@@ -1,0 +1,20 @@
+{
+  "name": "ptf-registration-bot",
+  "version": "1.0.0",
+  "description": "Phuket Tennis Family registration Telegram bot with WebApp, CRM, payments, admin inbox and broadcasts",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "googleapis": "^144.0.0",
+    "node-fetch": "^3.3.2",
+    "luxon": "^3.5.0"
+  }
+}
