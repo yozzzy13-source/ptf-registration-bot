@@ -172,8 +172,6 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
     }
   } else if (status === 'waitlist') {
     await sendMessage(app.telegram_id, t(lang, 'waitlist'));
-  } else if (status === 'refunded' || status === 'rejected') {
-    await sendMessage(app.telegram_id, t(lang, 'refunded'));
   }
   await sendMessage(chatId, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
 }

@@ -1,10 +1,10 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT } from './config.js';
+import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication } from './admin.js';
 
@@ -42,7 +42,9 @@ app.get('/api/bootstrap', async (req, res) => {
     const { user } = parseInitData(initData);
     const lang = langOf(user?.language_code);
     const events = await getActiveEvents();
-    res.json({ ok: true, user, lang, events, usdtAmount: DEFAULT_USDT_AMOUNT });
+    const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
+    const enrichedEvents = events.map(ev => ({ ...ev, applications_count: apps.filter(a => String(a.event_id) === String(ev.event_id)).length }));
+    res.json({ ok: true, user, lang, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
@@ -111,7 +113,10 @@ app.post('/api/submit-application', async (req, res) => {
       source: 'telegram_webapp',
       notes: safe(profile.notes),
       payment_amount: DEFAULT_USDT_AMOUNT,
-      payment_currency: 'USDT'
+      payment_currency: 'USDT',
+      payment_amount_usdt: DEFAULT_USDT_AMOUNT,
+      payment_amount_thb: priceThb,
+      price_thb: priceThb
     };
     await createApplication(appRow);
     await notifyNewApplication(appRow, applicant);

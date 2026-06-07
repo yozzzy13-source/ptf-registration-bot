@@ -42,7 +42,7 @@ export async function getRows(sheetName, { useCache=true } = {}) {
   const key = `rows:${sheetName}`;
   const c = cache.get(key);
   if (useCache && c && Date.now() - c.t < CACHE_MS) return c.v;
-  const values = await valuesGet(`'${sheetName}'!A:Z`);
+  const values = await valuesGet(`'${sheetName}'!A:AZ`);
   const headers = values[0] || [];
   const rows = values.slice(1).map((r, idx) => {
     const obj = { _rowNumber: idx + 2 };
@@ -57,7 +57,7 @@ export async function getRows(sheetName, { useCache=true } = {}) {
 export async function appendObject(sheetName, obj) {
   const { headers } = await getRows(sheetName, { useCache:false });
   const row = headers.map(h => obj[h] ?? '');
-  await valuesAppend(`'${sheetName}'!A:Z`, [row]);
+  await valuesAppend(`'${sheetName}'!A:AZ`, [row]);
   cache.clear();
 }
 
@@ -127,7 +127,10 @@ export async function upsertApplicant(profile) {
     selfie_status: profile.selfie_status || existing?.selfie_status || 'optional_missing',
     selfie_file_id: profile.selfie_file_id || existing?.selfie_file_id || '',
     crm_tags: profile.crm_tags || existing?.crm_tags || 'league_interested',
-    application_count: Number(existing?.application_count || 0) + 1
+    application_count: Number(existing?.application_count || 0) + 1,
+    profile_completed: 'yes',
+    allow_match_challenges: profile.allow_match_challenges || existing?.allow_match_challenges || 'yes',
+    player_profile_url: profile.player_profile_url || existing?.player_profile_url || ''
   };
   if (existing) {
     await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
@@ -189,4 +192,27 @@ export async function getSegmentContacts(segment='all') {
     if (segment === 'season2') return String(r.last_application_event || '').includes('Season 2') || String(r.last_application_event || '').includes('league_s2');
     return String(r.crm_tags || '').includes(segment) || r.status === segment;
   });
+}
+
+
+export function isProfileCompleted(row={}) {
+  return Boolean(row.telegram_id && row.name && row.gender && row.country_of_origin && row.experience && row.whatsapp && !['inactive','declined','refunded'].includes(String(row.status || '').toLowerCase()));
+}
+
+export async function createMatchChallenge(row) {
+  await appendObject(SHEETS.matchChallenges, row);
+  return row;
+}
+
+export async function findMatchChallenge(challengeId) {
+  const { rows } = await getRows(SHEETS.matchChallenges, { useCache:false });
+  return rows.find(r => r.challenge_id === challengeId);
+}
+
+export async function updateMatchChallenge(challengeId, patch) {
+  const { rows } = await getRows(SHEETS.matchChallenges, { useCache:false });
+  const found = rows.find(r => r.challenge_id === challengeId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.matchChallenges, found._rowNumber, patch);
+  return { ...found, ...patch };
 }
