@@ -68,20 +68,25 @@ app.post('/api/submit-application', async (req, res) => {
     }
 
     const events = await getActiveEvents();
-    const event = events.find(e => e.event_id === event_id);
-    if (!event) return res.status(400).json({ ok:false, error:'Event not active' });
+    const event = event_id ? events.find(e => e.event_id === event_id) : null;
 
     const lang = langOf(user.language_code);
     const username = user.username || '';
     const fullName = safe(profile.name) || [user.first_name, user.last_name].filter(Boolean).join(' ');
-    const eventName = lang === 'ru' ? (event.event_name_ru || event.event_name_en) : (event.event_name_en || event.event_name_ru);
+    const isEventApplication = Boolean(event);
+    const eventName = event
+      ? (lang === 'ru' ? (event.event_name_ru || event.event_name_en) : (event.event_name_en || event.event_name_ru))
+      : 'PTF Player Profile / Waitlist';
+    const finalEventId = event?.event_id || 'ptf_waitlist';
     const applicationId = uid('app');
-    const priceThb = Number(event.price_thb || 0);
+    const priceThb = Number(event?.price_thb || 0);
+    const applicationStatus = isEventApplication ? 'waiting_payment' : 'waitlist';
+    const paymentStatus = isEventApplication ? 'waiting_payment' : 'not_required';
 
     const applicant = await upsertApplicant({
       name: fullName,
       ntrp: profile.ntrp_unknown ? 'unknown' : safe(profile.ntrp),
-      status: 'waiting_payment',
+      status: applicationStatus,
       experience: safe(profile.experience),
       gender: safe(profile.gender),
       age: safe(profile.age),
@@ -95,7 +100,7 @@ app.post('/api/submit-application', async (req, res) => {
       source: 'telegram_webapp',
       last_application_event: eventName,
       selfie_status: 'optional_missing',
-      crm_tags: `league_interested,${event.event_id}`
+      crm_tags: isEventApplication ? `league_interested,${finalEventId}` : 'ptf_waitlist,profile_completed'
     });
 
     const appRow = {
@@ -103,26 +108,27 @@ app.post('/api/submit-application', async (req, res) => {
       telegram_id: user.id,
       telegram_username: username,
       player_name: fullName,
-      event_id: event.event_id,
+      event_id: finalEventId,
       event_name: eventName,
-      application_status: 'waiting_payment',
+      application_status: applicationStatus,
       submitted_at: nowISO(),
-      payment_status: 'waiting_payment',
+      payment_status: paymentStatus,
       selfie_required: 'no',
       selfie_status: 'optional_missing',
       source: 'telegram_webapp',
       notes: safe(profile.notes),
-      payment_amount: DEFAULT_USDT_AMOUNT,
-      payment_currency: 'USDT',
-      payment_amount_usdt: DEFAULT_USDT_AMOUNT,
-      payment_amount_thb: priceThb,
-      price_thb: priceThb
+      payment_amount: isEventApplication ? DEFAULT_USDT_AMOUNT : '',
+      payment_currency: isEventApplication ? 'USDT' : '',
+      payment_amount_usdt: isEventApplication ? DEFAULT_USDT_AMOUNT : '',
+      payment_amount_thb: priceThb || '',
+      price_thb: priceThb || ''
     };
     await createApplication(appRow);
     await notifyNewApplication(appRow, applicant);
-    await sendPaymentStart(user.id, lang, applicationId);
+    if (isEventApplication) await sendPaymentStart(user.id, lang, applicationId);
+    else await sendMessage(user.id, lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы добавлены в waitlist и сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You have been added to the waitlist and will be able to join open events later.');
 
-    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb });
+    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:isEventApplication });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });
