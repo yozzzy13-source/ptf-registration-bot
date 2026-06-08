@@ -35,6 +35,7 @@ export async function setCommands() {
   return call('setMyCommands', { commands: [
     { command: 'start', description: 'Start / Main menu' },
     { command: 'help', description: 'Help' },
+    { command: 'admin', description: 'Open admin panel' },
     { command: 'cancel', description: 'Cancel current action' }
   ]});
 }

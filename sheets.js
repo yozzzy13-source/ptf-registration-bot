@@ -206,6 +206,7 @@ export async function getSegmentContacts(segment='all') {
     if (segment === 'active') return r.status === 'active';
     if (segment === 'waitlist') return r.status === 'waitlist';
     if (segment === 'payment') return ['waiting_payment','proof_received','payment_approved'].includes(r.status);
+    if (segment === 'missing_selfie') return String(r.status).toLowerCase() === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received';
     if (segment === 'ru') return r.language === 'ru';
     if (segment === 'en') return r.language !== 'ru';
     if (segment === 'season2') return String(r.last_application_event || '').includes('Season 2') || String(r.last_application_event || '').includes('league_s2');
@@ -234,4 +235,28 @@ export async function updateMatchChallenge(challengeId, patch) {
   if (!found) return null;
   await updateObjectByRow(SHEETS.matchChallenges, found._rowNumber, patch);
   return { ...found, ...patch };
+}
+
+export async function updateApplicantByTelegramId(telegramId, patch) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { ...patch, updated_at: nowISO() });
+  return { ...found, ...patch };
+}
+
+export async function getAllApplicants() {
+  return (await getRows(SHEETS.applicants, { useCache:false })).rows;
+}
+
+export async function markSelfieRequested(telegramId) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+  const currentCount = Number(found.selfie_reminder_count || 0);
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, {
+    selfie_status: found.selfie_status === 'received' ? 'received' : 'requested',
+    selfie_requested_at: nowISO(),
+    selfie_reminder_count: currentCount + 1,
+    updated_at: nowISO()
+  });
+  return { ...found, selfie_status: found.selfie_status === 'received' ? 'received' : 'requested', selfie_requested_at: nowISO(), selfie_reminder_count: currentCount + 1 };
 }

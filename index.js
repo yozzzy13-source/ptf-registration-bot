@@ -7,6 +7,7 @@ import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication } from './admin.js';
+import { registerAdminRoutes } from './adminPanel.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,7 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
 app.get('/apply', (req, res) => res.sendFile(path.join(__dirname, 'public', 'apply.html')));
+registerAdminRoutes(app);
 
 const seen = new Set();
 app.post('/webhook', async (req, res) => {
