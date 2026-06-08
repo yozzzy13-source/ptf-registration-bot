@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication } from './admin.js';
 
@@ -44,7 +44,8 @@ app.get('/api/bootstrap', async (req, res) => {
     const events = await getActiveEvents();
     const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
     const enrichedEvents = events.map(ev => ({ ...ev, applications_count: apps.filter(a => String(a.event_id) === String(ev.event_id)).length }));
-    res.json({ ok: true, user, lang, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT });
+    const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
+    res.json({ ok: true, user, lang, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
@@ -59,7 +60,7 @@ app.get('/api/payment-methods', async (req, res) => {
 
 app.post('/api/submit-application', async (req, res) => {
   try {
-    const { initData = '', profile = {}, event_id } = req.body || {};
+    const { initData = '', profile = {}, event_id, mode = 'profile' } = req.body || {};
     const verified = verifyTelegramInitData(initData);
     const { user } = parseInitData(initData);
     if (!user?.id) return res.status(400).json({ ok:false, error:'Telegram WebApp user not found' });
@@ -72,7 +73,20 @@ app.post('/api/submit-application', async (req, res) => {
 
     const lang = langOf(user.language_code);
     const username = user.username || '';
-    const fullName = safe(profile.name) || [user.first_name, user.last_name].filter(Boolean).join(' ');
+    const existingProfile = await findApplicantByTelegramIdentity(user);
+    const eventOnlyWithProfile = mode === 'event' && isProfileCompleted(existingProfile);
+    const effectiveProfile = eventOnlyWithProfile ? {
+      name: existingProfile.name,
+      ntrp: existingProfile.ntrp,
+      ntrp_unknown: existingProfile.ntrp === 'unknown',
+      experience: existingProfile.experience,
+      gender: existingProfile.gender,
+      age: existingProfile.age,
+      country_of_origin: existingProfile.country_of_origin,
+      whatsapp: existingProfile.whatsapp,
+      notes: existingProfile.notes
+    } : profile;
+    const fullName = safe(effectiveProfile.name) || [user.first_name, user.last_name].filter(Boolean).join(' ');
     const isEventApplication = Boolean(event);
     const eventName = event
       ? (lang === 'ru' ? (event.event_name_ru || event.event_name_en) : (event.event_name_en || event.event_name_ru))
@@ -85,15 +99,15 @@ app.post('/api/submit-application', async (req, res) => {
 
     const applicant = await upsertApplicant({
       name: fullName,
-      ntrp: profile.ntrp_unknown ? 'unknown' : safe(profile.ntrp),
+      ntrp: effectiveProfile.ntrp_unknown ? 'unknown' : safe(effectiveProfile.ntrp),
       status: applicationStatus,
-      experience: safe(profile.experience),
-      gender: safe(profile.gender),
-      age: safe(profile.age),
-      country_of_origin: safe(profile.country_of_origin),
+      experience: safe(effectiveProfile.experience),
+      gender: safe(effectiveProfile.gender),
+      age: safe(effectiveProfile.age),
+      country_of_origin: safe(effectiveProfile.country_of_origin),
       telegram: username ? `t.me/${username}` : '',
-      whatsapp: safe(profile.whatsapp),
-      notes: safe(profile.notes),
+      whatsapp: safe(effectiveProfile.whatsapp),
+      notes: safe(effectiveProfile.notes),
       telegram_id: user.id,
       telegram_username: username,
       language: lang,
@@ -116,7 +130,7 @@ app.post('/api/submit-application', async (req, res) => {
       selfie_required: 'no',
       selfie_status: 'optional_missing',
       source: 'telegram_webapp',
-      notes: safe(profile.notes),
+      notes: safe(effectiveProfile.notes),
       payment_amount: isEventApplication ? DEFAULT_USDT_AMOUNT : '',
       payment_currency: isEventApplication ? 'USDT' : '',
       payment_amount_usdt: isEventApplication ? DEFAULT_USDT_AMOUNT : '',

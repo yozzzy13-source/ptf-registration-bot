@@ -105,8 +105,27 @@ export async function findApplicantByTelegramId(telegramId) {
   return rows.find(r => String(r.telegram_id) === String(telegramId));
 }
 
+export async function findApplicantByTelegramIdentity(userOrProfile={}) {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const telegramId = userOrProfile.id || userOrProfile.telegram_id || '';
+  const usernameRaw = userOrProfile.username || userOrProfile.telegram_username || '';
+  const username = String(usernameRaw || '').replace(/^@/,'').toLowerCase();
+  if (telegramId) {
+    const byId = rows.find(r => String(r.telegram_id) === String(telegramId));
+    if (byId) return byId;
+  }
+  if (username) {
+    return rows.find(r => {
+      const u1 = String(r.telegram_username || '').replace(/^@/,'').toLowerCase();
+      const u2 = String(r.telegram || '').replace(/^https?:\/\/t\.me\//,'').replace(/^t\.me\//,'').replace(/^@/,'').toLowerCase();
+      return u1 === username || u2 === username;
+    });
+  }
+  return null;
+}
+
 export async function upsertApplicant(profile) {
-  const existing = await findApplicantByTelegramId(profile.telegram_id);
+  const existing = await findApplicantByTelegramIdentity(profile);
   const patch = {
     name: profile.name,
     ntrp: profile.ntrp,
