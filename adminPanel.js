@@ -4,7 +4,7 @@ import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieReques
 import { sendMessage } from './telegram.js';
 
 function isAdminId(id) {
-  if (!ADMIN_IDS.length) return true;
+  if (!ADMIN_IDS.length) return false;
   return ADMIN_IDS.includes(String(id));
 }
 
