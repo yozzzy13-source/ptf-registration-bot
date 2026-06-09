@@ -91,7 +91,7 @@ export async function getBotText(text_key, language='en') {
 export async function getActiveEvents() {
   const { rows } = await getRows(SHEETS.events, { useCache:false });
   return rows
-    .filter(r => safe(r.status) === 'active')
+    .filter(r => ['active','waitlist','live'].includes(safe(r.status)))
     .sort((a,b) => Number(a.sort_order || 999) - Number(b.sort_order || 999));
 }
 
