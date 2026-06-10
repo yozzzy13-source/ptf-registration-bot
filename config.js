@@ -8,3 +8,21 @@ export const DEFAULT_USDT_AMOUNT = Number(process.env.DEFAULT_USDT_AMOUNT || 80)
 export const TIMEZONE = process.env.TIMEZONE || 'Asia/Bangkok';
 export const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 export const SHEETS = { applicants:'Applicants', events:'Events', applications:'Applications', messages:'Messages', broadcasts:'Broadcasts', broadcastLogs:'Broadcast Logs', settings:'Settings', botTexts:'Bot Texts', payments:'Payments', paymentMethods:'Payment Methods', matchChallenges:'Match Challenges', botMenu:'Bot Menu' };
+
+export const RESULTS = {
+  sheetId: process.env.RESULTS_SHEET_ID || '1tisUxFOJZgaD95o8cQKSvWpH8ySY-ht3H4wdHCeCI0Q',
+  localTimezone: process.env.RESULTS_TIMEZONE || process.env.LOCAL_TIMEZONE || 'Asia/Bangkok',
+  targetChatId: Number(process.env.RESULTS_CHAT_ID || '-1003636628710'),
+  targetTopicId: Number(process.env.RESULTS_TOPIC_ID || '5'),
+  confirmInTopic: (process.env.RESULTS_CONFIRM_IN_TOPIC || 'true') === 'true',
+  logSheetName: process.env.RESULTS_LOG_SHEET_NAME || 'Cross_Division_Match_Log',
+  masterSheetName: process.env.RESULTS_MASTER_SHEET_NAME || 'Players_Master',
+  debugSheetName: process.env.RESULTS_DEBUG_SHEET_NAME || 'Debug_Log',
+  aliasesSheetName: process.env.RESULTS_ALIASES_SHEET_NAME || 'Player_Aliases',
+  divisionSpreadsheets: {
+    A: { spreadsheetId: process.env.RESULTS_DIVISION_A_SPREADSHEET_ID || process.env.DIVISION_A_SPREADSHEET_ID || '', sheetName: 'Match_Log' },
+    B: { spreadsheetId: process.env.RESULTS_DIVISION_B_SPREADSHEET_ID || process.env.DIVISION_B_SPREADSHEET_ID || '', sheetName: 'Match_Log' },
+    C: { spreadsheetId: process.env.RESULTS_DIVISION_C_SPREADSHEET_ID || process.env.DIVISION_C_SPREADSHEET_ID || '', sheetName: 'Match_Log' },
+    D: { spreadsheetId: process.env.RESULTS_DIVISION_D_SPREADSHEET_ID || process.env.DIVISION_D_SPREADSHEET_ID || '', sheetName: 'Match_Log' }
+  }
+};

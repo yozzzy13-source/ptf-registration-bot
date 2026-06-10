@@ -1,9 +1,10 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
+import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, ADMIN_IDS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
+import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
 import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication } from './admin.js';
@@ -31,12 +32,27 @@ app.post('/webhook', async (req, res) => {
       seen.add(update.update_id);
       if (seen.size > 2000) seen.clear();
     }
-    if (update.message) await handleMessage(update.message);
-    else if (update.callback_query) await handleCallback(update.callback_query);
+    if (update.callback_query && isResultsCallback(update.callback_query)) {
+      await handleResultsCallback(update.callback_query);
+    } else if (update.message && isResultsMessage(update.message)) {
+      await handleResultsMessage(update.message);
+    } else if (update.message && shouldPassToRegistration(update.message)) {
+      await handleMessage(update.message);
+    } else if (update.callback_query) {
+      await handleCallback(update.callback_query);
+    }
   } catch (e) {
     console.error('webhook error', e);
   }
 });
+
+function shouldPassToRegistration(msg) {
+  if (msg.chat?.type === 'private') return true;
+  const text = (msg.text || msg.caption || '').trim();
+  if (text.startsWith('/')) return true;
+  if (msg.reply_to_message && ADMIN_IDS.includes(String(msg.from?.id || ''))) return true;
+  return false;
+}
 
 app.get('/api/bootstrap', async (req, res) => {
   try {
