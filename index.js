@@ -3,9 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, ADMIN_IDS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
-import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
+import { handleMessage, handleCallback } from './bot.js';
 import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
-import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -60,10 +60,8 @@ app.get('/api/bootstrap', async (req, res) => {
     const { user } = parseInitData(initData);
     const lang = langOf(user?.language_code);
     const events = await getActiveEvents();
-    const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
-    const enrichedEvents = events.map(ev => ({ ...ev, applications_count: apps.filter(a => String(a.event_id) === String(ev.event_id)).length }));
     const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
-    res.json({ ok: true, user, lang, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
+    res.json({ ok: true, user, lang, events, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
@@ -112,8 +110,8 @@ app.post('/api/submit-application', async (req, res) => {
     const finalEventId = event?.event_id || 'ptf_waitlist';
     const applicationId = uid('app');
     const priceThb = Number(event?.price_thb || 0);
-    const applicationStatus = isEventApplication ? 'waiting_payment' : 'waitlist';
-    const paymentStatus = isEventApplication ? 'waiting_payment' : 'not_required';
+    const applicationStatus = isEventApplication ? 'submitted' : 'waitlist';
+    const paymentStatus = 'not_required';
 
     const applicant = await upsertApplicant({
       name: fullName,
@@ -149,18 +147,22 @@ app.post('/api/submit-application', async (req, res) => {
       selfie_status: 'optional_missing',
       source: 'telegram_webapp',
       notes: safe(effectiveProfile.notes),
-      payment_amount: isEventApplication ? DEFAULT_USDT_AMOUNT : '',
-      payment_currency: isEventApplication ? 'USDT' : '',
-      payment_amount_usdt: isEventApplication ? DEFAULT_USDT_AMOUNT : '',
-      payment_amount_thb: priceThb || '',
+      payment_amount: '',
+      payment_currency: '',
+      payment_amount_usdt: '',
+      payment_amount_thb: '',
       price_thb: priceThb || ''
     };
     await createApplication(appRow);
     await notifyNewApplication(appRow, applicant);
-    if (isEventApplication) await sendPaymentStart(user.id, lang, applicationId);
-    else await sendMessage(user.id, lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы добавлены в waitlist и сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You have been added to the waitlist and will be able to join open events later.');
+    await sendMessage(
+      user.id,
+      isEventApplication
+        ? (lang === 'ru' ? '✅ Заявка сохранена. Оплату пока не просим — мы сообщим отдельно, когда откроем оплату.' : '✅ Application saved. Payment is not required yet — we will notify you separately when payment opens.')
+        : (lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы добавлены в waitlist и сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You have been added to the waitlist and will be able to join open events later.')
+    );
 
-    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:isEventApplication });
+    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:false });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });

@@ -6,33 +6,148 @@
   <title>PTF Registration</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    :root{--bg:#151515;--card:#222;--card2:#2b2b2b;--text:#f6f4ef;--muted:#b9b3aa;--accent:#ef5f00;--accent2:#ff8a2a;--border:#444;--danger:#ff6b6b;--ok:#8dff9f}
-    *{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#111,#1b1b1b);color:var(--text);min-height:100vh;padding:18px}
-    .wrap{max-width:560px;margin:0 auto}.card{background:var(--card);border:1px solid var(--border);border-radius:24px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
-    h1{font-size:30px;line-height:1.1;margin:8px 0 16px}p{color:var(--muted);font-size:16px;line-height:1.55}.progress{color:var(--muted);font-size:13px;margin-bottom:12px}
-    label{display:block;margin:14px 0 6px;color:#ddd;font-weight:700}input,select,textarea{width:100%;padding:14px 16px;border-radius:14px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:16px}textarea{min-height:84px;resize:vertical}
-    button{width:100%;border:0;border-radius:18px;padding:16px 18px;font-size:18px;font-weight:900;margin-top:16px;cursor:pointer}.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#111}.secondary{background:#272727;color:var(--text);border:1px solid var(--border)}
-    .hidden{display:none}.events{display:grid;gap:12px;margin-top:12px}.event{padding:16px;border:1px solid var(--border);border-radius:16px;background:#1f1f1f;cursor:pointer}.event.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(239,95,0,.35) inset}
-    .event-title{font-size:18px;font-weight:900;margin-bottom:6px}.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#303030;border:1px solid var(--border);color:var(--muted);font-size:12px;margin:3px 4px 3px 0}.small{font-size:12px;color:var(--muted)}.error{color:var(--danger);margin-top:10px}.ok{color:var(--ok);margin-top:10px}.checkbox{display:flex;gap:10px;align-items:center;margin-top:10px}.checkbox input{width:auto}.empty{border:1px dashed var(--border);border-radius:16px;padding:14px;margin-top:12px;color:var(--muted);background:#202020}
+    :root{--bg:#151515;--card:#222;--card2:#2b2b2b;--text:#f6f4ef;--muted:#b9b3aa;--accent:#ef5f00;--accent2:#ff8a2a;--border:#444;--danger:#ff6b6b;--ok:#75f08b}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#111,#1b1b1b);color:var(--text);min-height:100vh;padding:18px}
+    .wrap{max-width:560px;margin:0 auto}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:24px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+    h1{font-size:30px;line-height:1.1;margin:8px 0 16px}
+    p{color:var(--muted);font-size:16px;line-height:1.55}
+    .progress{color:var(--muted);font-size:13px;margin-bottom:12px}
+    label{display:block;margin:14px 0 6px;color:#ddd;font-weight:700}
+    input,select,textarea{width:100%;padding:14px 16px;border-radius:14px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:16px}
+    textarea{min-height:84px;resize:vertical}
+    button{width:100%;border:0;border-radius:18px;padding:16px 18px;font-size:18px;font-weight:900;margin-top:16px;cursor:pointer}
+    button:disabled{opacity:.65;cursor:wait}
+    .primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#111}
+    .secondary{background:#272727;color:var(--text);border:1px solid var(--border)}
+    .hidden{display:none}
+    .events{display:grid;gap:12px;margin-top:12px}
+    .event{padding:16px;border:1px solid var(--border);border-radius:16px;background:#1f1f1f;cursor:pointer}
+    .event.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(239,95,0,.35) inset}
+    .event.disabled{cursor:default;opacity:.82}
+    .event-title{font-size:18px;font-weight:900;margin-bottom:6px}
+    .pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;background:#303030;border:1px solid var(--border);color:var(--muted);font-size:12px}
+    .pill-live{color:#101610;background:#74f58b;border-color:#74f58b;animation:pulseLive 1.35s ease-in-out infinite}
+    .pill-open{color:#102014;background:#86f09b;border-color:#86f09b}
+    .small{font-size:12px;color:var(--muted)}
+    .error{color:var(--danger);margin-top:10px}
+    .ok{color:var(--ok);margin-top:10px}
+    .checkbox{display:flex;gap:10px;align-items:center;margin-top:10px}
+    .checkbox input{width:auto}
+    @keyframes pulseLive{0%,100%{box-shadow:0 0 0 0 rgba(116,245,139,.18)}50%{box-shadow:0 0 0 5px rgba(116,245,139,.22)}}
   </style>
 </head>
-<body><div class="wrap"><div class="card">
-  <section id="stepIntro"><div class="progress" id="progress"></div><h1 id="title"></h1><p id="intro"></p><button class="primary" id="startBtn"></button></section>
-  <section id="stepProfile" class="hidden"><div class="progress" id="progress2"></div><h1 id="profileTitle"></h1><label id="nameLabel"></label><input id="name"/><label id="genderLabel"></label><select id="gender"><option value=""></option><option value="male">Male</option><option value="female">Female</option></select><div id="ageWrap"><label id="ageLabel"></label><input id="age" inputmode="numeric"/></div><label id="countryLabel"></label><input id="country"/><label id="experienceLabel"></label><input id="experience"/><label id="ntrpLabel"></label><input id="ntrp" placeholder="3.5 / 4.0"/><label class="checkbox"><input type="checkbox" id="ntrpUnknown"><span id="ntrpUnknownText"></span></label><label id="whatsappLabel"></label><input id="whatsapp"/><label id="notesLabel"></label><textarea id="notes"></textarea><p class="small" id="divisionNote"></p><button class="primary" id="nextEventBtn"></button><button class="secondary" id="backIntroBtn"></button><div id="profileMsg"></div></section>
-  <section id="stepEvent" class="hidden"><div class="progress" id="progress3"></div><h1 id="eventTitle"></h1><p id="eventHint"></p><div class="events" id="events"></div><button class="primary" id="submitBtn"></button><button class="secondary" id="backBtn"></button><div id="msg"></div></section>
-  <section id="stepDone" class="hidden"><h1 id="doneTitle"></h1><p id="doneText"></p><button class="primary" id="closeBtn"></button></section>
+<body>
+<div class="wrap"><div class="card">
+  <section id="stepIntro">
+    <div class="progress" id="progress"></div>
+    <h1 id="title"></h1>
+    <p id="intro"></p>
+    <button class="primary" id="startBtn"></button>
+  </section>
+
+  <section id="stepProfile" class="hidden">
+    <div class="progress" id="progress2"></div>
+    <h1 id="profileTitle"></h1>
+    <label id="nameLabel"></label><input id="name"/>
+    <label id="genderLabel"></label><select id="gender"><option value=""></option><option value="male">Male</option><option value="female">Female</option></select>
+    <div id="ageWrap"><label id="ageLabel"></label><input id="age" inputmode="numeric"/></div>
+    <label id="countryLabel"></label><input id="country"/>
+    <label id="experienceLabel"></label><input id="experience"/>
+    <label id="ntrpLabel"></label><input id="ntrp" placeholder="3.5 / 4.0"/>
+    <label class="checkbox"><input type="checkbox" id="ntrpUnknown"><span id="ntrpUnknownText"></span></label>
+    <label id="whatsappLabel"></label><input id="whatsapp"/>
+    <label id="notesLabel"></label><textarea id="notes"></textarea>
+    <p class="small" id="divisionNote"></p>
+    <button class="primary" id="nextEventBtn"></button>
+    <button class="secondary" id="backIntroBtn"></button>
+    <div id="profileMsg"></div>
+  </section>
+
+  <section id="stepEvent" class="hidden">
+    <div class="progress" id="progress3"></div>
+    <h1 id="eventTitle"></h1>
+    <p id="eventHint"></p>
+    <div class="events" id="events"></div>
+    <button class="primary" id="submitBtn"></button>
+    <button class="secondary" id="backBtn"></button>
+    <div id="msg"></div>
+  </section>
+
+  <section id="stepDone" class="hidden">
+    <h1 id="doneTitle"></h1>
+    <p id="doneText"></p>
+    <button class="primary" id="closeBtn"></button>
+  </section>
 </div></div>
+
 <script>
-const tg=window.Telegram?.WebApp;if(tg){tg.expand();tg.ready()}const initData=tg?.initData||'';const params=new URLSearchParams(location.search);let mode=params.get('mode')||'profile';let lang='en',selectedEvent='',events=[],existingProfile=null,profileCompleted=false;
+const tg=window.Telegram?.WebApp;if(tg){tg.expand();tg.ready()}
+const initData=tg?.initData||'';
+const params=new URLSearchParams(location.search);
+let mode=params.get('mode')||'profile';
+let lang='en',selectedEvent='',events=[],existingProfile=null,profileCompleted=false,profileSaved=false;
+
 const L={
-ru:{progressIntro:'Шаг 1/3',progressProfile:'Шаг 2/3',progressEvent:'Шаг 3/3',titleProfile:'Анкета Phuket Tennis Family 🎾',titleEvent:'Участие в событии PTF 🏆',introProfile:'Заполните короткую анкету игрока. После этого ваш профиль будет в системе PTF, вы попадёте в waitlist и сможете подаваться в открытые события: лигу, турниры и будущие игровые форматы. Очередь среди новых игроков формируется по дате заполнения анкеты.',introEvent:'Выберите активное событие, куда хотите подать заявку. Если у вас уже есть заполненная анкета, повторно заполнять её не нужно. Если анкеты ещё нет, сначала мы сохраним ваш профиль в системе PTF.',startProfile:'Начать анкету',startEvent:'Продолжить',profileTitle:'Анкета игрока',name:'Имя и фамилия',gender:'Пол',age:'Возраст',country:'Страна',experience:'Опыт игры',ntrp:'Примерный NTRP',ntrpUnknown:'Я не знаю свой уровень',whatsapp:'WhatsApp',notes:'Комментарий / пожелания',divisionNote:'При первом участии дивизион назначает организатор на основе вашего уровня, опыта и текущего состава игроков.',next:'Далее',eventTitle:'Выберите событие',eventHintProfile:'Вы можете выбрать активное событие или просто сохранить анкету в системе PTF. Если сейчас нет активного события, анкета всё равно попадёт в waitlist.',eventHintEvent:'Выберите активное событие для участия. Если активных событий нет, ваша анкета останется в waitlist, и бот уведомит вас о новых наборах.',submit:'Отправить',back:'Назад',doneTitle:'Готово ✅',doneText:'Ваша анкета сохранена в системе PTF. Когда будут открыты подходящие события, вы сможете податься на участие.',doneTextPay:'Заявка на событие отправлена. Вернитесь в Telegram — бот отправил варианты оплаты.',close:'Закрыть',requiredBase:'Пожалуйста, заполните: ',noEvents:'Сейчас нет активных событий. Анкета будет сохранена в waitlist PTF.',profileOnly:'Без события: сохранить анкету в waitlist',alreadyProfile:'Мы нашли вашу анкету в системе PTF. Можно сразу выбрать событие.',needProfile:'Мы не нашли заполненную анкету. Сначала заполните короткий профиль игрока.',startDate:'Старт',fee:'Стоимость',status:'Статус',applications:'Заявок',limited:'Limited spots',open:'Регистрация открыта',live:'Идёт сейчас',waitlist:'Открыта регистрация',status_live:'Идёт сейчас',status_waitlist:'Открыта регистрация',status_active:'Регистрация открыта'},
-en:{progressIntro:'Step 1/3',progressProfile:'Step 2/3',progressEvent:'Step 3/3',titleProfile:'Phuket Tennis Family Profile 🎾',titleEvent:'Join PTF Event 🏆',introProfile:'Complete a short player profile. Your profile will be saved in the PTF system, you will enter the waitlist and you will be able to join open events: league seasons, tournaments and future playing formats. For new players, the queue is formed by profile submission date.',introEvent:'Choose an active event you want to join. If you already have a completed profile, you do not need to fill it again. If you do not have a profile yet, we will save it first in the PTF system.',startProfile:'Start profile',startEvent:'Continue',profileTitle:'Player profile',name:'Full name',gender:'Gender',age:'Age',country:'Country',experience:'Tennis experience',ntrp:'Approximate NTRP',ntrpUnknown:'I don’t know my level',whatsapp:'WhatsApp',notes:'Comment / notes',divisionNote:'For first-time participants, the division is assigned by the organizer based on your level, experience and the current player pool.',next:'Next',eventTitle:'Choose event',eventHintProfile:'You can choose an active event or simply save your profile in the PTF system. If there is no active event right now, your profile will still be saved to the waitlist.',eventHintEvent:'Choose an active event to join. If there are no active events, your profile will stay in the waitlist and the bot will notify you about future openings.',submit:'Submit',back:'Back',doneTitle:'Done ✅',doneText:'Your profile has been saved in the PTF system. When suitable events are open, you will be able to join them.',doneTextPay:'Event application sent. Return to Telegram — the bot has sent payment options.',close:'Close',requiredBase:'Please fill: ',noEvents:'There are no active events right now. Your profile will be saved to the PTF waitlist.',profileOnly:'No event: save profile to waitlist',alreadyProfile:'We found your profile in the PTF system. You can choose an event directly.',needProfile:'We could not find a completed profile. Please complete a short player profile first.',startDate:'Start',fee:'Fee',status:'Status',applications:'Applications',limited:'Limited spots',open:'Registration open',live:'Live now',waitlist:'Registration open',status_live:'Live now',status_waitlist:'Registration open',status_active:'Registration open'}};
-const $=id=>document.getElementById(id);function show(id){['stepIntro','stepProfile','stepEvent','stepDone'].forEach(x=>$(x).classList.add('hidden'));$(id).classList.remove('hidden')}function fillProfile(u={}){if(u.name)$('name').value=u.name;if(u.gender)$('gender').value=u.gender;if(u.age)$('age').value=u.age;if(u.country_of_origin)$('country').value=u.country_of_origin;if(u.experience)$('experience').value=u.experience;if(u.ntrp)$('ntrp').value=u.ntrp==='unknown'?'':u.ntrp;if(u.ntrp==='unknown')$('ntrpUnknown').checked=true;if(u.whatsapp)$('whatsapp').value=u.whatsapp;if(u.notes)$('notes').value=u.notes}
-function applyLang(){const x=L[lang];$('progress').textContent=x.progressIntro;$('title').textContent=mode==='event'?x.titleEvent:x.titleProfile;$('intro').textContent=mode==='event'?(profileCompleted?x.alreadyProfile:x.introEvent):x.introProfile;$('startBtn').textContent=mode==='event'?x.startEvent:x.startProfile;$('progress2').textContent=x.progressProfile;$('progress3').textContent=x.progressEvent;$('profileTitle').textContent=x.profileTitle;$('nameLabel').textContent=x.name;$('genderLabel').textContent=x.gender;$('ageLabel').textContent=x.age;$('countryLabel').textContent=x.country;$('experienceLabel').textContent=x.experience;$('ntrpLabel').textContent=x.ntrp;$('ntrpUnknownText').textContent=x.ntrpUnknown;$('whatsappLabel').textContent=x.whatsapp;$('notesLabel').textContent=x.notes;$('divisionNote').textContent=x.divisionNote;$('nextEventBtn').textContent=x.next;$('backIntroBtn').textContent=x.back;$('eventTitle').textContent=x.eventTitle;$('eventHint').textContent=mode==='event'?x.eventHintEvent:x.eventHintProfile;$('submitBtn').textContent=x.submit;$('backBtn').textContent=x.back;$('doneTitle').textContent=x.doneTitle;$('doneText').textContent=x.doneText;$('closeBtn').textContent=x.close}
-function renderEvents(){const box=$('events');box.innerHTML='';const x=L[lang];const profileOnly=document.createElement('div');profileOnly.className='event'+(selectedEvent===''?' active':'');profileOnly.innerHTML=`<div class="event-title">${x.profileOnly}</div><div class="small">${x.noEvents}</div>`;profileOnly.onclick=()=>{selectedEvent='';renderEvents()};box.appendChild(profileOnly);events.forEach(ev=>{const name=lang==='ru'?(ev.event_name_ru||ev.event_name_en):(ev.event_name_en||ev.event_name_ru);const desc=lang==='ru'?(ev.description_ru||ev.description_en):(ev.description_en||ev.description_ru);const start=ev.start_date||'';const price=ev.price_thb||'';const currency=ev.currency||'THB';const count=ev.applications_count||0;const status=String(ev.status||'active').toLowerCase();const statusLabel=x['status_'+status]||x.open;const selectable=status!=='live';const div=document.createElement('div');div.className='event'+(selectedEvent===ev.event_id?' active':'')+(selectable?'':' muted');div.innerHTML=`<div class="event-title">${name}</div><div class="small">${desc||''}</div><div style="margin-top:10px"><span class="pill">${x.status}: ${statusLabel}</span>${status==='waitlist'||status==='active'?`<span class="pill">${x.limited}</span>`:''}${start?`<span class="pill">${x.startDate}: ${start}</span>`:''}<span class="pill">${x.applications}: ${count}</span></div>${price?`<p><b>${x.fee}: ${price} ${currency}</b></p>`:''}`;div.onclick=()=>{if(!selectable)return;selectedEvent=ev.event_id;renderEvents()};box.appendChild(div)})}
+ru:{
+progressIntro:'Шаг 1/3',progressProfile:'Шаг 2/3',progressEvent:'Шаг 3/3',
+titleProfile:'Анкета Phuket Tennis Family 🎾',titleEvent:'Участие в событии PTF 🏆',
+introProfile:'Заполните короткую анкету игрока. После шага 2 профиль сразу сохранится в системе PTF и waitlist. На шаге 3 можно выбрать событие или оставить только waitlist.',
+introEvent:'Если анкета уже заполнена, можно сразу выбрать событие. Если анкеты ещё нет, сначала мы сохраним профиль игрока.',
+startProfile:'Начать анкету',startEvent:'Продолжить',
+profileTitle:'Анкета игрока',name:'Имя и фамилия',gender:'Пол',age:'Возраст',country:'Страна',experience:'Опыт игры',ntrp:'Примерный NTRP',ntrpUnknown:'Я не знаю свой уровень',whatsapp:'WhatsApp',notes:'Комментарий / пожелания',
+divisionNote:'При первом участии дивизион назначает организатор на основе вашего уровня, опыта и текущего состава игроков.',
+next:'Сохранить анкету и продолжить',eventTitle:'Выберите событие',eventHintProfile:'Анкета уже может быть сохранена в waitlist. Выберите событие для заявки или оставьте waitlist без выбора события.',eventHintEvent:'Выберите событие для участия или оставьте waitlist без выбора события.',
+submit:'Отправить',submitWaitlist:'Готово',back:'Назад',close:'Закрыть',
+doneTitle:'Готово ✅',doneText:'Ваша анкета сохранена в системе PTF и waitlist.',doneEventText:'Заявка сохранена. Оплату пока не просим — мы сообщим отдельно, когда откроем оплату.',
+requiredBase:'Пожалуйста, заполните: ',profileOnly:'Оставить анкету в waitlist',profileOnlyText:'Можно не выбирать событие сейчас. Анкета останется в базе PTF, а заявку на событие можно оставить позже.',
+alreadyProfile:'Мы нашли вашу анкету в системе PTF. Можно сразу выбрать событие.',needProfile:'Мы не нашли заполненную анкету. Сначала заполните короткий профиль игрока.',
+savedProfile:'Анкета сохранена. Теперь можно выбрать событие или оставить waitlist.',saving:'Сохраняем...',
+status:'Статус',open:'Регистрация открыта',live:'Идёт сейчас',status_live:'Идёт сейчас',status_waitlist:'Открыта регистрация',status_active:'Регистрация открыта',
+season2Start:'Старт: ориентировочно середина–конец августа',duration:'Продолжительность: 2 месяца',limited:'Limited spots',
+players32:'32 игрока',divisions4:'4 дивизиона',playoff:'Плей-офф: 27–28 июня',final:'Финал: 28 июня',courts:'The Peak Racquet Park'
+},
+en:{
+progressIntro:'Step 1/3',progressProfile:'Step 2/3',progressEvent:'Step 3/3',
+titleProfile:'Phuket Tennis Family Profile 🎾',titleEvent:'Join PTF Event 🏆',
+introProfile:'Complete a short player profile. After step 2 your profile is saved to the PTF system and waitlist. On step 3 you can choose an event or keep waitlist only.',
+introEvent:'If your profile is already completed, you can choose an event directly. If not, we will save your player profile first.',
+startProfile:'Start profile',startEvent:'Continue',
+profileTitle:'Player profile',name:'Full name',gender:'Gender',age:'Age',country:'Country',experience:'Tennis experience',ntrp:'Approximate NTRP',ntrpUnknown:'I don’t know my level',whatsapp:'WhatsApp',notes:'Comment / notes',
+divisionNote:'For first-time participants, the division is assigned by the organizer based on your level, experience and the current player pool.',
+next:'Save profile and continue',eventTitle:'Choose event',eventHintProfile:'Your profile can stay in the waitlist. Choose an event application or keep waitlist only.',eventHintEvent:'Choose an event to join or keep waitlist only.',
+submit:'Submit',submitWaitlist:'Done',back:'Back',close:'Close',
+doneTitle:'Done ✅',doneText:'Your profile has been saved in the PTF system and waitlist.',doneEventText:'Application saved. Payment is not required yet — we will notify you separately when payment opens.',
+requiredBase:'Please fill: ',profileOnly:'Keep profile in waitlist',profileOnlyText:'You do not have to choose an event now. Your profile stays in the PTF database and you can apply for an event later.',
+alreadyProfile:'We found your profile in the PTF system. You can choose an event directly.',needProfile:'We could not find a completed profile. Please complete a short player profile first.',
+saving:'Saving...',savedProfile:'Profile saved. Now you can choose an event or keep waitlist only.',
+status:'Status',open:'Registration open',live:'Live now',status_live:'Live now',status_waitlist:'Registration open',status_active:'Registration open',
+season2Start:'Start: approximately mid-late August',duration:'Duration: 2 months',limited:'Limited spots',
+players32:'32 players',divisions4:'4 divisions',playoff:'Play-off: June 27–28',final:'Final: June 28',courts:'The Peak Racquet Park'
+}};
+
+const $=id=>document.getElementById(id);
+function show(id){['stepIntro','stepProfile','stepEvent','stepDone'].forEach(x=>$(x).classList.add('hidden'));$(id).classList.remove('hidden')}
+function fillProfile(u={}){if(u.name)$('name').value=u.name;if(u.gender)$('gender').value=u.gender;if(u.age)$('age').value=u.age;if(u.country_of_origin)$('country').value=u.country_of_origin;if(u.experience)$('experience').value=u.experience;if(u.ntrp)$('ntrp').value=u.ntrp==='unknown'?'':u.ntrp;if(u.ntrp==='unknown')$('ntrpUnknown').checked=true;if(u.whatsapp)$('whatsapp').value=u.whatsapp;if(u.notes)$('notes').value=u.notes}
+function applyLang(){const x=L[lang];$('progress').textContent=x.progressIntro;$('title').textContent=mode==='event'?x.titleEvent:x.titleProfile;$('intro').textContent=mode==='event'?(profileCompleted?x.alreadyProfile:x.introEvent):x.introProfile;$('startBtn').textContent=mode==='event'?x.startEvent:x.startProfile;$('progress2').textContent=x.progressProfile;$('progress3').textContent=x.progressEvent;$('profileTitle').textContent=x.profileTitle;$('nameLabel').textContent=x.name;$('genderLabel').textContent=x.gender;$('ageLabel').textContent=x.age;$('countryLabel').textContent=x.country;$('experienceLabel').textContent=x.experience;$('ntrpLabel').textContent=x.ntrp;$('ntrpUnknownText').textContent=x.ntrpUnknown;$('whatsappLabel').textContent=x.whatsapp;$('notesLabel').textContent=x.notes;$('divisionNote').textContent=x.divisionNote;$('nextEventBtn').textContent=x.next;$('backIntroBtn').textContent=x.back;$('eventTitle').textContent=x.eventTitle;$('eventHint').textContent=mode==='event'?x.eventHintEvent:x.eventHintProfile;$('submitBtn').textContent=selectedEvent?x.submit:x.submitWaitlist;$('backBtn').textContent=x.back;$('doneTitle').textContent=x.doneTitle;$('doneText').textContent=x.doneText;$('closeBtn').textContent=x.close}
+function eventName(ev){return lang==='ru'?(ev.event_name_ru||ev.event_name_en):(ev.event_name_en||ev.event_name_ru)}
+function eventDescription(ev,status){const name=eventName(ev).toLowerCase();if(name.includes('season 2')||String(ev.event_id||'').toLowerCase().includes('season2'))return lang==='ru'?'Открыта предварительная регистрация во второй сезон лиги. Финальное количество мест и состав дивизионов определим после окончания приёма заявок.':'Pre-registration is open for League Season 2. Final spots and divisions will be confirmed after applications close.';return lang==='ru'?(ev.description_ru||ev.description_en):(ev.description_en||ev.description_ru)}
+function eventBadges(ev,status){const name=eventName(ev).toLowerCase();const explicit=(lang==='ru'?(ev.badges_ru||ev.badges_en):(ev.badges_en||ev.badges_ru));if(explicit)return String(explicit).split(/[;|,\n\r]+/).map(x=>x.trim()).filter(Boolean);if(status==='live'||name.includes('season 1'))return [L[lang].players32,L[lang].divisions4,L[lang].playoff,L[lang].final,L[lang].courts];if(name.includes('season 2')||String(ev.event_id||'').toLowerCase().includes('season2'))return [L[lang].season2Start,L[lang].duration,L[lang].limited];return []}
+function renderEvents(){const box=$('events');box.innerHTML='';const x=L[lang];const profileOnly=document.createElement('div');profileOnly.className='event'+(selectedEvent===''?' active':'');profileOnly.innerHTML=`<div class="event-title">${x.profileOnly}</div><div class="small">${x.profileOnlyText}</div>`;profileOnly.onclick=()=>{selectedEvent='';renderEvents();applyLang()};box.appendChild(profileOnly);events.forEach(ev=>{const status=String(ev.status||'active').toLowerCase();const statusLabel=x['status_'+status]||x.open;const selectable=status!=='live';const div=document.createElement('div');div.className='event'+(selectedEvent===ev.event_id?' active':'')+(selectable?'':' disabled');const badges=eventBadges(ev,status).map(b=>`<span class="pill">${b}</span>`).join('');div.innerHTML=`<div class="event-title">${eventName(ev)}</div><div class="small">${eventDescription(ev,status)||''}</div><div class="pills"><span class="pill ${status==='live'?'pill-live':'pill-open'}">${x.status}: ${statusLabel}</span>${badges}</div>`;div.onclick=()=>{if(!selectable)return;selectedEvent=ev.event_id;renderEvents();applyLang()};box.appendChild(div)})}
 async function bootstrap(){try{const r=await fetch('/api/bootstrap?initData='+encodeURIComponent(initData));const j=await r.json();if(!j.ok)throw new Error(j.error||'Bootstrap error');lang=j.lang||'en';events=j.events||[];existingProfile=j.existingProfile||null;profileCompleted=Boolean(j.profileCompleted);const u=j.user||{};$('name').value=[u.first_name,u.last_name].filter(Boolean).join(' ');if(existingProfile)fillProfile(existingProfile);applyLang();renderEvents()}catch(e){applyLang();$('events').innerHTML=`<p class="error">${e.message}</p>`}}
 function profileFromForm(){return {name:$('name').value.trim(),gender:$('gender').value,age:$('age').value.trim(),country_of_origin:$('country').value.trim(),experience:$('experience').value.trim(),ntrp:$('ntrp').value.trim(),ntrp_unknown:$('ntrpUnknown').checked,whatsapp:$('whatsapp').value.trim(),notes:$('notes').value.trim()}}
 function validateProfile(profile){const missing=[];if(!profile.name)missing.push(L[lang].name);if(!profile.gender)missing.push(L[lang].gender);if(!profile.country_of_origin)missing.push(L[lang].country);if(!profile.experience)missing.push(L[lang].experience);if(!profile.whatsapp)missing.push(L[lang].whatsapp);return missing}
-$('gender').onchange=()=>{$('ageWrap').style.display=$('gender').value==='female'?'none':'block'};$('startBtn').onclick=()=>{if(mode==='event'&&profileCompleted){show('stepEvent')}else{if(mode==='event'&&!profileCompleted){$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].needProfile}show('stepProfile')}};$('backIntroBtn').onclick=()=>show('stepIntro');$('nextEventBtn').onclick=()=>{const p=profileFromForm();const missing=validateProfile(p);if(missing.length){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].requiredBase+missing.join(', ');return}$('profileMsg').textContent='';show('stepEvent')};$('backBtn').onclick=()=>{if(mode==='event'&&profileCompleted)show('stepIntro');else show('stepProfile')};
-$('submitBtn').onclick=async()=>{$('msg').innerHTML='';$('msg').className='';let profile=profileFromForm();if(mode==='event'&&profileCompleted&&existingProfile){profile={...existingProfile,ntrp_unknown:existingProfile.ntrp==='unknown'}}const missing=validateProfile(profile);if(missing.length){$('msg').className='error';$('msg').textContent=L[lang].requiredBase+missing.join(', ');return}$('submitBtn').disabled=true;$('submitBtn').textContent='...';try{const r=await fetch('/api/submit-application',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,profile,event_id:selectedEvent||'',mode})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Error');$('doneText').textContent=j.payment_required?L[lang].doneTextPay:L[lang].doneText;show('stepDone');if(tg)tg.HapticFeedback?.notificationOccurred('success')}catch(e){$('msg').className='error';$('msg').textContent=e.message;$('submitBtn').disabled=false;$('submitBtn').textContent=L[lang].submit}};$('closeBtn').onclick=()=>tg?tg.close():null;bootstrap();
-</script></body></html>
+async function submitApplication(profile,eventId,submitMode){const r=await fetch('/api/submit-application',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,profile,event_id:eventId||'',mode:submitMode||mode})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Error');return j}
+$('gender').onchange=()=>{$('ageWrap').style.display=$('gender').value==='female'?'none':'block'};
+$('startBtn').onclick=()=>{if(mode==='event'&&profileCompleted){show('stepEvent')}else{if(mode==='event'&&!profileCompleted){$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].needProfile}show('stepProfile')}};
+$('backIntroBtn').onclick=()=>show('stepIntro');
+$('nextEventBtn').onclick=async()=>{const p=profileFromForm();const missing=validateProfile(p);if(missing.length){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].requiredBase+missing.join(', ');return}$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].saving;$('nextEventBtn').disabled=true;try{await submitApplication(p,'','profile');profileSaved=true;profileCompleted=true;existingProfile={...p,ntrp:p.ntrp_unknown?'unknown':p.ntrp};$('profileMsg').textContent=L[lang].savedProfile;show('stepEvent');if(tg)tg.HapticFeedback?.notificationOccurred('success')}catch(e){$('profileMsg').className='error';$('profileMsg').textContent=e.message}finally{$('nextEventBtn').disabled=false;$('nextEventBtn').textContent=L[lang].next}};
+$('backBtn').onclick=()=>{if(mode==='event'&&profileCompleted)show('stepIntro');else show('stepProfile')};
+$('submitBtn').onclick=async()=>{$('msg').innerHTML='';$('msg').className='';let profile=profileFromForm();if(profileCompleted&&existingProfile){profile={...existingProfile,ntrp_unknown:existingProfile.ntrp==='unknown'}}const missing=validateProfile(profile);if(missing.length){$('msg').className='error';$('msg').textContent=L[lang].requiredBase+missing.join(', ');return}if(!selectedEvent&&profileSaved){$('doneText').textContent=L[lang].doneText;show('stepDone');return}$('submitBtn').disabled=true;$('submitBtn').textContent='...';try{await submitApplication(profile,selectedEvent||'',selectedEvent?'event':'profile');$('doneText').textContent=selectedEvent?L[lang].doneEventText:L[lang].doneText;show('stepDone');if(tg)tg.HapticFeedback?.notificationOccurred('success')}catch(e){$('msg').className='error';$('msg').textContent=e.message;$('submitBtn').disabled=false;$('submitBtn').textContent=selectedEvent?L[lang].submit:L[lang].submitWaitlist}};
+$('closeBtn').onclick=()=>tg?tg.close():null;
+bootstrap();
+</script>
+</body>
+</html>
