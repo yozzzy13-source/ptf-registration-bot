@@ -38,6 +38,18 @@ async function valuesAppend(range, values) {
   return res.data;
 }
 
+async function ensureHeaders(sheetName, requiredHeaders=[]) {
+  const { headers } = await getRows(sheetName, { useCache:false });
+  const missing = requiredHeaders.filter(h => h && !headers.includes(h));
+  if (!missing.length) return headers;
+
+  const nextHeaders = headers.concat(missing);
+  const endCol = colToA1(nextHeaders.length);
+  await valuesUpdate(`'${sheetName}'!A1:${endCol}1`, [nextHeaders]);
+  cache.clear();
+  return nextHeaders;
+}
+
 export async function getRows(sheetName, { useCache=true } = {}) {
   const key = `rows:${sheetName}`;
   const c = cache.get(key);
@@ -146,6 +158,12 @@ export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
 
   if (!existing?.name && fullName) patch.name = fullName;
 
+  await ensureHeaders(SHEETS.applicants, Object.keys(patch).concat([
+    'first_seen_at',
+    'last_seen_at',
+    'profile_completed'
+  ]));
+
   if (existing) {
     await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
     return { ...existing, ...patch, isNew:false };
@@ -176,6 +194,44 @@ export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
 
   await appendObject(SHEETS.applicants, newRow);
   return { ...newRow, isNew:true };
+}
+
+export async function openAdminChatByTelegramId(telegramId, source='admin_outbound', admin={}) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+
+  const patch = {
+    chat_status: 'open',
+    chat_source: source,
+    chat_opened_at: found.chat_status === 'open' && found.chat_opened_at ? found.chat_opened_at : nowISO(),
+    chat_last_admin_contact_at: nowISO(),
+    chat_admin_id: admin.id || '',
+    chat_admin_name: admin.name || ''
+  };
+
+  await ensureHeaders(SHEETS.applicants, Object.keys(patch));
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
+export async function closeAdminChatByTelegramId(telegramId, source='user_navigation') {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+
+  const patch = {
+    chat_status: 'closed',
+    chat_closed_at: nowISO(),
+    chat_closed_by: source
+  };
+
+  await ensureHeaders(SHEETS.applicants, Object.keys(patch));
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
+export async function isAdminChatOpenByTelegramId(telegramId) {
+  const found = await findApplicantByTelegramId(telegramId);
+  return String(found?.chat_status || '').toLowerCase() === 'open';
 }
 
 export async function upsertApplicant(profile) {

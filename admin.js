@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, copyMessage } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, openAdminChatByTelegramId } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -82,10 +82,18 @@ export async function notifyNewApplication(app, profile) {
   });
 }
 
-export async function notifyIncomingMessage(from, text, telegramMessageId) {
+export async function notifyNewLead(profile) {
+  await notifyAdmin(`<b>New lead</b>\n\nTGID: <code>${escapeHtml(profile.telegram_id)}</code>\nName: <b>${escapeHtml(profile.name || '')}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}`);
+}
+
+export async function notifyIncomingMessage(from, text, telegramMessageId, sourceChatId=null, shouldCopy=false) {
   const adminMsg = await notifyAdmin(`<b>💬 New message from player</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}\n\n${escapeHtml(text)}`, {
     reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] }
   });
+  if (shouldCopy && telegramMessageId) {
+    const chatId = await getAdminChatId();
+    if (chatId) await copyMessage(chatId, sourceChatId || from.id, telegramMessageId).catch(e => console.error('copy incoming message failed', e.message || e));
+  }
   return adminMsg;
 }
 
@@ -144,6 +152,7 @@ export async function executeBroadcast(callbackQuery) {
   for (const c of contacts) {
     try {
       await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id);
+      await openAdminChatByTelegramId(c.telegram_id, 'broadcast', { id: adminId, name: callbackQuery.from.username || callbackQuery.from.first_name || '' });
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:state.segment });
       await new Promise(r => setTimeout(r, 45));
@@ -168,10 +177,12 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
       : '<b>Congratulations!</b> 🎾\n\nYou are now part of <b>Phuket Tennis Family</b>, and your participation in the season has been confirmed.\n\nYou can now join our club chat and start your journey inside our tennis family.';
     if (!app.confirmed_message_sent_at) {
       await sendMessage(app.telegram_id, text, { reply_markup: clubKeyboard(lang, CLUB_CHAT_URL) });
+      await openAdminChatByTelegramId(app.telegram_id, 'status_update', {});
       await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() });
     }
   } else if (status === 'waitlist') {
     await sendMessage(app.telegram_id, t(lang, 'waitlist'));
+    await openAdminChatByTelegramId(app.telegram_id, 'status_update', {});
   }
   await sendMessage(chatId, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
 }

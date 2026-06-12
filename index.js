@@ -5,7 +5,7 @@ import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEET
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback } from './bot.js';
 import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
-import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -161,6 +161,7 @@ app.post('/api/submit-application', async (req, res) => {
         ? (lang === 'ru' ? '✅ Заявка сохранена. Оплату пока не просим — мы сообщим отдельно, когда откроем оплату.' : '✅ Application saved. Payment is not required yet — we will notify you separately when payment opens.')
         : (lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы добавлены в waitlist и сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You have been added to the waitlist and will be able to join open events later.')
     );
+    await openAdminChatByTelegramId(user.id, 'application_saved', {});
 
     res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:false });
   } catch (e) {

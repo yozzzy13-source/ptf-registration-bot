@@ -1,6 +1,6 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested } from './sheets.js';
+import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, openAdminChatByTelegramId } from './sheets.js';
 import { sendMessage } from './telegram.js';
 
 function isAdminId(id) {
@@ -108,6 +108,7 @@ export function registerAdminRoutes(app) {
       for (const c of contacts) {
         try {
           await sendMessage(c.telegram_id, message);
+          await openAdminChatByTelegramId(c.telegram_id, 'admin_panel_broadcast', { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' });
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
           sent++;
         } catch (e) {
@@ -128,6 +129,7 @@ export function registerAdminRoutes(app) {
       const message = String(req.body.message || '').trim();
       if (!telegramId || !message) return res.status(400).json({ ok:false, error:'telegram_id and message are required' });
       await sendMessage(telegramId, message);
+      await openAdminChatByTelegramId(telegramId, 'admin_panel_direct', { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' });
       await logMessage({ message_id:uid('msg'), telegram_id:telegramId, direction:'outgoing', message_type:'text', message_text:message, timestamp:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', status:'sent' });
       res.json({ ok:true });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
@@ -146,6 +148,7 @@ export function registerAdminRoutes(app) {
           : '<b>📸 Please upload your selfie</b>\n\nYou are confirmed as a Phuket Tennis Family player. We need one selfie for your avatar and player profile card on the PTF website.\n\nTap the button below and send the photo to this chat.';
         try {
           await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '📸 Загрузить селфи' : '📸 Upload Selfie', callback_data:'upload_selfie' } ]] } });
+          await openAdminChatByTelegramId(c.telegram_id, 'selfie_request', { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' });
           await markSelfieRequested(c.telegram_id);
           sent++;
         } catch(e) { failed++; }
