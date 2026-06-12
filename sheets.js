@@ -1,6 +1,6 @@
 import { sheets as sheetsClient } from './google.js';
 import { SPREADSHEET_ID, SHEETS } from './config.js';
-import { nowISO, safe } from './util.js';
+import { langOf, nowISO, safe } from './util.js';
 
 const cache = new Map();
 const CACHE_MS = 20_000;
@@ -122,6 +122,60 @@ export async function findApplicantByTelegramIdentity(userOrProfile={}) {
     });
   }
   return null;
+}
+
+export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
+  if (!user?.id) return null;
+
+  const existing = await findApplicantByTelegramIdentity(user);
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+  const username = String(user.username || existing?.telegram_username || '').replace(/^@/, '');
+  const now = nowISO();
+
+  const patch = {
+    telegram_id: user.id,
+    telegram_username: username,
+    telegram: username ? `t.me/${username}` : existing?.telegram || '',
+    language: existing?.language || langOf(user.language_code),
+    source: existing?.source || source,
+    updated_at: now,
+    last_seen_at: now,
+    crm_tags: existing?.crm_tags || 'bot_started',
+    profile_completed: existing?.profile_completed || 'no'
+  };
+
+  if (!existing?.name && fullName) patch.name = fullName;
+
+  if (existing) {
+    await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
+    return { ...existing, ...patch, isNew:false };
+  }
+
+  const newRow = {
+    date: now,
+    created_at: now,
+    first_seen_at: now,
+    name: fullName,
+    status: 'lead',
+    division: 'pending',
+    ntrp: '',
+    experience: '',
+    gender: '',
+    age: '',
+    country_of_origin: '',
+    whatsapp: '',
+    notes: '',
+    last_application_event: '',
+    selfie_status: 'optional_missing',
+    selfie_file_id: '',
+    application_count: 0,
+    allow_match_challenges: 'yes',
+    player_profile_url: '',
+    ...patch
+  };
+
+  await appendObject(SHEETS.applicants, newRow);
+  return { ...newRow, isNew:true };
 }
 
 export async function upsertApplicant(profile) {
