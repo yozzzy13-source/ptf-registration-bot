@@ -308,8 +308,63 @@ export async function updatePayment(paymentId, patch) {
   return { ...found, ...patch };
 }
 
+function cleanTelegramId(v) {
+  const s = String(v || '').trim();
+  return /^\d+$/.test(s) ? s : '';
+}
+
+function mergeContact(map, source, row={}) {
+  const telegramId = cleanTelegramId(row.telegram_id);
+  if (!telegramId) return;
+
+  const existing = map.get(telegramId) || { telegram_id: telegramId, sources: [] };
+  const name = row.name || row.player_name || existing.name || '';
+  const username = row.telegram_username || existing.telegram_username || '';
+  const status = row.status || row.application_status || existing.status || '';
+  const division = row.division || existing.division || '';
+  const language = row.language || existing.language || '';
+  const selfieStatus = row.selfie_status || existing.selfie_status || '';
+  const lastEvent = row.last_application_event || row.event_name || existing.last_application_event || '';
+  const country = row.country_of_origin || existing.country_of_origin || '';
+  const whatsapp = row.whatsapp || existing.whatsapp || '';
+  const crmTags = row.crm_tags || existing.crm_tags || '';
+
+  map.set(telegramId, {
+    ...existing,
+    name,
+    telegram_username: username,
+    status,
+    division,
+    language,
+    selfie_status: selfieStatus,
+    last_application_event: lastEvent,
+    country_of_origin: country,
+    whatsapp,
+    crm_tags: crmTags,
+    sources: existing.sources.includes(source) ? existing.sources : existing.sources.concat(source)
+  });
+}
+
+export async function getBroadcastContacts() {
+  const map = new Map();
+
+  const applicants = (await getRows(SHEETS.applicants, { useCache:false })).rows;
+  applicants.forEach(r => mergeContact(map, 'Applicants', r));
+
+  const applications = (await getRows(SHEETS.applications, { useCache:false })).rows;
+  applications.forEach(r => mergeContact(map, 'Applications', r));
+
+  const messages = (await getRows(SHEETS.messages, { useCache:false })).rows;
+  messages.forEach(r => mergeContact(map, 'Messages', r));
+
+  const broadcastLogs = (await getRows(SHEETS.broadcastLogs, { useCache:false })).rows;
+  broadcastLogs.forEach(r => mergeContact(map, 'Broadcast Logs', r));
+
+  return [...map.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
 export async function getSegmentContacts(segment='all') {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const rows = await getBroadcastContacts();
   return rows.filter(r => {
     if (!r.telegram_id) return false;
     if (segment === 'all') return true;
