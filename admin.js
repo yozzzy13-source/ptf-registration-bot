@@ -1,4 +1,4 @@
-import { sendMessage, sendPhoto, sendDocument, copyMessage, createForumTopic } from './telegram.js';
+import { sendMessage, sendPhoto, sendDocument, copyMessage, getChat, createForumTopic, deleteForumTopic } from './telegram.js';
 import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByAdminTopic, openAdminChatByTelegramId, setAdminTopicByTelegramId, logMessage } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, ADMIN_CRM_CHAT_ID } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
@@ -32,8 +32,33 @@ export async function handleAdminInit(msg) {
 }
 
 export async function handleCrmInit(msg) {
+  const chat = await getChat(msg.chat.id).catch(e => ({ error: e }));
+
+  if (chat.error) {
+    return sendMessage(msg.chat.id, `<b>CRM topic group was not connected</b>\n\nTelegram error:\n<code>${escapeHtml(chat.error.message || chat.error)}</code>`);
+  }
+
+  if (msg.chat.type !== 'supergroup' || chat.is_forum !== true) {
+    return sendMessage(
+      msg.chat.id,
+      `<b>CRM topics are not enabled in this group</b>\n\nPlease open group settings and enable Topics first. The group must be a Telegram forum/supergroup. After that, run /crm_init again.`
+    );
+  }
+
+  try {
+    const probe = await createForumTopic(msg.chat.id, 'CRM setup test');
+    if (probe?.message_thread_id) {
+      await deleteForumTopic(msg.chat.id, probe.message_thread_id).catch(() => {});
+    }
+  } catch (e) {
+    return sendMessage(
+      msg.chat.id,
+      `<b>CRM topic group was not connected</b>\n\nThe group has Topics enabled, but the bot cannot create topics. Give the bot admin permission to manage topics, then run /crm_init again.\n\nTelegram error:\n<code>${escapeHtml(e.message || e)}</code>`
+    );
+  }
+
   await setSetting('admin_crm_chat_id', String(msg.chat.id), 'Telegram forum group for per-player CRM topics');
-  await sendMessage(msg.chat.id, `CRM topic group connected.\n\nchat_id: <code>${msg.chat.id}</code>`);
+  await sendMessage(msg.chat.id, `CRM topic group connected.\n\nchat_id: <code>${msg.chat.id}</code>\n\nNew player conversations will now create personal topics here.`);
 }
 
 function topicNameForProfile(profile={}) {
