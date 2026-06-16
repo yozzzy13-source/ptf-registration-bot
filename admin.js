@@ -253,16 +253,30 @@ export async function notifyIncomingMessage(from, text, telegramMessageId, sourc
   let adminMsg = null;
 
   if (topic?.chatId && topic.messageThreadId) {
-    adminMsg = await sendMessage(topic.chatId, body, { ...opts, message_thread_id: topic.messageThreadId });
+    if (telegramMessageId) {
+      adminMsg = await copyMessage(
+        topic.chatId,
+        sourceChatId || from.id,
+        telegramMessageId,
+        { message_thread_id: topic.messageThreadId }
+      ).catch(e => {
+        console.error('copy incoming message to topic failed', e.message || e);
+        return null;
+      });
+    }
+
+    if (!adminMsg) {
+      adminMsg = await sendMessage(topic.chatId, escapeHtml(text || '[media]'), { message_thread_id: topic.messageThreadId });
+    }
   } else {
     adminMsg = await notifyAdmin(body, opts);
+
+    if (shouldCopy && telegramMessageId) {
+      const chatId = await getAdminChatId();
+      if (chatId) await copyMessage(chatId, sourceChatId || from.id, telegramMessageId).catch(e => console.error('copy incoming message failed', e.message || e));
+    }
   }
 
-  if (shouldCopy && telegramMessageId) {
-    const chatId = topic?.chatId || await getAdminChatId();
-    const copyOpts = topic?.messageThreadId ? { message_thread_id: topic.messageThreadId } : {};
-    if (chatId) await copyMessage(chatId, sourceChatId || from.id, telegramMessageId, copyOpts).catch(e => console.error('copy incoming message failed', e.message || e));
-  }
   return adminMsg;
 }
 
