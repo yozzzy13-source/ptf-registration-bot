@@ -6,7 +6,18 @@ import { getResultBroadcastContacts, logResultBroadcast, markTelegramBlocked, se
 const MASTER_START_ROW = 4;
 const ALIAS_START_ROW = 2;
 const DATA_START_ROW = 2;
+const COL_MATCH_DATE = 2;
+const COL_FORMAT = 3;
+const COL_COMPETITION = 4;
+const COL_P1_ID = 5;
+const COL_P1_DIVISION = 6;
+const COL_P2_ID = 7;
+const COL_P2_DIVISION = 8;
 const COL_P1_NAME = 9;
+const COL_P2_NAME = 10;
+const COL_SCORES_START = 11;
+const COL_SET3MODE = 23;
+const COL_STATUS = 24;
 const SUGGESTIONS_LIMIT = 8;
 const PAIR_SUGGESTIONS_LIMIT = 8;
 const SUGGESTION_MIN_SCORE = 65;
@@ -215,8 +226,12 @@ async function startInteractiveSelection(userId, chatId, threadId, parsed, playe
 
 async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, parsed, sourceMessage=null) {
   await debugLog('10 writing main match', { p1Name, p2Name, score: formatScore(parsed) });
-  await writeMatchRow(p1Name, p2Name, parsed);
-  await debugLog('11 main match written', { p1Name, p2Name, score: formatScore(parsed) });
+  const mainMatchRow = await writeMatchRow(p1Name, p2Name, parsed);
+  const mainMatchContext = await getMainMatchContext(mainMatchRow).catch(err => {
+    debugLog('MAIN MATCH CONTEXT ERROR', stackDetails(err));
+    return {};
+  });
+  await debugLog('11 main match written', { p1Name, p2Name, score: formatScore(parsed), row: mainMatchRow, mainMatchContext });
 
   const divisionWriteResult = await writeDivisionMatchRow(p1Name, p2Name, parsed);
   const scoreText = formatScore(parsed);
@@ -229,10 +244,10 @@ async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, pars
   if (RESULTS.confirmInTopic && chatId && divisionWriteResult?.status === 'saved') {
     await safeSendMessage(chatId, '✅ Saved', { message_thread_id: threadId || undefined, disable_notification: true });
   }
-  await broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage });
+  await broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage, mainMatchContext });
 }
 
-async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage }) {
+async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage, mainMatchContext={} }) {
   if (!RESULTS_BROADCAST_ENABLED) return;
 
   const recipients = await getResultBroadcastContacts().catch(err => {
@@ -261,7 +276,7 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
 
   for (const recipient of recipients) {
     const lang = recipient.language === 'ru' ? 'ru' : 'en';
-    const text = buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, profileUrls });
+    const text = buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext, profileUrls });
     const opts = {
       reply_markup: {
         inline_keyboard: [[{
@@ -271,7 +286,7 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
       }
     };
 
-    const tableUrl = getDivisionTableUrl(divisionWriteResult);
+    const tableUrl = getDivisionTableUrl(divisionWriteResult, mainMatchContext);
     const buttons = [];
     if (tableUrl) buttons.push({ text: 'Смотреть таблицу', url: tableUrl });
     buttons.push({
@@ -353,8 +368,8 @@ function getResultPhoto(msg) {
   return msg.photo[msg.photo.length - 1];
 }
 
-function buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, profileUrls }) {
-  const card = buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult });
+function buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext, profileUrls }) {
+  const card = buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext });
   const winnerUrl = profileUrls.get(norm(card.winnerName)) || '';
   const loserUrl = profileUrls.get(norm(card.loserName)) || '';
 
@@ -366,31 +381,68 @@ function buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, prof
   ].join('\n');
 }
 
-function buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult }) {
+function buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext={} }) {
   const validation = validateMatchScore(parsed);
   const p1Won = validation.ok && validation.winner === 'p1';
   const winnerName = p1Won ? p1Name : p2Name;
   const loserName = p1Won ? p2Name : p1Name;
   const winnerPerspectiveScore = p1Won ? parsed : reverseParsedScore(parsed);
-  const division = divisionWriteResult?.status === 'saved' ? divisionWriteResult.division : '';
-  const seasonName = divisionWriteResult?.season || RESULTS.seasonName;
+  const division = mainMatchContext.division || (divisionWriteResult?.status === 'saved' ? divisionWriteResult.division : '');
+  const competition = parseCompetition(mainMatchContext.competition);
+  const seasonName = competition.seasonName || divisionWriteResult?.season || RESULTS.seasonName;
   const title = division
     ? `Division ${division} ${seasonName}`
     : `Cross-Division ${seasonName}`;
 
   return {
     title,
-    stage: divisionWriteResult?.stage || RESULTS.defaultStage || 'Group Stage',
-    dateText: formatResultDate(new Date()),
+    stage: competition.stage || mainMatchContext.format || divisionWriteResult?.stage || RESULTS.defaultStage || 'Group Stage',
+    dateText: formatMatchDateForCard(mainMatchContext.matchDate),
     winnerName,
     loserName,
     scoreText: formatScoreForCard(winnerPerspectiveScore)
   };
 }
 
-function getDivisionTableUrl(divisionWriteResult) {
-  if (divisionWriteResult?.status !== 'saved') return '';
-  const division = String(divisionWriteResult.division || '').trim().toUpperCase();
+async function getMainMatchContext(row) {
+  if (!row) return {};
+  const values = await getValues(RESULTS.sheetId, `${RESULTS.logSheetName}!B${row}:J${row}`);
+  const data = values[0] || [];
+  const p1Division = String(data[COL_P1_DIVISION - COL_MATCH_DATE] || '').trim().toUpperCase();
+  const p2Division = String(data[COL_P2_DIVISION - COL_MATCH_DATE] || '').trim().toUpperCase();
+  return {
+    matchDate: data[0] || '',
+    format: String(data[1] || '').trim(),
+    competition: String(data[2] || '').trim(),
+    p1Division,
+    p2Division,
+    division: p1Division && p1Division === p2Division ? p1Division : '',
+    p1Name: String(data[COL_P1_NAME - COL_MATCH_DATE] || '').trim(),
+    p2Name: String(data[COL_P2_NAME - COL_MATCH_DATE] || '').trim()
+  };
+}
+
+function parseCompetition(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return {};
+
+  const seasonNumberMatch = raw.match(/\b(?:season|s)\s*(\d+)\b/i);
+  const seasonName = seasonNumberMatch ? `Season ${seasonNumberMatch[1]}` : raw;
+
+  if (/semi[-\s]?finals?/i.test(raw)) return { seasonName, stage: 'Semifinal' };
+  if (/\bfinals?\b/i.test(raw)) return { seasonName, stage: 'Final' };
+  if (/play[-\s]?off/i.test(raw)) return { seasonName, stage: 'Playoff' };
+  if (/season/i.test(raw)) return { seasonName, stage: 'Group Stage' };
+
+  return { seasonName, stage: RESULTS.defaultStage || 'Group Stage' };
+}
+
+function getDivisionTableUrl(divisionWriteResult, mainMatchContext={}) {
+  const division = String(
+    mainMatchContext.division ||
+    (divisionWriteResult?.status === 'saved' ? divisionWriteResult.division : '')
+  ).trim().toUpperCase();
+  if (!division) return '';
   return RESULTS.divisionUrls?.[division] || '';
 }
 
@@ -400,6 +452,30 @@ function formatResultDate(date) {
     day: 'numeric',
     month: 'long'
   }).format(date);
+}
+
+function formatMatchDateForCard(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return formatResultDate(new Date());
+
+  const dotMatch = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (dotMatch) {
+    const [, day, month, year] = dotMatch;
+    return formatResultDate(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+  }
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return formatResultDate(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+  }
+
+  const serial = Number(raw);
+  if (Number.isFinite(serial) && serial > 20000) {
+    return formatResultDate(new Date((serial - 25569) * 86400000));
+  }
+
+  return raw;
 }
 
 function formatPlayerLink(name, url) {
