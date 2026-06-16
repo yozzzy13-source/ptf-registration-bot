@@ -25,7 +25,9 @@ export const answerCallbackQuery = (callback_query_id, text='', show_alert=false
 export const sendPhoto = (chat_id, photo, opts={}) => call('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...opts });
 export const sendDocument = (chat_id, document, opts={}) => call('sendDocument', { chat_id, document, parse_mode: 'HTML', ...opts });
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
+export const getChat = (chat_id) => call('getChat', { chat_id });
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
+export const deleteForumTopic = (chat_id, message_thread_id) => call('deleteForumTopic', { chat_id, message_thread_id });
 
 export async function setWebhook() {
   if (!PUBLIC_URL) throw new Error('PUBLIC_URL env is empty');
