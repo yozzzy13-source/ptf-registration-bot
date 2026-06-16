@@ -15,6 +15,7 @@ const PENDING_TTL_MS = 5 * 60 * 1000;
 const pendingSessions = new Map();
 const seenMessages = new Map();
 const sheetIdCache = new Map();
+let playerProfileUrlCache = { expiresAt: 0, map: new Map() };
 
 function sheets() {
   return sheetsClient();
@@ -106,7 +107,10 @@ export async function handleResultsCallback(callbackQuery) {
 
   if (data === 'RESNOTIFY|off') {
     await setResultsNotifications(userId, false).catch(err => debugLog('RESULT NOTIFY OFF ERROR', stackDetails(err)));
-    await safeSendMessage(userId, 'Match result notifications are off.\n\nYou can turn them back on later with /results.');
+    await safeSendMessage(
+      userId,
+      'Match result notifications are off.\n\nTo turn them back on, open Menu and choose /results.'
+    );
     return;
   }
 
@@ -238,10 +242,14 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
   if (!recipients.length) return;
 
   const broadcastId = randomToken();
-  const scoreText = formatScore(parsed);
+  const scoreText = formatScoreForCard(parsed);
   const matchText = `${p1Name} vs ${p2Name}`;
   const media = getResultPhoto(sourceMessage);
   const mediaType = media ? 'photo' : 'text';
+  const profileUrls = await getPlayerProfileUrlMap().catch(err => {
+    debugLog('PLAYER PROFILE URLS ERROR', stackDetails(err));
+    return new Map();
+  });
 
   await debugLog('RESULT BROADCAST START', {
     broadcastId,
@@ -253,7 +261,7 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
 
   for (const recipient of recipients) {
     const lang = recipient.language === 'ru' ? 'ru' : 'en';
-    const text = buildResultBroadcastText(lang, { p1Name, p2Name, scoreText, divisionWriteResult });
+    const text = buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, profileUrls });
     const opts = {
       reply_markup: {
         inline_keyboard: [[{
@@ -262,6 +270,15 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
         }]]
       }
     };
+
+    const tableUrl = getDivisionTableUrl(divisionWriteResult);
+    const buttons = [];
+    if (tableUrl) buttons.push({ text: 'Смотреть таблицу', url: tableUrl });
+    buttons.push({
+      text: lang === 'ru' ? 'Не присылать результаты матчей' : 'Stop match results',
+      callback_data: 'RESNOTIFY|off'
+    });
+    opts.reply_markup.inline_keyboard = [buttons];
 
     try {
       if (media) await sendPhoto(recipient.telegram_id, media.file_id, { caption: text, ...opts });
@@ -334,6 +351,110 @@ function buildResultBroadcastText(lang, { p1Name, p2Name, scoreText, divisionWri
 function getResultPhoto(msg) {
   if (!msg?.photo?.length) return null;
   return msg.photo[msg.photo.length - 1];
+}
+
+function buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, profileUrls }) {
+  const card = buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult });
+  const winnerUrl = profileUrls.get(norm(card.winnerName)) || '';
+  const loserUrl = profileUrls.get(norm(card.loserName)) || '';
+
+  return [
+    `<b>${escapeHtmlLocal(card.title)}</b>`,
+    `${escapeHtmlLocal(card.stage)} ${escapeHtmlLocal(card.dateText)}`,
+    '',
+    `${formatPlayerLink(card.winnerName, winnerUrl)} ${escapeHtmlLocal(card.scoreText)} ${formatPlayerLink(card.loserName, loserUrl)}`
+  ].join('\n');
+}
+
+function buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult }) {
+  const validation = validateMatchScore(parsed);
+  const p1Won = validation.ok && validation.winner === 'p1';
+  const winnerName = p1Won ? p1Name : p2Name;
+  const loserName = p1Won ? p2Name : p1Name;
+  const winnerPerspectiveScore = p1Won ? parsed : reverseParsedScore(parsed);
+  const division = divisionWriteResult?.status === 'saved' ? divisionWriteResult.division : '';
+  const seasonName = divisionWriteResult?.season || RESULTS.seasonName;
+  const title = division
+    ? `Division ${division} ${seasonName}`
+    : `Cross-Division ${seasonName}`;
+
+  return {
+    title,
+    stage: divisionWriteResult?.stage || RESULTS.defaultStage || 'Group Stage',
+    dateText: formatResultDate(new Date()),
+    winnerName,
+    loserName,
+    scoreText: formatScoreForCard(winnerPerspectiveScore)
+  };
+}
+
+function getDivisionTableUrl(divisionWriteResult) {
+  if (divisionWriteResult?.status !== 'saved') return '';
+  const division = String(divisionWriteResult.division || '').trim().toUpperCase();
+  return RESULTS.divisionUrls?.[division] || '';
+}
+
+function formatResultDate(date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: RESULTS.localTimezone,
+    day: 'numeric',
+    month: 'long'
+  }).format(date);
+}
+
+function formatPlayerLink(name, url) {
+  if (!url) return `<b>${escapeHtmlLocal(name)}</b>`;
+  return `<a href="${escapeHtmlLocal(url)}">${escapeHtmlLocal(name)}</a>`;
+}
+
+async function getPlayerProfileUrlMap() {
+  const now = Date.now();
+  if (playerProfileUrlCache.expiresAt > now) return playerProfileUrlCache.map;
+
+  const map = new Map();
+  if (!RESULTS.playerProfilesSpreadsheetId) {
+    playerProfileUrlCache = { expiresAt: now + 10 * 60 * 1000, map };
+    return map;
+  }
+
+  const values = await getValues(
+    RESULTS.playerProfilesSpreadsheetId,
+    `${RESULTS.playerProfilesSheetName}!A1:Z`
+  );
+  const headers = values[0] || [];
+  const nameIndex = findHeaderIndex(headers, ['player name', 'name']);
+  const urlIndex = findHeaderIndex(headers, ['profile url by name', 'profile url by id', 'profile url', 'url']);
+
+  if (nameIndex < 0 || urlIndex < 0) {
+    playerProfileUrlCache = { expiresAt: now + 10 * 60 * 1000, map };
+    return map;
+  }
+
+  for (const row of values.slice(1)) {
+    const name = String(row[nameIndex] || '').trim();
+    const url = normalizeWebsiteUrl(row[urlIndex]);
+    if (name && url) map.set(norm(name), url);
+  }
+
+  playerProfileUrlCache = { expiresAt: now + 10 * 60 * 1000, map };
+  return map;
+}
+
+function findHeaderIndex(headers, names) {
+  const normalized = headers.map(h => norm(h));
+  for (const name of names.map(norm)) {
+    const index = normalized.findIndex(h => h === name || h.includes(name));
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+function normalizeWebsiteUrl(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith('/')) return `${RESULTS.websiteBaseUrl}${s}`;
+  return `${RESULTS.websiteBaseUrl}/${s.replace(/^\/+/, '')}`;
 }
 
 function delay(ms) {
@@ -412,7 +533,14 @@ async function writeDivisionMatchRow(p1Name, p2Name, parsed) {
       p2Name,
       score: formatScore(parsed)
     });
-    return { status: 'saved', division: div1, row: rowInfo.row, reversed: rowInfo.reversed };
+    return {
+      status: 'saved',
+      division: div1,
+      row: rowInfo.row,
+      reversed: rowInfo.reversed,
+      stage: rowInfo.stage || RESULTS.defaultStage,
+      season: rowInfo.season || RESULTS.seasonName
+    };
   } catch (err) {
     await debugLog('DIVISION WRITE ERROR', stackDetails(err));
     return { status: 'error', message: err.message };
@@ -420,16 +548,29 @@ async function writeDivisionMatchRow(p1Name, p2Name, parsed) {
 }
 
 async function findDivisionMatchRow(spreadsheetId, sheetName, p1Name, p2Name) {
-  const values = await getValues(spreadsheetId, `${sheetName}!C2:E`);
+  const values = await getValues(spreadsheetId, `${sheetName}!A1:AD`);
+  const headers = values[0] || [];
+  const p1HeaderIndex = findHeaderIndex(headers, ['player 1']);
+  const p2HeaderIndex = findHeaderIndex(headers, ['player 2']);
+  const p1Index = p1HeaderIndex >= 0 ? p1HeaderIndex : 2;
+  const p2Index = p2HeaderIndex >= 0 ? p2HeaderIndex : 4;
+  const stageIndex = findHeaderIndex(headers, ['stage', 'round', 'phase']);
+  const seasonIndex = findHeaderIndex(headers, ['season']);
   const targetP1 = norm(p1Name);
   const targetP2 = norm(p2Name);
 
-  for (let i = 0; i < values.length; i++) {
-    const rowNumber = i + 2;
-    const sheetP1 = norm(values[i]?.[0]);
-    const sheetP2 = norm(values[i]?.[2]);
-    if (sheetP1 === targetP1 && sheetP2 === targetP2) return { row: rowNumber, reversed: false };
-    if (sheetP1 === targetP2 && sheetP2 === targetP1) return { row: rowNumber, reversed: true };
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] || [];
+    const rowNumber = i + 1;
+    const sheetP1 = norm(row[p1Index]);
+    const sheetP2 = norm(row[p2Index]);
+    const metadata = {
+      row: rowNumber,
+      stage: stageIndex >= 0 ? String(row[stageIndex] || '').trim() : '',
+      season: seasonIndex >= 0 ? String(row[seasonIndex] || '').trim() : ''
+    };
+    if (sheetP1 === targetP1 && sheetP2 === targetP2) return { ...metadata, reversed: false };
+    if (sheetP1 === targetP2 && sheetP2 === targetP1) return { ...metadata, reversed: true };
   }
   return null;
 }
@@ -971,6 +1112,20 @@ function formatScore(p) {
 function formatSet(a, b, tba, tbb) {
   let s = `${a}-${b}`;
   if (tba !== '' && tbb !== '') s += `(${tba}-${tbb})`;
+  return s;
+}
+
+function formatScoreForCard(p) {
+  const sets = [];
+  if (p.s1p1 !== '' && p.s1p2 !== '') sets.push(formatSetForCard(p.s1p1, p.s1p2, p.s1tb1, p.s1tb2));
+  if (p.s2p1 !== '' && p.s2p2 !== '') sets.push(formatSetForCard(p.s2p1, p.s2p2, p.s2tb1, p.s2tb2));
+  if (p.s3p1 !== '' && p.s3p2 !== '') sets.push(formatSetForCard(p.s3p1, p.s3p2, p.s3tb1, p.s3tb2));
+  return sets.join(' ');
+}
+
+function formatSetForCard(a, b, tba, tbb) {
+  let s = `${a}:${b}`;
+  if (tba !== '' && tbb !== '') s += ` (${tba}:${tbb})`;
   return s;
 }
 

@@ -65,6 +65,10 @@ async function handleResultsOptInCommand(msg) {
 
   const lang = langOf(msg.from.language_code);
   await setResultsNotifications(msg.from.id, true);
+  if (lang === 'ru') {
+    await sendMessage(msg.chat.id, 'Уведомления о результатах матчей включены.');
+    return true;
+  }
   await sendMessage(
     msg.chat.id,
     lang === 'ru'

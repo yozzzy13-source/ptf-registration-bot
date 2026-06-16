@@ -32,6 +32,17 @@ RESULTS_TIMEZONE=Asia/Bangkok
 RESULTS_CHAT_ID=-1003636628710
 RESULTS_TOPIC_ID=5
 RESULTS_CONFIRM_IN_TOPIC=true
+RESULTS_BROADCAST_ENABLED=true
+RESULTS_BROADCAST_DELAY_MS=700
+RESULTS_WEBSITE_BASE_URL=https://www.phukettennis.com
+RESULTS_SEASON_NAME=Season 1
+RESULTS_DEFAULT_STAGE=Group Stage
+RESULTS_PLAYER_PROFILES_SPREADSHEET_ID=1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY
+RESULTS_PLAYER_PROFILES_SHEET_NAME=Frontend_Profile_All
+RESULTS_DIVISION_A_URL=https://www.phukettennis.com/division-a
+RESULTS_DIVISION_B_URL=https://www.phukettennis.com/division-b
+RESULTS_DIVISION_C_URL=https://www.phukettennis.com/division-c
+RESULTS_DIVISION_D_URL=https://www.phukettennis.com/division-d
 RESULTS_DIVISION_A_SPREADSHEET_ID=1nmiBnyqHiZ-EuLUNCqv7ANl34yWfAWdkSZyw7h8o6bU
 RESULTS_DIVISION_B_SPREADSHEET_ID=1d-yhcCTE2sZQanog-BK3EV-1yAz6DOb0X6N5c_Fnutc
 RESULTS_DIVISION_C_SPREADSHEET_ID=1GFGtFx_Cvt5YyoPZtT4zA6qTFduM5_GsHqr0eUT1a_s
@@ -42,6 +53,7 @@ The same `GOOGLE_CREDENTIALS` service account must have Editor access to:
 
 - registration spreadsheet from `SPREADSHEET_ID`
 - main results spreadsheet from `RESULTS_SHEET_ID`
+- player profile spreadsheet from `RESULTS_PLAYER_PROFILES_SPREADSHEET_ID`
 - all four division spreadsheets
 
 ## Webhook

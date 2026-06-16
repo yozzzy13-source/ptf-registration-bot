@@ -37,7 +37,8 @@ export async function setWebhook() {
 export async function setCommands() {
   return call('setMyCommands', { commands: [
     { command: 'start', description: 'Start / Main menu' },
-    { command: 'help', description: 'Help' }
+    { command: 'help', description: 'Help' },
+    { command: 'results', description: 'Match result notifications' }
   ]});
 }
 
