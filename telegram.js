@@ -37,10 +37,7 @@ export async function setWebhook() {
 export async function setCommands() {
   return call('setMyCommands', { commands: [
     { command: 'start', description: 'Start / Main menu' },
-    { command: 'help', description: 'Help' },
-    { command: 'admin', description: 'Open admin panel' },
-    { command: 'crm_init', description: 'Connect CRM topics group' },
-    { command: 'cancel', description: 'Cancel current action' }
+    { command: 'help', description: 'Help' }
   ]});
 }
 
