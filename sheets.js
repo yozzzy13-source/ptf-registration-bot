@@ -234,6 +234,35 @@ export async function isAdminChatOpenByTelegramId(telegramId) {
   return String(found?.chat_status || '').toLowerCase() === 'open';
 }
 
+export async function setAdminTopicByTelegramId(telegramId, patch={}) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+
+  const safePatch = {
+    admin_topic_id: patch.admin_topic_id || found.admin_topic_id || '',
+    admin_topic_name: patch.admin_topic_name || found.admin_topic_name || '',
+    admin_topic_chat_id: patch.admin_topic_chat_id || found.admin_topic_chat_id || '',
+    admin_topic_created_at: patch.admin_topic_created_at || found.admin_topic_created_at || nowISO(),
+    admin_topic_last_used_at: nowISO()
+  };
+
+  await ensureHeaders(SHEETS.applicants, Object.keys(safePatch));
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, safePatch);
+  return { ...found, ...safePatch };
+}
+
+export async function findApplicantByAdminTopic(topicId, chatId='') {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const tid = String(topicId || '');
+  const cid = String(chatId || '');
+
+  return rows.find(r => {
+    if (String(r.admin_topic_id || '') !== tid) return false;
+    if (!cid || !r.admin_topic_chat_id) return true;
+    return String(r.admin_topic_chat_id) === cid;
+  });
+}
+
 export async function upsertApplicant(profile) {
   const existing = await findApplicantByTelegramIdentity(profile);
   const patch = {

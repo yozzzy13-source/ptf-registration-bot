@@ -7,7 +7,7 @@ import { handleMessage, handleCallback } from './bot.js';
 import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
 import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
-import { notifyNewApplication } from './admin.js';
+import { handleAdminTopicMessage, notifyNewApplication } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,7 +32,9 @@ app.post('/webhook', async (req, res) => {
       seen.add(update.update_id);
       if (seen.size > 2000) seen.clear();
     }
-    if (update.callback_query && isResultsCallback(update.callback_query)) {
+    if (update.message && await handleAdminTopicMessage(update.message)) {
+      return;
+    } else if (update.callback_query && isResultsCallback(update.callback_query)) {
       await handleResultsCallback(update.callback_query);
     } else if (update.message && isResultsMessage(update.message)) {
       await handleResultsMessage(update.message);

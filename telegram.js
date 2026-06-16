@@ -25,6 +25,7 @@ export const answerCallbackQuery = (callback_query_id, text='', show_alert=false
 export const sendPhoto = (chat_id, photo, opts={}) => call('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...opts });
 export const sendDocument = (chat_id, document, opts={}) => call('sendDocument', { chat_id, document, parse_mode: 'HTML', ...opts });
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
+export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 
 export async function setWebhook() {
   if (!PUBLIC_URL) throw new Error('PUBLIC_URL env is empty');
@@ -36,6 +37,7 @@ export async function setCommands() {
     { command: 'start', description: 'Start / Main menu' },
     { command: 'help', description: 'Help' },
     { command: 'admin', description: 'Open admin panel' },
+    { command: 'crm_init', description: 'Connect CRM topics group' },
     { command: 'cancel', description: 'Cancel current action' }
   ]});
 }
