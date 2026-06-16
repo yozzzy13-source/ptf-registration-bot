@@ -8,7 +8,10 @@ export const DEFAULT_USDT_AMOUNT = Number(process.env.DEFAULT_USDT_AMOUNT || 80)
 export const TIMEZONE = process.env.TIMEZONE || 'Asia/Bangkok';
 export const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 export const ADMIN_CRM_CHAT_ID = process.env.ADMIN_CRM_CHAT_ID || '';
-export const SHEETS = { applicants:'Applicants', events:'Events', applications:'Applications', messages:'Messages', broadcasts:'Broadcasts', broadcastLogs:'Broadcast Logs', settings:'Settings', botTexts:'Bot Texts', payments:'Payments', paymentMethods:'Payment Methods', matchChallenges:'Match Challenges', botMenu:'Bot Menu' };
+export const BROADCAST_DELAY_MS = Number(process.env.BROADCAST_DELAY_MS || 700);
+export const RESULTS_BROADCAST_ENABLED = (process.env.RESULTS_BROADCAST_ENABLED || 'true') === 'true';
+export const RESULTS_BROADCAST_DELAY_MS = Number(process.env.RESULTS_BROADCAST_DELAY_MS || 700);
+export const SHEETS = { applicants:'Applicants', leads:'Leads', events:'Events', applications:'Applications', messages:'Messages', broadcasts:'Broadcasts', broadcastLogs:'Broadcast Logs', resultBroadcastLogs:'Result Broadcast Logs', settings:'Settings', botTexts:'Bot Texts', payments:'Payments', paymentMethods:'Payment Methods', matchChallenges:'Match Challenges', botMenu:'Bot Menu' };
 
 export const RESULTS = {
   sheetId: process.env.RESULTS_SHEET_ID || '1tisUxFOJZgaD95o8cQKSvWpH8ySY-ht3H4wdHCeCI0Q',

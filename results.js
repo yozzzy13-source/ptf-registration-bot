@@ -1,6 +1,7 @@
-import { RESULTS } from './config.js';
+import { RESULTS, RESULTS_BROADCAST_ENABLED, RESULTS_BROADCAST_DELAY_MS } from './config.js';
 import { sheets as sheetsClient } from './google.js';
-import { sendMessage, answerCallbackQuery } from './telegram.js';
+import { sendMessage, sendPhoto, answerCallbackQuery } from './telegram.js';
+import { getResultBroadcastContacts, logResultBroadcast, markTelegramBlocked, setResultsNotifications } from './sheets.js';
 
 const MASTER_START_ROW = 4;
 const ALIAS_START_ROW = 2;
@@ -27,7 +28,8 @@ export function isResultsMessage(msg) {
 }
 
 export function isResultsCallback(callbackQuery) {
-  return String(callbackQuery?.data || '').startsWith('PTF|');
+  const data = String(callbackQuery?.data || '');
+  return data.startsWith('PTF|') || data.startsWith('RESNOTIFY|');
 }
 
 export async function handleResultsMessage(msg) {
@@ -88,19 +90,31 @@ export async function handleResultsMessage(msg) {
     !r1.name || !r2.name || r1.needsConfirmation || r2.needsConfirmation || r1.conflict || r2.conflict;
 
   if (needsInteractiveChoice) {
-    await startInteractiveSelection(userId, chatId, threadId, parsed, playersList, aliasMap, r1, r2);
+    await startInteractiveSelection(userId, chatId, threadId, parsed, playersList, aliasMap, r1, r2, msg);
     return;
   }
 
-  await saveMatchAndNotify(userId, chatId, threadId, r1.name, r2.name, parsed);
+  await saveMatchAndNotify(userId, chatId, threadId, r1.name, r2.name, parsed, msg);
 }
 
 export async function handleResultsCallback(callbackQuery) {
   const userId = callbackQuery.from?.id;
   const data = callbackQuery.data || '';
-  await answerCallbackQuery(callbackQuery.id, 'Selection received').catch(() => {});
+  await answerCallbackQuery(callbackQuery.id, data.startsWith('RESNOTIFY|') ? '' : 'Selection received').catch(() => {});
 
   if (!userId) return;
+
+  if (data === 'RESNOTIFY|off') {
+    await setResultsNotifications(userId, false).catch(err => debugLog('RESULT NOTIFY OFF ERROR', stackDetails(err)));
+    await safeSendMessage(userId, 'Match result notifications are off.\n\nYou can turn them back on later with /results.');
+    return;
+  }
+
+  if (data === 'RESNOTIFY|on') {
+    await setResultsNotifications(userId, true).catch(err => debugLog('RESULT NOTIFY ON ERROR', stackDetails(err)));
+    await safeSendMessage(userId, 'Match result notifications are on.');
+    return;
+  }
 
   const parts = data.split('|');
   if (parts.length < 3 || parts[0] !== 'PTF') return;
@@ -139,11 +153,11 @@ export async function handleResultsCallback(callbackQuery) {
   }
 
   await safeSendMessage(userId, `Pair selected:\n${choice.p1} vs ${choice.p2}`);
-  await saveMatchAndNotify(userId, pending.chatId, pending.threadId, choice.p1, choice.p2, pending.parsed);
+  await saveMatchAndNotify(userId, pending.chatId, pending.threadId, choice.p1, choice.p2, pending.parsed, pending.sourceMessage || null);
   cacheDeletePending(userId, token);
 }
 
-async function startInteractiveSelection(userId, chatId, threadId, parsed, playersList, aliasMap, r1, r2) {
+async function startInteractiveSelection(userId, chatId, threadId, parsed, playersList, aliasMap, r1, r2, sourceMessage=null) {
   const token = randomToken();
   const p1Options = buildPlayerOptionsForSelection(parsed.p1Raw, r1, playersList, aliasMap, SUGGESTIONS_LIMIT);
   const p2Options = buildPlayerOptionsForSelection(parsed.p2Raw, r2, playersList, aliasMap, SUGGESTIONS_LIMIT);
@@ -182,6 +196,7 @@ async function startInteractiveSelection(userId, chatId, threadId, parsed, playe
     threadId,
     userId,
     parsed,
+    sourceMessage,
     step: 'pair',
     pairChoices
   });
@@ -194,7 +209,7 @@ async function startInteractiveSelection(userId, chatId, threadId, parsed, playe
   await sendPairChoiceButtons(userId, title, token, pairChoices);
 }
 
-async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, parsed) {
+async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, parsed, sourceMessage=null) {
   await debugLog('10 writing main match', { p1Name, p2Name, score: formatScore(parsed) });
   await writeMatchRow(p1Name, p2Name, parsed);
   await debugLog('11 main match written', { p1Name, p2Name, score: formatScore(parsed) });
@@ -210,6 +225,127 @@ async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, pars
   if (RESULTS.confirmInTopic && chatId && divisionWriteResult?.status === 'saved') {
     await safeSendMessage(chatId, '✅ Saved', { message_thread_id: threadId || undefined, disable_notification: true });
   }
+  await broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage });
+}
+
+async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage }) {
+  if (!RESULTS_BROADCAST_ENABLED) return;
+
+  const recipients = await getResultBroadcastContacts().catch(err => {
+    debugLog('RESULT BROADCAST CONTACTS ERROR', stackDetails(err));
+    return [];
+  });
+  if (!recipients.length) return;
+
+  const broadcastId = randomToken();
+  const scoreText = formatScore(parsed);
+  const matchText = `${p1Name} vs ${p2Name}`;
+  const media = getResultPhoto(sourceMessage);
+  const mediaType = media ? 'photo' : 'text';
+
+  await debugLog('RESULT BROADCAST START', {
+    broadcastId,
+    recipients: recipients.length,
+    match: matchText,
+    score: scoreText,
+    mediaType
+  });
+
+  for (const recipient of recipients) {
+    const lang = recipient.language === 'ru' ? 'ru' : 'en';
+    const text = buildResultBroadcastText(lang, { p1Name, p2Name, scoreText, divisionWriteResult });
+    const opts = {
+      reply_markup: {
+        inline_keyboard: [[{
+          text: lang === 'ru' ? 'Не присылать результаты матчей' : 'Stop match results',
+          callback_data: 'RESNOTIFY|off'
+        }]]
+      }
+    };
+
+    try {
+      if (media) await sendPhoto(recipient.telegram_id, media.file_id, { caption: text, ...opts });
+      else await sendMessage(recipient.telegram_id, text, opts);
+
+      await logResultBroadcast({
+        broadcast_id: broadcastId,
+        created_at: nowISOForResults(),
+        telegram_id: recipient.telegram_id,
+        name: recipient.name,
+        telegram_username: recipient.telegram_username,
+        language: lang,
+        source: (recipient.sources || []).join(', '),
+        match: matchText,
+        score: scoreText,
+        media_type: mediaType,
+        status: 'sent',
+        error: ''
+      });
+    } catch (err) {
+      const message = String(err?.message || err);
+      if (/bot was blocked|Forbidden/i.test(message)) {
+        await markTelegramBlocked(recipient.telegram_id, message).catch(e => debugLog('MARK BLOCKED ERROR', stackDetails(e)));
+      }
+      await logResultBroadcast({
+        broadcast_id: broadcastId,
+        created_at: nowISOForResults(),
+        telegram_id: recipient.telegram_id,
+        name: recipient.name,
+        telegram_username: recipient.telegram_username,
+        language: lang,
+        source: (recipient.sources || []).join(', '),
+        match: matchText,
+        score: scoreText,
+        media_type: mediaType,
+        status: 'failed',
+        error: message
+      }).catch(e => debugLog('RESULT BROADCAST LOG ERROR', stackDetails(e)));
+    }
+
+    await delay(RESULTS_BROADCAST_DELAY_MS);
+  }
+}
+
+function buildResultBroadcastText(lang, { p1Name, p2Name, scoreText, divisionWriteResult }) {
+  const division =
+    divisionWriteResult?.status === 'saved'
+      ? `Division ${divisionWriteResult.division}`
+      : divisionWriteResult?.status === 'cross_division'
+        ? 'Cross-division match'
+        : '';
+
+  if (lang === 'ru') {
+    return [
+      '<b>Результат матча</b>',
+      division,
+      `${escapeHtmlLocal(p1Name)} vs ${escapeHtmlLocal(p2Name)}`,
+      `Счёт: <b>${escapeHtmlLocal(scoreText)}</b>`
+    ].filter(Boolean).join('\n');
+  }
+
+  return [
+    '<b>Match result</b>',
+    division,
+    `${escapeHtmlLocal(p1Name)} vs ${escapeHtmlLocal(p2Name)}`,
+    `Score: <b>${escapeHtmlLocal(scoreText)}</b>`
+  ].filter(Boolean).join('\n');
+}
+
+function getResultPhoto(msg) {
+  if (!msg?.photo?.length) return null;
+  return msg.photo[msg.photo.length - 1];
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function nowISOForResults() {
+  return new Date().toISOString();
+}
+
+function escapeHtmlLocal(s='') {
+  return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
 async function writeMatchRow(p1NameExact, p2NameExact, parsed) {

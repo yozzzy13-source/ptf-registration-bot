@@ -4,6 +4,7 @@ import { langOf, nowISO, safe } from './util.js';
 
 const cache = new Map();
 const CACHE_MS = 20_000;
+const knownSheets = new Set();
 
 function colToA1(n) {
   let s = '';
@@ -38,7 +39,25 @@ async function valuesAppend(range, values) {
   return res.data;
 }
 
+async function ensureSheetExists(sheetName) {
+  if (knownSheets.has(sheetName)) return;
+
+  const meta = await sheetsClient().spreadsheets.get({
+    spreadsheetId: SPREADSHEET_ID,
+    fields: 'sheets.properties.title'
+  });
+  const exists = (meta.data.sheets || []).some(s => s.properties?.title === sheetName);
+  if (!exists) {
+    await sheetsClient().spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] }
+    });
+  }
+  knownSheets.add(sheetName);
+}
+
 async function ensureHeaders(sheetName, requiredHeaders=[]) {
+  await ensureSheetExists(sheetName);
   const { headers } = await getRows(sheetName, { useCache:false });
   const missing = requiredHeaders.filter(h => h && !headers.includes(h));
   if (!missing.length) return headers;
@@ -54,7 +73,16 @@ export async function getRows(sheetName, { useCache=true } = {}) {
   const key = `rows:${sheetName}`;
   const c = cache.get(key);
   if (useCache && c && Date.now() - c.t < CACHE_MS) return c.v;
-  const values = await valuesGet(`'${sheetName}'!A:AZ`);
+  let values;
+  try {
+    values = await valuesGet(`'${sheetName}'!A:ZZ`);
+    knownSheets.add(sheetName);
+  } catch (err) {
+    const msg = String(err?.message || err);
+    if (!/Unable to parse range|not found|No grid/i.test(msg)) throw err;
+    await ensureSheetExists(sheetName);
+    values = await valuesGet(`'${sheetName}'!A:ZZ`);
+  }
   const headers = values[0] || [];
   const rows = values.slice(1).map((r, idx) => {
     const obj = { _rowNumber: idx + 2 };
@@ -67,9 +95,10 @@ export async function getRows(sheetName, { useCache=true } = {}) {
 }
 
 export async function appendObject(sheetName, obj) {
-  const { headers } = await getRows(sheetName, { useCache:false });
+  const existing = await getRows(sheetName, { useCache:false });
+  const headers = existing.headers.length ? existing.headers : await ensureHeaders(sheetName, Object.keys(obj));
   const row = headers.map(h => obj[h] ?? '');
-  await valuesAppend(`'${sheetName}'!A:AZ`, [row]);
+  await valuesAppend(`'${sheetName}'!A:ZZ`, [row]);
   cache.clear();
 }
 
@@ -117,6 +146,11 @@ export async function findApplicantByTelegramId(telegramId) {
   return rows.find(r => String(r.telegram_id) === String(telegramId));
 }
 
+export async function findLeadByTelegramId(telegramId) {
+  const { rows } = await getRows(SHEETS.leads, { useCache:false });
+  return rows.find(r => String(r.telegram_id) === String(telegramId));
+}
+
 export async function findApplicantByTelegramIdentity(userOrProfile={}) {
   const { rows } = await getRows(SHEETS.applicants, { useCache:false });
   const telegramId = userOrProfile.id || userOrProfile.telegram_id || '';
@@ -136,13 +170,31 @@ export async function findApplicantByTelegramIdentity(userOrProfile={}) {
   return null;
 }
 
+async function findLeadByTelegramIdentity(userOrProfile={}) {
+  const { rows } = await getRows(SHEETS.leads, { useCache:false });
+  const telegramId = userOrProfile.id || userOrProfile.telegram_id || '';
+  const usernameRaw = userOrProfile.username || userOrProfile.telegram_username || '';
+  const username = String(usernameRaw || '').replace(/^@/,'').toLowerCase();
+  if (telegramId) {
+    const byId = rows.find(r => String(r.telegram_id) === String(telegramId));
+    if (byId) return byId;
+  }
+  if (username) {
+    return rows.find(r => String(r.telegram_username || '').replace(/^@/,'').toLowerCase() === username);
+  }
+  return null;
+}
+
 export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
   if (!user?.id) return null;
 
-  const existing = await findApplicantByTelegramIdentity(user);
+  const existingApplicant = await findApplicantByTelegramIdentity(user);
+  const existingLead = existingApplicant ? null : await findLeadByTelegramIdentity(user);
+  const existing = existingApplicant || existingLead;
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
   const username = String(user.username || existing?.telegram_username || '').replace(/^@/, '');
   const now = nowISO();
+  const targetSheet = existingApplicant ? SHEETS.applicants : SHEETS.leads;
 
   const patch = {
     telegram_id: user.id,
@@ -153,19 +205,25 @@ export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
     updated_at: now,
     last_seen_at: now,
     crm_tags: existing?.crm_tags || 'bot_started',
-    profile_completed: existing?.profile_completed || 'no'
+    profile_completed: existingApplicant ? (existing?.profile_completed || 'yes') : 'no',
+    results_notifications: existing?.results_notifications || 'yes',
+    blocked: existing?.blocked || 'no'
   };
 
   if (!existing?.name && fullName) patch.name = fullName;
 
-  await ensureHeaders(SHEETS.applicants, Object.keys(patch).concat([
+  await ensureHeaders(targetSheet, Object.keys(patch).concat([
+    'date',
+    'created_at',
     'first_seen_at',
     'last_seen_at',
-    'profile_completed'
+    'profile_completed',
+    'sendpulse_status',
+    'notes'
   ]));
 
   if (existing) {
-    await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
+    await updateObjectByRow(targetSheet, existing._rowNumber, patch);
     return { ...existing, ...patch, isNew:false };
   }
 
@@ -192,7 +250,7 @@ export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
     ...patch
   };
 
-  await appendObject(SHEETS.applicants, newRow);
+  await appendObject(targetSheet, newRow);
   return { ...newRow, isNew:true };
 }
 
@@ -342,6 +400,21 @@ function cleanTelegramId(v) {
   return /^\d+$/.test(s) ? s : '';
 }
 
+function isBlockedRow(row={}) {
+  const values = [
+    row.blocked,
+    row.bot_blocked,
+    row.sendpulse_status,
+    row.status
+  ].map(v => String(v || '').trim().toLowerCase());
+  return values.includes('yes') || values.includes('true') || values.includes('blocked') || values.includes('disabled');
+}
+
+function wantsResults(row={}) {
+  const v = String(row.results_notifications || row.match_results_notifications || '').trim().toLowerCase();
+  return !['no', 'off', 'false', 'disabled', '0'].includes(v);
+}
+
 function mergeContact(map, source, row={}) {
   const telegramId = cleanTelegramId(row.telegram_id);
   if (!telegramId) return;
@@ -357,6 +430,10 @@ function mergeContact(map, source, row={}) {
   const country = row.country_of_origin || existing.country_of_origin || '';
   const whatsapp = row.whatsapp || existing.whatsapp || '';
   const crmTags = row.crm_tags || existing.crm_tags || '';
+  const blocked = existing.blocked === 'yes' || isBlockedRow(row) ? 'yes' : 'no';
+  const resultsNotifications = row.results_notifications || existing.results_notifications || 'yes';
+  const profileCompleted = row.profile_completed || existing.profile_completed || '';
+  const sendpulseStatus = row.sendpulse_status || existing.sendpulse_status || '';
 
   map.set(telegramId, {
     ...existing,
@@ -370,6 +447,10 @@ function mergeContact(map, source, row={}) {
     country_of_origin: country,
     whatsapp,
     crm_tags: crmTags,
+    blocked,
+    results_notifications: resultsNotifications,
+    profile_completed: profileCompleted,
+    sendpulse_status: sendpulseStatus,
     sources: existing.sources.includes(source) ? existing.sources : existing.sources.concat(source)
   });
 }
@@ -380,6 +461,11 @@ export async function getBroadcastContacts() {
   const applicants = (await getRows(SHEETS.applicants, { useCache:false })).rows;
   applicants.forEach(r => mergeContact(map, 'Applicants', r));
 
+  const leads = (await getRows(SHEETS.leads, { useCache:false })).rows;
+  leads.forEach(r => {
+    if (!map.has(cleanTelegramId(r.telegram_id))) mergeContact(map, 'Leads', r);
+  });
+
   const applications = (await getRows(SHEETS.applications, { useCache:false })).rows;
   applications.forEach(r => mergeContact(map, 'Applications', r));
 
@@ -389,7 +475,79 @@ export async function getBroadcastContacts() {
   const broadcastLogs = (await getRows(SHEETS.broadcastLogs, { useCache:false })).rows;
   broadcastLogs.forEach(r => mergeContact(map, 'Broadcast Logs', r));
 
-  return [...map.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  return [...map.values()]
+    .filter(r => r.telegram_id && r.blocked !== 'yes')
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+export async function getResultBroadcastContacts() {
+  const map = new Map();
+
+  const applicants = (await getRows(SHEETS.applicants, { useCache:false })).rows;
+  applicants.forEach(r => mergeContact(map, 'Applicants', r));
+
+  const leads = (await getRows(SHEETS.leads, { useCache:false })).rows;
+  leads.forEach(r => {
+    if (!map.has(cleanTelegramId(r.telegram_id))) mergeContact(map, 'Leads', r);
+  });
+
+  return [...map.values()]
+    .filter(r => r.telegram_id && r.blocked !== 'yes' && wantsResults(r))
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+export async function setResultsNotifications(telegramId, enabled) {
+  const patch = { results_notifications: enabled ? 'yes' : 'no', updated_at: nowISO() };
+  const applicant = await findApplicantByTelegramId(telegramId);
+  if (applicant) {
+    await ensureHeaders(SHEETS.applicants, Object.keys(patch));
+    await updateObjectByRow(SHEETS.applicants, applicant._rowNumber, patch);
+    return { ...applicant, ...patch };
+  }
+
+  const lead = await findLeadByTelegramId(telegramId);
+  if (lead) {
+    await ensureHeaders(SHEETS.leads, Object.keys(patch));
+    await updateObjectByRow(SHEETS.leads, lead._rowNumber, patch);
+    return { ...lead, ...patch };
+  }
+  return null;
+}
+
+export async function markTelegramBlocked(telegramId, reason='bot_blocked') {
+  const patch = { blocked: 'yes', blocked_at: nowISO(), blocked_reason: reason, results_notifications: 'no', updated_at: nowISO() };
+  const applicant = await findApplicantByTelegramId(telegramId);
+  if (applicant) {
+    await ensureHeaders(SHEETS.applicants, Object.keys(patch));
+    await updateObjectByRow(SHEETS.applicants, applicant._rowNumber, patch);
+    return { ...applicant, ...patch };
+  }
+
+  const lead = await findLeadByTelegramId(telegramId);
+  if (lead) {
+    await ensureHeaders(SHEETS.leads, Object.keys(patch));
+    await updateObjectByRow(SHEETS.leads, lead._rowNumber, patch);
+    return { ...lead, ...patch };
+  }
+  return null;
+}
+
+export async function logResultBroadcast(row) {
+  await ensureHeaders(SHEETS.resultBroadcastLogs, [
+    'broadcast_id',
+    'created_at',
+    'telegram_id',
+    'name',
+    'telegram_username',
+    'language',
+    'source',
+    'match',
+    'score',
+    'media_type',
+    'status',
+    'error'
+  ]);
+  return appendObject(SHEETS.resultBroadcastLogs, row);
 }
 
 export async function getSegmentContacts(segment='all') {

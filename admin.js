@@ -1,11 +1,12 @@
 import { sendMessage, sendPhoto, sendDocument, copyMessage, getChat, createForumTopic, deleteForumTopic } from './telegram.js';
 import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByAdminTopic, openAdminChatByTelegramId, setAdminTopicByTelegramId, logMessage } from './sheets.js';
-import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, ADMIN_CRM_CHAT_ID } from './config.js';
+import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, ADMIN_CRM_CHAT_ID, BROADCAST_DELAY_MS } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
 
 export const adminState = new Map();
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 export function isAdminUser(userId) {
   if (!ADMIN_IDS.length) return true; // first launch mode. Fill ADMIN_IDS later for stricter access.
@@ -341,15 +342,13 @@ export async function executeBroadcast(callbackQuery) {
   for (const c of contacts) {
     try {
       await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id);
-      await recordAdminOutbound(c.telegram_id, state.sourceMessage.text || state.sourceMessage.caption || '[media]', { id: adminId, name: callbackQuery.from.username || callbackQuery.from.first_name || '' }, 'broadcast');
-      await openAdminChatByTelegramId(c.telegram_id, 'broadcast', { id: adminId, name: callbackQuery.from.username || callbackQuery.from.first_name || '' });
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:state.segment });
-      await new Promise(r => setTimeout(r, 45));
     } catch (e) {
       failed++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:state.segment });
     }
+    await delay(BROADCAST_DELAY_MS);
   }
   await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:state.segment, language:'mixed', message_text:state.sourceMessage.text || state.sourceMessage.caption || '[media]', media_type: state.sourceMessage.photo ? 'photo' : state.sourceMessage.document ? 'document' : state.sourceMessage.video ? 'video' : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
   adminState.delete(String(adminId));

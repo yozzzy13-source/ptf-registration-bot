@@ -1,4 +1,4 @@
-import { ADMIN_IDS, SHEETS, BOT_TOKEN } from './config.js';
+import { ADMIN_IDS, SHEETS, BOT_TOKEN, BROADCAST_DELAY_MS } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
 import { getRows, getBroadcastContacts, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, openAdminChatByTelegramId } from './sheets.js';
 import { sendMessage } from './telegram.js';
@@ -19,6 +19,7 @@ function adminFromInitData(initData='') {
 }
 
 function norm(v) { return String(v || '').trim().toLowerCase(); }
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function publicContact(row) {
   return {
     row: row._rowNumber,
@@ -116,14 +117,13 @@ export function registerAdminRoutes(app) {
       for (const c of contacts) {
         try {
           await sendMessage(c.telegram_id, message);
-          await recordAdminOutbound(c.telegram_id, message, { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' }, 'admin_panel_broadcast');
-          await openAdminChatByTelegramId(c.telegram_id, 'admin_panel_broadcast', { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' });
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
           sent++;
         } catch (e) {
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
           failed++;
         }
+        await delay(BROADCAST_DELAY_MS);
       }
       await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:JSON.stringify(req.body.filters || {}), language:'mixed', message_text:message, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });

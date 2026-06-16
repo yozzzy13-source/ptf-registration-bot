@@ -5,7 +5,7 @@ import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEET
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback } from './bot.js';
 import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
-import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId, setResultsNotifications } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { handleAdminTopicMessage, notifyNewApplication } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -38,6 +38,8 @@ app.post('/webhook', async (req, res) => {
       await handleResultsCallback(update.callback_query);
     } else if (update.message && isResultsMessage(update.message)) {
       await handleResultsMessage(update.message);
+    } else if (update.message && await handleResultsOptInCommand(update.message)) {
+      return;
     } else if (update.message && shouldPassToRegistration(update.message)) {
       await handleMessage(update.message);
     } else if (update.callback_query) {
@@ -54,6 +56,22 @@ function shouldPassToRegistration(msg) {
   if (text.startsWith('/')) return true;
   if (msg.reply_to_message && ADMIN_IDS.includes(String(msg.from?.id || ''))) return true;
   return false;
+}
+
+async function handleResultsOptInCommand(msg) {
+  const text = (msg.text || '').trim();
+  if (text !== '/results') return false;
+  if (!msg.from?.id) return true;
+
+  const lang = langOf(msg.from.language_code);
+  await setResultsNotifications(msg.from.id, true);
+  await sendMessage(
+    msg.chat.id,
+    lang === 'ru'
+      ? 'Уведомления о результатах матчей включены.'
+      : 'Match result notifications are on.'
+  );
+  return true;
 }
 
 app.get('/api/bootstrap', async (req, res) => {
