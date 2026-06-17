@@ -35,11 +35,19 @@ export async function setWebhook() {
 }
 
 export async function setCommands() {
-  return call('setMyCommands', { commands: [
+  await call('setMyCommands', { commands: [
     { command: 'start', description: 'Start / Main menu' },
     { command: 'help', description: 'Help' },
     { command: 'results', description: 'Match result notifications' }
   ]});
+  return call('setMyCommands', {
+    language_code: 'ru',
+    commands: [
+      { command: 'start', description: 'Старт / главное меню' },
+      { command: 'help', description: 'Помощь' },
+      { command: 'results', description: 'Уведомления о результатах' }
+    ]
+  });
 }
 
 export function inlineKeyboard(rows) { return { inline_keyboard: rows }; }

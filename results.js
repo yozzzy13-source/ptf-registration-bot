@@ -115,19 +115,27 @@ export async function handleResultsCallback(callbackQuery) {
   await answerCallbackQuery(callbackQuery.id, data.startsWith('RESNOTIFY|') ? '' : 'Selection received').catch(() => {});
 
   if (!userId) return;
+  const lang = String(callbackQuery.from?.language_code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 
   if (data === 'RESNOTIFY|off') {
     await setResultsNotifications(userId, false).catch(err => debugLog('RESULT NOTIFY OFF ERROR', stackDetails(err)));
     await safeSendMessage(
       userId,
-      'Match result notifications are off.\n\nTo turn them back on, open Menu and choose /results.'
+      lang === 'ru'
+        ? '🔕 Уведомления о результатах матчей отключены.\n\nЧтобы включить их снова, откройте меню и выберите /results.'
+        : '🔕 Match result notifications are off.\n\nTo turn them back on, open Menu and choose /results.'
     );
     return;
   }
 
   if (data === 'RESNOTIFY|on') {
     await setResultsNotifications(userId, true).catch(err => debugLog('RESULT NOTIFY ON ERROR', stackDetails(err)));
-    await safeSendMessage(userId, 'Match result notifications are on.');
+    await safeSendMessage(
+      userId,
+      lang === 'ru'
+        ? '✅ Уведомления о результатах матчей включены.'
+        : '✅ Match result notifications are on.'
+    );
     return;
   }
 
@@ -276,7 +284,10 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
 
   for (const recipient of recipients) {
     const lang = recipient.language === 'ru' ? 'ru' : 'en';
-    const text = buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext, profileUrls });
+    const card = buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext });
+    const winnerUrl = profileUrls.get(norm(card.winnerName)) || '';
+    const loserUrl = profileUrls.get(norm(card.loserName)) || '';
+    const text = buildResultCardText({ card, winnerUrl, loserUrl, lang });
     const opts = {
       reply_markup: {
         inline_keyboard: [[{
@@ -293,7 +304,7 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
       text: lang === 'ru' ? 'Не присылать результаты матчей' : 'Stop match results',
       callback_data: 'RESNOTIFY|off'
     });
-    opts.reply_markup.inline_keyboard = [buttons];
+    opts.reply_markup.inline_keyboard = buildResultKeyboard({ lang, tableUrl, card, winnerUrl, loserUrl });
 
     try {
       if (media) await sendPhoto(recipient.telegram_id, media.file_id, { caption: text, ...opts });
@@ -368,17 +379,46 @@ function getResultPhoto(msg) {
   return msg.photo[msg.photo.length - 1];
 }
 
-function buildResultCardText({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext, profileUrls }) {
-  const card = buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext });
-  const winnerUrl = profileUrls.get(norm(card.winnerName)) || '';
-  const loserUrl = profileUrls.get(norm(card.loserName)) || '';
-
+function buildResultCardText({ card, winnerUrl, loserUrl, lang }) {
   return [
-    `<b>${escapeHtmlLocal(card.title)}</b>`,
-    `${escapeHtmlLocal(card.stage)} ${escapeHtmlLocal(card.dateText)}`,
+    `<b>${lang === 'ru' ? '🎾 Результат матча' : '🎾 Match Result'}</b>`,
+    escapeHtmlLocal(formatDivisionSeasonTitle(card, lang)),
     '',
     `${formatPlayerLink(card.winnerName, winnerUrl)} ${escapeHtmlLocal(card.scoreText)} ${formatPlayerLink(card.loserName, loserUrl)}`
   ].join('\n');
+}
+
+function buildResultKeyboard({ lang, tableUrl, card, winnerUrl, loserUrl }) {
+  const rows = [];
+  const profileRow = [];
+  if (winnerUrl) {
+    profileRow.push({
+      text: `🏆 ${lang === 'ru' ? 'Профиль' : 'Profile'} ${shortPlayerName(card.winnerName)}`,
+      url: winnerUrl
+    });
+  }
+  if (loserUrl) {
+    profileRow.push({
+      text: `👤 ${lang === 'ru' ? 'Профиль' : 'Profile'} ${shortPlayerName(card.loserName)}`,
+      url: loserUrl
+    });
+  }
+  if (profileRow.length) rows.push(profileRow);
+
+  const actionRow = [];
+  if (tableUrl) {
+    actionRow.push({
+      text: lang === 'ru' ? '📊 Смотреть таблицу' : '📊 View standings',
+      url: tableUrl
+    });
+  }
+  actionRow.push({
+    text: lang === 'ru' ? '🔕 Не присылать' : '🔕 Stop results',
+    callback_data: 'RESNOTIFY|off'
+  });
+  rows.push(actionRow);
+
+  return rows;
 }
 
 function buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult, mainMatchContext={} }) {
@@ -396,12 +436,38 @@ function buildResultCardData({ p1Name, p2Name, parsed, divisionWriteResult, main
 
   return {
     title,
+    division,
+    seasonName,
     stage: competition.stage || mainMatchContext.format || divisionWriteResult?.stage || RESULTS.defaultStage || 'Group Stage',
     dateText: formatMatchDateForCard(mainMatchContext.matchDate),
     winnerName,
     loserName,
     scoreText: formatScoreForCard(winnerPerspectiveScore)
   };
+}
+
+function formatDivisionSeasonTitle(card, lang) {
+  const seasonName = lang === 'ru' ? localizeSeasonName(card.seasonName, lang) : card.seasonName;
+  if (!card.division) {
+    return lang === 'ru'
+      ? `Междивизионный матч ${seasonName}`
+      : `Cross-Division ${seasonName}`;
+  }
+
+  return lang === 'ru'
+    ? `Дивизион ${card.division} ${seasonName}`
+    : `Division ${card.division} ${seasonName}`;
+}
+
+function localizeSeasonName(seasonName, lang) {
+  const raw = String(seasonName || RESULTS.seasonName || '').trim();
+  if (lang !== 'ru') return raw;
+  const match = raw.match(/\bseason\s*(\d+)\b/i);
+  return match ? `Сезон ${match[1]}` : raw;
+}
+
+function shortPlayerName(name) {
+  return String(name || '').trim().split(/\s+/)[0] || 'Player';
 }
 
 async function getMainMatchContext(row) {
@@ -480,7 +546,7 @@ function formatMatchDateForCard(value) {
 
 function formatPlayerLink(name, url) {
   if (!url) return `<b>${escapeHtmlLocal(name)}</b>`;
-  return `<a href="${escapeHtmlLocal(url)}">${escapeHtmlLocal(name)}</a>`;
+  return `<b><a href="${escapeHtmlLocal(url)}">${escapeHtmlLocal(name)}</a></b>`;
 }
 
 async function getPlayerProfileUrlMap() {
