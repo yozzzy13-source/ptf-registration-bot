@@ -62,6 +62,11 @@ export async function handleResultsMessage(msg) {
   await debugLog('06 dedup result', { claimed: true, chatId, messageId });
   await debugLog('02 message parsed', { chatId, threadId, userId, messageId, text });
 
+  if (!looksLikeMatchSubmission(text)) {
+    await debugLog('07 ignored non-result message', { chatId, threadId, userId, messageId, text });
+    return;
+  }
+
   const parsed = parseMatchMessageV2(text);
   await debugLog('07 parsed', parsed);
 
@@ -377,6 +382,27 @@ function buildResultBroadcastText(lang, { p1Name, p2Name, scoreText, divisionWri
 function getResultPhoto(msg) {
   if (!msg?.photo?.length) return null;
   return msg.photo[msg.photo.length - 1];
+}
+
+function looksLikeMatchSubmission(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+
+  const scoreCount = countScoreLikeTokens(s);
+  if (scoreCount >= 2) return /\p{L}/u.test(s);
+
+  if (scoreCount === 1) {
+    const hasNameSeparator = /\bvs\b|\bv\b|\bagainst\b|\s[-—]\s/i.test(s);
+    const hasDivision = /\b(?:div|division)\s+(?:prime|a|b|c|d)\b/i.test(s);
+    return /\p{L}/u.test(s) && (hasNameSeparator || hasDivision);
+  }
+
+  return false;
+}
+
+function countScoreLikeTokens(text) {
+  const scoreRegex = /(\d{1,2})\s*[:\-\/]\s*(\d{1,2})(?:\s*[\(\[]\s*(\d{1,2})\s*[:\-\/]\s*(\d{1,2})\s*[\)\]])?/g;
+  return [...String(text || '').matchAll(scoreRegex)].length;
 }
 
 function buildResultCardText({ card, winnerUrl, loserUrl, lang }) {
@@ -1167,7 +1193,15 @@ async function sendPlayerNotFoundMessage(userId, rawName) {
 async function safeSendMessage(chatId, text, opts = {}) {
   if (!chatId) return null;
   try {
-    return await sendMessage(chatId, text, opts);
+    const result = await sendMessage(chatId, text, opts);
+    await debugLog('TELEGRAM SEND OK', {
+      chatId,
+      message_thread_id: opts.message_thread_id || '',
+      text,
+      has_reply_markup: Boolean(opts.reply_markup),
+      sent_message_id: result?.message_id || ''
+    });
+    return result;
   } catch (err) {
     await debugLog('TELEGRAM SEND ERROR', { error: err.message, chatId, text });
     return null;
