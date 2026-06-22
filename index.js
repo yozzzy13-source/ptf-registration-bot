@@ -5,7 +5,7 @@ import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEET
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback } from './bot.js';
 import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
-import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId, setResultsNotifications } from './sheets.js';
+import { getActiveEvents, upsertApplicant, saveApplicationOnce, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId, setResultsNotifications } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { handleAdminTopicMessage, notifyNewApplication } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -14,6 +14,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const applicationSubmissionLocks = new Map();
+
+async function withApplicationSubmissionLock(telegramId, fn) {
+  const key = String(telegramId);
+  const previous = applicationSubmissionLocks.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(fn);
+  applicationSubmissionLocks.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (applicationSubmissionLocks.get(key) === current) applicationSubmissionLocks.delete(key);
+  }
+}
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
@@ -108,6 +121,7 @@ app.post('/api/submit-application', async (req, res) => {
       return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
     }
 
+    const result = await withApplicationSubmissionLock(user.id, async () => {
     const events = await getActiveEvents();
     const event = event_id ? events.find(e => e.event_id === event_id) : null;
 
@@ -177,8 +191,12 @@ app.post('/api/submit-application', async (req, res) => {
       payment_amount_thb: '',
       price_thb: priceThb || ''
     };
-    await createApplication(appRow);
-    await notifyNewApplication(appRow, applicant);
+    const saved = await saveApplicationOnce(appRow);
+    const savedApp = saved.application;
+    if (!saved.duplicate) await notifyNewApplication(savedApp, applicant);
+    if (saved.duplicate) {
+      return { application:savedApp, duplicate:true, eventName, priceThb };
+    }
     await sendMessage(
       user.id,
       isEventApplication
@@ -187,7 +205,10 @@ app.post('/api/submit-application', async (req, res) => {
     );
     await openAdminChatByTelegramId(user.id, 'application_saved', {});
 
-    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:false });
+    return { application:savedApp, duplicate:false, eventName, priceThb };
+    });
+
+    res.json({ ok:true, application_id:result.application.application_id, event:result.eventName, price_thb:result.priceThb, payment_required:false, duplicate:result.duplicate });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });

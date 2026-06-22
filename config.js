@@ -11,6 +11,8 @@ export const ADMIN_CRM_CHAT_ID = process.env.ADMIN_CRM_CHAT_ID || '';
 export const BROADCAST_DELAY_MS = Number(process.env.BROADCAST_DELAY_MS || 700);
 export const RESULTS_BROADCAST_ENABLED = (process.env.RESULTS_BROADCAST_ENABLED || 'true') === 'true';
 export const RESULTS_BROADCAST_DELAY_MS = Number(process.env.RESULTS_BROADCAST_DELAY_MS || 700);
+export const RESULTS_MEDIA_PAIR_WINDOW_MS = Number(process.env.RESULTS_MEDIA_PAIR_WINDOW_MS || 180000);
+export const RESULTS_MEDIA_WAIT_MS = Number(process.env.RESULTS_MEDIA_WAIT_MS || 120000);
 export const RESULTS_WEBSITE_BASE_URL = (process.env.RESULTS_WEBSITE_BASE_URL || 'https://www.phukettennis.com').replace(/\/$/, '');
 export const SHEETS = { applicants:'Applicants', leads:'Leads', events:'Events', applications:'Applications', messages:'Messages', broadcasts:'Broadcasts', broadcastLogs:'Broadcast Logs', resultBroadcastLogs:'Result Broadcast Logs', settings:'Settings', botTexts:'Bot Texts', payments:'Payments', paymentMethods:'Payment Methods', matchChallenges:'Match Challenges', botMenu:'Bot Menu' };
 

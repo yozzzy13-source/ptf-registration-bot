@@ -293,8 +293,11 @@ export async function isAdminChatOpenByTelegramId(telegramId) {
 }
 
 export async function setAdminTopicByTelegramId(telegramId, patch={}) {
-  const found = await findApplicantByTelegramId(telegramId);
+  const applicant = await findApplicantByTelegramId(telegramId);
+  const lead = applicant ? null : await findLeadByTelegramId(telegramId);
+  const found = applicant || lead;
   if (!found) return null;
+  const sheetName = applicant ? SHEETS.applicants : SHEETS.leads;
 
   const safePatch = {
     admin_topic_id: patch.admin_topic_id || found.admin_topic_id || '',
@@ -304,17 +307,29 @@ export async function setAdminTopicByTelegramId(telegramId, patch={}) {
     admin_topic_last_used_at: nowISO()
   };
 
-  await ensureHeaders(SHEETS.applicants, Object.keys(safePatch));
-  await updateObjectByRow(SHEETS.applicants, found._rowNumber, safePatch);
+  await ensureHeaders(sheetName, Object.keys(safePatch));
+  await updateObjectByRow(sheetName, found._rowNumber, safePatch);
   return { ...found, ...safePatch };
 }
 
+export async function updateContactByTelegramId(telegramId, patch={}) {
+  const applicant = await findApplicantByTelegramId(telegramId);
+  const lead = applicant ? null : await findLeadByTelegramId(telegramId);
+  const found = applicant || lead;
+  if (!found) return null;
+  const sheetName = applicant ? SHEETS.applicants : SHEETS.leads;
+  await ensureHeaders(sheetName, Object.keys(patch));
+  await updateObjectByRow(sheetName, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
 export async function findApplicantByAdminTopic(topicId, chatId='') {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const applicantRows = (await getRows(SHEETS.applicants, { useCache:false })).rows;
+  const leadRows = (await getRows(SHEETS.leads, { useCache:false })).rows;
   const tid = String(topicId || '');
   const cid = String(chatId || '');
 
-  return rows.find(r => {
+  return applicantRows.concat(leadRows).find(r => {
     if (String(r.admin_topic_id || '') !== tid) return false;
     if (!cid || !r.admin_topic_chat_id) return true;
     return String(r.admin_topic_chat_id) === cid;
@@ -323,6 +338,7 @@ export async function findApplicantByAdminTopic(topicId, chatId='') {
 
 export async function upsertApplicant(profile) {
   const existing = await findApplicantByTelegramIdentity(profile);
+  const existingLead = existing ? null : await findLeadByTelegramIdentity(profile);
   const patch = {
     name: profile.name,
     ntrp: profile.ntrp,
@@ -343,7 +359,7 @@ export async function upsertApplicant(profile) {
     selfie_status: profile.selfie_status || existing?.selfie_status || 'optional_missing',
     selfie_file_id: profile.selfie_file_id || existing?.selfie_file_id || '',
     crm_tags: profile.crm_tags || existing?.crm_tags || 'league_interested',
-    application_count: Number(existing?.application_count || 0) + 1,
+    application_count: existing ? Number(existing.application_count || 0) : 1,
     profile_completed: 'yes',
     allow_match_challenges: profile.allow_match_challenges || existing?.allow_match_challenges || 'yes',
     player_profile_url: profile.player_profile_url || existing?.player_profile_url || ''
@@ -352,14 +368,66 @@ export async function upsertApplicant(profile) {
     await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
     return { ...existing, ...patch, _rowNumber: existing._rowNumber, isNew:false };
   }
-  const newRow = { division:'pending', date: nowISO(), created_at: nowISO(), ...patch };
+  const newRow = {
+    division:'pending',
+    date: nowISO(),
+    created_at: nowISO(),
+    admin_topic_id: existingLead?.admin_topic_id || '',
+    admin_topic_name: existingLead?.admin_topic_name || '',
+    admin_topic_chat_id: existingLead?.admin_topic_chat_id || '',
+    admin_topic_created_at: existingLead?.admin_topic_created_at || '',
+    admin_lead_message_id: existingLead?.admin_lead_message_id || '',
+    admin_lead_chat_id: existingLead?.admin_lead_chat_id || '',
+    ...patch
+  };
+  await ensureHeaders(SHEETS.applicants, Object.keys(newRow));
   await appendObject(SHEETS.applicants, newRow);
   return { ...newRow, isNew:true };
 }
 
 export async function createApplication(app) {
+  await ensureHeaders(SHEETS.applications, Object.keys(app));
   await appendObject(SHEETS.applications, app);
   return app;
+}
+
+export async function saveApplicationOnce(app) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const telegramId = String(app.telegram_id || '');
+  const eventId = String(app.event_id || '');
+  const ownRows = rows
+    .filter(r => String(r.telegram_id || '') === telegramId)
+    .sort((a, b) => Number(b._rowNumber) - Number(a._rowNumber));
+
+  const exact = ownRows.find(r => String(r.event_id || '') === eventId);
+  if (exact) {
+    const updated = await updateApplication(exact.application_id, {
+      ...app,
+      application_id: exact.application_id,
+      submitted_at: exact.submitted_at || app.submitted_at,
+      updated_at: nowISO()
+    });
+    return { application: updated, created:false, promoted:false, duplicate:true };
+  }
+
+  if (eventId && eventId !== 'ptf_waitlist') {
+    const waitlist = ownRows.find(r =>
+      String(r.event_id || '') === 'ptf_waitlist' &&
+      String(r.application_status || '') === 'waitlist'
+    );
+    if (waitlist) {
+      const updated = await updateApplication(waitlist.application_id, {
+        ...app,
+        application_id: waitlist.application_id,
+        submitted_at: waitlist.submitted_at || app.submitted_at,
+        updated_at: nowISO()
+      });
+      return { application: updated, created:false, promoted:true, duplicate:false };
+    }
+  }
+
+  await createApplication(app);
+  return { application: app, created:true, promoted:false, duplicate:false };
 }
 
 export async function findApplication(applicationId) {
@@ -371,6 +439,7 @@ export async function updateApplication(applicationId, patch) {
   const { rows } = await getRows(SHEETS.applications, { useCache:false });
   const found = rows.find(r => r.application_id === applicationId);
   if (!found) return null;
+  await ensureHeaders(SHEETS.applications, Object.keys(patch));
   await updateObjectByRow(SHEETS.applications, found._rowNumber, patch);
   return { ...found, ...patch };
 }

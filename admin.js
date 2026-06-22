@@ -1,11 +1,12 @@
-import { sendMessage, sendPhoto, sendDocument, copyMessage, getChat, createForumTopic, deleteForumTopic } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByAdminTopic, openAdminChatByTelegramId, setAdminTopicByTelegramId, logMessage } from './sheets.js';
+import { sendMessage, editMessageText, sendPhoto, sendDocument, copyMessage, getChat, createForumTopic, deleteForumTopic } from './telegram.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findLeadByTelegramId, findApplicantByAdminTopic, openAdminChatByTelegramId, setAdminTopicByTelegramId, updateContactByTelegramId, logMessage } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, ADMIN_CRM_CHAT_ID, BROADCAST_DELAY_MS } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
 
 export const adminState = new Map();
+const topicCreationLocks = new Map();
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 export function isAdminUser(userId) {
@@ -70,11 +71,12 @@ function topicNameForProfile(profile={}) {
   return `${baseName}${suffix}`.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
-async function getOrCreateAdminTopicForTelegramId(telegramId, fallback={}) {
+async function getOrCreateAdminTopicForTelegramIdUnlocked(telegramId, fallback={}) {
   const chatId = await getCrmChatId();
   if (!chatId || !telegramId) return null;
 
-  const profile = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const profile = await findApplicantByTelegramId(telegramId).catch(() => null)
+    || await findLeadByTelegramId(telegramId).catch(() => null);
   const contact = profile || { ...fallback, telegram_id: telegramId };
 
   if (contact.admin_topic_id) {
@@ -100,17 +102,22 @@ async function getOrCreateAdminTopicForTelegramId(telegramId, fallback={}) {
       });
     }
 
-    await sendMessage(
-      chatId,
-      `<b>CRM chat opened</b>\n\nTGID: <code>${escapeHtml(telegramId)}</code>\nName: <b>${escapeHtml(contact.name || '')}</b> ${contact.telegram_username ? '@'+escapeHtml(contact.telegram_username) : ''}`,
-      { message_thread_id: messageThreadId }
-    ).catch(() => {});
-
     return { chatId, messageThreadId, topicName, profile: contact };
   } catch (e) {
     console.error('createForumTopic failed', e.message || e);
     return { chatId, messageThreadId: null, topicName, profile: contact, topicError: e };
   }
+}
+
+async function getOrCreateAdminTopicForTelegramId(telegramId, fallback={}) {
+  const key = String(telegramId || '');
+  if (!key) return null;
+  if (topicCreationLocks.has(key)) return topicCreationLocks.get(key);
+
+  const pending = getOrCreateAdminTopicForTelegramIdUnlocked(telegramId, fallback)
+    .finally(() => topicCreationLocks.delete(key));
+  topicCreationLocks.set(key, pending);
+  return pending;
 }
 
 export async function handleAdminTopicMessage(msg) {
@@ -222,11 +229,60 @@ export async function notifyNewApplication(app, profile) {
   const text = `<b>🎾 New application</b>\n\nApplication: <code>${escapeHtml(app.application_id)}</code>\nTGID: <code>${escapeHtml(app.telegram_id)}</code>\nPlayer: <b>${escapeHtml(profile.name)}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}\nEvent: <b>${escapeHtml(app.event_name)}</b>\nStatus: <b>${escapeHtml(app.application_status)}</b>\n\nNTRP: ${escapeHtml(profile.ntrp)}\nExperience: ${escapeHtml(profile.experience)}\nGender: ${escapeHtml(profile.gender)}\nAge: ${escapeHtml(profile.age)}\nCountry: ${escapeHtml(profile.country_of_origin)}\nWhatsApp: ${escapeHtml(profile.whatsapp)}\nNotes: ${escapeHtml(profile.notes)}`;
   const opts = { reply_markup: adminApplicationKeyboard(app.application_id, app.telegram_id) };
 
-  if (topic?.chatId && topic.messageThreadId) {
-    return sendMessage(topic.chatId, text, { ...opts, message_thread_id: topic.messageThreadId });
+  if (app.admin_notification_message_id && app.admin_notification_chat_id) {
+    return editMessageText(
+      app.admin_notification_chat_id,
+      app.admin_notification_message_id,
+      text,
+      opts
+    ).catch(e => {
+      console.error('application notification edit failed', e.message || e);
+      return null;
+    });
   }
 
-  await notifyAdmin(text, opts);
+  if (profile.admin_lead_message_id && profile.admin_lead_chat_id) {
+    const edited = await editMessageText(
+      profile.admin_lead_chat_id,
+      profile.admin_lead_message_id,
+      text,
+      opts
+    ).catch(e => {
+      console.error('lead notification promotion failed', e.message || e);
+      return null;
+    });
+    if (edited) {
+      await updateApplication(app.application_id, {
+        admin_notification_message_id: String(profile.admin_lead_message_id),
+        admin_notification_chat_id: String(profile.admin_lead_chat_id),
+        admin_notification_topic_id: String(topic?.messageThreadId || ''),
+        admin_notification_sent_at: nowISO()
+      });
+      return edited;
+    }
+  }
+
+  if (topic?.chatId && topic.messageThreadId) {
+    const sent = await sendMessage(topic.chatId, text, { ...opts, message_thread_id: topic.messageThreadId });
+    await updateApplication(app.application_id, {
+      admin_notification_message_id: String(sent.message_id),
+      admin_notification_chat_id: String(topic.chatId),
+      admin_notification_topic_id: String(topic.messageThreadId),
+      admin_notification_sent_at: nowISO()
+    });
+    return sent;
+  }
+
+  const sent = await notifyAdmin(text, opts);
+  if (sent?.message_id) {
+    await updateApplication(app.application_id, {
+      admin_notification_message_id: String(sent.message_id),
+      admin_notification_chat_id: String(sent.chat?.id || ''),
+      admin_notification_topic_id: '',
+      admin_notification_sent_at: nowISO()
+    });
+  }
+  return sent;
 }
 
 export async function notifyNewLead(profile) {
@@ -234,10 +290,24 @@ export async function notifyNewLead(profile) {
   const text = `<b>New lead</b>\n\nTGID: <code>${escapeHtml(profile.telegram_id)}</code>\nName: <b>${escapeHtml(profile.name || '')}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}`;
 
   if (topic?.chatId && topic.messageThreadId) {
-    return sendMessage(topic.chatId, text, { message_thread_id: topic.messageThreadId });
+    const sent = await sendMessage(topic.chatId, text, { message_thread_id: topic.messageThreadId });
+    await updateContactByTelegramId(profile.telegram_id, {
+      admin_lead_message_id: String(sent.message_id),
+      admin_lead_chat_id: String(topic.chatId),
+      admin_lead_sent_at: nowISO()
+    });
+    return sent;
   }
 
-  await notifyAdmin(text);
+  const sent = await notifyAdmin(text);
+  if (sent?.message_id) {
+    await updateContactByTelegramId(profile.telegram_id, {
+      admin_lead_message_id: String(sent.message_id),
+      admin_lead_chat_id: String(sent.chat?.id || ''),
+      admin_lead_sent_at: nowISO()
+    });
+  }
+  return sent;
 }
 
 export async function notifyIncomingMessage(from, text, telegramMessageId, sourceChatId=null, shouldCopy=false) {

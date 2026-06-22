@@ -28,6 +28,13 @@ export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call(
 export const getChat = (chat_id) => call('getChat', { chat_id });
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 export const deleteForumTopic = (chat_id, message_thread_id) => call('deleteForumTopic', { chat_id, message_thread_id });
+export const setMessageReaction = (chat_id, message_id, emoji='✅', opts={}) => call('setMessageReaction', {
+  chat_id,
+  message_id,
+  reaction: [{ type: 'emoji', emoji }],
+  is_big: false,
+  ...opts
+});
 
 export async function setWebhook() {
   if (!PUBLIC_URL) throw new Error('PUBLIC_URL env is empty');

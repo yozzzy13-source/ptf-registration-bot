@@ -1,6 +1,6 @@
-import { RESULTS, RESULTS_BROADCAST_ENABLED, RESULTS_BROADCAST_DELAY_MS } from './config.js';
+import { RESULTS, RESULTS_BROADCAST_ENABLED, RESULTS_BROADCAST_DELAY_MS, RESULTS_MEDIA_PAIR_WINDOW_MS, RESULTS_MEDIA_WAIT_MS } from './config.js';
 import { sheets as sheetsClient } from './google.js';
-import { sendMessage, sendPhoto, answerCallbackQuery } from './telegram.js';
+import { sendMessage, sendPhoto, answerCallbackQuery, setMessageReaction } from './telegram.js';
 import { getResultBroadcastContacts, logResultBroadcast, markTelegramBlocked, setResultsNotifications } from './sheets.js';
 
 const MASTER_START_ROW = 4;
@@ -25,6 +25,8 @@ const PENDING_TTL_MS = 5 * 60 * 1000;
 
 const pendingSessions = new Map();
 const seenMessages = new Map();
+const recentStandalonePhotos = new Map();
+const pendingResultBroadcasts = new Map();
 const sheetIdCache = new Map();
 let playerProfileUrlCache = { expiresAt: 0, map: new Map() };
 
@@ -54,6 +56,12 @@ export async function handleResultsMessage(msg) {
   await debugLog('01 received', { message: msg });
 
   if (!text) {
+    if (msg.photo?.length) {
+      if (!claimMessageOnce(chatId, messageId)) return;
+      await debugLog('06 dedup result', { claimed: true, chatId, messageId });
+      await handleStandaloneResultPhoto(msg);
+      return;
+    }
     await debugLog('03 stopped no text/caption', { chatId, threadId, userId, messageId });
     return;
   }
@@ -63,6 +71,7 @@ export async function handleResultsMessage(msg) {
   await debugLog('02 message parsed', { chatId, threadId, userId, messageId, text });
 
   if (!looksLikeMatchSubmission(text)) {
+    if (msg.photo?.length) await handleStandaloneResultPhoto(msg);
     await debugLog('07 ignored non-result message', { chatId, threadId, userId, messageId, text });
     return;
   }
@@ -247,17 +256,150 @@ async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, pars
   await debugLog('11 main match written', { p1Name, p2Name, score: formatScore(parsed), row: mainMatchRow, mainMatchContext });
 
   const divisionWriteResult = await writeDivisionMatchRow(p1Name, p2Name, parsed);
-  const scoreText = formatScore(parsed);
-  let divisionText = 'Division log not updated';
-  if (divisionWriteResult?.status === 'saved') divisionText = `Division ${divisionWriteResult.division}`;
-  if (divisionWriteResult?.status === 'cross_division') divisionText = 'Cross-division match';
+  await markResultSavedWithReaction(chatId, sourceMessage);
+  await queueResultBroadcast({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage, mainMatchContext });
+}
 
-  await safeSendMessage(userId, `✅ Match saved\n${divisionText}\n${p1Name} vs ${p2Name}\nScore: ${scoreText}`);
-
-  if (RESULTS.confirmInTopic && chatId && divisionWriteResult?.status === 'saved') {
-    await safeSendMessage(chatId, '✅ Saved', { message_thread_id: threadId || undefined, disable_notification: true });
+async function markResultSavedWithReaction(chatId, sourceMessage) {
+  const targetChatId = sourceMessage?.chat?.id || chatId;
+  const messageId = sourceMessage?.message_id;
+  if (!targetChatId || !messageId) {
+    await debugLog('RESULT REACTION SKIPPED', { chatId: targetChatId, messageId });
+    return;
   }
-  await broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage, mainMatchContext });
+
+  try {
+    await setMessageReaction(targetChatId, messageId, '✅');
+    await debugLog('RESULT REACTION SET', { chatId: targetChatId, messageId, emoji: '✅' });
+  } catch (err) {
+    await debugLog('RESULT REACTION ERROR', {
+      chatId: targetChatId,
+      messageId,
+      error: stackDetails(err)
+    });
+  }
+}
+
+async function queueResultBroadcast(payload) {
+  if (!RESULTS_BROADCAST_ENABLED) return;
+
+  const sourceMessage = attachNearbyStandalonePhoto(payload.sourceMessage);
+  if (getResultPhoto(sourceMessage)) {
+    await broadcastSavedResult({ ...payload, sourceMessage });
+    return;
+  }
+
+  const key = resultMediaKey(sourceMessage);
+  if (!key || RESULTS_MEDIA_WAIT_MS <= 0) {
+    await broadcastSavedResult(payload);
+    return;
+  }
+
+  const existing = pendingResultBroadcasts.get(key);
+  if (existing?.timer) {
+    clearTimeout(existing.timer);
+    pendingResultBroadcasts.delete(key);
+    await debugLog('RESULT MEDIA WAIT FLUSHED BY NEXT SCORE', {
+      key,
+      messageId: existing.payload.sourceMessage?.message_id
+    });
+    await broadcastSavedResult(existing.payload);
+  }
+
+  const timer = setTimeout(async () => {
+    const pending = pendingResultBroadcasts.get(key);
+    if (!pending || pending.timer !== timer) return;
+    pendingResultBroadcasts.delete(key);
+    try {
+      await debugLog('RESULT MEDIA WAIT EXPIRED', {
+        key,
+        messageId: pending.payload.sourceMessage?.message_id,
+        waitMs: RESULTS_MEDIA_WAIT_MS
+      });
+      await broadcastSavedResult(pending.payload);
+    } catch (err) {
+      await debugLog('RESULT DELAYED BROADCAST ERROR', stackDetails(err));
+    }
+  }, RESULTS_MEDIA_WAIT_MS);
+
+  pendingResultBroadcasts.set(key, {
+    payload: { ...payload, sourceMessage },
+    createdAt: Date.now(),
+    timer
+  });
+  await debugLog('RESULT WAITING FOR SEPARATE PHOTO', {
+    key,
+    messageId: sourceMessage?.message_id,
+    waitMs: RESULTS_MEDIA_WAIT_MS,
+    pairWindowMs: RESULTS_MEDIA_PAIR_WINDOW_MS
+  });
+}
+
+async function handleStandaloneResultPhoto(msg) {
+  const key = resultMediaKey(msg);
+  const photo = getResultPhoto(msg);
+  if (!key || !photo) return;
+
+  cleanupRecentStandalonePhotos();
+  const pending = pendingResultBroadcasts.get(key);
+  if (pending && messagesAreNear(pending.payload.sourceMessage, msg)) {
+    clearTimeout(pending.timer);
+    pendingResultBroadcasts.delete(key);
+    const sourceMessage = { ...pending.payload.sourceMessage, photo: msg.photo };
+    await debugLog('RESULT SEPARATE PHOTO MATCHED AFTER SCORE', {
+      key,
+      scoreMessageId: pending.payload.sourceMessage?.message_id,
+      photoMessageId: msg.message_id
+    });
+    await broadcastSavedResult({ ...pending.payload, sourceMessage });
+    return;
+  }
+
+  recentStandalonePhotos.set(key, { message: msg, storedAt: Date.now() });
+  await debugLog('RESULT STANDALONE PHOTO STORED', {
+    key,
+    photoMessageId: msg.message_id,
+    pairWindowMs: RESULTS_MEDIA_PAIR_WINDOW_MS
+  });
+}
+
+function attachNearbyStandalonePhoto(msg) {
+  const key = resultMediaKey(msg);
+  if (!key || getResultPhoto(msg)) return msg;
+  cleanupRecentStandalonePhotos();
+  const recent = recentStandalonePhotos.get(key);
+  if (!recent || !messagesAreNear(msg, recent.message)) return msg;
+  recentStandalonePhotos.delete(key);
+  debugLog('RESULT SEPARATE PHOTO MATCHED BEFORE SCORE', {
+    key,
+    photoMessageId: recent.message.message_id,
+    scoreMessageId: msg?.message_id
+  });
+  return { ...msg, photo: recent.message.photo };
+}
+
+function resultMediaKey(msg) {
+  const chatId = msg?.chat?.id;
+  const threadId = msg?.message_thread_id || 0;
+  const userId = msg?.from?.id;
+  if (!chatId || !userId) return '';
+  return `${chatId}:${threadId}:${userId}`;
+}
+
+function messageTimeMs(msg) {
+  const telegramTime = Number(msg?.date || 0);
+  return telegramTime > 0 ? telegramTime * 1000 : Date.now();
+}
+
+function messagesAreNear(a, b) {
+  return Math.abs(messageTimeMs(a) - messageTimeMs(b)) <= RESULTS_MEDIA_PAIR_WINDOW_MS;
+}
+
+function cleanupRecentStandalonePhotos() {
+  const cutoff = Date.now() - RESULTS_MEDIA_PAIR_WINDOW_MS;
+  for (const [key, item] of recentStandalonePhotos) {
+    if (item.storedAt < cutoff) recentStandalonePhotos.delete(key);
+  }
 }
 
 async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage, mainMatchContext={} }) {
@@ -303,12 +445,6 @@ async function broadcastSavedResult({ p1Name, p2Name, parsed, divisionWriteResul
     };
 
     const tableUrl = getDivisionTableUrl(divisionWriteResult, mainMatchContext);
-    const buttons = [];
-    if (tableUrl) buttons.push({ text: 'Смотреть таблицу', url: tableUrl });
-    buttons.push({
-      text: lang === 'ru' ? 'Не присылать результаты матчей' : 'Stop match results',
-      callback_data: 'RESNOTIFY|off'
-    });
     opts.reply_markup.inline_keyboard = buildResultKeyboard({ lang, tableUrl, card, winnerUrl, loserUrl });
 
     try {
@@ -434,7 +570,7 @@ function buildResultKeyboard({ lang, tableUrl, card, winnerUrl, loserUrl }) {
   const actionRow = [];
   if (tableUrl) {
     actionRow.push({
-      text: lang === 'ru' ? '📊 Смотреть таблицу' : '📊 View standings',
+      text: lang === 'ru' ? '📊 Таблица' : '📊 Standings',
       url: tableUrl
     });
   }
