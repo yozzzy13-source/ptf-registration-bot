@@ -36,6 +36,14 @@
     .ok{color:var(--ok);margin-top:10px}
     .checkbox{display:flex;gap:10px;align-items:center;margin-top:10px}
     .checkbox input{width:auto}
+    .field-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:14px}
+    .field-head label{margin:0}
+    .link-button{width:auto;margin:0;padding:0;background:transparent;color:var(--accent2);font-size:14px;font-weight:800;text-align:right}
+    .test-options{display:grid;gap:10px;margin-top:16px}
+    .test-option{margin:0;padding:14px 16px;border:1px solid var(--border);border-radius:14px;background:var(--card2);color:var(--text);font-size:15px;font-weight:700;text-align:left}
+    .test-option.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(239,95,0,.3) inset}
+    .test-result{padding:20px;border:1px solid var(--accent);border-radius:16px;background:#1f1f1f;text-align:center;margin-top:18px}
+    .test-score{font-size:42px;font-weight:900;color:var(--accent2)}
     @keyframes pulseLive{0%,100%{box-shadow:0 0 0 0 rgba(116,245,139,.18)}50%{box-shadow:0 0 0 5px rgba(116,245,139,.22)}}
   </style>
 </head>
@@ -56,7 +64,7 @@
     <div id="ageWrap"><label id="ageLabel"></label><input id="age" inputmode="numeric"/></div>
     <label id="countryLabel"></label><input id="country"/>
     <label id="experienceLabel"></label><input id="experience"/>
-    <label id="ntrpLabel"></label><input id="ntrp" placeholder="3.5 / 4.0"/>
+    <div class="field-head"><label id="ntrpLabel"></label><button type="button" class="link-button" id="ntrpTestBtn"></button></div><input id="ntrp" placeholder="3.5 / 4.0"/>
     <label class="checkbox"><input type="checkbox" id="ntrpUnknown"><span id="ntrpUnknownText"></span></label>
     <label id="whatsappLabel"></label><input id="whatsapp"/>
     <label id="notesLabel"></label><textarea id="notes"></textarea>
@@ -64,6 +72,23 @@
     <button class="primary" id="nextEventBtn"></button>
     <button class="secondary" id="backIntroBtn"></button>
     <div id="profileMsg"></div>
+  </section>
+
+  <section id="stepNtrp" class="hidden">
+    <div class="progress" id="ntrpProgress"></div>
+    <h1 id="ntrpTitle"></h1>
+    <p id="ntrpIntro"></p>
+    <div id="ntrpQuestionWrap">
+      <div class="event-title" id="ntrpQuestion"></div>
+      <div class="test-options" id="ntrpOptions"></div>
+      <button class="primary" id="ntrpNextBtn" disabled></button>
+    </div>
+    <div id="ntrpResult" class="hidden">
+      <div class="test-result"><div id="ntrpResultLabel"></div><div class="test-score" id="ntrpScore"></div><p class="small" id="ntrpDisclaimer"></p></div>
+      <button class="primary" id="ntrpUseBtn"></button>
+      <button class="secondary" id="ntrpRestartBtn"></button>
+    </div>
+    <button class="secondary" id="ntrpBackBtn"></button>
   </section>
 
   <section id="stepEvent" class="hidden">
@@ -89,6 +114,24 @@ const initData=tg?.initData||'';
 const params=new URLSearchParams(location.search);
 let mode=params.get('mode')||'profile';
 let lang='en',selectedEvent='',events=[],existingProfile=null,profileCompleted=false,profileSaved=false;
+let ntrpQuestionIndex=0,ntrpAnswers=[],ntrpSelected=null,ntrpCalculated='';
+
+const NTRP_LEVELS=[2,2.5,3,3.5,4,4.5];
+const NTRP_TEST={
+ru:[
+{q:'Как вы держите розыгрыш с задней линии?',a:['Мне трудно несколько раз подряд попасть в корт','Могу поддержать короткий розыгрыш в медленном темпе','Достаточно стабильно играю в среднем темпе','Уверенно держу темп и иногда меняю направление','Стабильно управляю глубиной, направлением и вращением','Сохраняю темп, глубину и вращение даже под давлением']},
+{q:'Насколько хорошо вы контролируете направление и глубину удара?',a:['Главная задача — просто попасть по мячу','Направление получается только на простых мячах','Могу направлять мяч, но глубина нестабильна','Регулярно направляю мяч и удерживаю хорошую глубину','Использую направление, глубину и вращение как тактику','Точно меняю направление и темп в сложных ситуациях']},
+{q:'Как вы оцениваете свою подачу и приём?',a:['Подача и приём пока часто не получаются','Подаю медленно и просто начинаю розыгрыш','Первая подача заметно сильнее второй, приём достаточно стабилен','Контролирую направление подачи и уверенно принимаю средний темп','Использую разные подачи и атакующий приём','Подача и приём регулярно создают преимущество под давлением']},
+{q:'Как вы играете у сетки?',a:['Почти не играю у сетки','Могу отбить простой удар с лёта','Базовые удары с лёта получаются, но позиция нестабильна','Уверенно завершаю простые мячи и понимаю позицию','Активно использую выходы к сетке и разные удары с лёта','Комфортно атакую и защищаюсь у сетки в быстром темпе']},
+{q:'Как выглядит ваша игра в матчах?',a:['Только начинаю играть матчи','Пока в основном возвращаю мяч без тактического плана','Стараюсь использовать сильную сторону и держать мяч в игре','Строю розыгрыш, замечаю слабые стороны соперника','Меняю тактику и стабильно выполняю план в напряжённых матчах','Играю в высоком темпе, адаптируюсь и редко отдаю простые очки']}
+],
+en:[
+{q:'How well can you sustain a baseline rally?',a:['I struggle to put several balls in the court','I can sustain a short rally at slow pace','I am fairly consistent at medium pace','I handle moderate pace and sometimes change direction','I reliably control depth, direction and spin','I maintain pace, depth and spin even under pressure']},
+{q:'How well do you control direction and depth?',a:['My main goal is simply making contact','Direction works mainly on easy balls','I can direct the ball, but depth varies','I regularly direct the ball with useful depth','I use direction, depth and spin tactically','I change direction and pace accurately in difficult situations']},
+{q:'How would you describe your serve and return?',a:['Serving and returning are still difficult','I serve slowly, mainly to start the point','My first serve is stronger than my second and returns are fairly steady','I control serve direction and return moderate pace confidently','I vary serves and can attack returns','Serve and return regularly create an advantage under pressure']},
+{q:'How comfortable are you at the net?',a:['I almost never play at the net','I can handle an easy volley','Basic volleys work, but positioning is inconsistent','I finish easier balls and understand net positioning','I actively approach the net and use different volleys','I attack and defend comfortably at the net at high pace']},
+{q:'How do you compete during matches?',a:['I am only beginning to play matches','I mainly return the ball without a tactical plan','I use my stronger side and try to keep the ball in play','I construct points and notice an opponent’s weaknesses','I adjust tactics and execute a plan in close matches','I compete at high pace, adapt quickly and rarely give away easy points']}
+]};
 
 const L={
 ru:{
@@ -97,7 +140,8 @@ titleProfile:'Анкета Phuket Tennis Family 🎾',titleEvent:'Участие
 introProfile:'Заполните короткую анкету игрока. После шага 2 профиль сразу сохранится в системе PTF и waitlist. На шаге 3 можно выбрать событие или оставить только waitlist.',
 introEvent:'Если анкета уже заполнена, можно сразу выбрать событие. Если анкеты ещё нет, сначала мы сохраним профиль игрока.',
 startProfile:'Начать анкету',startEvent:'Продолжить',
-profileTitle:'Анкета игрока',name:'Имя и фамилия',gender:'Пол',age:'Возраст',country:'Страна',experience:'Опыт игры',ntrp:'Примерный NTRP',ntrpUnknown:'Я не знаю свой уровень',whatsapp:'WhatsApp',notes:'Комментарий / пожелания',
+profileTitle:'Анкета игрока',name:'Имя и фамилия',gender:'Пол',age:'Возраст',country:'Страна',experience:'Опыт игры',ntrp:'Примерный NTRP',ntrpTest:'Узнать свой уровень',ntrpUnknown:'Я не знаю свой уровень',whatsapp:'WhatsApp',notes:'Комментарий / пожелания — можете описать свой опыт игры в теннис',
+ntrpTitle:'Тест NTRP',ntrpIntro:'Выберите наиболее подходящий ответ. Результат поможет примерно оценить ваш текущий игровой уровень.',ntrpNext:'Далее',ntrpFinish:'Показать результат',ntrpResult:'Ваш примерный NTRP',ntrpUse:'Использовать этот уровень',ntrpRestart:'Пройти ещё раз',ntrpDisclaimer:'Это ориентировочная самооценка, а не официальный рейтинг. Организатор может скорректировать уровень после игры.',
 divisionNote:'При первом участии дивизион назначает организатор на основе вашего уровня, опыта и текущего состава игроков.',
 next:'Сохранить анкету и продолжить',eventTitle:'Выберите событие',eventHintProfile:'Анкета уже может быть сохранена в waitlist. Выберите событие для заявки или оставьте waitlist без выбора события.',eventHintEvent:'Выберите событие для участия или оставьте waitlist без выбора события.',
 submit:'Отправить',submitWaitlist:'Готово',back:'Назад',close:'Закрыть',
@@ -115,7 +159,8 @@ titleProfile:'Phuket Tennis Family Profile 🎾',titleEvent:'Join PTF Event 🏆
 introProfile:'Complete a short player profile. After step 2 your profile is saved to the PTF system and waitlist. On step 3 you can choose an event or keep waitlist only.',
 introEvent:'If your profile is already completed, you can choose an event directly. If not, we will save your player profile first.',
 startProfile:'Start profile',startEvent:'Continue',
-profileTitle:'Player profile',name:'Full name',gender:'Gender',age:'Age',country:'Country',experience:'Tennis experience',ntrp:'Approximate NTRP',ntrpUnknown:'I don’t know my level',whatsapp:'WhatsApp',notes:'Comment / notes',
+profileTitle:'Player profile',name:'Full name',gender:'Gender',age:'Age',country:'Country',experience:'Tennis experience',ntrp:'Approximate NTRP',ntrpTest:'Find my level',ntrpUnknown:'I don’t know my level',whatsapp:'WhatsApp',notes:'Comments / wishes — you may describe your tennis experience',
+ntrpTitle:'NTRP test',ntrpIntro:'Choose the answer that describes you best. The result gives an approximate estimate of your current playing level.',ntrpNext:'Next',ntrpFinish:'Show result',ntrpResult:'Your approximate NTRP',ntrpUse:'Use this level',ntrpRestart:'Take the test again',ntrpDisclaimer:'This is a self-assessment, not an official rating. The organizer may adjust the level after observing play.',
 divisionNote:'For first-time participants, the division is assigned by the organizer based on your level, experience and the current player pool.',
 next:'Save profile and continue',eventTitle:'Choose event',eventHintProfile:'Your profile can stay in the waitlist. Choose an event application or keep waitlist only.',eventHintEvent:'Choose an event to join or keep waitlist only.',
 submit:'Submit',submitWaitlist:'Done',back:'Back',close:'Close',
@@ -129,9 +174,11 @@ players32:'32 players',divisions4:'4 divisions',playoff:'Play-off: June 27–28'
 }};
 
 const $=id=>document.getElementById(id);
-function show(id){['stepIntro','stepProfile','stepEvent','stepDone'].forEach(x=>$(x).classList.add('hidden'));$(id).classList.remove('hidden')}
+function show(id){['stepIntro','stepProfile','stepNtrp','stepEvent','stepDone'].forEach(x=>$(x).classList.add('hidden'));$(id).classList.remove('hidden')}
 function fillProfile(u={}){if(u.name)$('name').value=u.name;if(u.gender)$('gender').value=u.gender;if(u.age)$('age').value=u.age;if(u.country_of_origin)$('country').value=u.country_of_origin;if(u.experience)$('experience').value=u.experience;if(u.ntrp)$('ntrp').value=u.ntrp==='unknown'?'':u.ntrp;if(u.ntrp==='unknown')$('ntrpUnknown').checked=true;if(u.whatsapp)$('whatsapp').value=u.whatsapp;if(u.notes)$('notes').value=u.notes}
-function applyLang(){const x=L[lang];$('progress').textContent=x.progressIntro;$('title').textContent=mode==='event'?x.titleEvent:x.titleProfile;$('intro').textContent=mode==='event'?(profileCompleted?x.alreadyProfile:x.introEvent):x.introProfile;$('startBtn').textContent=mode==='event'?x.startEvent:x.startProfile;$('progress2').textContent=x.progressProfile;$('progress3').textContent=x.progressEvent;$('profileTitle').textContent=x.profileTitle;$('nameLabel').textContent=x.name;$('genderLabel').textContent=x.gender;$('ageLabel').textContent=x.age;$('countryLabel').textContent=x.country;$('experienceLabel').textContent=x.experience;$('ntrpLabel').textContent=x.ntrp;$('ntrpUnknownText').textContent=x.ntrpUnknown;$('whatsappLabel').textContent=x.whatsapp;$('notesLabel').textContent=x.notes;$('divisionNote').textContent=x.divisionNote;$('nextEventBtn').textContent=x.next;$('backIntroBtn').textContent=x.back;$('eventTitle').textContent=x.eventTitle;$('eventHint').textContent=mode==='event'?x.eventHintEvent:x.eventHintProfile;$('submitBtn').textContent=selectedEvent?x.submit:x.submitWaitlist;$('backBtn').textContent=x.back;$('doneTitle').textContent=x.doneTitle;$('doneText').textContent=x.doneText;$('closeBtn').textContent=x.close}
+function applyLang(){const x=L[lang];$('progress').textContent=x.progressIntro;$('title').textContent=mode==='event'?x.titleEvent:x.titleProfile;$('intro').textContent=mode==='event'?(profileCompleted?x.alreadyProfile:x.introEvent):x.introProfile;$('startBtn').textContent=mode==='event'?x.startEvent:x.startProfile;$('progress2').textContent=x.progressProfile;$('progress3').textContent=x.progressEvent;$('profileTitle').textContent=x.profileTitle;$('nameLabel').textContent=x.name;$('genderLabel').textContent=x.gender;$('ageLabel').textContent=x.age;$('countryLabel').textContent=x.country;$('experienceLabel').textContent=x.experience;$('ntrpLabel').textContent=x.ntrp;$('ntrpTestBtn').textContent=x.ntrpTest;$('ntrpUnknownText').textContent=x.ntrpUnknown;$('whatsappLabel').textContent=x.whatsapp;$('notesLabel').textContent=x.notes;$('divisionNote').textContent=x.divisionNote;$('nextEventBtn').textContent=x.next;$('backIntroBtn').textContent=x.back;$('eventTitle').textContent=x.eventTitle;$('eventHint').textContent=mode==='event'?x.eventHintEvent:x.eventHintProfile;$('submitBtn').textContent=selectedEvent?x.submit:x.submitWaitlist;$('backBtn').textContent=x.back;$('doneTitle').textContent=x.doneTitle;$('doneText').textContent=x.doneText;$('closeBtn').textContent=x.close;$('ntrpTitle').textContent=x.ntrpTitle;$('ntrpIntro').textContent=x.ntrpIntro;$('ntrpResultLabel').textContent=x.ntrpResult;$('ntrpUseBtn').textContent=x.ntrpUse;$('ntrpRestartBtn').textContent=x.ntrpRestart;$('ntrpDisclaimer').textContent=x.ntrpDisclaimer;$('ntrpBackBtn').textContent=x.back}
+function renderNtrpTest(){const questions=NTRP_TEST[lang];const x=L[lang];$('ntrpResult').classList.add('hidden');$('ntrpQuestionWrap').classList.remove('hidden');$('ntrpProgress').textContent=`${ntrpQuestionIndex+1} / ${questions.length}`;$('ntrpQuestion').textContent=questions[ntrpQuestionIndex].q;$('ntrpOptions').innerHTML='';ntrpSelected=ntrpAnswers[ntrpQuestionIndex]??null;questions[ntrpQuestionIndex].a.forEach((answer,index)=>{const b=document.createElement('button');b.type='button';b.className='test-option'+(ntrpSelected===index?' active':'');b.textContent=answer;b.onclick=()=>{ntrpSelected=index;ntrpAnswers[ntrpQuestionIndex]=index;renderNtrpTest()};$('ntrpOptions').appendChild(b)});$('ntrpNextBtn').disabled=ntrpSelected===null;$('ntrpNextBtn').textContent=ntrpQuestionIndex===questions.length-1?x.ntrpFinish:x.ntrpNext}
+function finishNtrpTest(){const total=ntrpAnswers.reduce((sum,index)=>sum+NTRP_LEVELS[index],0);ntrpCalculated=(Math.round((total/ntrpAnswers.length)*2)/2).toFixed(1);$('ntrpScore').textContent=ntrpCalculated;$('ntrpQuestionWrap').classList.add('hidden');$('ntrpResult').classList.remove('hidden');$('ntrpProgress').textContent=L[lang].ntrpResult}
 function eventName(ev){return lang==='ru'?(ev.event_name_ru||ev.event_name_en):(ev.event_name_en||ev.event_name_ru)}
 function eventDescription(ev,status){const name=eventName(ev).toLowerCase();if(name.includes('season 2')||String(ev.event_id||'').toLowerCase().includes('season2'))return lang==='ru'?'Открыта предварительная регистрация во второй сезон лиги. Финальное количество мест и состав дивизионов определим после окончания приёма заявок.':'Pre-registration is open for League Season 2. Final spots and divisions will be confirmed after applications close.';return lang==='ru'?(ev.description_ru||ev.description_en):(ev.description_en||ev.description_ru)}
 function eventBadges(ev,status){const name=eventName(ev).toLowerCase();const explicit=(lang==='ru'?(ev.badges_ru||ev.badges_en):(ev.badges_en||ev.badges_ru));if(explicit)return String(explicit).split(/[;|,\n\r]+/).map(x=>x.trim()).filter(Boolean);if(status==='live'||name.includes('season 1'))return [L[lang].players32,L[lang].divisions4,L[lang].playoff,L[lang].final,L[lang].courts];if(name.includes('season 2')||String(ev.event_id||'').toLowerCase().includes('season2'))return [L[lang].season2Start,L[lang].duration,L[lang].limited];return []}
@@ -141,6 +188,13 @@ function profileFromForm(){return {name:$('name').value.trim(),gender:$('gender'
 function validateProfile(profile){const missing=[];if(!profile.name)missing.push(L[lang].name);if(!profile.gender)missing.push(L[lang].gender);if(!profile.country_of_origin)missing.push(L[lang].country);if(!profile.experience)missing.push(L[lang].experience);if(!profile.whatsapp)missing.push(L[lang].whatsapp);return missing}
 async function submitApplication(profile,eventId,submitMode){const r=await fetch('/api/submit-application',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,profile,event_id:eventId||'',mode:submitMode||mode})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Error');return j}
 $('gender').onchange=()=>{$('ageWrap').style.display=$('gender').value==='female'?'none':'block'};
+$('ntrpTestBtn').onclick=()=>{ntrpQuestionIndex=0;ntrpAnswers=[];ntrpSelected=null;show('stepNtrp');renderNtrpTest()};
+$('ntrpNextBtn').onclick=()=>{if(ntrpSelected===null)return;if(ntrpQuestionIndex<NTRP_TEST[lang].length-1){ntrpQuestionIndex++;renderNtrpTest()}else finishNtrpTest()};
+$('ntrpUseBtn').onclick=()=>{$('ntrp').value=ntrpCalculated;$('ntrpUnknown').checked=false;show('stepProfile');tg?.HapticFeedback?.notificationOccurred('success')};
+$('ntrpRestartBtn').onclick=()=>{ntrpQuestionIndex=0;ntrpAnswers=[];ntrpSelected=null;renderNtrpTest()};
+$('ntrpBackBtn').onclick=()=>show('stepProfile');
+$('ntrp').oninput=()=>{if($('ntrp').value.trim())$('ntrpUnknown').checked=false};
+$('ntrpUnknown').onchange=()=>{if($('ntrpUnknown').checked)$('ntrp').value=''};
 $('startBtn').onclick=()=>{if(mode==='event'&&profileCompleted){show('stepEvent')}else{if(mode==='event'&&!profileCompleted){$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].needProfile}show('stepProfile')}};
 $('backIntroBtn').onclick=()=>show('stepIntro');
 $('nextEventBtn').onclick=async()=>{const p=profileFromForm();const missing=validateProfile(p);if(missing.length){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].requiredBase+missing.join(', ');return}$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].saving;$('nextEventBtn').disabled=true;try{await submitApplication(p,'','profile');profileSaved=true;profileCompleted=true;existingProfile={...p,ntrp:p.ntrp_unknown?'unknown':p.ntrp};$('profileMsg').textContent=L[lang].savedProfile;show('stepEvent');if(tg)tg.HapticFeedback?.notificationOccurred('success')}catch(e){$('profileMsg').className='error';$('profileMsg').textContent=e.message}finally{$('nextEventBtn').disabled=false;$('nextEventBtn').textContent=L[lang].next}};
