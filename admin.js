@@ -135,7 +135,18 @@ export async function handleAdminTopicMessage(msg) {
   const text = msg.text || msg.caption || '';
   if (!text && !msg.photo && !msg.document && !msg.video && !msg.voice && !msg.audio && !msg.sticker) return true;
 
-  await copyMessage(applicant.telegram_id, msg.chat.id, msg.message_id);
+  try {
+    await copyMessage(applicant.telegram_id, msg.chat.id, msg.message_id);
+    adminState.delete(String(msg.from?.id || ''));
+  } catch (e) {
+    console.error('CRM topic reply failed', e?.message || e);
+    await sendMessage(
+      msg.chat.id,
+      `<b>Message was not delivered</b>\n\n<code>${escapeHtml(e?.message || e)}</code>`,
+      { message_thread_id: msg.message_thread_id }
+    ).catch(() => {});
+    return true;
+  }
   await openAdminChatByTelegramId(applicant.telegram_id, 'admin_topic_reply', {
     id: msg.from?.id,
     name: msg.from?.username || msg.from?.first_name || ''

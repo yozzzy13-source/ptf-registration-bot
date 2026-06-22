@@ -255,7 +255,7 @@ export async function upsertLeadFromTelegramUser(user={}, source='bot_start') {
 }
 
 export async function openAdminChatByTelegramId(telegramId, source='admin_outbound', admin={}) {
-  const found = await findApplicantByTelegramId(telegramId);
+  const found = await findApplicantByTelegramId(telegramId) || await findLeadByTelegramId(telegramId);
   if (!found) return null;
 
   const patch = {
@@ -267,13 +267,11 @@ export async function openAdminChatByTelegramId(telegramId, source='admin_outbou
     chat_admin_name: admin.name || ''
   };
 
-  await ensureHeaders(SHEETS.applicants, Object.keys(patch));
-  await updateObjectByRow(SHEETS.applicants, found._rowNumber, patch);
-  return { ...found, ...patch };
+  return updateContactByTelegramId(telegramId, patch);
 }
 
 export async function closeAdminChatByTelegramId(telegramId, source='user_navigation') {
-  const found = await findApplicantByTelegramId(telegramId);
+  const found = await findApplicantByTelegramId(telegramId) || await findLeadByTelegramId(telegramId);
   if (!found) return null;
 
   const patch = {
@@ -282,13 +280,11 @@ export async function closeAdminChatByTelegramId(telegramId, source='user_naviga
     chat_closed_by: source
   };
 
-  await ensureHeaders(SHEETS.applicants, Object.keys(patch));
-  await updateObjectByRow(SHEETS.applicants, found._rowNumber, patch);
-  return { ...found, ...patch };
+  return updateContactByTelegramId(telegramId, patch);
 }
 
 export async function isAdminChatOpenByTelegramId(telegramId) {
-  const found = await findApplicantByTelegramId(telegramId);
+  const found = await findApplicantByTelegramId(telegramId) || await findLeadByTelegramId(telegramId);
   return String(found?.chat_status || '').toLowerCase() === 'open';
 }
 
