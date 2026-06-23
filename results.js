@@ -268,15 +268,24 @@ async function markResultSavedWithReaction(chatId, sourceMessage) {
     return;
   }
 
-  try {
-    await setMessageReaction(targetChatId, messageId, '✅');
-    await debugLog('RESULT REACTION SET', { chatId: targetChatId, messageId, emoji: '✅' });
-  } catch (err) {
-    await debugLog('RESULT REACTION ERROR', {
-      chatId: targetChatId,
-      messageId,
-      error: stackDetails(err)
-    });
+  const reactionEmojis = ['\u2705', '\u{1F44D}'];
+
+  for (const emoji of reactionEmojis) {
+    try {
+      await setMessageReaction(targetChatId, messageId, emoji);
+      await debugLog('RESULT REACTION SET', { chatId: targetChatId, messageId, emoji });
+      return;
+    } catch (err) {
+      const error = stackDetails(err);
+      await debugLog('RESULT REACTION ERROR', {
+        chatId: targetChatId,
+        messageId,
+        emoji,
+        error
+      });
+
+      if (!/REACTION_INVALID/i.test(error)) return;
+    }
   }
 }
 
