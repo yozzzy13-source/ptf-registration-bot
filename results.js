@@ -255,7 +255,7 @@ async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, pars
   });
   await debugLog('11 main match written', { p1Name, p2Name, score: formatScore(parsed), row: mainMatchRow, mainMatchContext });
 
-  const divisionWriteResult = await writeDivisionMatchRow(p1Name, p2Name, parsed);
+  const divisionWriteResult = await writeDivisionMatchRow(p1Name, p2Name, parsed, mainMatchContext);
   await markResultSavedWithReaction(chatId, sourceMessage);
   await queueResultBroadcast({ p1Name, p2Name, parsed, divisionWriteResult, sourceMessage, mainMatchContext });
 }
@@ -820,7 +820,7 @@ async function writeMatchRow(p1NameExact, p2NameExact, parsed) {
   return row;
 }
 
-async function writeDivisionMatchRow(p1Name, p2Name, parsed) {
+async function writeDivisionMatchRow(p1Name, p2Name, parsed, mainMatchContext={}) {
   try {
     const playersIndex = await getPlayersIndex();
     const p1 = playersIndex[norm(p1Name)];
@@ -834,7 +834,7 @@ async function writeDivisionMatchRow(p1Name, p2Name, parsed) {
     const config = RESULTS.divisionSpreadsheets[div1];
     if (!config?.spreadsheetId) return { status: 'config_missing', division: div1 };
 
-    const rowInfo = await findDivisionMatchRow(config.spreadsheetId, config.sheetName, p1Name, p2Name);
+    const rowInfo = await findDivisionMatchRow(config.spreadsheetId, config.sheetName, p1Name, p2Name, mainMatchContext);
     if (!rowInfo) return { status: 'not_found', division: div1 };
 
     await writeDivisionScoreToRow(config.spreadsheetId, config.sheetName, rowInfo.row, parsed, rowInfo.reversed);
@@ -842,6 +842,8 @@ async function writeDivisionMatchRow(p1Name, p2Name, parsed) {
       division: div1,
       row: rowInfo.row,
       reversed: rowInfo.reversed,
+      completedBeforeWrite: rowInfo.completed,
+      selectedReason: rowInfo.selectedReason,
       p1Name,
       p2Name,
       score: formatScore(parsed)
@@ -860,17 +862,20 @@ async function writeDivisionMatchRow(p1Name, p2Name, parsed) {
   }
 }
 
-async function findDivisionMatchRow(spreadsheetId, sheetName, p1Name, p2Name) {
+async function findDivisionMatchRow(spreadsheetId, sheetName, p1Name, p2Name, mainMatchContext={}) {
   const values = await getValues(spreadsheetId, `${sheetName}!A1:AD`);
   const headers = values[0] || [];
   const p1HeaderIndex = findHeaderIndex(headers, ['player 1']);
   const p2HeaderIndex = findHeaderIndex(headers, ['player 2']);
   const p1Index = p1HeaderIndex >= 0 ? p1HeaderIndex : 2;
   const p2Index = p2HeaderIndex >= 0 ? p2HeaderIndex : 4;
+  const completedIndex = findHeaderIndex(headers, ['completed', 'complete']);
   const stageIndex = findHeaderIndex(headers, ['stage', 'round', 'phase']);
   const seasonIndex = findHeaderIndex(headers, ['season']);
+  const stageHint = normalizeStageHint(mainMatchContext.competition || mainMatchContext.format || '');
   const targetP1 = norm(p1Name);
   const targetP2 = norm(p2Name);
+  const candidates = [];
 
   for (let i = 1; i < values.length; i++) {
     const row = values[i] || [];
@@ -880,12 +885,53 @@ async function findDivisionMatchRow(spreadsheetId, sheetName, p1Name, p2Name) {
     const metadata = {
       row: rowNumber,
       stage: stageIndex >= 0 ? String(row[stageIndex] || '').trim() : '',
-      season: seasonIndex >= 0 ? String(row[seasonIndex] || '').trim() : ''
+      season: seasonIndex >= 0 ? String(row[seasonIndex] || '').trim() : '',
+      completed: isDivisionRowCompleted(row, completedIndex)
     };
-    if (sheetP1 === targetP1 && sheetP2 === targetP2) return { ...metadata, reversed: false };
-    if (sheetP1 === targetP2 && sheetP2 === targetP1) return { ...metadata, reversed: true };
+    if (sheetP1 === targetP1 && sheetP2 === targetP2) candidates.push({ ...metadata, reversed: false });
+    if (sheetP1 === targetP2 && sheetP2 === targetP1) candidates.push({ ...metadata, reversed: true });
   }
-  return null;
+
+  if (candidates.length === 0) return null;
+
+  const stageCandidates =
+    stageHint && stageIndex >= 0
+      ? candidates.filter(candidate => normalizeStageHint(candidate.stage) === stageHint)
+      : [];
+  const pool = stageCandidates.length ? stageCandidates : candidates;
+  const openCandidate = pool.find(candidate => !candidate.completed);
+
+  if (openCandidate) {
+    return {
+      ...openCandidate,
+      selectedReason: stageCandidates.length ? 'stage_open_row' : 'open_row'
+    };
+  }
+
+  const fallbackCandidate = isPlayoffStage(stageHint) ? pool[pool.length - 1] : pool[0];
+  return {
+    ...fallbackCandidate,
+    selectedReason: isPlayoffStage(stageHint) ? 'playoff_last_completed_match' : 'first_completed_match'
+  };
+}
+
+function isDivisionRowCompleted(row, completedIndex) {
+  if (completedIndex < 0) return false;
+  return /^(yes|true|done|completed)$/i.test(String(row[completedIndex] || '').trim());
+}
+
+function normalizeStageHint(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/semi[-\s]?finals?/i.test(raw)) return 'semifinal';
+  if (/\bfinals?\b/i.test(raw)) return 'final';
+  if (/play[-\s]?off/i.test(raw)) return 'playoff';
+  if (/group/i.test(raw) || /season/i.test(raw)) return 'group';
+  return '';
+}
+
+function isPlayoffStage(stage) {
+  return ['semifinal', 'final', 'playoff'].includes(stage);
 }
 
 async function writeDivisionScoreToRow(spreadsheetId, sheetName, row, parsed, reversed) {
