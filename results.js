@@ -551,12 +551,33 @@ function countScoreLikeTokens(text) {
 }
 
 function buildResultCardText({ card, winnerUrl, loserUrl, lang }) {
-  return [
+  const lines = [
     `<b>${lang === 'ru' ? '🎾 Результат матча' : '🎾 Match Result'}</b>`,
-    escapeHtmlLocal(formatDivisionSeasonTitle(card, lang)),
+    escapeHtmlLocal(formatDivisionSeasonTitle(card, lang))
+  ];
+  const stageLabel = formatResultStage(card.stage, lang);
+  if (stageLabel) lines.push(`<b>${escapeHtmlLocal(stageLabel)}</b>`);
+  lines.push(
     '',
     `${formatPlayerLink(card.winnerName, winnerUrl)} ${escapeHtmlLocal(card.scoreText)} ${formatPlayerLink(card.loserName, loserUrl)}`
-  ].join('\n');
+  );
+  return lines.join('\n');
+}
+
+function formatResultStage(stage, lang) {
+  const normalized = normalizeStageHint(stage);
+  if (!normalized || normalized === 'group') return '';
+
+  if (lang === 'ru') {
+    if (normalized === 'semifinal') return 'Полуфинал';
+    if (normalized === 'final') return 'Финал';
+    if (normalized === 'playoff') return 'Плей-офф';
+  }
+
+  if (normalized === 'semifinal') return 'Semifinal';
+  if (normalized === 'final') return 'Final';
+  if (normalized === 'playoff') return 'Playoff';
+  return '';
 }
 
 function buildResultKeyboard({ lang, tableUrl, card, winnerUrl, loserUrl }) {
