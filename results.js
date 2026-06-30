@@ -253,6 +253,9 @@ async function saveMatchAndNotify(userId, chatId, threadId, p1Name, p2Name, pars
     debugLog('MAIN MATCH CONTEXT ERROR', stackDetails(err));
     return {};
   });
+  if (parsed.technicalResult === 'RET') {
+    await writeMainRetirementMetadata(mainMatchRow, parsed, mainMatchContext);
+  }
   await debugLog('11 main match written', { p1Name, p2Name, score: formatScore(parsed), row: mainMatchRow, mainMatchContext });
 
   const divisionWriteResult = await writeDivisionMatchRow(p1Name, p2Name, parsed, mainMatchContext);
@@ -672,7 +675,9 @@ async function getMainMatchContext(row) {
     matchDate: data[0] || '',
     format: String(data[1] || '').trim(),
     competition: String(data[2] || '').trim(),
+    p1Id: data[COL_P1_ID - COL_MATCH_DATE] || '',
     p1Division,
+    p2Id: data[COL_P2_ID - COL_MATCH_DATE] || '',
     p2Division,
     division: p1Division && p1Division === p2Division ? p1Division : '',
     p1Name: String(data[COL_P1_NAME - COL_MATCH_DATE] || '').trim(),
@@ -841,6 +846,21 @@ async function writeMatchRow(p1NameExact, p2NameExact, parsed) {
   return row;
 }
 
+async function writeMainRetirementMetadata(row, parsed, context={}) {
+  const values = await getValues(RESULTS.sheetId, `${RESULTS.logSheetName}!A1:AZ1`);
+  const headers = values[0] || [];
+  const writes = buildRetirementMetadataWrites({
+    sheetName: RESULTS.logSheetName,
+    row,
+    headers,
+    parsed,
+    p1Id: context.p1Id,
+    p2Id: context.p2Id,
+    includeDerivedFields: false
+  });
+  if (writes.length) await batchUpdateValues(RESULTS.sheetId, writes);
+}
+
 async function writeDivisionMatchRow(p1Name, p2Name, parsed, mainMatchContext={}) {
   try {
     const playersIndex = await getPlayersIndex();
@@ -957,14 +977,93 @@ function isPlayoffStage(stage) {
 
 async function writeDivisionScoreToRow(spreadsheetId, sheetName, row, parsed, reversed) {
   const p = reversed ? reverseParsedScore(parsed) : parsed;
-  await batchUpdateValues(spreadsheetId, [
+  const writes = [
     { range: `${sheetName}!F${row}:Q${row}`, values: [scoreValues(p).map(coerceNumber)] },
     { range: `${sheetName}!R${row}:S${row}`, values: [[detectSet3Mode(p), 'Yes']] }
-  ]);
+  ];
+
+  if (p.technicalResult === 'RET') {
+    const values = await getValues(spreadsheetId, `${sheetName}!A1:AZ${row}`);
+    const headers = values[0] || [];
+    const matchRow = values[row - 1] || [];
+    const p1IdIndex = findHeaderIndex(headers, ['p1 id', 'player 1 id']);
+    const p2IdIndex = findHeaderIndex(headers, ['p2 id', 'player 2 id']);
+    writes.push(...buildRetirementMetadataWrites({
+      sheetName,
+      row,
+      headers,
+      parsed: p,
+      p1Id: p1IdIndex >= 0 ? matchRow[p1IdIndex] : '',
+      p2Id: p2IdIndex >= 0 ? matchRow[p2IdIndex] : ''
+    }));
+  }
+
+  await batchUpdateValues(spreadsheetId, writes);
+}
+
+function buildRetirementMetadataWrites({
+  sheetName,
+  row,
+  headers,
+  parsed,
+  p1Id,
+  p2Id,
+  includeDerivedFields=true
+}) {
+  const writes = [];
+  const winner = parsed.retiredPlayer === 'p1' ? 'p2' : 'p1';
+  const winnerCode = winner.toUpperCase();
+  const retiredCode = String(parsed.retiredPlayer || '').toUpperCase();
+  const winnerId = winner === 'p1' ? p1Id : p2Id;
+  const p1Display = formatScoreForSheetDisplay(parsed, false);
+  const p2Display = formatScoreForSheetDisplay(parsed, true);
+  const winnerDisplay = winner === 'p1' ? p1Display : p2Display;
+
+  addHeaderWrite(writes, sheetName, row, headers, ['tech result', 'technical result'], winnerCode);
+  addHeaderWrite(writes, sheetName, row, headers, ['result status', 'match status', 'result type'], 'RET');
+  addHeaderWrite(writes, sheetName, row, headers, ['retired player', 'retired'], retiredCode);
+
+  if (includeDerivedFields) {
+    if (winnerId !== '' && winnerId !== null && winnerId !== undefined) {
+      addHeaderWrite(writes, sheetName, row, headers, ['winner id'], winnerId);
+    }
+
+    const displayP1Index = findHeaderIndex(headers, ['display p1', 'p1 display']);
+    const displayP2Index = findHeaderIndex(headers, ['display p2', 'p2 display']);
+    if (displayP1Index >= 0) addColumnWrite(writes, sheetName, row, displayP1Index, p1Display);
+    if (displayP2Index >= 0) addColumnWrite(writes, sheetName, row, displayP2Index, p2Display);
+    if (displayP1Index < 0 && displayP2Index < 0) {
+      addHeaderWrite(writes, sheetName, row, headers, ['display', 'score display'], winnerDisplay);
+    }
+  }
+
+  return writes;
+}
+
+function addHeaderWrite(writes, sheetName, row, headers, names, value) {
+  const index = findHeaderIndex(headers, names);
+  if (index >= 0) addColumnWrite(writes, sheetName, row, index, value);
+}
+
+function addColumnWrite(writes, sheetName, row, zeroBasedColumn, value) {
+  const column = columnToA1(zeroBasedColumn + 1);
+  writes.push({ range: `${sheetName}!${column}${row}`, values: [[value]] });
+}
+
+function columnToA1(column) {
+  let n = Number(column);
+  let out = '';
+  while (n > 0) {
+    n -= 1;
+    out = String.fromCharCode(65 + (n % 26)) + out;
+    n = Math.floor(n / 26);
+  }
+  return out;
 }
 
 function parseMatchMessageV2(text) {
   const originalText = String(text || '');
+  const retirementNotation = parseRetirementNotation(originalText);
   const scoreRegex = /(\d{1,2})\s*[:\-\/]\s*(\d{1,2})(?:\s*[\(\[]\s*(\d{1,2})\s*[:\-\/]\s*(\d{1,2})\s*[\)\]])?/g;
   const scores = [];
   let match;
@@ -1024,10 +1123,20 @@ function parseMatchMessageV2(text) {
     }
   }
 
+  const p1MarkedRetired = hasNameRetirementMarker(p1Raw);
+  const p2MarkedRetired = hasNameRetirementMarker(p2Raw);
+  const retiredPlayer =
+    retirementNotation.explicitPlayer ||
+    (p1MarkedRetired && !p2MarkedRetired ? 'p1' : '') ||
+    (p2MarkedRetired && !p1MarkedRetired ? 'p2' : '') ||
+    (retirementNotation.isRetirement ? 'p2' : '');
+
   return {
     hasScore: true,
-    p1Raw: sanitizeName(p1Raw),
-    p2Raw: sanitizeName(p2Raw),
+    p1Raw: sanitizeName(stripRetirementMarker(p1Raw)),
+    p2Raw: sanitizeName(stripRetirementMarker(p2Raw)),
+    technicalResult: retirementNotation.isRetirement ? 'RET' : '',
+    retiredPlayer,
     s1p1: scores[0]?.p1 || '',
     s1p2: scores[0]?.p2 || '',
     s1tb1: scores[0]?.tb1 || '',
@@ -1041,6 +1150,38 @@ function parseMatchMessageV2(text) {
     s3tb1: scores[2]?.tb1 || '',
     s3tb2: scores[2]?.tb2 || ''
   };
+}
+
+function parseRetirementNotation(text) {
+  const raw = String(text || '');
+  const isRetirement = hasRetirementMarker(raw);
+  if (!isRetirement) return { isRetirement: false, explicitPlayer: '' };
+
+  const token = '(?:ret\\.?|retired|retirement|rtd\\.?)';
+  const after = raw.match(new RegExp(`${token}\\s*[:=\\-]?\\s*p(?:layer)?\\s*([12])\\b`, 'i'));
+  if (after) return { isRetirement: true, explicitPlayer: `p${after[1]}` };
+
+  const before = raw.match(new RegExp(`\\bp(?:layer)?\\s*([12])\\s*${token}`, 'i'));
+  if (before) return { isRetirement: true, explicitPlayer: `p${before[1]}` };
+
+  return { isRetirement: true, explicitPlayer: '' };
+}
+
+function hasRetirementMarker(text) {
+  return /(?:^|[\s([])(?:ret\.?|retired|retirement|rtd\.?)(?=$|[\s)\],;:])/i.test(String(text || ''));
+}
+
+function hasNameRetirementMarker(text) {
+  return /(?:[\(\[]\s*(?:retirement|retired|rtd\.?|ret\.?)\s*[\)\]]|(?:^|\s)(?:retirement|retired|rtd\.?|ret\.?)\s*$)/i
+    .test(String(text || ''));
+}
+
+function stripRetirementMarker(text) {
+  return String(text || '')
+    .replace(/[\(\[]\s*(?:retirement|retired|rtd\.?|ret\.?)\s*[\)\]]/gi, ' ')
+    .replace(/(?:^|\s)(?:retirement|retired|rtd\.?|ret\.?)\s*$/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function normalizeMessageText(text) {
@@ -1070,7 +1211,7 @@ function chooseNameParsingText(text) {
     }
   }
 
-  if (bestScoreCount >= 2 && /\p{L}/u.test(bestLine)) return bestLine;
+  if (bestScoreCount >= 1 && /\p{L}/u.test(bestLine)) return bestLine;
   return text;
 }
 
@@ -1097,6 +1238,31 @@ function sanitizeName(s) {
 
 function validateMatchScore(p) {
   const sets = getSets(p);
+
+  if (p.technicalResult === 'RET') {
+    if (!['p1', 'p2'].includes(p.retiredPlayer)) {
+      return { ok: false, message: 'For a retirement, specify which player retired.' };
+    }
+    if (sets.length < 1) {
+      return { ok: false, message: 'A retirement result must include the score played before retirement.' };
+    }
+    if (sets.length > 3) {
+      return { ok: false, message: 'A match cannot have more than three sets.' };
+    }
+
+    for (let i = 0; i < sets.length; i++) {
+      const validation = validateRetirementSet(sets[i]);
+      if (!validation.ok) return { ok: false, message: `Set ${i + 1} is invalid: ${validation.message}` };
+    }
+
+    return {
+      ok: true,
+      winner: p.retiredPlayer === 'p1' ? 'p2' : 'p1',
+      set3Mode: '',
+      technicalResult: 'RET'
+    };
+  }
+
   if (sets.length < 2) return { ok: false, message: 'A completed match must include at least two sets.' };
   if (sets.length > 3) return { ok: false, message: 'A match cannot have more than three sets.' };
 
@@ -1121,6 +1287,26 @@ function validateMatchScore(p) {
   }
 
   return { ok: false, message: 'The match score is not complete.' };
+}
+
+function validateRetirementSet(set) {
+  const { a, b } = set;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return { ok: false, message: 'Set score contains non-numeric values.' };
+  }
+  if (a < 0 || b < 0 || a > 30 || b > 30) {
+    return { ok: false, message: 'Retirement score is outside the supported range 0-30.' };
+  }
+  if ((set.tba === '') !== (set.tbb === '')) {
+    return { ok: false, message: 'Tie-break score is incomplete.' };
+  }
+  if (set.tba !== '' && (!Number.isFinite(Number(set.tba)) || !Number.isFinite(Number(set.tbb)))) {
+    return { ok: false, message: 'Tie-break score contains non-numeric values.' };
+  }
+  if (set.tba !== '' && (Number(set.tba) < 0 || Number(set.tbb) < 0 || Number(set.tba) > 30 || Number(set.tbb) > 30)) {
+    return { ok: false, message: 'Tie-break score is outside the supported range 0-30.' };
+  }
+  return { ok: true };
 }
 
 function getSets(p) {
@@ -1474,6 +1660,8 @@ function reverseParsedScore(p) {
     hasScore: p.hasScore,
     p1Raw: p.p2Raw,
     p2Raw: p.p1Raw,
+    technicalResult: p.technicalResult || '',
+    retiredPlayer: p.retiredPlayer === 'p1' ? 'p2' : p.retiredPlayer === 'p2' ? 'p1' : '',
     s1p1: p.s1p2,
     s1p2: p.s1p1,
     s1tb1: p.s1tb2,
@@ -1494,7 +1682,8 @@ function formatScore(p) {
   if (p.s1p1 !== '' && p.s1p2 !== '') sets.push(formatSet(p.s1p1, p.s1p2, p.s1tb1, p.s1tb2));
   if (p.s2p1 !== '' && p.s2p2 !== '') sets.push(formatSet(p.s2p1, p.s2p2, p.s2tb1, p.s2tb2));
   if (p.s3p1 !== '' && p.s3p2 !== '') sets.push(formatSet(p.s3p1, p.s3p2, p.s3tb1, p.s3tb2));
-  return sets.join(' ');
+  const score = sets.join(' ');
+  return p.technicalResult === 'RET' ? `${score} RET`.trim() : score;
 }
 
 function formatSet(a, b, tba, tbb) {
@@ -1504,11 +1693,26 @@ function formatSet(a, b, tba, tbb) {
 }
 
 function formatScoreForCard(p) {
+  return formatScoreForPlayer(p, false, p.technicalResult === 'RET');
+}
+
+function formatScoreForSheetDisplay(p, reversed) {
+  const score = reversed ? reverseParsedScore(p) : p;
   const sets = [];
-  if (p.s1p1 !== '' && p.s1p2 !== '') sets.push(formatSetForCard(p.s1p1, p.s1p2, p.s1tb1, p.s1tb2));
-  if (p.s2p1 !== '' && p.s2p2 !== '') sets.push(formatSetForCard(p.s2p1, p.s2p2, p.s2tb1, p.s2tb2));
-  if (p.s3p1 !== '' && p.s3p2 !== '') sets.push(formatSetForCard(p.s3p1, p.s3p2, p.s3tb1, p.s3tb2));
-  return sets.join(' ');
+  if (score.s1p1 !== '' && score.s1p2 !== '') sets.push(formatSetForCard(score.s1p1, score.s1p2, score.s1tb1, score.s1tb2));
+  if (score.s2p1 !== '' && score.s2p2 !== '') sets.push(formatSetForCard(score.s2p1, score.s2p2, score.s2tb1, score.s2tb2));
+  if (score.s3p1 !== '' && score.s3p2 !== '') sets.push(formatSetForCard(score.s3p1, score.s3p2, score.s3tb1, score.s3tb2));
+  return `${sets.join(' / ')} RET`.trim();
+}
+
+function formatScoreForPlayer(p, reversed, includeRetirement) {
+  const score = reversed ? reverseParsedScore(p) : p;
+  const sets = [];
+  if (score.s1p1 !== '' && score.s1p2 !== '') sets.push(formatSetForCard(score.s1p1, score.s1p2, score.s1tb1, score.s1tb2));
+  if (score.s2p1 !== '' && score.s2p2 !== '') sets.push(formatSetForCard(score.s2p1, score.s2p2, score.s2tb1, score.s2tb2));
+  if (score.s3p1 !== '' && score.s3p2 !== '') sets.push(formatSetForCard(score.s3p1, score.s3p2, score.s3tb1, score.s3tb2));
+  const value = sets.join(' ');
+  return includeRetirement ? `${value} RET`.trim() : value;
 }
 
 function formatSetForCard(a, b, tba, tbb) {
