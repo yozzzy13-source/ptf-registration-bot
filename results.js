@@ -532,7 +532,7 @@ function getResultPhoto(msg) {
   return msg.photo[msg.photo.length - 1];
 }
 
-function looksLikeMatchSubmission(text) {
+export function looksLikeMatchSubmission(text) {
   const s = String(text || '').trim();
   if (!s) return false;
 
@@ -549,8 +549,7 @@ function looksLikeMatchSubmission(text) {
 }
 
 function countScoreLikeTokens(text) {
-  const scoreRegex = /(\d{1,2})\s*[:\-\/]\s*(\d{1,2})(?:\s*[\(\[]\s*(\d{1,2})\s*[:\-\/]\s*(\d{1,2})\s*[\)\]])?/g;
-  return [...String(text || '').matchAll(scoreRegex)].length;
+  return extractScoreMatches(text).length;
 }
 
 function buildResultCardText({ card, winnerUrl, loserUrl, lang }) {
@@ -1061,19 +1060,20 @@ function columnToA1(column) {
   return out;
 }
 
-function parseMatchMessageV2(text) {
+export function parseMatchMessageV2(text) {
   const originalText = String(text || '');
   const retirementNotation = parseRetirementNotation(originalText);
-  const scoreRegex = /(\d{1,2})\s*[:\-\/]\s*(\d{1,2})(?:\s*[\(\[]\s*(\d{1,2})\s*[:\-\/]\s*(\d{1,2})\s*[\)\]])?/g;
-  const scores = [];
-  let match;
-
-  while ((match = scoreRegex.exec(originalText)) !== null) {
-    scores.push({ p1: match[1], p2: match[2], tb1: match[3] || '', tb2: match[4] || '' });
-  }
+  const scores = extractScoreMatches(originalText).map(match => ({
+    p1: match[1],
+    p2: match[2],
+    tb1: match[3] || '',
+    tb2: match[4] || ''
+  }));
   if (scores.length === 0) return { hasScore: false };
 
   const cleaned = normalizeMessageText(chooseNameParsingText(originalText));
+  const scoreRegex = createScoreRegex();
+  let match;
   scoreRegex.lastIndex = 0;
 
   let firstScoreIndex = -1;
@@ -1088,7 +1088,7 @@ function parseMatchMessageV2(text) {
   const beforeFirstScore = firstScoreIndex >= 0 ? cleaned.slice(0, firstScoreIndex).trim() : '';
   let afterLastScore = lastScoreEnd >= 0 ? cleaned.slice(lastScoreEnd).trim() : '';
   afterLastScore = cleanTrailingComments(afterLastScore);
-  const explicitSepRegex = /\s+\bvs\b\s+|\s+\bv\b\s+|\s+against\s+|\s+[-—]\s+|[-—]/i;
+  const explicitSepRegex = /\s+\bvs\b\s+|\s+\bv\b\s+|\s+against\s+|\s+[-\u2010-\u2015\u2212]\s+|[-\u2010-\u2015\u2212]/i;
 
   if (explicitSepRegex.test(beforeFirstScore)) {
     const parts = beforeFirstScore.split(explicitSepRegex).map(s => s.trim()).filter(Boolean);
@@ -1098,7 +1098,7 @@ function parseMatchMessageV2(text) {
     p1Raw = beforeFirstScore;
     p2Raw = afterLastScore;
   } else {
-    let namesOnly = cleaned.replace(scoreRegex, ' ').replace(/[(){}\[\],/]/g, ' ').replace(/\s+/g, ' ').trim();
+    let namesOnly = cleaned.replace(createScoreRegex(), ' ').replace(/[(){}\[\],/]/g, ' ').replace(/\s+/g, ' ').trim();
     namesOnly = cleanTrailingComments(namesOnly);
     const parts = namesOnly.split(explicitSepRegex).map(s => s.trim()).filter(Boolean);
 
@@ -1152,6 +1152,30 @@ function parseMatchMessageV2(text) {
   };
 }
 
+function createScoreRegex() {
+  // Telegram users often paste scores with typographic dashes instead of "-".
+  return /(\d{1,2})\s*[:/\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]\s*(\d{1,2})(?:\s*[\(\[]\s*(\d{1,2})\s*[:/\-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]\s*(\d{1,2})\s*[\)\]])?/g;
+}
+
+function extractScoreMatches(text) {
+  const source = String(text || '');
+  const scoreRegex = createScoreRegex();
+  const matches = [];
+  let match;
+
+  while ((match = scoreRegex.exec(source)) !== null) {
+    const prefix = source.slice(0, match.index).trimEnd();
+    const previousChar = prefix.slice(-1);
+
+    // A parenthesized tie-break must not become a standalone set when the
+    // surrounding set uses a separator the parser cannot recognize.
+    if (previousChar === '(' || previousChar === '[') continue;
+    matches.push(match);
+  }
+
+  return matches;
+}
+
 function parseRetirementNotation(text) {
   const raw = String(text || '');
   const isRetirement = hasRetirementMarker(raw);
@@ -1196,15 +1220,12 @@ function normalizeMessageText(text) {
 }
 
 function chooseNameParsingText(text) {
-  const lineScoreRegex = /(\d{1,2})\s*[:\-\/]\s*(\d{1,2})(?:\s*[\(\[]\s*(\d{1,2})\s*[:\-\/]\s*(\d{1,2})\s*[\)\]])?/g;
   const lines = String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   let bestLine = '';
   let bestScoreCount = 0;
 
   for (const line of lines) {
-    lineScoreRegex.lastIndex = 0;
-    const matches = line.match(lineScoreRegex);
-    const scoreCount = matches ? matches.length : 0;
+    const scoreCount = extractScoreMatches(line).length;
     if (scoreCount > bestScoreCount) {
       bestScoreCount = scoreCount;
       bestLine = line;
@@ -1236,7 +1257,7 @@ function sanitizeName(s) {
     .trim();
 }
 
-function validateMatchScore(p) {
+export function validateMatchScore(p) {
   const sets = getSets(p);
 
   if (p.technicalResult === 'RET') {
