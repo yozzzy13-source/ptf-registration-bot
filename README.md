@@ -43,21 +43,3 @@ NODE_ENV=production
 ```
 
 After deploy, run `/admin_init` in the admin Telegram group.
-
-## Payment Methods and Payment Summary
-
-Current supported payment methods:
-
-- Thai bank transfer
-- USDT TRC20
-- USDT ERC20
-
-To change the Thai bank account without redeploy, edit Google Sheets → `Payment Methods` → row `thai_bank` → column `recipient`.
-
-To prepare payment methods and create the compact summary tab, run once:
-
-```bash
-npm run setup:payments
-```
-
-The helper script updates `Payment Methods` and creates `Payment Summary` with basic payment balance formulas.
