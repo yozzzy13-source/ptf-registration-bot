@@ -3,15 +3,46 @@ import { BOT_TOKEN, PUBLIC_URL, CLUB_CHAT_URL } from './config.js';
 
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
-async function call(method, payload = {}) {
-  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+const migratedChats = new Map();
+
+function normalizePayload(payload = {}) {
+  if (payload.chat_id !== undefined && payload.chat_id !== null) {
+    const key = String(payload.chat_id);
+    if (migratedChats.has(key)) return { ...payload, chat_id: migratedChats.get(key) };
+  }
+  return payload;
+}
+
+async function rawCall(method, payload = {}) {
   const res = await fetch(`${API}/${method}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  const json = await res.json().catch(() => ({}));
-  if (!json.ok) throw new Error(`${method}: ${JSON.stringify(json)}`);
+  return res.json().catch(() => ({}));
+}
+
+async function call(method, payload = {}) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  const normalized = normalizePayload(payload);
+  let json = await rawCall(method, normalized);
+
+  // Telegram group -> supergroup migration.
+  // Without this retry, admin notifications can break the whole WebApp submit flow.
+  const migrateTo = json?.parameters?.migrate_to_chat_id;
+  if (!json.ok && migrateTo && normalized.chat_id !== undefined && normalized.chat_id !== null) {
+    const oldChatId = String(normalized.chat_id);
+    const newChatId = String(migrateTo);
+    migratedChats.set(oldChatId, newChatId);
+    console.warn(`Telegram chat migrated: ${oldChatId} -> ${newChatId}`);
+    json = await rawCall(method, { ...normalized, chat_id: newChatId });
+  }
+
+  if (!json.ok) {
+    const err = new Error(`${method}: ${JSON.stringify(json)}`);
+    err.telegram = json;
+    throw err;
+  }
   return json.result;
 }
 

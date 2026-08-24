@@ -156,7 +156,12 @@ app.post('/api/submit-application', async (req, res) => {
       price_thb: paymentRequired ? priceThb : ''
     };
     await createApplication(appRow);
-    await notifyNewApplication(appRow, applicant);
+    try {
+      await notifyNewApplication(appRow, applicant);
+    } catch (notifyError) {
+      // Do not block player registration/payment if the admin chat is misconfigured or migrated.
+      console.error('notifyNewApplication failed:', notifyError.message);
+    }
     if (isEventApplication && paymentRequired) {
       await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.
 
