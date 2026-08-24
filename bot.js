@@ -12,11 +12,14 @@ async function sendMain(chatId, lang) { closeContactSession(chatId); userState.d
 function siteUrls(settings={}) { const home=settings.website_url || 'https://phukettennis.com/'; const base=home.replace(/\/$/,''); return {home, matches:settings.website_matches||`${base}/matches`, divisions:settings.website_divisions||`${base}/divisions`, yearlyRace:settings.website_yearly_race||`${base}/yearly-race`, players:settings.website_players||`${base}/players`, regulations:settings.website_regulations||`${base}/regulations`}; }
 async function sendWebsiteMenu(chatId, lang, editMsgId=null) { const settings={website_url: await getSetting('website_url') || 'https://phukettennis.com/', website_matches: await getSetting('website_matches'), website_divisions: await getSetting('website_divisions'), website_yearly_race: await getSetting('website_yearly_race'), website_players: await getSetting('website_players')}; const urls=siteUrls(settings); const txt=await getBotText('website_button',lang); const body=txt?.html_text || (lang==='ru'?'<b>ℹ️ О PTF</b>\n\nЗдесь собрана главная информация о лиге и турнирах: матчи, дивизионы, годовая гонка и игроки.':'<b>ℹ️ About PTF</b>\n\nHere you can find the main information about the league and tournaments: matches, divisions, Yearly Race and players.'); const opts={reply_markup:websiteKeyboard(lang,urls)}; if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
 async function sendTextSection(chatId, lang, key, editMsgId=null) { const txt=await getBotText(key,lang); const body=txt?.html_text || `<b>${escapeHtml(key)}</b>`; let opts={reply_markup:textKeyboard(lang,key)}; if(key==='yearly_race'){ const ratingUrl=await getSetting('website_yearly_race') || (await getSetting('website_url') || 'https://phukettennis.com/').replace(/\/$/,'') + '/yearly-race'; opts={reply_markup:{inline_keyboard:[[{text:lang==='ru'?'📊 Посмотреть рейтинг':'📊 View Ranking',url:ratingUrl}],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]}}; } if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
-async function handlePaymentMenu(chatId, lang, applicationId) {
-  const app = await findApplication(applicationId).catch(() => null);
-  const amountThb = app?.payment_amount_thb || app?.price_thb || '';
-  const amountUsdt = app?.payment_amount_usdt || DEFAULT_USDT_AMOUNT || '';
-  const priceLine = lang === 'ru'
+function cleanPaymentAmount(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return raw.replace(/\s*(THB|USDT|USD|฿|\$)\s*/gi, '').trim();
+}
+
+function formatPaymentAmounts(lang, amountThb, amountUsdt) {
+  return lang === 'ru'
     ? `
 
 <b>Сумма к оплате</b>
@@ -27,9 +30,101 @@ USDT: <b>${escapeHtml(amountUsdt || '-')} USDT</b>`
 <b>Payment amount</b>
 Bank Transfer: <b>${escapeHtml(amountThb || '-')} THB</b>
 USDT: <b>${escapeHtml(amountUsdt || '-')} USDT</b>`;
-  await sendMessage(chatId, `${t(lang,'payment_section')}${priceLine}`, { reply_markup: paymentKeyboard(lang,applicationId) });
 }
-async function sendPaymentInstructions(chatId, lang, applicationId, methodId) { const app=await findApplication(applicationId); if(!app) return sendMessage(chatId,'Application not found.'); const methods=await getPaymentMethods(); const method=methods.find(m=>m.method_id===methodId); if(!method) return sendMessage(chatId,'Payment method not found.'); const paymentId=uid('payment'); const isCrypto=method.method_type==='crypto'; const amount=isCrypto?(app.payment_amount_usdt||DEFAULT_USDT_AMOUNT):(app.payment_amount_thb||app.price_thb||2490); const currency=isCrypto?'USDT':(method.currency||'THB'); const network=method.network||''; const recipient=method.recipient||''; await logPayment({payment_id:paymentId, application_id:applicationId, telegram_id:app.telegram_id, player_name:app.player_name, event_id:app.event_id, event_name:app.event_name, method:method.display_name_en||methodId, network, amount, currency, invoice_text:`${methodId} ${amount} ${currency}`, status:'invoice_created'}); await updateApplication(applicationId,{application_status:'waiting_payment', payment_status:'waiting_payment', payment_id:paymentId, payment_method:isCrypto?'USDT':'Bank Transfer', payment_network:network, payment_amount:amount, payment_currency:currency, payment_amount_thb:isCrypto?app.payment_amount_thb:amount, payment_amount_usdt:isCrypto?amount:app.payment_amount_usdt}); await updateApplicantStatusByTelegramId(app.telegram_id,'waiting_payment'); userState.set(String(chatId),{mode:'awaiting_payment_proof',applicationId,paymentId,methodId}); let text; if(isCrypto){ text=lang==='ru'?`<b>💵 Оплата USDT ${escapeHtml(network)}</b>\n\nСумма: <b>${escapeHtml(amount)} USDT</b>\n\nАдрес кошелька ${escapeHtml(network)}:\n<code>${escapeHtml(recipient)}</code>\n\n⚠️ Убедитесь, что вы выбрали правильную сеть: <b>${escapeHtml(network)}</b>.\n\n${escapeHtml(t(lang,'payment_refund_note'))}\n\n${t(lang,'send_proof')}`:`<b>💵 USDT ${escapeHtml(network)} payment</b>\n\nAmount: <b>${escapeHtml(amount)} USDT</b>\n\nWallet address ${escapeHtml(network)}:\n<code>${escapeHtml(recipient)}</code>\n\n⚠️ Make sure you use the correct network: <b>${escapeHtml(network)}</b>.\n\n${escapeHtml(t(lang,'payment_refund_note'))}\n\n${t(lang,'send_proof')}`; } else { text=lang==='ru'?`<b>🏦 Bank Transfer</b>\n\nСумма: <b>${escapeHtml(amount)} THB</b>\n\nРеквизиты:\n<code>${escapeHtml(recipient)}</code>\n\n${escapeHtml(t(lang,'payment_refund_note'))}\n\n${t(lang,'send_proof')}`:`<b>🏦 Bank Transfer</b>\n\nAmount: <b>${escapeHtml(amount)} THB</b>\n\nBank details:\n<code>${escapeHtml(recipient)}</code>\n\n${escapeHtml(t(lang,'payment_refund_note'))}\n\n${t(lang,'send_proof')}`; } await sendMessage(chatId,text); }
+
+async function paymentAmountsForApplication(app) {
+  const events = await getActiveEvents().catch(() => []);
+  const event = events.find(e => String(e.event_id || '') === String(app?.event_id || '')) || null;
+  const amountThb = cleanPaymentAmount(event?.price_thb) || cleanPaymentAmount(app?.payment_amount_thb) || cleanPaymentAmount(app?.price_thb) || cleanPaymentAmount(app?.payment_amount) || '';
+  const amountUsdt = cleanPaymentAmount(event?.price_usdt) || cleanPaymentAmount(event?.usdt_amount) || cleanPaymentAmount(app?.payment_amount_usdt) || cleanPaymentAmount(app?.price_usdt) || cleanPaymentAmount(DEFAULT_USDT_AMOUNT) || '';
+  if (app?.application_id) {
+    const patch = {};
+    if (amountThb && String(app.payment_amount_thb || '') !== String(amountThb)) patch.payment_amount_thb = amountThb;
+    if (amountThb && String(app.price_thb || '') !== String(amountThb)) patch.price_thb = amountThb;
+    if (amountUsdt && String(app.payment_amount_usdt || '') !== String(amountUsdt)) patch.payment_amount_usdt = amountUsdt;
+    if (amountUsdt && String(app.price_usdt || '') !== String(amountUsdt)) patch.price_usdt = amountUsdt;
+    if (Object.keys(patch).length) await updateApplication(app.application_id, patch).catch(e => console.error('payment amount sync failed:', e.message));
+  }
+  return { amountThb, amountUsdt };
+}
+
+async function handlePaymentMenu(chatId, lang, applicationId) {
+  const app = await findApplication(applicationId).catch(() => null);
+  if (!app) return sendMessage(chatId, 'Application not found.');
+  const { amountThb, amountUsdt } = await paymentAmountsForApplication(app);
+  await sendMessage(chatId, `${t(lang,'payment_section')}${formatPaymentAmounts(lang, amountThb, amountUsdt)}`, { reply_markup: paymentKeyboard(lang,applicationId) });
+}
+
+async function sendPaymentInstructions(chatId, lang, applicationId, methodId) {
+  const app = await findApplication(applicationId);
+  if (!app) return sendMessage(chatId,'Application not found.');
+  const methods = await getPaymentMethods();
+  const method = methods.find(m => m.method_id === methodId);
+  if (!method) return sendMessage(chatId,'Payment method not found.');
+  const { amountThb, amountUsdt } = await paymentAmountsForApplication(app);
+  const paymentId = uid('payment');
+  const isCrypto = method.method_type === 'crypto';
+  const amount = isCrypto ? (amountUsdt || DEFAULT_USDT_AMOUNT) : (amountThb || 2490);
+  const currency = isCrypto ? 'USDT' : (method.currency || 'THB');
+  const network = method.network || '';
+  const recipient = method.recipient || '';
+  await logPayment({ payment_id:paymentId, application_id:applicationId, telegram_id:app.telegram_id, player_name:app.player_name, event_id:app.event_id, event_name:app.event_name, method:method.display_name_en||methodId, network, amount, currency, invoice_text:`${methodId} ${amount} ${currency}`, status:'invoice_created' });
+  await updateApplication(applicationId, { application_status:'waiting_payment', payment_status:'waiting_payment', payment_id:paymentId, payment_method:isCrypto?'USDT':'Bank Transfer', payment_network:network, payment_amount:amount, payment_currency:currency, payment_amount_thb:amountThb, payment_amount_usdt:amountUsdt, price_thb:amountThb, price_usdt:amountUsdt });
+  await updateApplicantStatusByTelegramId(app.telegram_id,'waiting_payment');
+  userState.set(String(chatId), { mode:'awaiting_payment_proof', applicationId, paymentId, methodId });
+  let text;
+  if (isCrypto) {
+    text = lang === 'ru'
+      ? `<b>💵 Оплата USDT ${escapeHtml(network)}</b>
+
+Сумма: <b>${escapeHtml(amount)} USDT</b>
+
+Адрес кошелька ${escapeHtml(network)}:
+<code>${escapeHtml(recipient)}</code>
+
+⚠️ Убедитесь, что вы выбрали правильную сеть: <b>${escapeHtml(network)}</b>.
+
+${escapeHtml(t(lang,'payment_refund_note'))}
+
+${t(lang,'send_proof')}`
+      : `<b>💵 USDT ${escapeHtml(network)} payment</b>
+
+Amount: <b>${escapeHtml(amount)} USDT</b>
+
+Wallet address ${escapeHtml(network)}:
+<code>${escapeHtml(recipient)}</code>
+
+⚠️ Make sure you use the correct network: <b>${escapeHtml(network)}</b>.
+
+${escapeHtml(t(lang,'payment_refund_note'))}
+
+${t(lang,'send_proof')}`;
+  } else {
+    text = lang === 'ru'
+      ? `<b>🏦 Bank Transfer</b>
+
+Сумма: <b>${escapeHtml(amount)} THB</b>
+
+Реквизиты:
+<code>${escapeHtml(recipient)}</code>
+
+${escapeHtml(t(lang,'payment_refund_note'))}
+
+${t(lang,'send_proof')}`
+      : `<b>🏦 Bank Transfer</b>
+
+Amount: <b>${escapeHtml(amount)} THB</b>
+
+Bank details:
+<code>${escapeHtml(recipient)}</code>
+
+${escapeHtml(t(lang,'payment_refund_note'))}
+
+${t(lang,'send_proof')}`;
+  }
+  await sendMessage(chatId, text);
+}
+
 function contactName(from){return [from.first_name,from.last_name].filter(Boolean).join(' ')}
 async function forwardContactMessage(msg,lang){const from=msg.from||{}; const text=msg.text||msg.caption||'[media]'; await logMessage({message_id:uid('msg'),telegram_id:from.id,telegram_username:from.username||'',name:contactName(from),direction:'incoming',message_type:msg.photo?'photo':msg.document?'document':'text',message_text:text,timestamp:nowISO(),status:'new',telegram_message_id:msg.message_id}); await notifyIncomingMessage({id:from.id,username:from.username,name:contactName(from)},text,msg.message_id); return null;}
 const contactTimers = new Map();
@@ -66,15 +161,26 @@ async function handleContactMessage(msg, state, lang) {
 async function sendPaymentEntry(chatId, from, lang) {
   const profile = await findApplicantByTelegramId(from.id);
   const hasProfile = isProfileCompleted(profile);
-  if (!hasProfile) return sendMessage(chatId, `${t(lang,'payment_section')}\n\n${t(lang,'payment_no_profile')}`, { reply_markup: paymentEntryKeyboard(lang, { hasProfile:false }) });
+  if (!hasProfile) return sendMessage(chatId, `${t(lang,'payment_section')}
+
+${t(lang,'payment_no_profile')}`, { reply_markup: paymentEntryKeyboard(lang, { hasProfile:false }) });
   const app = await findLatestPayableApplicationByTelegramId(from.id);
-  if (!app) return sendMessage(chatId, `${t(lang,'payment_section')}\n\n${t(lang,'payment_no_application')}`, { reply_markup: paymentEntryKeyboard(lang, { hasProfile:true }) });
+  if (!app) return sendMessage(chatId, `${t(lang,'payment_section')}
+
+${t(lang,'payment_no_application')}`, { reply_markup: paymentEntryKeyboard(lang, { hasProfile:true }) });
   const pStatus = String(app.payment_status || '').toLowerCase();
   const aStatus = String(app.application_status || '').toLowerCase();
-  if (aStatus === 'active') return sendMessage(chatId, `${t(lang,'payment_section')}\n\n${t(lang,'payment_active')}`, { reply_markup: mainKeyboard(lang) });
-  if (pStatus === 'approved' || aStatus === 'payment_approved') return sendMessage(chatId, `${t(lang,'payment_section')}\n\n${t(lang,'payment_already_paid')}`, { reply_markup: mainKeyboard(lang) });
-  if (pStatus === 'proof_received' || aStatus === 'proof_received') return sendMessage(chatId, `${t(lang,'payment_section')}\n\n${t(lang,'payment_already_proof')}`, { reply_markup: mainKeyboard(lang) });
-  return sendMessage(chatId, `${t(lang,'payment_section')}\n\n${lang==='ru'?'Выберите способ оплаты ниже.':'Choose a payment method below.'}`, { reply_markup: paymentEntryKeyboard(lang, { hasProfile:true, applicationId:app.application_id, status:pStatus }) });
+  if (aStatus === 'active') return sendMessage(chatId, `${t(lang,'payment_section')}
+
+${t(lang,'payment_active')}`, { reply_markup: mainKeyboard(lang) });
+  if (pStatus === 'approved' || aStatus === 'payment_approved') return sendMessage(chatId, `${t(lang,'payment_section')}
+
+${t(lang,'payment_already_paid')}`, { reply_markup: mainKeyboard(lang) });
+  if (pStatus === 'proof_received' || aStatus === 'proof_received') return sendMessage(chatId, `${t(lang,'payment_section')}
+
+${t(lang,'payment_already_proof')}`, { reply_markup: mainKeyboard(lang) });
+  const { amountThb, amountUsdt } = await paymentAmountsForApplication(app);
+  return sendMessage(chatId, `${t(lang,'payment_section')}${formatPaymentAmounts(lang, amountThb, amountUsdt)}`, { reply_markup: paymentKeyboard(lang, app.application_id) });
 }
 
 async function handleChallengeStart(chatId,from,lang,targetTelegramId){const challenger=await findApplicantByTelegramId(from.id); if(!isProfileCompleted(challenger)) return sendMessage(chatId,t(lang,'challenge_needs_profile'),{reply_markup:mainKeyboard(lang)}); if(String(from.id)===String(targetTelegramId)) return sendMessage(chatId,t(lang,'challenge_self')); const target=await findApplicantByTelegramId(targetTelegramId); if(!target?.telegram_id) return sendMessage(chatId,t(lang,'challenge_target_missing')); const challengeId=uid('challenge'); const profileUrl=challenger.player_profile_url || await getSetting('website_players') || await getSetting('website_url') || 'https://phukettennis.com/'; await createMatchChallenge({challenge_id:challengeId,from_telegram_id:challenger.telegram_id,from_name:challenger.name,from_username:challenger.telegram_username,from_player_profile_url:profileUrl,to_telegram_id:target.telegram_id,to_name:target.name,to_username:target.telegram_username,status:'pending',created_at:nowISO(),direct_chat_available:challenger.telegram_username?'yes':'no',match_chat_mode:challenger.telegram_username?'direct':'bot_fallback'}); const targetLang=target.language==='ru'?'ru':'en'; await sendMessage(target.telegram_id,tt(targetLang,'challenge_received',{name:challenger.name}),{reply_markup:challengeKeyboard(targetLang,challengeId,profileUrl)}); return sendMessage(chatId,t(lang,'challenge_sent'));}
@@ -103,4 +209,8 @@ async function forwardAdminTopicMessageToPlayer(msg, player) {
 
 export async function handleMessage(msg){const chatId=msg.chat.id; const from=msg.from||{}; const lang=await userLang(from); const text=(msg.text||'').trim(); if(text==='/cancel'){closeContactSession(chatId); userState.delete(String(chatId)); adminState.delete(String(from.id)); return sendMessage(chatId,t(lang,'cancelled'));} if(text.startsWith('/start')){const param=text.split(/\s+/)[1]||''; if(param.startsWith('challenge_')) return handleChallengeStart(chatId,from,lang,param.replace('challenge_','')); return sendMain(chatId,lang);} if(text==='/help'){ if(isAdminUser(from.id)&&(msg.chat.type==='group'||msg.chat.type==='supergroup'||await getSetting('admin_chat_id')===String(chatId))) return sendMessage(chatId,t(lang,'admin_help')); return sendMessage(chatId,t(lang,'help_user'),{reply_markup:mainKeyboard(lang)});} if(text==='/admin_init'){if(!isAdminUser(from.id)) return sendMessage(chatId,t(lang,'admin_only')); return handleAdminInit(msg);} if(text==='/admin'){if(!isAdminUser(from.id)) return sendMessage(chatId,t(lang,'admin_only')); return sendMessage(chatId,'<b>PTF Admin Panel</b>\n\nOpen the admin WebApp to filter players, send broadcasts, request selfies and message players.',{reply_markup:adminPanelKeyboard(lang)});} if(isAdminUser(from.id)){ if(text==='/stats') return adminStats(chatId); if(text==='/events') return adminEvents(chatId); if(text==='/pending') return adminPending(chatId); if(text==='/messages') return adminMessages(chatId); if(text.startsWith('/profile')) return adminProfile(chatId,text); if(text==='/broadcast') return startBroadcast(chatId,from.id); if(text==='/broadcast_menu') return startBroadcastWithMenu(chatId,from.id); if(text==='/broadcast_poll') return startBroadcastPoll(chatId,from.id); if(text==='/broadcast_poll_test') return startBroadcastPoll(chatId,from.id,true); if(text.startsWith('/poll_stats')) return adminPollStats(chatId,text); if(text==='/segments') return sendMessage(chatId,'Segments: all, season2, active, waitlist, payment, ru, en, or crm_tags value.'); if((msg.chat.type==='group'||msg.chat.type==='supergroup') && msg.message_thread_id && !text.startsWith('/')){ const topicPlayer = await findApplicantByAdminTopicId(msg.message_thread_id).catch(()=>null); if(topicPlayer){ await forwardAdminTopicMessageToPlayer(msg, topicPlayer); return null; }} const aState=adminState.get(String(from.id)); if(aState?.mode==='reply_waiting'){await sendMessage(aState.targetTelegramId,msg.text||msg.caption||''); await logMessage({message_id:uid('msg'),telegram_id:aState.targetTelegramId,direction:'outgoing',message_type:'text',message_text:msg.text||msg.caption||'',timestamp:nowISO(),admin_id:from.id,admin_name:from.username||from.first_name||'',status:'sent'}); adminState.delete(String(from.id)); return null;} if(aState?.mode==='broadcast_message') return handleBroadcastMessage(msg,aState); if(aState?.mode==='broadcast_menu_message') return handleBroadcastMenuMessage(msg,aState); if(aState?.mode==='broadcast_poll_message') return handleBroadcastPollMessage(msg,aState); if(msg.reply_to_message&&(msg.reply_to_message.text||msg.reply_to_message.caption)){const body=msg.reply_to_message.text||msg.reply_to_message.caption||''; const match=body.match(/TGID:\s*(?:<code>)?(\d+)/i)||body.match(/TGID:\s*(\d+)/i); if(match&&text){await sendMessage(match[1],text); await logMessage({message_id:uid('msg'),telegram_id:match[1],direction:'outgoing',message_type:'text',message_text:text,timestamp:nowISO(),admin_id:from.id,admin_name:from.username||from.first_name||'',status:'sent'}); return null;}}} const state=userState.get(String(chatId)); if(state?.mode==='selfie_upload'){ if(!msg.photo?.length) return sendMessage(chatId,t(lang,'selfie_prompt')); const fileId=msg.photo[msg.photo.length-1].file_id; await updateApplicantByTelegramId(from.id,{selfie_status:'received',selfie_file_id:fileId,selfie_received_at:nowISO()}); userState.delete(String(chatId)); await notifyAdmin(`<b>📸 Selfie received</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.first_name||'')}</b> ${from.username?'@'+escapeHtml(from.username):''}`); return sendMessage(chatId,t(lang,'selfie_received'),{reply_markup:mainKeyboard(lang)});} if(state?.mode==='awaiting_payment_proof'){ if(!msg.photo?.length&&!msg.document) return sendMessage(chatId,t(lang,'send_proof')); const app=await findApplication(state.applicationId); if(!app) return sendMessage(chatId,'Application not found.'); const fileId=msg.photo?.length?msg.photo[msg.photo.length-1].file_id:msg.document.file_id; await updateApplication(state.applicationId,{application_status:'proof_received',payment_status:'proof_received',payment_proof_status:'proof_received',payment_proof_file_id:fileId}); await updateApplicantStatusByTelegramId(from.id,'proof_received'); await logPayment({payment_id:state.paymentId,application_id:state.applicationId,telegram_id:from.id,player_name:app.player_name,event_id:app.event_id,event_name:app.event_name,proof_file_id:fileId,proof_received_at:nowISO(),status:'proof_received'}); userState.delete(String(chatId)); try { await notifyPaymentProof({app,payment:{payment_id:state.paymentId,method:app.payment_method||state.methodId,network:app.payment_network,amount:app.payment_amount,currency:app.payment_currency},from,originalMessage:msg}); } catch (notifyError) { console.error('notifyPaymentProof failed:', notifyError.message); } return sendMessage(chatId,t(lang,'proof_received'));} if(state?.mode==='contact') return handleContactMessage(msg,state,lang); if(state?.mode==='challenge_chat') return forwardChallengeChat(msg,state); return sendMain(chatId,lang);}
 export async function handleCallback(q){const data=q.data||''; const msg=q.message; const chatId=msg.chat.id; const from=q.from||{}; const lang=await userLang(from); await answerCallbackQuery(q.id).catch(()=>{}); if(data==='main') return sendMain(chatId,lang); if(data==='website_menu') return sendWebsiteMenu(chatId,lang,msg.message_id); if(data.startsWith('text:')) return sendTextSection(chatId,lang,data.slice(5),msg.message_id); if(data==='payment_entry') return sendPaymentEntry(chatId,from,lang); if(data==='contact'){openContactSession(chatId,lang); return sendMessage(chatId,t(lang,'contact_prompt'),{reply_markup:contactOpenKeyboard(lang)});} if(data==='close_contact'){closeContactSession(chatId); return sendMessage(chatId,t(lang,'contact_closed'),{reply_markup:mainKeyboard(lang)});} if(data==='upload_selfie'){userState.set(String(chatId),{mode:'selfie_upload'}); return sendMessage(chatId,t(lang,'selfie_prompt'));} if(data.startsWith('payment_menu:')) return handlePaymentMenu(chatId,lang,data.split(':')[1]); if(data.startsWith('crypto:')) return sendMessage(chatId,t(lang,'choose_crypto_network'),{reply_markup:cryptoKeyboard(lang,data.split(':')[1])}); if(data.startsWith('paylater:')) return sendMessage(chatId,t(lang,'payment_later'),{reply_markup:mainKeyboard(lang)}); if(data.startsWith('pay:')){const [,applicationId,methodId]=data.split(':'); return sendPaymentInstructions(chatId,lang,applicationId,methodId);} if(data.startsWith('challenge_accept:')) return acceptChallenge(chatId,from,lang,data.split(':')[1]); if(data.startsWith('challenge_decline:')) return declineChallenge(chatId,from,lang,data.split(':')[1]); if(isAdminUser(from.id)){ if(data.startsWith('admin_reply:')){const targetTelegramId=data.split(':')[1]; adminState.set(String(from.id),{mode:'reply_waiting',targetTelegramId}); return sendMessage(chatId,`Write reply to TGID <code>${escapeHtml(targetTelegramId)}</code>.`);} if(data.startsWith('admin_status:')){const [,applicationId,status]=data.split(':'); return setApplicationStatus({chatId,applicationId,status});} if(data.startsWith('admin_payment:')){const [,applicationId,paymentId,status]=data.split(':'); return setPaymentStatus({chatId,applicationId,paymentId,status});} if(data.startsWith('bcseg:')) return handleBroadcastSegment(q,data.split(':')[1]); if(data==='bcconfirm') return executeBroadcast(q); if(data==='bcconfirm_menu') return executeBroadcastWithMenu(q); if(data==='bcconfirm_poll') return executeBroadcastPoll(q); if(data==='bccancel'){adminState.delete(String(from.id)); return sendMessage(chatId,'Broadcast cancelled.');}}}
-export async function sendPaymentStart(chatId,lang,applicationId){await sendMessage(chatId,t(lang,'application_received'),{reply_markup:paymentKeyboard(lang,applicationId)});}
+export async function sendPaymentStart(chatId, lang, applicationId) {
+  const app = await findApplication(applicationId).catch(() => null);
+  const amounts = app ? await paymentAmountsForApplication(app) : { amountThb:'', amountUsdt:'' };
+  await sendMessage(chatId, `${t(lang,'application_received')}${formatPaymentAmounts(lang, amounts.amountThb, amounts.amountUsdt)}`, { reply_markup: paymentKeyboard(lang, applicationId) });
+}
