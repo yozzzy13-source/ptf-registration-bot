@@ -51,7 +51,7 @@ async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
     if (sheetId) props.sheetId = sheetId;
     await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [{ addSheet: { properties: props } }] } });
   }
-  const values = await valuesGet(`'${sheetName}'!A1:AZ1`).catch(() => []);
+  const values = await valuesGet(`'${sheetName}'!A1:BZ1`).catch(() => []);
   const current = values[0] || [];
   const merged = [...current];
   for (const h of headers) if (!merged.includes(h)) merged.push(h);
@@ -64,7 +64,7 @@ export async function getRows(sheetName, { useCache=true } = {}) {
   const key = `rows:${sheetName}`;
   const c = cache.get(key);
   if (useCache && c && Date.now() - c.t < CACHE_MS) return c.v;
-  const values = await valuesGet(`'${sheetName}'!A:AZ`);
+  const values = await valuesGet(`'${sheetName}'!A:BZ`);
   const headers = values[0] || [];
   const rows = values.slice(1).map((r, idx) => {
     const obj = { _rowNumber: idx + 2 };
@@ -79,7 +79,7 @@ export async function getRows(sheetName, { useCache=true } = {}) {
 export async function appendObject(sheetName, obj) {
   const { headers } = await getRows(sheetName, { useCache:false });
   const row = headers.map(h => obj[h] ?? '');
-  await valuesAppend(`'${sheetName}'!A:AZ`, [row]);
+  await valuesAppend(`'${sheetName}'!A:BZ`, [row]);
   cache.clear();
 }
 
@@ -120,6 +120,25 @@ export async function getActiveEvents() {
 export async function getPaymentMethods() {
   const { rows } = await getRows(SHEETS.paymentMethods, { useCache:false });
   return rows.filter(r => safe(r.status) === 'active');
+}
+
+
+export async function ensureApplicantAdminColumns() {
+  return ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_created_at']);
+}
+
+export async function findApplicantByAdminTopicId(topicId) {
+  await ensureApplicantAdminColumns();
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  return rows.find(r => String(r.admin_topic_id || '') === String(topicId));
+}
+
+export async function updateApplicantAdminTopic(telegramId, patch) {
+  await ensureApplicantAdminColumns();
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { ...patch, updated_at: nowISO() });
+  return { ...found, ...patch };
 }
 
 export async function findApplicantByTelegramId(telegramId) {

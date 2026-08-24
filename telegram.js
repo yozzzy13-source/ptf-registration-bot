@@ -56,6 +56,7 @@ export const answerCallbackQuery = (callback_query_id, text='', show_alert=false
 export const sendPhoto = (chat_id, photo, opts={}) => call('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...opts });
 export const sendDocument = (chat_id, document, opts={}) => call('sendDocument', { chat_id, document, parse_mode: 'HTML', ...opts });
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
+export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 export const sendPoll = (chat_id, question, options, opts={}) => call('sendPoll', { chat_id, question, options, ...opts });
 
 export async function setWebhook() {
@@ -70,6 +71,7 @@ export async function setCommands() {
     { command: 'admin', description: 'Open admin panel' },
     { command: 'broadcast_menu', description: 'Admin: broadcast with menu button' },
     { command: 'broadcast_poll', description: 'Admin: send anonymous poll' },
+    { command: 'broadcast_poll_test', description: 'Admin: test poll to yourself' },
     { command: 'poll_stats', description: 'Admin: poll summary' },
     { command: 'cancel', description: 'Cancel current action' }
   ]});
