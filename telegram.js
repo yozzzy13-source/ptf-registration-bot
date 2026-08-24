@@ -36,6 +36,7 @@ export async function setCommands() {
     { command: 'start', description: 'Start / Main menu' },
     { command: 'help', description: 'Help' },
     { command: 'admin', description: 'Open admin panel' },
+    { command: 'broadcast_menu', description: 'Admin: broadcast with menu button' },
     { command: 'cancel', description: 'Cancel current action' }
   ]});
 }

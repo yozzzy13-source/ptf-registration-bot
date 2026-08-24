@@ -8,7 +8,7 @@ import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './
 export const adminState = new Map();
 
 export function isAdminUser(userId) {
-  if (!ADMIN_IDS.length) return true; // first launch mode. Fill ADMIN_IDS later for stricter access.
+  if (!ADMIN_IDS.length) return false; // admin panel is closed until ADMIN_IDS is configured.
   return ADMIN_IDS.includes(String(userId));
 }
 
@@ -33,9 +33,31 @@ export async function adminStats(chatId) {
   const payments = (await getRows(SHEETS.payments, { useCache:false })).rows;
   const active = applicants.filter(r => r.status === 'active').length;
   const waitlist = applicants.filter(r => r.status === 'waitlist').length;
-  const proof = apps.filter(r => r.application_status === 'proof_received').length;
-  await sendMessage(chatId, `<b>PTF Stats</b>\n\nContacts: <b>${applicants.length}</b>\nApplications: <b>${apps.length}</b>\nActive: <b>${active}</b>\nWaitlist: <b>${waitlist}</b>\nPayment proofs waiting: <b>${proof}</b>\nPayments: <b>${payments.length}</b>`);
+  const norm = v => String(v || '').trim().toLowerCase();
+  const unpaid = apps.filter(r => ['payment_required','waiting_payment'].includes(norm(r.payment_status))).length;
+  const proof = apps.filter(r => norm(r.payment_status) === 'proof_received' || norm(r.payment_proof_status) === 'proof_received').length;
+  const approved = apps.filter(r => norm(r.payment_status) === 'approved').length;
+  const rejected = apps.filter(r => norm(r.payment_status) === 'rejected').length;
+  const approvedPayments = payments.filter(p => norm(p.status) === 'approved');
+  const paidThb = approvedPayments.filter(p => norm(p.currency) === 'thb').reduce((sum,p) => sum + Number(p.amount || 0), 0);
+  const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
+  await sendMessage(chatId, `<b>PTF Stats</b>
+
+Contacts: <b>${applicants.length}</b>
+Applications: <b>${apps.length}</b>
+Active: <b>${active}</b>
+Waitlist: <b>${waitlist}</b>
+
+<b>Payments</b>
+Unpaid / waiting: <b>${unpaid}</b>
+Proofs waiting review: <b>${proof}</b>
+Approved: <b>${approved}</b>
+Rejected: <b>${rejected}</b>
+Paid THB: <b>${paidThb}</b>
+Paid USDT: <b>${paidUsdt}</b>
+Payment rows: <b>${payments.length}</b>`);
 }
+
 
 export async function adminEvents(chatId) {
   const rows = (await getRows(SHEETS.events, { useCache:false })).rows;
@@ -101,6 +123,47 @@ export async function notifyPaymentProof({ app, payment, from, originalMessage }
   } else {
     await sendMessage(chatId, caption, { reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   }
+}
+
+
+export async function startBroadcastWithMenu(chatId, adminId) {
+  const contacts = await getSegmentContacts('all');
+  adminState.set(String(adminId), { mode: 'broadcast_menu_message', segment: 'all', count: contacts.length });
+  await sendMessage(chatId, `<b>Broadcast with menu button</b>\n\nRecipients: <b>${contacts.length}</b>\n\nSend the text that should go to all users. The bot will attach a button that opens the main menu.`);
+}
+
+export async function handleBroadcastMenuMessage(msg, state) {
+  const text = msg.text || msg.caption || '';
+  if (!text) return sendMessage(msg.chat.id, 'Send a text message for this broadcast.');
+  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_menu_confirm', message_text: text });
+  await sendMessage(msg.chat.id, `<b>Broadcast preview</b>\n\nSegment: <b>all</b>\nRecipients: <b>${state.count}</b>\n\n${escapeHtml(text)}\n\nButton: <b>🎾 Open menu</b>\n\nSend now?`, { reply_markup: { inline_keyboard: [[
+    { text: '✅ Send now', callback_data: 'bcconfirm_menu' },
+    { text: '❌ Cancel', callback_data: 'bccancel' }
+  ]]}});
+}
+
+export async function executeBroadcastWithMenu(callbackQuery) {
+  const adminId = callbackQuery.from.id;
+  const state = adminState.get(String(adminId));
+  if (!state || state.mode !== 'broadcast_menu_confirm') return;
+  const contacts = await getSegmentContacts('all');
+  const broadcastId = uid('broadcast');
+  const keyboard = { inline_keyboard: [[{ text: '🎾 Open menu / Открыть меню', callback_data: 'main' }]] };
+  let sent = 0, failed = 0;
+  for (const c of contacts) {
+    try {
+      await sendMessage(c.telegram_id, state.message_text, { reply_markup: keyboard });
+      sent++;
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'all_menu_button' });
+      await new Promise(r => setTimeout(r, 45));
+    } catch (e) {
+      failed++;
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:'all_menu_button' });
+    }
+  }
+  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'all_menu_button', language:'mixed', message_text:state.message_text, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+  adminState.delete(String(adminId));
+  await sendMessage(callbackQuery.message.chat.id, `✅ Broadcast finished\n\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>`);
 }
 
 export async function startBroadcast(chatId, adminId) {
@@ -179,7 +242,7 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
 export async function setPaymentStatus({ chatId, applicationId, paymentId, status }) {
   await updatePayment(paymentId, { status: status === 'approved' ? 'approved' : 'rejected', admin_checked_at: nowISO() });
   const appStatus = status === 'approved' ? 'payment_approved' : 'waiting_payment';
-  const app = await updateApplication(applicationId, { application_status: appStatus, payment_proof_status: status });
+  const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: status === 'approved' ? 'approved' : 'rejected', payment_proof_status: status, payment_reviewed_at: nowISO() });
   if (app) await updateApplicantStatusByTelegramId(app.telegram_id, appStatus);
   await sendMessage(chatId, `Payment ${escapeHtml(status)} for application <code>${escapeHtml(applicationId)}</code>. Participation status is still separate.`);
 }

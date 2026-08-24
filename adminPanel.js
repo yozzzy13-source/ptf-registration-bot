@@ -81,9 +81,17 @@ export function registerAdminRoutes(app) {
       const active = contacts.filter(r => r.status === 'active').length;
       const waitlist = contacts.filter(r => r.status === 'waitlist').length;
       const missingSelfie = contacts.filter(r => r.status === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received').length;
+      const payStatus = s => applications.filter(a => norm(a.payment_status) === s).length;
+      const unpaid = applications.filter(a => ['payment_required','waiting_payment'].includes(norm(a.payment_status))).length;
+      const proofReceived = payStatus('proof_received');
+      const paid = payStatus('approved');
+      const rejectedPayments = payStatus('rejected');
+      const approvedPayments = payments.filter(p => norm(p.status) === 'approved');
+      const paidThb = approvedPayments.filter(p => norm(p.currency) === 'thb').reduce((sum,p) => sum + Number(p.amount || 0), 0);
+      const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
       const divisions = [...new Set(contacts.map(r => r.division).filter(Boolean))].sort();
       const statuses = [...new Set(contacts.map(r => r.status).filter(Boolean))].sort();
-      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, payments:payments.length, active, waitlist, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses });
+      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

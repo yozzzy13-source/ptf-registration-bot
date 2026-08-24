@@ -110,8 +110,9 @@ app.post('/api/submit-application', async (req, res) => {
     const finalEventId = event?.event_id || 'ptf_waitlist';
     const applicationId = uid('app');
     const priceThb = Number(event?.price_thb || 0);
-    const applicationStatus = 'waitlist';
-    const paymentStatus = 'not_required';
+    const paymentRequired = Boolean(event && priceThb > 0);
+    const applicationStatus = event ? (paymentRequired ? 'waiting_payment' : 'application_received') : 'waitlist';
+    const paymentStatus = paymentRequired ? 'payment_required' : 'not_required';
 
     const applicant = await upsertApplicant({
       name: fullName,
@@ -130,7 +131,7 @@ app.post('/api/submit-application', async (req, res) => {
       source: 'telegram_webapp',
       last_application_event: eventName,
       selfie_status: 'optional_missing',
-      crm_tags: isEventApplication ? `event_waitlist,${finalEventId}` : 'ptf_waitlist,profile_completed',
+      crm_tags: isEventApplication ? `event_application,${finalEventId}` : 'ptf_waitlist,profile_completed',
       increment_application_count: true
     });
 
@@ -148,18 +149,26 @@ app.post('/api/submit-application', async (req, res) => {
       selfie_status: 'optional_missing',
       source: 'telegram_webapp',
       notes: safe(effectiveProfile.notes),
-      payment_amount: '',
-      payment_currency: '',
+      payment_amount: paymentRequired ? priceThb : '',
+      payment_currency: paymentRequired ? 'THB' : '',
       payment_amount_usdt: '',
-      payment_amount_thb: '',
-      price_thb: ''
+      payment_amount_thb: paymentRequired ? priceThb : '',
+      price_thb: paymentRequired ? priceThb : ''
     };
     await createApplication(appRow);
     await notifyNewApplication(appRow, applicant);
-    if (isEventApplication) await sendMessage(user.id, lang === 'ru' ? `✅ Заявка сохранена. Вы добавлены в waitlist события: ${eventName}. Детали по оплате и подтверждению участия будут отправлены позже через Telegram-бота.` : `✅ Application saved. You have been added to the waitlist for: ${eventName}. Payment and participation confirmation details will be sent later through the Telegram bot.`);
-    else await sendMessage(user.id, lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы добавлены в waitlist и сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You have been added to the waitlist and will be able to join open events later.');
+    if (isEventApplication && paymentRequired) {
+      await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.
 
-    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:false });
+Следующий шаг — оплата участия. Выберите удобный способ оплаты ниже.` : `✅ Your event application has been saved: ${eventName}.
+
+Next step — participation payment. Please choose a payment method below.`);
+      await sendPaymentStart(user.id, lang, applicationId);
+    } else if (isEventApplication) {
+      await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}. Детали подтверждения участия будут отправлены через Telegram-бота.` : `✅ Your event application has been saved: ${eventName}. Participation confirmation details will be sent through the Telegram bot.`);
+    } else await sendMessage(user.id, lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You will be able to join open events later.');
+
+    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:paymentRequired });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });

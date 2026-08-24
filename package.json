@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "setup:payments": "node scripts/setup-payments.js"
   },
   "engines": {
     "node": ">=18"
