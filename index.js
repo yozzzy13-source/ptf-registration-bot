@@ -1,32 +1,18 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, ADMIN_IDS } from './config.js';
+import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
-import { handleMessage, handleCallback } from './bot.js';
-import { isResultsMessage, isResultsCallback, handleResultsMessage, handleResultsCallback } from './results.js';
-import { getActiveEvents, upsertApplicant, saveApplicationOnce, getPaymentMethods, findApplicantByTelegramIdentity, isProfileCompleted, openAdminChatByTelegramId, setResultsNotifications } from './sheets.js';
+import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
+import { getActiveEvents, upsertApplicant, createApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
-import { handleAdminTopicMessage, notifyNewApplication } from './admin.js';
+import { notifyNewApplication } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const applicationSubmissionLocks = new Map();
-
-async function withApplicationSubmissionLock(telegramId, fn) {
-  const key = String(telegramId);
-  const previous = applicationSubmissionLocks.get(key) || Promise.resolve();
-  const current = previous.catch(() => {}).then(fn);
-  applicationSubmissionLocks.set(key, current);
-  try {
-    return await current;
-  } finally {
-    if (applicationSubmissionLocks.get(key) === current) applicationSubmissionLocks.delete(key);
-  }
-}
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
@@ -45,51 +31,12 @@ app.post('/webhook', async (req, res) => {
       seen.add(update.update_id);
       if (seen.size > 2000) seen.clear();
     }
-    if (update.message && await handleAdminTopicMessage(update.message)) {
-      return;
-    } else if (update.callback_query && isResultsCallback(update.callback_query)) {
-      await handleResultsCallback(update.callback_query);
-    } else if (update.message && isResultsMessage(update.message)) {
-      await handleResultsMessage(update.message);
-    } else if (update.message && await handleResultsOptInCommand(update.message)) {
-      return;
-    } else if (update.message && shouldPassToRegistration(update.message)) {
-      await handleMessage(update.message);
-    } else if (update.callback_query) {
-      await handleCallback(update.callback_query);
-    }
+    if (update.message) await handleMessage(update.message);
+    else if (update.callback_query) await handleCallback(update.callback_query);
   } catch (e) {
     console.error('webhook error', e);
   }
 });
-
-function shouldPassToRegistration(msg) {
-  if (msg.chat?.type === 'private') return true;
-  const text = (msg.text || msg.caption || '').trim();
-  if (text.startsWith('/')) return true;
-  if (msg.reply_to_message && ADMIN_IDS.includes(String(msg.from?.id || ''))) return true;
-  return false;
-}
-
-async function handleResultsOptInCommand(msg) {
-  const text = (msg.text || '').trim();
-  if (text !== '/results') return false;
-  if (!msg.from?.id) return true;
-
-  const lang = langOf(msg.from.language_code);
-  await setResultsNotifications(msg.from.id, true);
-  if (lang === 'ru') {
-    await sendMessage(msg.chat.id, '✅ Уведомления о результатах матчей включены.');
-    return true;
-  }
-  await sendMessage(
-    msg.chat.id,
-    lang === 'ru'
-      ? 'Уведомления о результатах матчей включены.'
-      : '✅ Match result notifications are on.'
-  );
-  return true;
-}
 
 app.get('/api/bootstrap', async (req, res) => {
   try {
@@ -97,11 +44,27 @@ app.get('/api/bootstrap', async (req, res) => {
     const { user } = parseInitData(initData);
     const lang = langOf(user?.language_code);
     const events = await getActiveEvents();
+    const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
+    const enrichedEvents = events.map(ev => ({ ...ev, applications_count: apps.filter(a => String(a.event_id) === String(ev.event_id)).length }));
     const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
-    res.json({ ok: true, user, lang, events, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
+    res.json({ ok: true, user, lang, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
+});
+
+
+app.post('/api/save-profile', async (req, res) => {
+  try {
+    const { initData = '', profile = {} } = req.body || {};
+    const verified = verifyTelegramInitData(initData);
+    const { user } = parseInitData(initData);
+    if (!user?.id) return res.status(400).json({ ok:false, error:'Telegram WebApp user not found' });
+    if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
+    const lang = langOf(user.language_code); const username = user.username || '';
+    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:profile.ntrp_unknown?'unknown':safe(profile.ntrp), status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:'ptf_waitlist,profile_completed', increment_application_count:false });
+    res.json({ok:true,applicant,profileCompleted:true});
+  } catch(e){ console.error(e); res.status(500).json({ok:false,error:e.message}); }
 });
 
 app.get('/api/payment-methods', async (req, res) => {
@@ -121,7 +84,6 @@ app.post('/api/submit-application', async (req, res) => {
       return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
     }
 
-    const result = await withApplicationSubmissionLock(user.id, async () => {
     const events = await getActiveEvents();
     const event = event_id ? events.find(e => e.event_id === event_id) : null;
 
@@ -148,8 +110,9 @@ app.post('/api/submit-application', async (req, res) => {
     const finalEventId = event?.event_id || 'ptf_waitlist';
     const applicationId = uid('app');
     const priceThb = Number(event?.price_thb || 0);
-    const applicationStatus = isEventApplication ? 'submitted' : 'waitlist';
-    const paymentStatus = 'not_required';
+    const paymentRequired = Boolean(event && priceThb > 0);
+    const applicationStatus = event ? (paymentRequired ? 'waiting_payment' : 'application_received') : 'waitlist';
+    const paymentStatus = paymentRequired ? 'payment_required' : 'not_required';
 
     const applicant = await upsertApplicant({
       name: fullName,
@@ -168,7 +131,8 @@ app.post('/api/submit-application', async (req, res) => {
       source: 'telegram_webapp',
       last_application_event: eventName,
       selfie_status: 'optional_missing',
-      crm_tags: isEventApplication ? `league_interested,${finalEventId}` : 'ptf_waitlist,profile_completed'
+      crm_tags: isEventApplication ? `event_application,${finalEventId}` : 'ptf_waitlist,profile_completed',
+      increment_application_count: true
     });
 
     const appRow = {
@@ -185,30 +149,26 @@ app.post('/api/submit-application', async (req, res) => {
       selfie_status: 'optional_missing',
       source: 'telegram_webapp',
       notes: safe(effectiveProfile.notes),
-      payment_amount: '',
-      payment_currency: '',
+      payment_amount: paymentRequired ? priceThb : '',
+      payment_currency: paymentRequired ? 'THB' : '',
       payment_amount_usdt: '',
-      payment_amount_thb: '',
-      price_thb: priceThb || ''
+      payment_amount_thb: paymentRequired ? priceThb : '',
+      price_thb: paymentRequired ? priceThb : ''
     };
-    const saved = await saveApplicationOnce(appRow);
-    const savedApp = saved.application;
-    if (!saved.duplicate) await notifyNewApplication(savedApp, applicant);
-    if (saved.duplicate) {
-      return { application:savedApp, duplicate:true, eventName, priceThb };
-    }
-    await sendMessage(
-      user.id,
-      isEventApplication
-        ? (lang === 'ru' ? '✅ Заявка сохранена. Оплату пока не просим — мы сообщим отдельно, когда откроем оплату.' : '✅ Application saved. Payment is not required yet — we will notify you separately when payment opens.')
-        : (lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы добавлены в waitlist и сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You have been added to the waitlist and will be able to join open events later.')
-    );
-    await openAdminChatByTelegramId(user.id, 'application_saved', {});
+    await createApplication(appRow);
+    await notifyNewApplication(appRow, applicant);
+    if (isEventApplication && paymentRequired) {
+      await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.
 
-    return { application:savedApp, duplicate:false, eventName, priceThb };
-    });
+Следующий шаг — оплата участия. Выберите удобный способ оплаты ниже.` : `✅ Your event application has been saved: ${eventName}.
 
-    res.json({ ok:true, application_id:result.application.application_id, event:result.eventName, price_thb:result.priceThb, payment_required:false, duplicate:result.duplicate });
+Next step — participation payment. Please choose a payment method below.`);
+      await sendPaymentStart(user.id, lang, applicationId);
+    } else if (isEventApplication) {
+      await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}. Детали подтверждения участия будут отправлены через Telegram-бота.` : `✅ Your event application has been saved: ${eventName}. Participation confirmation details will be sent through the Telegram bot.`);
+    } else await sendMessage(user.id, lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You will be able to join open events later.');
+
+    res.json({ ok:true, application_id:applicationId, event:eventName, price_thb:priceThb, payment_required:paymentRequired });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });

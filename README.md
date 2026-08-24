@@ -28,18 +28,6 @@ Only users with completed profile in Applicants can challenge players.
 If challenger has a public Telegram username, accepted challenge opens direct Telegram contact.
 If no username is available, bot opens temporary bot-mediated chat.
 
-## Retirement match results
-
-Put the winner first when using a bare `ret.` marker:
-
-```text
-Div A
-Winner Name - Retired Name 6-4 2-1 ret.
-```
-
-The bot also accepts `retired`, `rtd.`, `ret. P1`, `ret. P2`, and a marker attached
-to a player name such as `Player Name (ret.)`.
-
 ## Required Railway variables
 
 ```env
@@ -55,3 +43,21 @@ NODE_ENV=production
 ```
 
 After deploy, run `/admin_init` in the admin Telegram group.
+
+## Payment Methods and Payment Summary
+
+Current supported payment methods:
+
+- Thai bank transfer
+- USDT TRC20
+- USDT ERC20
+
+To change the Thai bank account without redeploy, edit Google Sheets → `Payment Methods` → row `thai_bank` → column `recipient`.
+
+To prepare payment methods and create the compact summary tab, run once:
+
+```bash
+npm run setup:payments
+```
+
+The helper script updates `Payment Methods` and creates `Payment Summary` with basic payment balance formulas.

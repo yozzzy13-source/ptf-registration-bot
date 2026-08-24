@@ -1,25 +1,19 @@
-import { sendMessage, editMessageText, sendPhoto, sendDocument, copyMessage, getChat, createForumTopic, deleteForumTopic } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findLeadByTelegramId, findApplicantByAdminTopic, openAdminChatByTelegramId, setAdminTopicByTelegramId, updateContactByTelegramId, logMessage } from './sheets.js';
-import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, ADMIN_CRM_CHAT_ID, BROADCAST_DELAY_MS } from './config.js';
+import { sendMessage, sendPhoto, sendDocument, copyMessage } from './telegram.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId } from './sheets.js';
+import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
 
 export const adminState = new Map();
-const topicCreationLocks = new Map();
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 export function isAdminUser(userId) {
-  if (!ADMIN_IDS.length) return true; // first launch mode. Fill ADMIN_IDS later for stricter access.
+  if (!ADMIN_IDS.length) return false; // admin panel is closed until ADMIN_IDS is configured.
   return ADMIN_IDS.includes(String(userId));
 }
 
 export async function getAdminChatId() {
   return await getSetting('admin_chat_id');
-}
-
-export async function getCrmChatId() {
-  return ADMIN_CRM_CHAT_ID || await getSetting('admin_crm_chat_id') || await getAdminChatId();
 }
 
 export async function notifyAdmin(text, opts={}) {
@@ -33,168 +27,37 @@ export async function handleAdminInit(msg) {
   await sendMessage(msg.chat.id, `✅ Admin inbox connected.\n\nchat_id: <code>${msg.chat.id}</code>`);
 }
 
-export async function handleCrmInit(msg) {
-  const chat = await getChat(msg.chat.id).catch(e => ({ error: e }));
-
-  if (chat.error) {
-    return sendMessage(msg.chat.id, `<b>CRM topic group was not connected</b>\n\nTelegram error:\n<code>${escapeHtml(chat.error.message || chat.error)}</code>`);
-  }
-
-  if (msg.chat.type !== 'supergroup' || chat.is_forum !== true) {
-    return sendMessage(
-      msg.chat.id,
-      `<b>CRM topics are not enabled in this group</b>\n\nPlease open group settings and enable Topics first. The group must be a Telegram forum/supergroup. After that, run /crm_init again.`
-    );
-  }
-
-  try {
-    const probe = await createForumTopic(msg.chat.id, 'CRM setup test');
-    if (probe?.message_thread_id) {
-      await deleteForumTopic(msg.chat.id, probe.message_thread_id).catch(() => {});
-    }
-  } catch (e) {
-    return sendMessage(
-      msg.chat.id,
-      `<b>CRM topic group was not connected</b>\n\nThe group has Topics enabled, but the bot cannot create topics. Give the bot admin permission to manage topics, then run /crm_init again.\n\nTelegram error:\n<code>${escapeHtml(e.message || e)}</code>`
-    );
-  }
-
-  await setSetting('admin_crm_chat_id', String(msg.chat.id), 'Telegram forum group for per-player CRM topics');
-  await sendMessage(msg.chat.id, `CRM topic group connected.\n\nchat_id: <code>${msg.chat.id}</code>\n\nNew player conversations will now create personal topics here.`);
-}
-
-function topicNameForProfile(profile={}) {
-  const baseName = profile.name || profile.player_name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || profile.telegram_username || profile.username || profile.telegram_id || profile.id || 'Unknown';
-  const username = profile.telegram_username || profile.username || '';
-  const id = profile.telegram_id || profile.id || '';
-  const suffix = username ? ` @${String(username).replace(/^@/, '')}` : id ? ` ${id}` : '';
-  return `${baseName}${suffix}`.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-}
-
-async function getOrCreateAdminTopicForTelegramIdUnlocked(telegramId, fallback={}) {
-  const chatId = await getCrmChatId();
-  if (!chatId || !telegramId) return null;
-
-  const profile = await findApplicantByTelegramId(telegramId).catch(() => null)
-    || await findLeadByTelegramId(telegramId).catch(() => null);
-  const contact = profile || { ...fallback, telegram_id: telegramId };
-
-  if (contact.admin_topic_id) {
-    return {
-      chatId,
-      messageThreadId: Number(contact.admin_topic_id),
-      topicName: contact.admin_topic_name || topicNameForProfile(contact),
-      profile: contact
-    };
-  }
-
-  const topicName = topicNameForProfile(contact);
-
-  try {
-    const topic = await createForumTopic(chatId, topicName);
-    const messageThreadId = topic.message_thread_id;
-
-    if (profile) {
-      await setAdminTopicByTelegramId(telegramId, {
-        admin_topic_id: String(messageThreadId),
-        admin_topic_name: topicName,
-        admin_topic_chat_id: String(chatId)
-      });
-    }
-
-    return { chatId, messageThreadId, topicName, profile: contact };
-  } catch (e) {
-    console.error('createForumTopic failed', e.message || e);
-    return { chatId, messageThreadId: null, topicName, profile: contact, topicError: e };
-  }
-}
-
-async function getOrCreateAdminTopicForTelegramId(telegramId, fallback={}) {
-  const key = String(telegramId || '');
-  if (!key) return null;
-  if (topicCreationLocks.has(key)) return topicCreationLocks.get(key);
-
-  const pending = getOrCreateAdminTopicForTelegramIdUnlocked(telegramId, fallback)
-    .finally(() => topicCreationLocks.delete(key));
-  topicCreationLocks.set(key, pending);
-  return pending;
-}
-
-export async function handleAdminTopicMessage(msg) {
-  const chatId = String(msg.chat?.id || '');
-  const crmChatId = String(await getCrmChatId() || '');
-
-  if (!crmChatId || chatId !== crmChatId) return false;
-  if (!msg.message_thread_id) return false;
-  if (msg.from?.is_bot) return true;
-  if (msg.forum_topic_created || msg.forum_topic_closed || msg.forum_topic_reopened || msg.general_forum_topic_hidden || msg.general_forum_topic_unhidden) return true;
-
-  const applicant = await findApplicantByAdminTopic(msg.message_thread_id, chatId);
-  if (!applicant?.telegram_id) return false;
-
-  const text = msg.text || msg.caption || '';
-  if (!text && !msg.photo && !msg.document && !msg.video && !msg.voice && !msg.audio && !msg.sticker) return true;
-
-  try {
-    await copyMessage(applicant.telegram_id, msg.chat.id, msg.message_id);
-    adminState.delete(String(msg.from?.id || ''));
-  } catch (e) {
-    console.error('CRM topic reply failed', e?.message || e);
-    await sendMessage(
-      msg.chat.id,
-      `<b>Message was not delivered</b>\n\n<code>${escapeHtml(e?.message || e)}</code>`,
-      { message_thread_id: msg.message_thread_id }
-    ).catch(() => {});
-    return true;
-  }
-  await openAdminChatByTelegramId(applicant.telegram_id, 'admin_topic_reply', {
-    id: msg.from?.id,
-    name: msg.from?.username || msg.from?.first_name || ''
-  });
-  await logMessage({
-    message_id: uid('msg'),
-    telegram_id: applicant.telegram_id,
-    direction: 'outgoing',
-    message_type: msg.photo ? 'photo' : msg.document ? 'document' : msg.video ? 'video' : 'text',
-    message_text: text || '[media]',
-    timestamp: nowISO(),
-    admin_id: msg.from?.id || '',
-    admin_name: msg.from?.username || msg.from?.first_name || '',
-    status: 'sent',
-    related_event: `admin_topic:${msg.message_thread_id}`
-  });
-
-  return true;
-}
-
-export async function recordAdminOutbound(telegramId, text, admin={}, source='admin_outbound') {
-  const topic = await getOrCreateAdminTopicForTelegramId(telegramId, {
-    telegram_id: telegramId,
-    name: ''
-  });
-
-  if (!topic?.chatId || !topic.messageThreadId) return null;
-
-  const label = source.replace(/_/g, ' ');
-  return sendMessage(
-    topic.chatId,
-    `<b>Outgoing · ${escapeHtml(label)}</b>\n\n${escapeHtml(text || '[media]')}`,
-    { message_thread_id: topic.messageThreadId }
-  ).catch(e => {
-    console.error('recordAdminOutbound failed', e.message || e);
-    return null;
-  });
-}
-
 export async function adminStats(chatId) {
   const applicants = (await getRows(SHEETS.applicants, { useCache:false })).rows;
   const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
   const payments = (await getRows(SHEETS.payments, { useCache:false })).rows;
   const active = applicants.filter(r => r.status === 'active').length;
   const waitlist = applicants.filter(r => r.status === 'waitlist').length;
-  const proof = apps.filter(r => r.application_status === 'proof_received').length;
-  await sendMessage(chatId, `<b>PTF Stats</b>\n\nContacts: <b>${applicants.length}</b>\nApplications: <b>${apps.length}</b>\nActive: <b>${active}</b>\nWaitlist: <b>${waitlist}</b>\nPayment proofs waiting: <b>${proof}</b>\nPayments: <b>${payments.length}</b>`);
+  const norm = v => String(v || '').trim().toLowerCase();
+  const unpaid = apps.filter(r => ['payment_required','waiting_payment'].includes(norm(r.payment_status))).length;
+  const proof = apps.filter(r => norm(r.payment_status) === 'proof_received' || norm(r.payment_proof_status) === 'proof_received').length;
+  const approved = apps.filter(r => norm(r.payment_status) === 'approved').length;
+  const rejected = apps.filter(r => norm(r.payment_status) === 'rejected').length;
+  const approvedPayments = payments.filter(p => norm(p.status) === 'approved');
+  const paidThb = approvedPayments.filter(p => norm(p.currency) === 'thb').reduce((sum,p) => sum + Number(p.amount || 0), 0);
+  const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
+  await sendMessage(chatId, `<b>PTF Stats</b>
+
+Contacts: <b>${applicants.length}</b>
+Applications: <b>${apps.length}</b>
+Active: <b>${active}</b>
+Waitlist: <b>${waitlist}</b>
+
+<b>Payments</b>
+Unpaid / waiting: <b>${unpaid}</b>
+Proofs waiting review: <b>${proof}</b>
+Approved: <b>${approved}</b>
+Rejected: <b>${rejected}</b>
+Paid THB: <b>${paidThb}</b>
+Paid USDT: <b>${paidUsdt}</b>
+Payment rows: <b>${payments.length}</b>`);
 }
+
 
 export async function adminEvents(chatId) {
   const rows = (await getRows(SHEETS.events, { useCache:false })).rows;
@@ -236,150 +99,71 @@ export async function adminProfile(chatId, query) {
 }
 
 export async function notifyNewApplication(app, profile) {
-  const topic = await getOrCreateAdminTopicForTelegramId(app.telegram_id, profile);
-  const text = `<b>🎾 New application</b>\n\nApplication: <code>${escapeHtml(app.application_id)}</code>\nTGID: <code>${escapeHtml(app.telegram_id)}</code>\nPlayer: <b>${escapeHtml(profile.name)}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}\nEvent: <b>${escapeHtml(app.event_name)}</b>\nStatus: <b>${escapeHtml(app.application_status)}</b>\n\nNTRP: ${escapeHtml(profile.ntrp)}\nExperience: ${escapeHtml(profile.experience)}\nGender: ${escapeHtml(profile.gender)}\nAge: ${escapeHtml(profile.age)}\nCountry: ${escapeHtml(profile.country_of_origin)}\nWhatsApp: ${escapeHtml(profile.whatsapp)}\nNotes: ${escapeHtml(profile.notes)}`;
-  const opts = { reply_markup: adminApplicationKeyboard(app.application_id, app.telegram_id) };
-
-  if (app.admin_notification_message_id && app.admin_notification_chat_id) {
-    return editMessageText(
-      app.admin_notification_chat_id,
-      app.admin_notification_message_id,
-      text,
-      opts
-    ).catch(e => {
-      console.error('application notification edit failed', e.message || e);
-      return null;
-    });
-  }
-
-  if (profile.admin_lead_message_id && profile.admin_lead_chat_id) {
-    const edited = await editMessageText(
-      profile.admin_lead_chat_id,
-      profile.admin_lead_message_id,
-      text,
-      opts
-    ).catch(e => {
-      console.error('lead notification promotion failed', e.message || e);
-      return null;
-    });
-    if (edited) {
-      await updateApplication(app.application_id, {
-        admin_notification_message_id: String(profile.admin_lead_message_id),
-        admin_notification_chat_id: String(profile.admin_lead_chat_id),
-        admin_notification_topic_id: String(topic?.messageThreadId || ''),
-        admin_notification_sent_at: nowISO()
-      });
-      return edited;
-    }
-  }
-
-  if (topic?.chatId && topic.messageThreadId) {
-    const sent = await sendMessage(topic.chatId, text, { ...opts, message_thread_id: topic.messageThreadId });
-    await updateApplication(app.application_id, {
-      admin_notification_message_id: String(sent.message_id),
-      admin_notification_chat_id: String(topic.chatId),
-      admin_notification_topic_id: String(topic.messageThreadId),
-      admin_notification_sent_at: nowISO()
-    });
-    return sent;
-  }
-
-  const sent = await notifyAdmin(text, opts);
-  if (sent?.message_id) {
-    await updateApplication(app.application_id, {
-      admin_notification_message_id: String(sent.message_id),
-      admin_notification_chat_id: String(sent.chat?.id || ''),
-      admin_notification_topic_id: '',
-      admin_notification_sent_at: nowISO()
-    });
-  }
-  return sent;
-}
-
-export async function notifyNewLead(profile) {
-  const topic = await getOrCreateAdminTopicForTelegramId(profile.telegram_id, profile);
-  const text = `<b>New lead</b>\n\nTGID: <code>${escapeHtml(profile.telegram_id)}</code>\nName: <b>${escapeHtml(profile.name || '')}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}`;
-
-  if (topic?.chatId && topic.messageThreadId) {
-    const sent = await sendMessage(topic.chatId, text, { message_thread_id: topic.messageThreadId });
-    await updateContactByTelegramId(profile.telegram_id, {
-      admin_lead_message_id: String(sent.message_id),
-      admin_lead_chat_id: String(topic.chatId),
-      admin_lead_sent_at: nowISO()
-    });
-    return sent;
-  }
-
-  const sent = await notifyAdmin(text);
-  if (sent?.message_id) {
-    await updateContactByTelegramId(profile.telegram_id, {
-      admin_lead_message_id: String(sent.message_id),
-      admin_lead_chat_id: String(sent.chat?.id || ''),
-      admin_lead_sent_at: nowISO()
-    });
-  }
-  return sent;
-}
-
-export async function notifyIncomingMessage(from, text, telegramMessageId, sourceChatId=null, shouldCopy=false) {
-  const topic = await getOrCreateAdminTopicForTelegramId(from.id, {
-    name: from.name || '',
-    telegram_username: from.username || '',
-    telegram_id: from.id
+  await notifyAdmin(`<b>🎾 New application</b>\n\nApplication: <code>${escapeHtml(app.application_id)}</code>\nTGID: <code>${escapeHtml(app.telegram_id)}</code>\nPlayer: <b>${escapeHtml(profile.name)}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}\nEvent: <b>${escapeHtml(app.event_name)}</b>\nStatus: <b>${escapeHtml(app.application_status)}</b>\n\nNTRP: ${escapeHtml(profile.ntrp)}\nExperience: ${escapeHtml(profile.experience)}\nGender: ${escapeHtml(profile.gender)}\nAge: ${escapeHtml(profile.age)}\nCountry: ${escapeHtml(profile.country_of_origin)}\nWhatsApp: ${escapeHtml(profile.whatsapp)}\nNotes: ${escapeHtml(profile.notes)}`, {
+    reply_markup: adminApplicationKeyboard(app.application_id, app.telegram_id)
   });
-  const body = `<b>💬 New message from player</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}\n\n${escapeHtml(text)}`;
-  const opts = {
+}
+
+export async function notifyIncomingMessage(from, text, telegramMessageId) {
+  const adminMsg = await notifyAdmin(`<b>💬 New message from player</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}\n\n${escapeHtml(text)}`, {
     reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] }
-  };
-
-  let adminMsg = null;
-
-  if (topic?.chatId && topic.messageThreadId) {
-    if (telegramMessageId) {
-      adminMsg = await copyMessage(
-        topic.chatId,
-        sourceChatId || from.id,
-        telegramMessageId,
-        { message_thread_id: topic.messageThreadId }
-      ).catch(e => {
-        console.error('copy incoming message to topic failed', e.message || e);
-        return null;
-      });
-    }
-
-    if (!adminMsg) {
-      adminMsg = await sendMessage(topic.chatId, escapeHtml(text || '[media]'), { message_thread_id: topic.messageThreadId });
-    }
-  } else {
-    adminMsg = await notifyAdmin(body, opts);
-
-    if (shouldCopy && telegramMessageId) {
-      const chatId = await getAdminChatId();
-      if (chatId) await copyMessage(chatId, sourceChatId || from.id, telegramMessageId).catch(e => console.error('copy incoming message failed', e.message || e));
-    }
-  }
-
+  });
   return adminMsg;
 }
 
 export async function notifyPaymentProof({ app, payment, from, originalMessage }) {
-  const topic = await getOrCreateAdminTopicForTelegramId(from.id, {
-    name: app.player_name || '',
-    telegram_username: from.username || '',
-    telegram_id: from.id
-  });
-  const chatId = topic?.chatId || await getAdminChatId();
+  const chatId = await getAdminChatId();
   if (!chatId) return;
-  const threadOpts = topic?.messageThreadId ? { message_thread_id: topic.messageThreadId } : {};
   const caption = `<b>💳 Payment proof received</b>\n\nApplication: <code>${escapeHtml(app.application_id)}</code>\nPayment: <code>${escapeHtml(payment.payment_id)}</code>\nTGID: <code>${escapeHtml(from.id)}</code>\nPlayer: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}\nEvent: ${escapeHtml(app.event_name)}\nMethod: <b>${escapeHtml(payment.method)}</b> ${escapeHtml(payment.network || '')}\nAmount: <b>${escapeHtml(payment.amount)} ${escapeHtml(payment.currency)}</b>`;
   if (originalMessage.photo?.length) {
     const fileId = originalMessage.photo[originalMessage.photo.length - 1].file_id;
-    await sendPhoto(chatId, fileId, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id), ...threadOpts });
+    await sendPhoto(chatId, fileId, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   } else if (originalMessage.document) {
-    await sendDocument(chatId, originalMessage.document.file_id, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id), ...threadOpts });
+    await sendDocument(chatId, originalMessage.document.file_id, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   } else {
-    await sendMessage(chatId, caption, { reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id), ...threadOpts });
+    await sendMessage(chatId, caption, { reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   }
+}
+
+
+export async function startBroadcastWithMenu(chatId, adminId) {
+  const contacts = await getSegmentContacts('all');
+  adminState.set(String(adminId), { mode: 'broadcast_menu_message', segment: 'all', count: contacts.length });
+  await sendMessage(chatId, `<b>Broadcast with menu button</b>\n\nRecipients: <b>${contacts.length}</b>\n\nSend the text that should go to all users. The bot will attach a button that opens the main menu.`);
+}
+
+export async function handleBroadcastMenuMessage(msg, state) {
+  const text = msg.text || msg.caption || '';
+  if (!text) return sendMessage(msg.chat.id, 'Send a text message for this broadcast.');
+  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_menu_confirm', message_text: text });
+  await sendMessage(msg.chat.id, `<b>Broadcast preview</b>\n\nSegment: <b>all</b>\nRecipients: <b>${state.count}</b>\n\n${escapeHtml(text)}\n\nButton: <b>🎾 Open menu</b>\n\nSend now?`, { reply_markup: { inline_keyboard: [[
+    { text: '✅ Send now', callback_data: 'bcconfirm_menu' },
+    { text: '❌ Cancel', callback_data: 'bccancel' }
+  ]]}});
+}
+
+export async function executeBroadcastWithMenu(callbackQuery) {
+  const adminId = callbackQuery.from.id;
+  const state = adminState.get(String(adminId));
+  if (!state || state.mode !== 'broadcast_menu_confirm') return;
+  const contacts = await getSegmentContacts('all');
+  const broadcastId = uid('broadcast');
+  const keyboard = { inline_keyboard: [[{ text: '🎾 Open menu / Открыть меню', callback_data: 'main' }]] };
+  let sent = 0, failed = 0;
+  for (const c of contacts) {
+    try {
+      await sendMessage(c.telegram_id, state.message_text, { reply_markup: keyboard });
+      sent++;
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'all_menu_button' });
+      await new Promise(r => setTimeout(r, 45));
+    } catch (e) {
+      failed++;
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:'all_menu_button' });
+    }
+  }
+  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'all_menu_button', language:'mixed', message_text:state.message_text, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+  adminState.delete(String(adminId));
+  await sendMessage(callbackQuery.message.chat.id, `✅ Broadcast finished\n\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>`);
 }
 
 export async function startBroadcast(chatId, adminId) {
@@ -425,11 +209,11 @@ export async function executeBroadcast(callbackQuery) {
       await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id);
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:state.segment });
+      await new Promise(r => setTimeout(r, 45));
     } catch (e) {
       failed++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:state.segment });
     }
-    await delay(BROADCAST_DELAY_MS);
   }
   await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:state.segment, language:'mixed', message_text:state.sourceMessage.text || state.sourceMessage.caption || '[media]', media_type: state.sourceMessage.photo ? 'photo' : state.sourceMessage.document ? 'document' : state.sourceMessage.video ? 'video' : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
   adminState.delete(String(adminId));
@@ -447,14 +231,10 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
       : '<b>Congratulations!</b> 🎾\n\nYou are now part of <b>Phuket Tennis Family</b>, and your participation in the season has been confirmed.\n\nYou can now join our club chat and start your journey inside our tennis family.';
     if (!app.confirmed_message_sent_at) {
       await sendMessage(app.telegram_id, text, { reply_markup: clubKeyboard(lang, CLUB_CHAT_URL) });
-      await recordAdminOutbound(app.telegram_id, text, {}, 'status_update');
-      await openAdminChatByTelegramId(app.telegram_id, 'status_update', {});
       await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() });
     }
   } else if (status === 'waitlist') {
     await sendMessage(app.telegram_id, t(lang, 'waitlist'));
-    await recordAdminOutbound(app.telegram_id, t(lang, 'waitlist'), {}, 'status_update');
-    await openAdminChatByTelegramId(app.telegram_id, 'status_update', {});
   }
   await sendMessage(chatId, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
 }
@@ -462,7 +242,7 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
 export async function setPaymentStatus({ chatId, applicationId, paymentId, status }) {
   await updatePayment(paymentId, { status: status === 'approved' ? 'approved' : 'rejected', admin_checked_at: nowISO() });
   const appStatus = status === 'approved' ? 'payment_approved' : 'waiting_payment';
-  const app = await updateApplication(applicationId, { application_status: appStatus, payment_proof_status: status });
+  const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: status === 'approved' ? 'approved' : 'rejected', payment_proof_status: status, payment_reviewed_at: nowISO() });
   if (app) await updateApplicantStatusByTelegramId(app.telegram_id, appStatus);
   await sendMessage(chatId, `Payment ${escapeHtml(status)} for application <code>${escapeHtml(applicationId)}</code>. Participation status is still separate.`);
 }

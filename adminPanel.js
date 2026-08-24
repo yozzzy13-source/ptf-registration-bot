@@ -1,8 +1,7 @@
-import { ADMIN_IDS, SHEETS, BOT_TOKEN, BROADCAST_DELAY_MS } from './config.js';
+import { ADMIN_IDS, SHEETS, BOT_TOKEN } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, getBroadcastContacts, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, openAdminChatByTelegramId } from './sheets.js';
+import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested } from './sheets.js';
 import { sendMessage } from './telegram.js';
-import { recordAdminOutbound } from './admin.js';
 
 function isAdminId(id) {
   if (!ADMIN_IDS.length) return false;
@@ -19,7 +18,6 @@ function adminFromInitData(initData='') {
 }
 
 function norm(v) { return String(v || '').trim().toLowerCase(); }
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function publicContact(row) {
   return {
     row: row._rowNumber,
@@ -33,9 +31,7 @@ function publicContact(row) {
     last_application_event: row.last_application_event || '',
     country: row.country_of_origin || '',
     whatsapp: row.whatsapp || '',
-    crm_tags: row.crm_tags || '',
-    can_message: Boolean(row.telegram_id),
-    contact_sources: Array.isArray(row.sources) ? row.sources.join(', ') : ''
+    crm_tags: row.crm_tags || ''
   };
 }
 
@@ -71,10 +67,6 @@ async function getContacts() {
   return (await getRows(SHEETS.applicants, { useCache:false })).rows;
 }
 
-async function getSendableContacts() {
-  return await getBroadcastContacts();
-}
-
 export function registerAdminRoutes(app) {
   app.get('/admin', (req, res) => res.sendFile(process.cwd() + '/public/admin.html'));
 
@@ -83,16 +75,23 @@ export function registerAdminRoutes(app) {
       const auth = adminFromInitData(req.query.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
       const contacts = await getContacts();
-      const sendableContacts = await getSendableContacts();
       const applications = (await getRows(SHEETS.applications, { useCache:false })).rows;
       const payments = (await getRows(SHEETS.payments, { useCache:false })).rows;
       const events = (await getRows(SHEETS.events, { useCache:false })).rows;
       const active = contacts.filter(r => r.status === 'active').length;
       const waitlist = contacts.filter(r => r.status === 'waitlist').length;
       const missingSelfie = contacts.filter(r => r.status === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received').length;
+      const payStatus = s => applications.filter(a => norm(a.payment_status) === s).length;
+      const unpaid = applications.filter(a => ['payment_required','waiting_payment'].includes(norm(a.payment_status))).length;
+      const proofReceived = payStatus('proof_received');
+      const paid = payStatus('approved');
+      const rejectedPayments = payStatus('rejected');
+      const approvedPayments = payments.filter(p => norm(p.status) === 'approved');
+      const paidThb = approvedPayments.filter(p => norm(p.currency) === 'thb').reduce((sum,p) => sum + Number(p.amount || 0), 0);
+      const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
       const divisions = [...new Set(contacts.map(r => r.division).filter(Boolean))].sort();
       const statuses = [...new Set(contacts.map(r => r.status).filter(Boolean))].sort();
-      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, sendable:sendableContacts.length, no_telegram_id:Math.max(contacts.length - contacts.filter(r => r.telegram_id).length, 0), applications:applications.length, payments:payments.length, active, waitlist, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses });
+      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -100,7 +99,7 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const contacts = applyFilters(await getSendableContacts(), req.body.filters || {});
+      const contacts = applyFilters(await getContacts(), req.body.filters || {});
       res.json({ ok:true, count:contacts.length, contacts:contacts.map(publicContact) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
@@ -111,7 +110,7 @@ export function registerAdminRoutes(app) {
       if (!auth.ok) return res.status(403).json(auth);
       const message = String(req.body.message || '').trim();
       if (!message) return res.status(400).json({ ok:false, error:'Message is empty' });
-      const contacts = applyFilters(await getSendableContacts(), req.body.filters || {});
+      const contacts = applyFilters(await getContacts(), req.body.filters || {});
       const broadcastId = uid('broadcast');
       let sent = 0, failed = 0;
       for (const c of contacts) {
@@ -123,7 +122,6 @@ export function registerAdminRoutes(app) {
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
           failed++;
         }
-        await delay(BROADCAST_DELAY_MS);
       }
       await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:JSON.stringify(req.body.filters || {}), language:'mixed', message_text:message, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
@@ -138,8 +136,6 @@ export function registerAdminRoutes(app) {
       const message = String(req.body.message || '').trim();
       if (!telegramId || !message) return res.status(400).json({ ok:false, error:'telegram_id and message are required' });
       await sendMessage(telegramId, message);
-      await recordAdminOutbound(telegramId, message, { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' }, 'admin_panel_direct');
-      await openAdminChatByTelegramId(telegramId, 'admin_panel_direct', { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' });
       await logMessage({ message_id:uid('msg'), telegram_id:telegramId, direction:'outgoing', message_type:'text', message_text:message, timestamp:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', status:'sent' });
       res.json({ ok:true });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
@@ -149,7 +145,7 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const contacts = applyFilters(await getSendableContacts(), { ...(req.body.filters || {}), selfie_status:'missing' }).filter(r => String(r.status).toLowerCase() === 'active');
+      const contacts = applyFilters(await getContacts(), { ...(req.body.filters || {}), selfie_status:'missing' }).filter(r => String(r.status).toLowerCase() === 'active');
       let sent = 0, failed = 0;
       for (const c of contacts) {
         const lang = c.language === 'ru' ? 'ru' : 'en';
@@ -158,8 +154,6 @@ export function registerAdminRoutes(app) {
           : '<b>📸 Please upload your selfie</b>\n\nYou are confirmed as a Phuket Tennis Family player. We need one selfie for your avatar and player profile card on the PTF website.\n\nTap the button below and send the photo to this chat.';
         try {
           await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '📸 Загрузить селфи' : '📸 Upload Selfie', callback_data:'upload_selfie' } ]] } });
-          await recordAdminOutbound(c.telegram_id, text, { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' }, 'selfie_request');
-          await openAdminChatByTelegramId(c.telegram_id, 'selfie_request', { id: auth.user.id, name: auth.user.username || auth.user.first_name || '' });
           await markSelfieRequested(c.telegram_id);
           sent++;
         } catch(e) { failed++; }
