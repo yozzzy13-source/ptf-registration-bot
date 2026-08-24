@@ -165,6 +165,23 @@ export async function createApplication(app) {
   return app;
 }
 
+export async function findApplicationByTelegramEvent(telegramId, eventId) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  return rows
+    .filter(r => String(r.telegram_id) === String(telegramId) && String(r.event_id) === String(eventId))
+    .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))[0] || null;
+}
+
+export async function createOrUpdateApplication(app) {
+  const existing = await findApplicationByTelegramEvent(app.telegram_id, app.event_id);
+  if (existing && !['active','approved','rejected','refunded'].includes(String(existing.application_status || '').toLowerCase())) {
+    await updateObjectByRow(SHEETS.applications, existing._rowNumber, { ...app, application_id: existing.application_id || app.application_id, updated_at: nowISO() });
+    return { ...existing, ...app, application_id: existing.application_id || app.application_id, isUpdated:true };
+  }
+  await appendObject(SHEETS.applications, app);
+  return { ...app, isUpdated:false };
+}
+
 export async function findApplication(applicationId) {
   const { rows } = await getRows(SHEETS.applications, { useCache:false });
   return rows.find(r => r.application_id === applicationId);
