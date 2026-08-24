@@ -16,7 +16,8 @@ const EXTRA_HEADERS = [
   'venue_ru',
   'show_price',
   'payment_enabled',
-  'selectable'
+  'selectable',
+  'price_usdt'
 ];
 
 async function valuesGet(range) {
@@ -44,9 +45,12 @@ async function upsertLeagueSeason2(headers) {
   const rows = values.slice(1);
   let idx = rows.findIndex(r => String(r[0] || '') === 'league_s2');
   if (idx < 0) idx = rows.length;
+  const existingRow = idx >= 0 ? (rows[idx] || []) : [];
   const row = new Array(headers.length).fill('');
-  const set = (key, value) => { const i = headers.indexOf(key); if (i >= 0) row[i] = value; };
-  set('event_id','league_s2');
+  headers.forEach((h, i) => row[i] = existingRow[i] || '');
+  const set = (key, value) => { const i = headers.indexOf(key); if (i >= 0 && !row[i]) row[i] = value; };
+  const force = (key, value) => { const i = headers.indexOf(key); if (i >= 0) row[i] = value; };
+  force('event_id','league_s2');
   set('event_name_en','League Season 2');
   set('event_name_ru','League Season 2');
   set('event_type','league');
@@ -54,6 +58,7 @@ async function upsertLeagueSeason2(headers) {
   set('start_date','2026-08-20');
   set('end_date','2026-10-20');
   set('price_thb','2490');
+  set('price_usdt','80');
   set('currency','THB');
   set('description_en','Applications are open for League Season 2. Final spots will be confirmed after registration closes. Priority goes to players with previous PTF experience.');
   set('description_ru','Открыт приём заявок во Второй сезон. Финальное количество мест определим после завершения регистрации. Приоритет получают игроки с предыдущим опытом участия в PTF.');

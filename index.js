@@ -6,7 +6,7 @@ import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
 import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
-import { notifyNewApplication } from './admin.js';
+import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -33,6 +33,7 @@ app.post('/webhook', async (req, res) => {
     }
     if (update.message) await handleMessage(update.message);
     else if (update.callback_query) await handleCallback(update.callback_query);
+    else if (update.poll) await handlePollUpdate(update.poll);
   } catch (e) {
     console.error('webhook error', e);
   }
@@ -77,6 +78,7 @@ function isPaymentEnabledForEvent(event) {
   return true;
 }
 function eventPriceThb(event) { return Number(event?.price_thb || 0); }
+function eventPriceUsdt(event) { return Number(event?.price_usdt || event?.usdt_amount || DEFAULT_USDT_AMOUNT || 0); }
 
 app.get('/api/payment-methods', async (req, res) => {
   try {
@@ -121,6 +123,7 @@ app.post('/api/submit-application', async (req, res) => {
     const finalEventId = event?.event_id || 'ptf_waitlist';
     const applicationId = uid('app');
     const priceThb = eventPriceThb(event);
+    const priceUsdt = eventPriceUsdt(event);
     const paymentRequired = isPaymentEnabledForEvent(event);
     const applicationStatus = event ? (paymentRequired ? 'waiting_payment' : 'application_received') : 'waitlist';
     const paymentStatus = paymentRequired ? 'payment_required' : 'not_required';
@@ -162,9 +165,10 @@ app.post('/api/submit-application', async (req, res) => {
       notes: safe(effectiveProfile.notes),
       payment_amount: paymentRequired ? priceThb : '',
       payment_currency: paymentRequired ? 'THB' : '',
-      payment_amount_usdt: '',
+      payment_amount_usdt: paymentRequired ? priceUsdt : '',
       payment_amount_thb: paymentRequired ? priceThb : '',
-      price_thb: paymentRequired ? priceThb : ''
+      price_thb: paymentRequired ? priceThb : '',
+      price_usdt: paymentRequired ? priceUsdt : ''
     };
     const savedApplication = await createOrUpdateApplication(appRow);
     appRow.application_id = savedApplication.application_id || applicationId;
@@ -193,7 +197,7 @@ Please choose a payment method below.`);
       await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}. Детали подтверждения участия будут отправлены через Telegram-бота.` : `✅ Your event application has been saved: ${eventName}. Participation confirmation details will be sent through the Telegram bot.`);
     } else await sendMessage(user.id, lang === 'ru' ? '✅ Анкета сохранена в системе PTF. Вы сможете податься в открытые события позже.' : '✅ Your profile has been saved in the PTF system. You will be able to join open events later.');
 
-    res.json({ ok:true, application_id:appRow.application_id, event:eventName, price_thb:priceThb, payment_required:paymentRequired, application_status: applicationStatus, payment_status: paymentStatus });
+    res.json({ ok:true, application_id:appRow.application_id, event:eventName, price_thb:priceThb, price_usdt:priceUsdt, payment_required:paymentRequired, application_status: applicationStatus, payment_status: paymentStatus });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });
