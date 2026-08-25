@@ -2,6 +2,9 @@ import { inlineKeyboard, webAppButton, urlButton, clubChatButton } from './teleg
 import { t } from './i18n.js';
 import { PUBLIC_URL } from './config.js';
 
+
+export function languageKeyboard() { return inlineKeyboard([[{text:'🇷🇺 Русский',callback_data:'lang_select:ru'},{text:'🇬🇧 English',callback_data:'lang_select:en'}]]); }
+
 export function mainKeyboard(lang) { return inlineKeyboard([
   [webAppButton(t(lang,'join'),'/apply?mode=profile')],
   [webAppButton(t(lang,'join_event'),'/apply?mode=event')],
@@ -14,7 +17,14 @@ export function textKeyboard(lang,key) { const rows=[[webAppButton(t(lang,'join'
 export function websiteKeyboard(lang, urls) { return inlineKeyboard([[{text:'🎾 Matches',url:urls.matches}],[{text:lang==='ru'?'🏆 Дивизионы':'🏆 Divisions',url:urls.divisions}],[{text:'⭐ Yearly Race',url:urls.yearlyRace}],[{text:lang==='ru'?'👥 Игроки':'👥 Players',url:urls.players}],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]); }
 export function contactOpenKeyboard(lang) { return inlineKeyboard([[{text:t(lang,'main_menu'),callback_data:'main'},{text:t(lang,'close_chat'),callback_data:'close_contact'}]]); }
 export function paymentKeyboard(lang, applicationId) { return inlineKeyboard([[{text:t(lang,'bank'),callback_data:`pay:${applicationId}:thai_bank`}],[{text:t(lang,'crypto'),callback_data:`crypto:${applicationId}`}],[{text:t(lang,'pay_later'),callback_data:`paylater:${applicationId}`}],[{text:t(lang,'call_admin'),callback_data:'contact'}]]); }
-export function cryptoKeyboard(lang, applicationId) { return inlineKeyboard([[{text:'USDT TRC20',callback_data:`pay:${applicationId}:crypto_usdt_trc20`}],[{text:'USDT ERC20',callback_data:`pay:${applicationId}:crypto_usdt_erc20`}],[{text:t(lang,'back'),callback_data:`payment_menu:${applicationId}`}]]); }
+export function cryptoKeyboard(lang, applicationId, methods=[]) {
+  const rows = methods
+    .filter(m => String(m.method_type || '').toLowerCase() === 'crypto' && String(m.currency || '').toUpperCase() === 'USDT' && String(m.status || 'active').toLowerCase() === 'active')
+    .map(m => [{ text: m[lang === 'ru' ? 'display_name_ru' : 'display_name_en'] || `USDT ${m.network || ''}`.trim(), callback_data: `pay:${applicationId}:${m.method_id}` }]);
+  if (!rows.length) rows.push([{ text:'USDT TRC20', callback_data:`pay:${applicationId}:crypto_usdt_trc20` }], [{ text:'USDT ERC20', callback_data:`pay:${applicationId}:crypto_usdt_erc20` }]);
+  rows.push([{text:t(lang,'back'),callback_data:`payment_menu:${applicationId}`}]);
+  return inlineKeyboard(rows);
+}
 export function paymentEntryKeyboard(lang, { hasProfile=false, applicationId='', status='' } = {}) {
   if (!hasProfile) return inlineKeyboard([[webAppButton(t(lang,'join'),'/apply?mode=event')],[{text:t(lang,'back'),callback_data:'main'}]]);
   if (applicationId && ['payment_required','waiting_payment',''].includes(String(status || '').toLowerCase())) return inlineKeyboard([[{text:t(lang,'pay_now'),callback_data:`payment_menu:${applicationId}`}],[{text:t(lang,'join_event'),web_app:{url:`${PUBLIC_URL}/apply?mode=event`}}],[{text:t(lang,'back'),callback_data:'main'}]]);

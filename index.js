@@ -5,7 +5,7 @@ import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEET
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted } from './sheets.js';
-import { langOf, parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
+import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 
@@ -43,12 +43,12 @@ app.get('/api/bootstrap', async (req, res) => {
   try {
     const initData = req.query.initData || '';
     const { user } = parseInitData(initData);
-    const lang = langOf(user?.language_code);
+    const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
+    const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en';
     const events = await getActiveEvents();
     const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
     const enrichedEvents = events.map(ev => ({ ...ev, applications_count: apps.filter(a => String(a.event_id) === String(ev.event_id)).length }));
-    const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
-    res.json({ ok: true, user, lang, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
+    res.json({ ok: true, user, lang, language_required: !existingProfile?.language, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
@@ -62,7 +62,8 @@ app.post('/api/save-profile', async (req, res) => {
     const { user } = parseInitData(initData);
     if (!user?.id) return res.status(400).json({ ok:false, error:'Telegram WebApp user not found' });
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
-    const lang = langOf(user.language_code); const username = user.username || '';
+    const existingProfile = await findApplicantByTelegramIdentity(user);
+    const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en'; const username = user.username || '';
     const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:profile.ntrp_unknown?'unknown':safe(profile.ntrp), status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:'ptf_waitlist,profile_completed', increment_application_count:false });
     res.json({ok:true,applicant,profileCompleted:true});
   } catch(e){ console.error(e); res.status(500).json({ok:false,error:e.message}); }
@@ -100,9 +101,9 @@ app.post('/api/submit-application', async (req, res) => {
     const events = await getActiveEvents();
     const event = event_id ? events.find(e => e.event_id === event_id) : null;
 
-    const lang = langOf(user.language_code);
     const username = user.username || '';
     const existingProfile = await findApplicantByTelegramIdentity(user);
+    const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en';
     const eventOnlyWithProfile = mode === 'event' && isProfileCompleted(existingProfile);
     const effectiveProfile = eventOnlyWithProfile ? {
       name: existingProfile.name,

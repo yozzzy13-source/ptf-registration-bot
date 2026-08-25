@@ -165,6 +165,36 @@ export async function findApplicantByTelegramIdentity(userOrProfile={}) {
   return null;
 }
 
+export async function setUserLanguage(user={}, language='en') {
+  const lang = language === 'ru' ? 'ru' : 'en';
+  const telegramId = user.id || user.telegram_id || '';
+  const username = user.username || user.telegram_username || '';
+  const name = user.name || [user.first_name, user.last_name].filter(Boolean).join(' ') || '';
+  const existing = await findApplicantByTelegramIdentity({ id: telegramId, username });
+  if (existing) {
+    await updateObjectByRow(SHEETS.applicants, existing._rowNumber, { language: lang, telegram_id: telegramId || existing.telegram_id, telegram_username: username || existing.telegram_username, telegram: username ? `t.me/${username}` : existing.telegram, updated_at: nowISO() });
+    return { ...existing, language: lang };
+  }
+  const newRow = {
+    date: nowISO(),
+    created_at: nowISO(),
+    updated_at: nowISO(),
+    name,
+    status: 'lead',
+    division: 'pending',
+    telegram_id: telegramId,
+    telegram_username: username,
+    telegram: username ? `t.me/${username}` : '',
+    language: lang,
+    source: 'telegram_language_select',
+    crm_tags: 'language_selected',
+    profile_completed: 'no',
+    selfie_status: 'optional_missing'
+  };
+  await appendObject(SHEETS.applicants, newRow);
+  return newRow;
+}
+
 export async function upsertApplicant(profile) {
   const existing = await findApplicantByTelegramIdentity(profile);
   const patch = {
@@ -180,7 +210,7 @@ export async function upsertApplicant(profile) {
     notes: profile.notes,
     telegram_id: profile.telegram_id,
     telegram_username: profile.telegram_username,
-    language: profile.language,
+    language: profile.language || existing?.language || '',
     source: profile.source || 'registration_bot',
     updated_at: nowISO(),
     last_application_event: profile.last_application_event,

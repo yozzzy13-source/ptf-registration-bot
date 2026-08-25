@@ -217,10 +217,11 @@ export async function executeBroadcastWithMenu(callbackQuery) {
   if (!state || state.mode !== 'broadcast_menu_confirm') return;
   const contacts = await getSegmentContacts('all');
   const broadcastId = uid('broadcast');
-  const keyboard = { inline_keyboard: [[{ text: '🎾 Open menu / Открыть меню', callback_data: 'main' }]] };
   let sent = 0, failed = 0;
   for (const c of contacts) {
     try {
+      const l = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
+      const keyboard = { inline_keyboard: [[{ text: l === 'ru' ? '🎾 Открыть меню' : '🎾 Open menu', callback_data: 'main' }]] };
       await sendMessage(c.telegram_id, state.message_text, { reply_markup: keyboard });
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'all_menu_button' });

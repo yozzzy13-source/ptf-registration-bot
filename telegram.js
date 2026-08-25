@@ -68,6 +68,7 @@ export async function setCommands() {
   return call('setMyCommands', { commands: [
     { command: 'start', description: 'Start / Main menu' },
     { command: 'help', description: 'Help' },
+    { command: 'language', description: 'Choose language' },
     { command: 'admin', description: 'Open admin panel' },
     { command: 'broadcast_menu', description: 'Admin: broadcast with menu button' },
     { command: 'broadcast_poll', description: 'Admin: send anonymous poll' },
