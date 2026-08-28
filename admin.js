@@ -1,5 +1,5 @@
-import { sendMessage, sendPhoto, sendDocument, copyMessage, sendPoll, createForumTopic } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic } from './sheets.js';
+import { sendMessage, sendPhoto, sendDocument, copyMessage } from './telegram.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -14,41 +14,6 @@ export function isAdminUser(userId) {
 
 export async function getAdminChatId() {
   return await getSetting('admin_chat_id');
-}
-
-function playerTopicName(profileOrFrom={}) {
-  const name = String(profileOrFrom.name || [profileOrFrom.first_name, profileOrFrom.last_name].filter(Boolean).join(' ') || 'Player').trim();
-  const username = String(profileOrFrom.telegram_username || profileOrFrom.username || '').replace(/^@/, '');
-  const id = String(profileOrFrom.telegram_id || profileOrFrom.id || '').trim();
-  const base = `${name}${username ? ' @' + username : id ? ' ' + id : ''}`.trim();
-  return base.slice(0, 120) || `Player ${id}`;
-}
-
-export async function getOrCreatePlayerTopic(player={}) {
-  const chatId = await getAdminChatId();
-  if (!chatId) return null;
-  const telegramId = player.telegram_id || player.id;
-  if (!telegramId) return null;
-  const profile = await findApplicantByTelegramId(telegramId).catch(() => null);
-  const currentTopicId = profile?.admin_topic_id || player.admin_topic_id || '';
-  if (currentTopicId) return { chatId, message_thread_id: Number(currentTopicId), topicName: profile?.admin_topic_name || playerTopicName(profile || player), existing:true };
-  const topicName = playerTopicName(profile || player);
-  try {
-    const topic = await createForumTopic(chatId, topicName);
-    const threadId = topic?.message_thread_id;
-    if (threadId) {
-      await updateApplicantAdminTopic(telegramId, { admin_topic_id:String(threadId), admin_topic_name:topicName, admin_topic_created_at:nowISO() }).catch(() => {});
-      return { chatId, message_thread_id: threadId, topicName, existing:false };
-    }
-  } catch (e) {
-    console.error('createForumTopic failed; falling back to General:', e.message);
-  }
-  return { chatId, topicName, existing:false };
-}
-
-function withTopicOpts(topic, opts={}) {
-  if (topic?.message_thread_id) return { ...opts, message_thread_id: topic.message_thread_id };
-  return opts;
 }
 
 export async function notifyAdmin(text, opts={}) {
@@ -134,63 +99,29 @@ export async function adminProfile(chatId, query) {
 }
 
 export async function notifyNewApplication(app, profile) {
-  const topic = await getOrCreatePlayerTopic({ ...profile, telegram_id: app.telegram_id });
-  const chatId = topic?.chatId || await getAdminChatId();
-  if (!chatId) return null;
-  await sendMessage(chatId, `<b>🎾 New application</b>
-
-Application: <code>${escapeHtml(app.application_id)}</code>
-TGID: <code>${escapeHtml(app.telegram_id)}</code>
-Player: <b>${escapeHtml(profile.name)}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}
-Event: <b>${escapeHtml(app.event_name)}</b>
-Status: <b>${escapeHtml(app.application_status)}</b>
-
-NTRP: ${escapeHtml(profile.ntrp)}
-Experience: ${escapeHtml(profile.experience)}
-Gender: ${escapeHtml(profile.gender)}
-Age: ${escapeHtml(profile.age)}
-Country: ${escapeHtml(profile.country_of_origin)}
-WhatsApp: ${escapeHtml(profile.whatsapp)}
-Notes: ${escapeHtml(profile.notes)}`, withTopicOpts(topic, {
+  await notifyAdmin(`<b>🎾 New application</b>\n\nApplication: <code>${escapeHtml(app.application_id)}</code>\nTGID: <code>${escapeHtml(app.telegram_id)}</code>\nPlayer: <b>${escapeHtml(profile.name)}</b> ${profile.telegram_username ? '@'+escapeHtml(profile.telegram_username) : ''}\nEvent: <b>${escapeHtml(app.event_name)}</b>\nStatus: <b>${escapeHtml(app.application_status)}</b>\n\nNTRP: ${escapeHtml(profile.ntrp)}\nExperience: ${escapeHtml(profile.experience)}\nGender: ${escapeHtml(profile.gender)}\nAge: ${escapeHtml(profile.age)}\nCountry: ${escapeHtml(profile.country_of_origin)}\nWhatsApp: ${escapeHtml(profile.whatsapp)}\nNotes: ${escapeHtml(profile.notes)}`, {
     reply_markup: adminApplicationKeyboard(app.application_id, app.telegram_id)
-  }));
+  });
 }
 
 export async function notifyIncomingMessage(from, text, telegramMessageId) {
-  const topic = await getOrCreatePlayerTopic(from);
-  const chatId = topic?.chatId || await getAdminChatId();
-  if (!chatId) return null;
-  return sendMessage(chatId, `<b>💬 New message from player</b>
-
-TGID: <code>${escapeHtml(from.id)}</code>
-From: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
-
-${escapeHtml(text)}`, withTopicOpts(topic, {
+  const adminMsg = await notifyAdmin(`<b>💬 New message from player</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}\n\n${escapeHtml(text)}`, {
     reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] }
-  }));
+  });
+  return adminMsg;
 }
 
 export async function notifyPaymentProof({ app, payment, from, originalMessage }) {
-  const topic = await getOrCreatePlayerTopic({ ...from, id: from.id, name: app.player_name, telegram_id: app.telegram_id });
-  const chatId = topic?.chatId || await getAdminChatId();
+  const chatId = await getAdminChatId();
   if (!chatId) return;
-  const caption = `<b>💳 Payment proof received</b>
-
-Application: <code>${escapeHtml(app.application_id)}</code>
-Payment: <code>${escapeHtml(payment.payment_id)}</code>
-TGID: <code>${escapeHtml(from.id)}</code>
-Player: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
-Event: ${escapeHtml(app.event_name)}
-Method: <b>${escapeHtml(payment.method)}</b> ${escapeHtml(payment.network || '')}
-Amount: <b>${escapeHtml(payment.amount)} ${escapeHtml(payment.currency)}</b>`;
-  const opts = withTopicOpts(topic, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
+  const caption = `<b>💳 Payment proof received</b>\n\nApplication: <code>${escapeHtml(app.application_id)}</code>\nPayment: <code>${escapeHtml(payment.payment_id)}</code>\nTGID: <code>${escapeHtml(from.id)}</code>\nPlayer: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}\nEvent: ${escapeHtml(app.event_name)}\nMethod: <b>${escapeHtml(payment.method)}</b> ${escapeHtml(payment.network || '')}\nAmount: <b>${escapeHtml(payment.amount)} ${escapeHtml(payment.currency)}</b>`;
   if (originalMessage.photo?.length) {
     const fileId = originalMessage.photo[originalMessage.photo.length - 1].file_id;
-    await sendPhoto(chatId, fileId, opts);
+    await sendPhoto(chatId, fileId, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   } else if (originalMessage.document) {
-    await sendDocument(chatId, originalMessage.document.file_id, opts);
+    await sendDocument(chatId, originalMessage.document.file_id, { caption, reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   } else {
-    await sendMessage(chatId, caption, withTopicOpts(topic, { reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) }));
+    await sendMessage(chatId, caption, { reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
   }
 }
 
@@ -217,11 +148,10 @@ export async function executeBroadcastWithMenu(callbackQuery) {
   if (!state || state.mode !== 'broadcast_menu_confirm') return;
   const contacts = await getSegmentContacts('all');
   const broadcastId = uid('broadcast');
+  const keyboard = { inline_keyboard: [[{ text: '🎾 Open menu / Открыть меню', callback_data: 'main' }]] };
   let sent = 0, failed = 0;
   for (const c of contacts) {
     try {
-      const l = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
-      const keyboard = { inline_keyboard: [[{ text: l === 'ru' ? '🎾 Открыть меню' : '🎾 Open menu', callback_data: 'main' }]] };
       await sendMessage(c.telegram_id, state.message_text, { reply_markup: keyboard });
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'all_menu_button' });
@@ -234,85 +164,6 @@ export async function executeBroadcastWithMenu(callbackQuery) {
   await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'all_menu_button', language:'mixed', message_text:state.message_text, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
   adminState.delete(String(adminId));
   await sendMessage(callbackQuery.message.chat.id, `✅ Broadcast finished\n\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>`);
-}
-
-
-export async function startBroadcastPoll(chatId, adminId, testOnly=false) {
-  const contacts = testOnly ? [{ telegram_id: adminId, name:'Admin', telegram_username:'', language:'mixed' }] : await getSegmentContacts('all');
-  adminState.set(String(adminId), { mode: 'broadcast_poll_message', segment: testOnly ? 'test' : 'all', count: contacts.length, testOnly });
-  await sendMessage(chatId, `<b>${testOnly ? 'Test anonymous poll' : 'Anonymous poll broadcast'}</b>
-
-Recipients: <b>${contacts.length}</b>
-
-Send the poll in this format:
-
-Question text
-Option 1
-Option 2
-Option 3
-
-The poll will be anonymous. Results will be saved in the <b>Poll Results</b> sheet and can be checked with /poll_stats.`);
-}
-
-export async function handleBroadcastPollMessage(msg, state) {
-  const text = (msg.text || msg.caption || '').trim();
-  if (!text) return sendMessage(msg.chat.id, 'Send poll question and options as text.');
-  const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
-  const question = lines[0] || '';
-  const options = lines.slice(1, 11);
-  if (!question || options.length < 2) return sendMessage(msg.chat.id, 'Format: first line is question, next lines are at least 2 answer options.');
-  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_poll_confirm', question, options });
-  await sendMessage(msg.chat.id, `<b>Poll preview</b>
-
-Recipients: <b>${state.count}</b>
-Question: <b>${escapeHtml(question)}</b>
-
-${options.map((o,i)=>`${i+1}. ${escapeHtml(o)}`).join('\n')}
-
-Send anonymous Telegram poll now?`, { reply_markup: { inline_keyboard: [[
-    { text: '✅ Send poll', callback_data: 'bcconfirm_poll' },
-    { text: '❌ Cancel', callback_data: 'bccancel' }
-  ]]} });
-}
-
-export async function executeBroadcastPoll(callbackQuery) {
-  const adminId = callbackQuery.from.id;
-  const state = adminState.get(String(adminId));
-  if (!state || state.mode !== 'broadcast_poll_confirm') return;
-  const contacts = state.testOnly ? [{ telegram_id: adminId, name:'Admin', telegram_username:'', language:'mixed' }] : await getSegmentContacts(state.segment || 'all');
-  const broadcastId = uid('poll');
-  let sent = 0, failed = 0;
-  for (const c of contacts) {
-    try {
-      const message = await sendPoll(c.telegram_id, state.question, state.options, { is_anonymous: true, allows_multiple_answers: false });
-      sent++;
-      if (message?.poll?.id) await upsertPollResult({ poll_id: message.poll.id, broadcast_id: broadcastId, question: state.question, options: state.options.map(text => ({ text, voter_count:0 })), total_votes:0, sent_count: contacts.length, status:'open' });
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'poll_anonymous' });
-      await new Promise(r => setTimeout(r, 45));
-    } catch (e) {
-      failed++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:'poll_anonymous' });
-    }
-  }
-  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'poll_anonymous', language:'mixed', message_text:state.question + '\n' + state.options.join('\n'), media_type:'poll', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-  adminState.delete(String(adminId));
-  await sendMessage(callbackQuery.message.chat.id, `✅ Poll broadcast finished\n\nBroadcast ID: <code>${escapeHtml(broadcastId)}</code>\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>\n\nResults will appear in the <b>Poll Results</b> sheet. You can also use:\n<code>/poll_stats ${escapeHtml(broadcastId)}</code>`);
-}
-
-export async function handlePollUpdate(poll) {
-  if (!poll?.id) return;
-  await upsertPollResult({ poll_id: poll.id, question: poll.question || '', options: poll.options || [], total_votes: poll.total_voter_count || 0, status: poll.is_closed ? 'closed' : 'open' });
-}
-
-export async function adminPollStats(chatId, text='') {
-  const broadcastId = String(text || '').replace('/poll_stats','').trim();
-  if (!broadcastId) return sendMessage(chatId, 'Usage: /poll_stats poll_xxxxx');
-  const rows = await findPollResultsByBroadcastId(broadcastId);
-  if (!rows.length) return sendMessage(chatId, 'No poll results found for this broadcast ID yet.');
-  const summary = summarizePollRows(rows);
-  const question = rows.find(r => r.question)?.question || 'Poll';
-  const body = summary.options.map(o => `• ${escapeHtml(o.text)} — <b>${Number(o.votes || 0)}</b>`).join('\n') || 'No votes yet.';
-  await sendMessage(chatId, `<b>Poll stats</b>\n\nBroadcast: <code>${escapeHtml(broadcastId)}</code>\nQuestion: <b>${escapeHtml(question)}</b>\nPoll copies: <b>${rows.length}</b>\nTotal votes: <b>${summary.total_votes}</b>\n\n${body}`);
 }
 
 export async function startBroadcast(chatId, adminId) {

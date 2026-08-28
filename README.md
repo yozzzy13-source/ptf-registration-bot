@@ -61,10 +61,3 @@ npm run setup:payments
 ```
 
 The helper script updates `Payment Methods` and creates `Payment Summary` with basic payment balance formulas.
-
-## Latest operational notes
-
-- `/broadcast_poll` sends an anonymous native Telegram poll to all bot contacts. Results are stored in `Poll Results`; use `/poll_stats <broadcast_id>` for a quick summary.
-- Main menu payment entry is now `💳 Payment / Оплата`, replacing League Pass.
-- Event payments support separate `price_thb` and `price_usdt` fields in `Events`.
-- Contact organizer chat is a 2-hour quiet session without repeated delivery confirmations.
