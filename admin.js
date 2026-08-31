@@ -214,9 +214,17 @@ async function sendProofFileToTopic(chatId, topic, originalMessage) {
 }
 
 export async function notifyPaymentProof({ app, payment={}, from, originalMessage }) {
-  const topic = await getOrCreatePlayerTopic({ ...from, id: from.id, name: app.player_name, telegram_id: app.telegram_id });
-  const chatId = topic?.chatId || await getAdminChatId();
-  if (!chatId) return;
+  let topic = null;
+  let chatId = null;
+  try {
+    topic = await getOrCreatePlayerTopic({ ...from, id: from.id, name: app.player_name, telegram_id: app.telegram_id });
+    chatId = topic?.chatId || await getAdminChatId();
+  } catch (e) {
+    console.error('get payment proof topic failed:', e.message);
+    chatId = await getAdminChatId().catch(() => null);
+  }
+  if (!chatId) return null;
+
   const paymentId = payment.payment_id || app.payment_id || '';
   const caption = `<b>💳 Payment proof received</b>
 
@@ -229,20 +237,50 @@ Method: <b>${escapeHtml(payment.method || app.payment_method || '')}</b> ${escap
 Amount: <b>${escapeHtml(payment.amount || app.payment_amount || '')} ${escapeHtml(payment.currency || app.payment_currency || '')}</b>
 
 Proof is copied below.`;
-  const reviewOpts = withTopicOpts(topic, { reply_markup: adminPaymentKeyboard(app.application_id, paymentId, from.id) });
 
-  await sendMessage(chatId, caption, reviewOpts);
+  const reviewMarkup = { reply_markup: adminPaymentKeyboard(app.application_id, paymentId, from.id) };
+  const topicOpts = withTopicOpts(topic, reviewMarkup);
 
-  const copied = await sendProofFileToTopic(chatId, topic, originalMessage).catch(e => {
-    console.error('send payment proof file to topic failed:', e.message);
-    return false;
-  });
+  let sentToTopic = false;
+  try {
+    await sendMessage(chatId, caption, topicOpts);
+    sentToTopic = true;
+  } catch (e) {
+    console.error('send payment proof card to topic failed:', e.message);
+    try {
+      await sendMessage(chatId, caption, reviewMarkup);
+    } catch (fallbackError) {
+      console.error('send payment proof card to General failed:', fallbackError.message);
+    }
+  }
+
+  let copied = false;
+  try {
+    copied = await sendProofFileToTopic(chatId, sentToTopic ? topic : null, originalMessage);
+  } catch (e) {
+    console.error('send payment proof file failed:', e.message);
+    copied = false;
+  }
+
+  // If copying to the player topic failed, make one more attempt in General without message_thread_id.
+  if (!copied) {
+    try {
+      copied = await sendProofFileToTopic(chatId, null, originalMessage);
+    } catch (e) {
+      console.error('send payment proof file to General failed:', e.message);
+      copied = false;
+    }
+  }
 
   if (!copied) {
-    await sendMessage(chatId, '<b>⚠️ Payment proof was received, but the bot could not copy the media file. Please ask the player to resend the screenshot.</b>', withTopicOpts(topic, {}));
+    try {
+      await sendMessage(chatId, '<b>⚠️ Payment proof was received, but the bot could not copy the media file. Please ask the player to resend the screenshot.</b>', sentToTopic ? withTopicOpts(topic, {}) : {});
+    } catch (e) {
+      console.error('send proof copy failure notice failed:', e.message);
+    }
   }
+  return true;
 }
-
 
 export async function startBroadcastWithMenu(chatId, adminId) {
   const contacts = await getSegmentContacts('all');

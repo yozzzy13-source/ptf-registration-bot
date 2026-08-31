@@ -1,6 +1,6 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage } from './telegram.js';
 import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, websiteKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, setUserLanguage } from './sheets.js';
+import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT } from './config.js';
@@ -159,9 +159,22 @@ async function handlePaymentProofSubmission(msg, lang, state=null) {
   if (!proofMedia) return false;
   const from = msg.from || {};
   const applicationId = state?.applicationId || '';
-  const app = applicationId
+  let app = applicationId
     ? await findApplication(applicationId).catch(() => null)
     : await findLatestPayableApplicationByTelegramId(from.id).catch(() => null);
+
+  // Robust fallback: if the bot process restarted or an old application row has a non-standard
+  // payment status, still attach the proof to the latest event application for this player.
+  if (!app?.application_id && !applicationId) {
+    const latest = await findLatestApplicationByTelegramId(from.id).catch(() => null);
+    const appStatus = String(latest?.application_status || '').toLowerCase();
+    const payStatus = String(latest?.payment_status || '').toLowerCase();
+    const canAcceptProof = latest?.application_id
+      && !['active','rejected','refunded'].includes(appStatus)
+      && !['approved','rejected','refunded'].includes(payStatus)
+      && String(latest?.event_id || '').trim();
+    if (canAcceptProof) app = latest;
+  }
   if (!app?.application_id) return false;
 
   const paymentId = state?.paymentId || app.payment_id || uid('payment');
@@ -191,12 +204,17 @@ async function handlePaymentProofSubmission(msg, lang, state=null) {
     status:'proof_received'
   });
   userState.delete(String(msg.chat.id));
+
+  // Admin notification must never block the player-side confirmation. Previously, if Telegram
+  // failed to copy the screenshot to the topic, the handler threw and the player got dropped back
+  // to the main menu without the "proof received" message.
   await notifyPaymentProof({
     app: updatedApp || { ...app, application_status:'proof_received', payment_status:'proof_received', payment_id:paymentId },
     payment:{ payment_id:paymentId, method:app.payment_method || state?.methodId || '', network:app.payment_network || '', amount:app.payment_amount || '', currency:app.payment_currency || '' },
     from,
     originalMessage:msg
-  });
+  }).catch(e => console.error('notify payment proof failed:', e.message));
+
   await sendMessage(msg.chat.id, t(lang, 'proof_received'));
   return true;
 }
