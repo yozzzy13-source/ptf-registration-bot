@@ -26,7 +26,7 @@ export function cryptoKeyboard(lang, applicationId, methods=[]) {
   return inlineKeyboard(rows);
 }
 export function paymentEntryKeyboard(lang, { hasProfile=false, applicationId='', status='' } = {}) {
-  if (!hasProfile) return inlineKeyboard([[webAppButton(t(lang,'join'),'/apply?mode=event')],[{text:t(lang,'back'),callback_data:'main'}]]);
+  if (!hasProfile) return inlineKeyboard([[webAppButton(t(lang,'join'),'/apply?mode=profile')],[{text:t(lang,'back'),callback_data:'main'}]]);
   if (applicationId && ['payment_required','waiting_payment',''].includes(String(status || '').toLowerCase())) return inlineKeyboard([[{text:t(lang,'pay_now'),callback_data:`payment_menu:${applicationId}`}],[{text:t(lang,'join_event'),web_app:{url:`${PUBLIC_URL}/apply?mode=event`}}],[{text:t(lang,'back'),callback_data:'main'}]]);
   return inlineKeyboard([[webAppButton(t(lang,'join_event'),'/apply?mode=event')],[{text:t(lang,'back'),callback_data:'main'}]]);
 }

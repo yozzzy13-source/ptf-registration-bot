@@ -408,13 +408,9 @@ export async function handleMessage(msg) {
     return sendMessage(chatId, t(lang, 'send_proof'));
   }
 
-  // Open contact chat has priority over payment-proof recovery. Otherwise screenshots, voice notes
-  // or other media sent during an open organizer chat can be incorrectly captured as payment proofs.
-  if (state?.mode === 'contact') return handleContactMessage(msg, state, lang);
-  if (state?.mode === 'challenge_chat') return forwardChallengeChat(msg, state);
-
   // If the bot was restarted after the player selected a payment method, in-memory state can be lost.
-  // Still accept a media message as payment proof when the player has a payable application.
+  // Keep payment proof recovery before contact/chat fallback: this was the last confirmed
+  // working path for screenshots sent after choosing a payment method. Do not refactor it.
   if (msg.chat.type === 'private' && paymentProofMedia(msg)) {
     const handled = await handlePaymentProofSubmission(msg, lang, null).catch(e => {
       console.error('payment proof recovery failed:', e.message);
@@ -422,6 +418,9 @@ export async function handleMessage(msg) {
     });
     if (handled) return null;
   }
+
+  if (state?.mode === 'contact') return handleContactMessage(msg, state, lang);
+  if (state?.mode === 'challenge_chat') return forwardChallengeChat(msg, state);
   return sendMain(chatId, lang);
 }
 
