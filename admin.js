@@ -263,7 +263,24 @@ Proof is copied below.`;
   }
 
   // If copying to the player topic failed, make one more attempt in General without message_thread_id.
+  // When media falls back to General, always send a clear context label first so the screenshot is identifiable.
   if (!copied) {
+    const fallbackCaption = `<b>⚠️ Payment proof media fallback</b>
+
+The bot could not copy the proof media into the player's topic, so the original proof is copied below in General.
+
+Application: <code>${escapeHtml(app.application_id)}</code>
+${paymentId ? `Payment: <code>${escapeHtml(paymentId)}</code>
+` : ''}TGID: <code>${escapeHtml(from.id)}</code>
+Player: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
+Event: ${escapeHtml(app.event_name)}
+Method: <b>${escapeHtml(payment.method || app.payment_method || '')}</b> ${escapeHtml(payment.network || app.payment_network || '')}
+Amount: <b>${escapeHtml(payment.amount || app.payment_amount || '')} ${escapeHtml(payment.currency || app.payment_currency || '')}</b>`;
+    try {
+      await sendMessage(chatId, fallbackCaption, reviewMarkup);
+    } catch (e) {
+      console.error('send payment proof General fallback label failed:', e.message);
+    }
     try {
       copied = await sendProofFileToTopic(chatId, null, originalMessage);
     } catch (e) {
