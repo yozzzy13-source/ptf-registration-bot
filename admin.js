@@ -156,6 +156,66 @@ Notes: ${escapeHtml(profile.notes)}`, withTopicOpts(topic, {
   }));
 }
 
+async function resetPlayerTopic(telegramId) {
+  if (!telegramId) return null;
+  await updateApplicantAdminTopic(telegramId, { admin_topic_id:'', admin_topic_name:'', admin_topic_created_at:'' }).catch(() => {});
+}
+
+async function getFreshPlayerTopic(from, oldTopic=null) {
+  if (!oldTopic?.message_thread_id) return oldTopic;
+  await resetPlayerTopic(from.id || from.telegram_id);
+  return getOrCreatePlayerTopic(from).catch(() => oldTopic);
+}
+
+async function sendMessageToTopicOrGeneral({ chatId, topic, text, opts={}, from, fallbackTitle='Admin inbox fallback' }) {
+  try {
+    const res = await sendMessage(chatId, text, withTopicOpts(topic, opts));
+    return { sent:true, topic, usedTopic: !!topic?.message_thread_id, result:res };
+  } catch (e) {
+    console.error(`${fallbackTitle}: send to topic failed:`, e.message);
+    let freshTopic = null;
+    if (topic?.message_thread_id) {
+      freshTopic = await getFreshPlayerTopic(from, topic).catch(() => null);
+      if (freshTopic?.message_thread_id && String(freshTopic.message_thread_id) !== String(topic.message_thread_id)) {
+        try {
+          const res = await sendMessage(chatId, text, withTopicOpts(freshTopic, opts));
+          return { sent:true, topic:freshTopic, usedTopic:true, result:res };
+        } catch (e2) {
+          console.error(`${fallbackTitle}: send to fresh topic failed:`, e2.message);
+        }
+      }
+    }
+    const label = `<b>⚠️ ${escapeHtml(fallbackTitle)}</b>\n\nThis message could not be delivered to the player's topic, so it is shown in General.\n\n${text}`;
+    const res = await sendMessage(chatId, label, opts);
+    return { sent:true, topic:null, usedTopic:false, result:res };
+  }
+}
+
+async function copyMessageToTopicOrGeneral({ chatId, topic, sourceChatId, telegramMessageId, from, fallbackTitle='Media fallback', contextText='' }) {
+  try {
+    await copyMessage(chatId, sourceChatId, telegramMessageId, withTopicOpts(topic, {}));
+    return { copied:true, topic, usedTopic: !!topic?.message_thread_id };
+  } catch (e) {
+    console.error(`${fallbackTitle}: copy to topic failed:`, e.message);
+    let freshTopic = null;
+    if (topic?.message_thread_id) {
+      freshTopic = await getFreshPlayerTopic(from, topic).catch(() => null);
+      if (freshTopic?.message_thread_id && String(freshTopic.message_thread_id) !== String(topic.message_thread_id)) {
+        try {
+          await copyMessage(chatId, sourceChatId, telegramMessageId, withTopicOpts(freshTopic, {}));
+          return { copied:true, topic:freshTopic, usedTopic:true };
+        } catch (e2) {
+          console.error(`${fallbackTitle}: copy to fresh topic failed:`, e2.message);
+        }
+      }
+    }
+    const label = `<b>⚠️ ${escapeHtml(fallbackTitle)}</b>\n\nThe media could not be delivered to the player's topic, so it is copied below in General.${contextText ? '\n\n' + contextText : ''}`;
+    await sendMessage(chatId, label);
+    await copyMessage(chatId, sourceChatId, telegramMessageId, {});
+    return { copied:true, topic:null, usedTopic:false };
+  }
+}
+
 export async function notifyIncomingMessage(from, text, telegramMessageId, sourceChatId=null, originalMessage=null) {
   const topic = await getOrCreatePlayerTopic(from);
   const chatId = topic?.chatId || await getAdminChatId();
@@ -164,19 +224,15 @@ export async function notifyIncomingMessage(from, text, telegramMessageId, sourc
 
 TGID: <code>${escapeHtml(from.id)}</code>
 From: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}`;
-  const topicOpts = withTopicOpts(topic, {
-    reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] }
-  });
+  const body = `${header}\n\n${escapeHtml(text || '[media]')}`;
+  const replyMarkup = { reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] } };
   const hasMedia = originalMessage && (originalMessage.photo?.length || originalMessage.document || originalMessage.video || originalMessage.voice || originalMessage.audio || originalMessage.sticker || originalMessage.video_note);
+  const sent = await sendMessageToTopicOrGeneral({ chatId, topic, text: body, opts: replyMarkup, from, fallbackTitle:'Player message topic fallback' });
   if (hasMedia && sourceChatId && telegramMessageId) {
-    await sendMessage(chatId, `${header}
-
-${escapeHtml(text || '[media]')}`, topicOpts);
-    return copyMessage(chatId, sourceChatId, telegramMessageId, withTopicOpts(topic, {}));
+    const context = `TGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}`;
+    return copyMessageToTopicOrGeneral({ chatId, topic:sent.topic, sourceChatId, telegramMessageId, from, fallbackTitle:'Player media topic fallback', contextText:context });
   }
-  return sendMessage(chatId, `${header}
-
-${escapeHtml(text)}`, topicOpts);
+  return sent.result;
 }
 
 function paymentProofFile(originalMessage={}) {
@@ -239,59 +295,59 @@ Amount: <b>${escapeHtml(payment.amount || app.payment_amount || '')} ${escapeHtm
 Proof is copied below.`;
 
   const reviewMarkup = { reply_markup: adminPaymentKeyboard(app.application_id, paymentId, from.id) };
-  const topicOpts = withTopicOpts(topic, reviewMarkup);
-
-  let sentToTopic = false;
-  try {
-    await sendMessage(chatId, caption, topicOpts);
-    sentToTopic = true;
-  } catch (e) {
-    console.error('send payment proof card to topic failed:', e.message);
-    try {
-      await sendMessage(chatId, caption, reviewMarkup);
-    } catch (fallbackError) {
-      console.error('send payment proof card to General failed:', fallbackError.message);
-    }
-  }
+  const sent = await sendMessageToTopicOrGeneral({
+    chatId,
+    topic,
+    text: caption,
+    opts: reviewMarkup,
+    from: { ...from, id: from.id, telegram_id: app.telegram_id, name: app.player_name },
+    fallbackTitle:'Payment proof topic fallback'
+  });
 
   let copied = false;
   try {
-    copied = await sendProofFileToTopic(chatId, sentToTopic ? topic : null, originalMessage);
+    const copyRes = await sendProofFileToTopic(chatId, sent.topic, originalMessage);
+    copied = !!copyRes;
   } catch (e) {
-    console.error('send payment proof file failed:', e.message);
+    console.error('send payment proof file to selected destination failed:', e.message);
     copied = false;
   }
 
-  // If copying to the player topic failed, make one more attempt in General without message_thread_id.
-  // When media falls back to General, always send a clear context label first so the screenshot is identifiable.
   if (!copied) {
-    const fallbackCaption = `<b>⚠️ Payment proof media fallback</b>
-
-The bot could not copy the proof media into the player's topic, so the original proof is copied below in General.
-
-Application: <code>${escapeHtml(app.application_id)}</code>
+    const context = `Application: <code>${escapeHtml(app.application_id)}</code>
 ${paymentId ? `Payment: <code>${escapeHtml(paymentId)}</code>
 ` : ''}TGID: <code>${escapeHtml(from.id)}</code>
 Player: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
 Event: ${escapeHtml(app.event_name)}
 Method: <b>${escapeHtml(payment.method || app.payment_method || '')}</b> ${escapeHtml(payment.network || app.payment_network || '')}
 Amount: <b>${escapeHtml(payment.amount || app.payment_amount || '')} ${escapeHtml(payment.currency || app.payment_currency || '')}</b>`;
-    try {
-      await sendMessage(chatId, fallbackCaption, reviewMarkup);
-    } catch (e) {
-      console.error('send payment proof General fallback label failed:', e.message);
-    }
-    try {
-      copied = await sendProofFileToTopic(chatId, null, originalMessage);
-    } catch (e) {
-      console.error('send payment proof file to General failed:', e.message);
-      copied = false;
+    if (originalMessage?.chat?.id && originalMessage?.message_id) {
+      try {
+        const res = await copyMessageToTopicOrGeneral({
+          chatId,
+          topic: sent.topic,
+          sourceChatId: originalMessage.chat.id,
+          telegramMessageId: originalMessage.message_id,
+          from: { ...from, id: from.id, telegram_id: app.telegram_id, name: app.player_name },
+          fallbackTitle:'Payment proof media fallback',
+          contextText:context
+        });
+        copied = !!res?.copied;
+      } catch (e) {
+        console.error('copy payment proof media fallback failed:', e.message);
+      }
     }
   }
 
   if (!copied) {
     try {
-      await sendMessage(chatId, '<b>⚠️ Payment proof was received, but the bot could not copy the media file. Please ask the player to resend the screenshot.</b>', sentToTopic ? withTopicOpts(topic, {}) : {});
+      await sendMessage(chatId, `<b>⚠️ Payment proof was received, but the bot could not copy the media file.</b>
+
+Application: <code>${escapeHtml(app.application_id)}</code>
+TGID: <code>${escapeHtml(from.id)}</code>
+Player: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
+
+Please ask the player to resend the screenshot.`, sent.usedTopic ? withTopicOpts(sent.topic, {}) : {});
     } catch (e) {
       console.error('send proof copy failure notice failed:', e.message);
     }
