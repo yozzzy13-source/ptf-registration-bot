@@ -55,6 +55,11 @@ export const editMessageText = (chat_id, message_id, text, opts={}) => call('edi
 export const answerCallbackQuery = (callback_query_id, text='', show_alert=false) => call('answerCallbackQuery', { callback_query_id, text, show_alert });
 export const sendPhoto = (chat_id, photo, opts={}) => call('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...opts });
 export const sendDocument = (chat_id, document, opts={}) => call('sendDocument', { chat_id, document, parse_mode: 'HTML', ...opts });
+export const sendVideo = (chat_id, video, opts={}) => call('sendVideo', { chat_id, video, parse_mode: 'HTML', ...opts });
+export const sendVoice = (chat_id, voice, opts={}) => call('sendVoice', { chat_id, voice, parse_mode: 'HTML', ...opts });
+export const sendAudio = (chat_id, audio, opts={}) => call('sendAudio', { chat_id, audio, parse_mode: 'HTML', ...opts });
+export const sendVideoNote = (chat_id, video_note, opts={}) => call('sendVideoNote', { chat_id, video_note, ...opts });
+export const sendSticker = (chat_id, sticker, opts={}) => call('sendSticker', { chat_id, sticker, ...opts });
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 export const sendPoll = (chat_id, question, options, opts={}) => call('sendPoll', { chat_id, question, options, ...opts });

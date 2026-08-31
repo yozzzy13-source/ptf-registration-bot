@@ -1,4 +1,4 @@
-import { sendMessage, sendPhoto, sendDocument, copyMessage, sendPoll, createForumTopic } from './telegram.js';
+import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic } from './telegram.js';
 import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
@@ -179,42 +179,67 @@ ${escapeHtml(text || '[media]')}`, topicOpts);
 ${escapeHtml(text)}`, topicOpts);
 }
 
-export async function notifyPaymentProof({ app, payment, from, originalMessage }) {
-  const topic = await getOrCreatePlayerTopic({ ...from, id: from.id, name: app.player_name, telegram_id: app.telegram_id });
-  const chatId = topic?.chatId || await getAdminChatId();
-  if (!chatId) return;
-  const caption = `<b>💳 Payment proof received</b>
+function paymentProofFile(originalMessage={}) {
+  if (originalMessage.photo?.length) return { type:'photo', fileId: originalMessage.photo[originalMessage.photo.length - 1].file_id };
+  if (originalMessage.document) return { type:'document', fileId: originalMessage.document.file_id };
+  if (originalMessage.video) return { type:'video', fileId: originalMessage.video.file_id };
+  if (originalMessage.voice) return { type:'voice', fileId: originalMessage.voice.file_id };
+  if (originalMessage.audio) return { type:'audio', fileId: originalMessage.audio.file_id };
+  if (originalMessage.video_note) return { type:'video_note', fileId: originalMessage.video_note.file_id };
+  if (originalMessage.sticker) return { type:'sticker', fileId: originalMessage.sticker.file_id };
+  return null;
+}
 
-Application: <code>${escapeHtml(app.application_id)}</code>
-Payment: <code>${escapeHtml(payment.payment_id)}</code>
-TGID: <code>${escapeHtml(from.id)}</code>
-Player: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
-Event: ${escapeHtml(app.event_name)}
-Method: <b>${escapeHtml(payment.method)}</b> ${escapeHtml(payment.network || '')}
-Amount: <b>${escapeHtml(payment.amount)} ${escapeHtml(payment.currency)}</b>
-
-Proof is copied below.`;
-  const reviewOpts = withTopicOpts(topic, { reply_markup: adminPaymentKeyboard(app.application_id, payment.payment_id, from.id) });
-
-  // Send the review card first, then copy the original proof message into the same player topic.
-  // This is more reliable than re-sending the file_id as a new photo/document and preserves screenshots,
-  // documents, voice notes, videos, and other media exactly as the player sent them.
-  await sendMessage(chatId, caption, reviewOpts);
-
+async function sendProofFileToTopic(chatId, topic, originalMessage) {
   if (originalMessage?.chat?.id && originalMessage?.message_id) {
     try {
       await copyMessage(chatId, originalMessage.chat.id, originalMessage.message_id, withTopicOpts(topic, {}));
-      return;
+      return true;
     } catch (copyError) {
       console.error('copy payment proof failed; trying file_id fallback:', copyError.message);
     }
   }
 
-  if (originalMessage?.photo?.length) {
-    const fileId = originalMessage.photo[originalMessage.photo.length - 1].file_id;
-    await sendPhoto(chatId, fileId, withTopicOpts(topic, { caption: 'Payment proof screenshot' }));
-  } else if (originalMessage?.document) {
-    await sendDocument(chatId, originalMessage.document.file_id, withTopicOpts(topic, { caption: 'Payment proof file' }));
+  const proof = paymentProofFile(originalMessage || {});
+  if (!proof?.fileId) return false;
+  const opts = withTopicOpts(topic, {});
+  if (proof.type === 'photo') await sendPhoto(chatId, proof.fileId, withTopicOpts(topic, { caption: 'Payment proof screenshot' }));
+  else if (proof.type === 'document') await sendDocument(chatId, proof.fileId, withTopicOpts(topic, { caption: 'Payment proof file' }));
+  else if (proof.type === 'video') await sendVideo(chatId, proof.fileId, opts);
+  else if (proof.type === 'voice') await sendVoice(chatId, proof.fileId, opts);
+  else if (proof.type === 'audio') await sendAudio(chatId, proof.fileId, opts);
+  else if (proof.type === 'video_note') await sendVideoNote(chatId, proof.fileId, opts);
+  else if (proof.type === 'sticker') await sendSticker(chatId, proof.fileId, opts);
+  return true;
+}
+
+export async function notifyPaymentProof({ app, payment={}, from, originalMessage }) {
+  const topic = await getOrCreatePlayerTopic({ ...from, id: from.id, name: app.player_name, telegram_id: app.telegram_id });
+  const chatId = topic?.chatId || await getAdminChatId();
+  if (!chatId) return;
+  const paymentId = payment.payment_id || app.payment_id || '';
+  const caption = `<b>💳 Payment proof received</b>
+
+Application: <code>${escapeHtml(app.application_id)}</code>
+${paymentId ? `Payment: <code>${escapeHtml(paymentId)}</code>
+` : ''}TGID: <code>${escapeHtml(from.id)}</code>
+Player: <b>${escapeHtml(app.player_name)}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}
+Event: ${escapeHtml(app.event_name)}
+Method: <b>${escapeHtml(payment.method || app.payment_method || '')}</b> ${escapeHtml(payment.network || app.payment_network || '')}
+Amount: <b>${escapeHtml(payment.amount || app.payment_amount || '')} ${escapeHtml(payment.currency || app.payment_currency || '')}</b>
+
+Proof is copied below.`;
+  const reviewOpts = withTopicOpts(topic, { reply_markup: adminPaymentKeyboard(app.application_id, paymentId, from.id) });
+
+  await sendMessage(chatId, caption, reviewOpts);
+
+  const copied = await sendProofFileToTopic(chatId, topic, originalMessage).catch(e => {
+    console.error('send payment proof file to topic failed:', e.message);
+    return false;
+  });
+
+  if (!copied) {
+    await sendMessage(chatId, '<b>⚠️ Payment proof was received, but the bot could not copy the media file. Please ask the player to resend the screenshot.</b>', withTopicOpts(topic, {}));
   }
 }
 

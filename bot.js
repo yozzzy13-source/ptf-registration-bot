@@ -153,6 +153,53 @@ function paymentProofMedia(msg={}) {
   if (msg.sticker) return { fileId: msg.sticker.file_id, type: 'sticker' };
   return null;
 }
+
+async function handlePaymentProofSubmission(msg, lang, state=null) {
+  const proofMedia = paymentProofMedia(msg);
+  if (!proofMedia) return false;
+  const from = msg.from || {};
+  const applicationId = state?.applicationId || '';
+  const app = applicationId
+    ? await findApplication(applicationId).catch(() => null)
+    : await findLatestPayableApplicationByTelegramId(from.id).catch(() => null);
+  if (!app?.application_id) return false;
+
+  const paymentId = state?.paymentId || app.payment_id || uid('payment');
+  const updatedApp = await updateApplication(app.application_id, {
+    application_status:'proof_received',
+    payment_status:'proof_received',
+    payment_proof_status:'proof_received',
+    payment_proof_file_id:proofMedia.fileId,
+    payment_proof_type:proofMedia.type,
+    payment_id: paymentId
+  });
+  await updateApplicantStatusByTelegramId(from.id, 'proof_received');
+  await logPayment({
+    payment_id:paymentId,
+    application_id:app.application_id,
+    telegram_id:from.id,
+    player_name:app.player_name,
+    event_id:app.event_id,
+    event_name:app.event_name,
+    method:app.payment_method || state?.methodId || '',
+    network:app.payment_network || '',
+    amount:app.payment_amount || '',
+    currency:app.payment_currency || '',
+    proof_file_id:proofMedia.fileId,
+    proof_type:proofMedia.type,
+    proof_received_at:nowISO(),
+    status:'proof_received'
+  });
+  userState.delete(String(msg.chat.id));
+  await notifyPaymentProof({
+    app: updatedApp || { ...app, application_status:'proof_received', payment_status:'proof_received', payment_id:paymentId },
+    payment:{ payment_id:paymentId, method:app.payment_method || state?.methodId || '', network:app.payment_network || '', amount:app.payment_amount || '', currency:app.payment_currency || '' },
+    from,
+    originalMessage:msg
+  });
+  await sendMessage(msg.chat.id, t(lang, 'proof_received'));
+  return true;
+}
 async function forwardContactMessage(msg,lang){const from=msg.from||{}; const type=messageType(msg); const text=msg.text||msg.caption||(type==='text'?'':'[media]'); await logMessage({message_id:uid('msg'),telegram_id:from.id,telegram_username:from.username||'',name:contactName(from),direction:'incoming',message_type:type,message_text:text,timestamp:nowISO(),status:'new',telegram_message_id:msg.message_id}); await notifyIncomingMessage({id:from.id,username:from.username,name:contactName(from)},text,msg.message_id,msg.chat.id,msg); return null;}
 const contactTimers = new Map();
 function openContactSession(chatId, lang) {
@@ -335,20 +382,22 @@ export async function handleMessage(msg) {
   }
 
   if (state?.mode === 'awaiting_payment_proof') {
-    const proofMedia = paymentProofMedia(msg);
-    if (!proofMedia) return sendMessage(chatId, t(lang, 'send_proof'));
-    const app = await findApplication(state.applicationId);
-    if (!app) return sendMessage(chatId, 'Application not found.');
-    await updateApplication(state.applicationId, { application_status:'proof_received', payment_status:'proof_received', payment_proof_status:'proof_received', payment_proof_file_id:proofMedia.fileId, payment_proof_type:proofMedia.type });
-    await updateApplicantStatusByTelegramId(from.id, 'proof_received');
-    await logPayment({ payment_id:state.paymentId, application_id:state.applicationId, telegram_id:from.id, player_name:app.player_name, event_id:app.event_id, event_name:app.event_name, proof_file_id:proofMedia.fileId, proof_type:proofMedia.type, proof_received_at:nowISO(), status:'proof_received' });
-    userState.delete(String(chatId));
-    try {
-      await notifyPaymentProof({ app, payment:{ payment_id:state.paymentId, method:app.payment_method || state.methodId, network:app.payment_network, amount:app.payment_amount, currency:app.payment_currency }, from, originalMessage:msg });
-    } catch (notifyError) {
-      console.error('notifyPaymentProof failed:', notifyError.message);
-    }
-    return sendMessage(chatId, t(lang, 'proof_received'));
+    const handled = await handlePaymentProofSubmission(msg, lang, state).catch(e => {
+      console.error('payment proof handling failed:', e.message);
+      return false;
+    });
+    if (handled) return null;
+    return sendMessage(chatId, t(lang, 'send_proof'));
+  }
+
+  // If the bot was restarted after the player selected a payment method, in-memory state can be lost.
+  // Still accept a media message as payment proof when the player has a payable application.
+  if (msg.chat.type === 'private' && paymentProofMedia(msg)) {
+    const handled = await handlePaymentProofSubmission(msg, lang, null).catch(e => {
+      console.error('payment proof recovery failed:', e.message);
+      return false;
+    });
+    if (handled) return null;
   }
 
   if (state?.mode === 'contact') return handleContactMessage(msg, state, lang);
