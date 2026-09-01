@@ -189,11 +189,15 @@ app.post('/api/submit-application', async (req, res) => {
     };
     const savedApplication = await createOrUpdateApplication(appRow);
     appRow.application_id = savedApplication.application_id || applicationId;
-    try {
-      await notifyNewApplication(appRow, applicant);
-    } catch (notifyError) {
-      // Do not block player registration/payment if the admin chat is misconfigured or migrated.
-      console.error('notifyNewApplication failed:', notifyError.message);
+    // Do not spam admin topics when the same player presses submit again for the same event.
+    // The row in Applications is updated, but the admin application card is sent only for a fresh application.
+    if (!savedApplication.isUpdated) {
+      try {
+        await notifyNewApplication(appRow, applicant);
+      } catch (notifyError) {
+        // Do not block player registration/payment if the admin chat is misconfigured or migrated.
+        console.error('notifyNewApplication failed:', notifyError.message);
+      }
     }
     if (isEventApplication && paymentRequired) {
       await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.

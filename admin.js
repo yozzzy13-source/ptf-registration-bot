@@ -6,6 +6,37 @@ import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
 
 export const adminState = new Map();
+const topicLocks = new Map();
+const recentlyNotifiedApplications = new Map();
+
+async function withTopicLock(telegramId, fn) {
+  const key = String(telegramId || '');
+  if (!key) return fn();
+  const previous = topicLocks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise(resolve => { release = resolve; });
+  topicLocks.set(key, previous.then(() => current, () => current));
+  try {
+    await previous.catch(() => {});
+    return await fn();
+  } finally {
+    release();
+    // The next waiter, if any, will continue after release. Remove stale lock later.
+    setTimeout(() => { if (topicLocks.get(key) === current) topicLocks.delete(key); }, 30000).unref?.();
+  }
+}
+
+function rememberApplicationNotification(applicationId) {
+  const id = String(applicationId || '').trim();
+  if (!id) return false;
+  const now = Date.now();
+  for (const [key, ts] of recentlyNotifiedApplications.entries()) {
+    if (now - ts > 10 * 60 * 1000) recentlyNotifiedApplications.delete(key);
+  }
+  if (recentlyNotifiedApplications.has(id)) return true;
+  recentlyNotifiedApplications.set(id, now);
+  return false;
+}
 
 export function isAdminUser(userId) {
   if (!ADMIN_IDS.length) return false; // admin panel is closed until ADMIN_IDS is configured.
@@ -29,21 +60,36 @@ export async function getOrCreatePlayerTopic(player={}) {
   if (!chatId) return null;
   const telegramId = player.telegram_id || player.id;
   if (!telegramId) return null;
-  const profile = await findApplicantByTelegramId(telegramId).catch(() => null);
-  const currentTopicId = profile?.admin_topic_id || player.admin_topic_id || '';
-  if (currentTopicId) return { chatId, message_thread_id: Number(currentTopicId), topicName: profile?.admin_topic_name || playerTopicName(profile || player), existing:true };
-  const topicName = playerTopicName(profile || player);
-  try {
-    const topic = await createForumTopic(chatId, topicName);
-    const threadId = topic?.message_thread_id;
-    if (threadId) {
-      await updateApplicantAdminTopic(telegramId, { admin_topic_id:String(threadId), admin_topic_name:topicName, admin_topic_created_at:nowISO() }).catch(() => {});
-      return { chatId, message_thread_id: threadId, topicName, existing:false };
+
+  return withTopicLock(telegramId, async () => {
+    const freshProfile = await findApplicantByTelegramId(telegramId).catch(() => null);
+    const currentTopicId = freshProfile?.admin_topic_id || player.admin_topic_id || '';
+    if (currentTopicId) {
+      return {
+        chatId,
+        message_thread_id: Number(currentTopicId),
+        topicName: freshProfile?.admin_topic_name || playerTopicName(freshProfile || player),
+        existing:true
+      };
     }
-  } catch (e) {
-    console.error('createForumTopic failed; falling back to General:', e.message);
-  }
-  return { chatId, topicName, existing:false };
+
+    const topicName = playerTopicName(freshProfile || player);
+    try {
+      const topic = await createForumTopic(chatId, topicName);
+      const threadId = topic?.message_thread_id;
+      if (threadId) {
+        await updateApplicantAdminTopic(telegramId, {
+          admin_topic_id:String(threadId),
+          admin_topic_name:topicName,
+          admin_topic_created_at:nowISO()
+        }).catch(() => {});
+        return { chatId, message_thread_id: threadId, topicName, existing:false };
+      }
+    } catch (e) {
+      console.error('createForumTopic failed; falling back to General:', e.message);
+    }
+    return { chatId, topicName, existing:false };
+  });
 }
 
 function withTopicOpts(topic, opts={}) {
@@ -134,6 +180,7 @@ export async function adminProfile(chatId, query) {
 }
 
 export async function notifyNewApplication(app, profile) {
+  if (rememberApplicationNotification(app?.application_id)) return null;
   const topic = await getOrCreatePlayerTopic({ ...profile, telegram_id: app.telegram_id });
   const chatId = topic?.chatId || await getAdminChatId();
   if (!chatId) return null;
