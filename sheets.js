@@ -420,6 +420,27 @@ export async function updatePayment(paymentId, patch) {
   return { ...found, ...patch };
 }
 
+
+function isMissingRatingValue(value='') {
+  const rating = String(value || '').trim().toLowerCase();
+  return !rating || ['unknown','не знаю','dont know','don\'t know','n/a','na','-'].includes(rating);
+}
+
+export function hasMissingRating(row={}) {
+  return isMissingRatingValue(row.ntrp || row.racket_rating || '');
+}
+
+export async function getMissingRatingContacts() {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  return rows.filter(r => {
+    if (!r.telegram_id) return false;
+    if (!hasMissingRating(r)) return false;
+    if (['inactive','declined','rejected','refunded'].includes(String(r.status || '').toLowerCase())) return false;
+    // Avoid pure language-only leads with no actual profile data.
+    return Boolean(r.name || r.telegram_username || r.whatsapp || r.experience || r.country_of_origin || r.gender);
+  });
+}
+
 export async function getSegmentContacts(segment='all') {
   const { rows } = await getRows(SHEETS.applicants, { useCache:false });
   return rows.filter(r => {
@@ -428,6 +449,7 @@ export async function getSegmentContacts(segment='all') {
     if (segment === 'active') return r.status === 'active';
     if (segment === 'waitlist') return r.status === 'waitlist';
     if (segment === 'payment') return ['waiting_payment','proof_received','payment_approved'].includes(r.status);
+    if (segment === 'missing_rating') return hasMissingRating(r);
     if (segment === 'missing_selfie') return String(r.status).toLowerCase() === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received';
     if (segment === 'ru') return r.language === 'ru';
     if (segment === 'en') return r.language !== 'ru';
@@ -485,7 +507,8 @@ export function summarizePollRows(rows=[]) {
 
 
 export function isProfileCompleted(row={}) {
-  return Boolean(row.telegram_id && row.name && row.gender && row.country_of_origin && row.experience && row.whatsapp && !['inactive','declined','refunded'].includes(String(row.status || '').toLowerCase()));
+  const rating = String(row.ntrp || row.racket_rating || '').trim().toLowerCase();
+  return Boolean(row.telegram_id && row.name && row.gender && row.country_of_origin && row.experience && row.whatsapp && rating && rating !== 'unknown' && !['inactive','declined','refunded'].includes(String(row.status || '').toLowerCase()));
 }
 
 export async function createMatchChallenge(row) {

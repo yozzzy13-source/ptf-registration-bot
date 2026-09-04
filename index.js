@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, isProfileCompleted, enrichEventsWithStats, getEventPlayers } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -70,6 +70,39 @@ app.get('/api/event-players', async (req, res) => {
 });
 
 
+
+function requireRacketRating(profile = {}) {
+  const rating = safe(profile.racket_rating || profile.ntrp);
+  if (!rating || ["unknown","не знаю","dont know","don\'t know","n/a","na","-"].includes(String(rating).trim().toLowerCase())) {
+    throw new Error('Racket Rating is required. If the player does not know it, complete the level test.');
+  }
+  return rating;
+}
+
+
+app.post('/api/update-rating', async (req, res) => {
+  try {
+    const { initData = '', rating = '' } = req.body || {};
+    const verified = verifyTelegramInitData(initData);
+    const { user } = parseInitData(initData);
+    if (!user?.id) return res.status(400).json({ ok:false, error:'Telegram WebApp user not found' });
+    if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
+    const existing = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
+    if (!existing) return res.status(404).json({ ok:false, error:'Player profile not found. Please complete the profile first.' });
+    const racketRating = requireRacketRating({ ntrp: rating, racket_rating: rating });
+    let updated = await updateApplicantByTelegramId(user.id, { ntrp: racketRating, telegram_id: user.id, telegram_username: user.username || existing.telegram_username || '', telegram: user.username ? `t.me/${user.username}` : existing.telegram || '', profile_completed: 'yes', source: existing.source || 'telegram_webapp' });
+    if (!updated && existing?._rowNumber) {
+      const patch = { ntrp: racketRating, telegram_id: user.id, telegram_username: user.username || existing.telegram_username || '', telegram: user.username ? `t.me/${user.username}` : existing.telegram || '', profile_completed: 'yes', updated_at: nowISO() };
+      await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
+      updated = { ...existing, ...patch };
+    }
+    res.json({ ok:true, applicant: updated, rating: racketRating });
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
 app.post('/api/save-profile'
 , async (req, res) => {
   try {
@@ -80,7 +113,8 @@ app.post('/api/save-profile'
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
     const existingProfile = await findApplicantByTelegramIdentity(user);
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en'; const username = user.username || '';
-    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:profile.ntrp_unknown?'unknown':safe(profile.ntrp), status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:'ptf_waitlist,profile_completed', increment_application_count:false });
+    const racketRating = requireRacketRating(profile);
+    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:'ptf_waitlist,profile_completed', increment_application_count:false });
     res.json({ok:true,applicant,profileCompleted:true});
   } catch(e){ console.error(e); res.status(500).json({ok:false,error:e.message}); }
 });
@@ -132,6 +166,7 @@ app.post('/api/submit-application', async (req, res) => {
       whatsapp: existingProfile.whatsapp,
       notes: existingProfile.notes
     } : profile;
+    const racketRating = requireRacketRating(effectiveProfile);
     const fullName = safe(effectiveProfile.name) || [user.first_name, user.last_name].filter(Boolean).join(' ');
     const isEventApplication = Boolean(event);
     const eventName = event
@@ -147,7 +182,7 @@ app.post('/api/submit-application', async (req, res) => {
 
     const applicant = await upsertApplicant({
       name: fullName,
-      ntrp: effectiveProfile.ntrp_unknown ? 'unknown' : safe(effectiveProfile.ntrp),
+      ntrp: racketRating,
       status: applicationStatus,
       experience: safe(effectiveProfile.experience),
       gender: safe(effectiveProfile.gender),

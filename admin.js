@@ -1,6 +1,6 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic } from './sheets.js';
-import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL } from './config.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic } from './sheets.js';
+import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
@@ -400,6 +400,63 @@ Please ask the player to resend the screenshot.`, sent.usedTopic ? withTopicOpts
     }
   }
   return true;
+}
+
+
+function ratingUpdateKeyboard(lang='en') {
+  const url = `${PUBLIC_URL}/apply?mode=rating`;
+  return { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Указать NTRP (Raketo)' : '🎾 Add NTRP (Raketo)', web_app: { url } }]] };
+}
+
+function missingRatingMessage(lang='en') {
+  return lang === 'ru'
+    ? `<b>🎾 Обновите рейтинг NTRP (Raketo)</b>
+
+В вашей анкете Phuket Tennis Family не указан рейтинг NTRP (Raketo).
+
+Чтобы анкета считалась заполненной полностью, укажите свой рейтинг из приложения Raketo. Если рейтинга Raketo у вас нет, пройдите короткий тест по кнопке ниже — бот рассчитает примерный уровень и обновит вашу уже существующую анкету.`
+    : `<b>🎾 Update your NTRP (Raketo)</b>
+
+Your Phuket Tennis Family profile does not include NTRP (Raketo).
+
+To complete your profile, enter your rating from the Raketo app. If you do not have a Raketo rating, take the short test using the button below — the bot will estimate your level and update your existing profile.`;
+}
+
+export async function startMissingRatingBroadcast(chatId, adminId) {
+  const contacts = await getMissingRatingContacts();
+  adminState.set(String(adminId), { mode:'missing_rating_confirm', count:contacts.length });
+  return sendMessage(chatId, `<b>Missing NTRP (Raketo) broadcast</b>
+
+Recipients found: <b>${contacts.length}</b>
+
+This will send a fixed message with a WebApp button to update NTRP (Raketo).`, { reply_markup:{ inline_keyboard:[[ { text:'✅ Send', callback_data:'bcconfirm_missing_rating' }, { text:'❌ Cancel', callback_data:'bccancel' } ]] } });
+}
+
+export async function executeMissingRatingBroadcast(callbackQuery) {
+  const adminId = callbackQuery.from.id;
+  const state = adminState.get(String(adminId));
+  if (!state || state.mode !== 'missing_rating_confirm') return;
+  const contacts = await getMissingRatingContacts();
+  const broadcastId = uid('broadcast');
+  let sent = 0, failed = 0;
+  for (const c of contacts) {
+    const lang = c.language === 'ru' ? 'ru' : 'en';
+    try {
+      await sendMessage(c.telegram_id, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
+      sent++;
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'missing_rating' });
+      await new Promise(r => setTimeout(r, 45));
+    } catch (e) {
+      failed++;
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:lang, segment_filter:'missing_rating' });
+    }
+  }
+  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'missing_rating', language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+  adminState.delete(String(adminId));
+  return sendMessage(callbackQuery.message.chat.id, `✅ Missing rating broadcast finished
+
+Sent: <b>${sent}</b>
+Failed: <b>${failed}</b>`);
 }
 
 export async function startBroadcastWithMenu(chatId, adminId) {

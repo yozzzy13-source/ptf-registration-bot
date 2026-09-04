@@ -4,7 +4,7 @@ import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplica
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT } from './config.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -356,8 +356,9 @@ export async function handleMessage(msg) {
     if (text === '/broadcast_menu') return startBroadcastWithMenu(chatId, from.id);
     if (text === '/broadcast_poll') return startBroadcastPoll(chatId, from.id);
     if (text === '/broadcast_poll_test') return startBroadcastPoll(chatId, from.id, true);
+    if (text === '/broadcast_missing_rating') return startMissingRatingBroadcast(chatId, from.id);
     if (text.startsWith('/poll_stats')) return adminPollStats(chatId, text);
-    if (text === '/segments') return sendMessage(chatId, 'Segments: all, season2, active, waitlist, payment, ru, en, or crm_tags value.');
+    if (text === '/segments') return sendMessage(chatId, 'Segments: all, season2, active, waitlist, payment, missing_rating, ru, en, or crm_tags value.');
 
     if ((msg.chat.type === 'group' || msg.chat.type === 'supergroup') && msg.message_thread_id && !text.startsWith('/')) {
       const topicPlayer = await findApplicantByAdminTopicId(msg.message_thread_id).catch(() => null);
@@ -495,6 +496,7 @@ export async function handleCallback(q) {
     if (data === 'bcconfirm') return executeBroadcast(q);
     if (data === 'bcconfirm_menu') return executeBroadcastWithMenu(q);
     if (data === 'bcconfirm_poll') return executeBroadcastPoll(q);
+    if (data === 'bcconfirm_missing_rating') return executeMissingRatingBroadcast(q);
     if (data === 'bccancel') {
       adminState.delete(String(from.id));
       return sendMessage(chatId, 'Broadcast cancelled.');
