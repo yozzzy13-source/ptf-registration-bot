@@ -39,6 +39,16 @@ function publicContact(row) {
 }
 
 
+// Optional inline button attached to a panel broadcast. WebApp buttons open the mini app directly.
+function broadcastButtonMarkup(kind='', lang='en') {
+  const ru = lang === 'ru';
+  if (kind === 'participants') return { inline_keyboard: [[{ text: ru ? '👥 Список участников' : '👥 Participants List', web_app: { url: `${PUBLIC_URL}/participants` } }]] };
+  if (kind === 'join_event') return { inline_keyboard: [[{ text: ru ? '🏆 Участвовать в событии' : '🏆 Join Event', web_app: { url: `${PUBLIC_URL}/apply?mode=event` } }]] };
+  if (kind === 'payment') return { inline_keyboard: [[{ text: ru ? '💳 Оплата' : '💳 Payment', callback_data: 'payment_entry' }]] };
+  if (kind === 'main') return { inline_keyboard: [[{ text: ru ? '🏠 Главное меню' : '🏠 Main menu', callback_data: 'main' }]] };
+  return null;
+}
+
 function applyFilters(rows, filters={}) {
   const status = norm(filters.status);
   const division = norm(filters.division);
@@ -117,12 +127,14 @@ export function registerAdminRoutes(app) {
       if (!auth.ok) return res.status(403).json(auth);
       const message = String(req.body.message || '').trim();
       if (!message) return res.status(400).json({ ok:false, error:'Message is empty' });
+      const button = String(req.body.button || '').trim();
       const contacts = applyFilters(await getContacts(), req.body.filters || {});
       const broadcastId = uid('broadcast');
       let sent = 0, failed = 0;
       for (const c of contacts) {
         try {
-          await sendMessage(c.telegram_id, message);
+          const markup = broadcastButtonMarkup(button, c.language === 'ru' ? 'ru' : 'en');
+          await sendMessage(c.telegram_id, message, markup ? { reply_markup: markup } : {});
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
           sent++;
         } catch (e) {
@@ -130,7 +142,7 @@ export function registerAdminRoutes(app) {
           failed++;
         }
       }
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:JSON.stringify(req.body.filters || {}), language:'mixed', message_text:message, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:JSON.stringify(req.body.filters || {}), language:'mixed', message_text:message, media_type: button ? `text+button:${button}` : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
