@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
 import { setWebhook, setCommands, sendMessage } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers } from './sheets.js';
+import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -60,10 +60,20 @@ app.get('/api/event-players', async (req, res) => {
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
     const eventId = String(req.query.event_id || '').trim();
     if (!eventId) return res.status(400).json({ ok:false, error:'event_id is required' });
-    const events = await getActiveEvents();
-    const event = events.find(e => String(e.event_id) === eventId) || { event_id:eventId };
-    const players = await getEventPlayers(event);
-    res.json({ ok:true, event_id:eventId, total:players.length, players:players.map((p,idx) => ({ n:idx+1, name:p.name })) });
+    const players = await getManualParticipants();
+    res.json({ ok:true, event_id:eventId, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })) });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+app.get('/api/participants', async (req, res) => {
+  try {
+    const initData = req.query.initData || '';
+    const verified = verifyTelegramInitData(initData);
+    if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
+    const players = await getManualParticipants();
+    res.json({ ok:true, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }

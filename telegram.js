@@ -75,9 +75,6 @@ export async function setCommands() {
     { command: 'help', description: 'Help' },
     { command: 'language', description: 'Choose language' },
     { command: 'admin', description: 'Open admin panel' },
-    { command: 'broadcast_menu', description: 'Admin: broadcast with menu button' },
-    { command: 'broadcast_poll', description: 'Admin: send anonymous poll' },
-    { command: 'broadcast_poll_test', description: 'Admin: test poll to yourself' },
     { command: 'poll_stats', description: 'Admin: poll summary' },
     { command: 'cancel', description: 'Cancel current action' }
   ]});

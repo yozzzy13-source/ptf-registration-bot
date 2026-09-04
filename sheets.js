@@ -1,5 +1,5 @@
 import { sheets as sheetsClient } from './google.js';
-import { SPREADSHEET_ID, SHEETS } from './config.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID } from './config.js';
 import { nowISO, safe } from './util.js';
 
 const cache = new Map();
@@ -41,6 +41,62 @@ async function valuesAppend(range, values) {
 async function spreadsheetMeta() {
   const res = await sheetsClient().spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
   return res.data;
+}
+
+
+async function valuesGetFromSpreadsheet(spreadsheetId, range) {
+  const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId, range });
+  return res.data.values || [];
+}
+async function spreadsheetMetaFor(spreadsheetId) {
+  const res = await sheetsClient().spreadsheets.get({ spreadsheetId });
+  return res.data;
+}
+function normalizeHeader(value='') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '');
+}
+function firstNonEmpty(row={}, keys=[]) {
+  for (const k of keys) {
+    const v = row[k];
+    if (v !== undefined && String(v).trim()) return String(v).trim();
+  }
+  return '';
+}
+async function manualParticipantsSheetTitle() {
+  const meta = await spreadsheetMetaFor(PARTICIPANTS_SPREADSHEET_ID);
+  const sheets = meta.sheets || [];
+  const byId = sheets.find(s => String(s.properties?.sheetId || '') === String(PARTICIPANTS_SHEET_ID));
+  return byId?.properties?.title || sheets[0]?.properties?.title || 'Sheet1';
+}
+export async function getManualParticipants() {
+  const title = await manualParticipantsSheetTitle();
+  const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+  const headers = values[0] || [];
+  const normHeaders = headers.map(normalizeHeader);
+  const rows = values.slice(1).map((r, idx) => {
+    const raw = {};
+    const fields = [];
+    headers.forEach((h, i) => {
+      const label = String(h || '').trim();
+      const value = r[i] ?? '';
+      const key = normHeaders[i] || `col_${i+1}`;
+      raw[key] = value;
+      if (label && String(value).trim()) fields.push({ key, label, value: String(value).trim() });
+    });
+    const name = firstNonEmpty(raw, ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок']) || firstNonEmpty(Object.fromEntries(fields.map(f => [f.label, f.value])), headers.slice(0,2));
+    const division = firstNonEmpty(raw, ['division','дивизион','group','группа']);
+    const rating = firstNonEmpty(raw, ['ntrp','ntrp_raketo','raketo','rating','рейтинг','рейтинг_ntrp','ntrp_raketo']);
+    const status = firstNonEmpty(raw, ['status','статус']);
+    const telegram = firstNonEmpty(raw, ['telegram','telegram_username','username','tg','телеграм']);
+    const country = firstNonEmpty(raw, ['country','country_of_origin','страна']);
+    return { rowNumber: idx + 2, name, division, rating, status, telegram, country, fields };
+  }).filter(r => r.fields.length && r.name);
+  return rows;
 }
 
 async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
@@ -217,10 +273,12 @@ export async function getEventPlayers(event={}) {
 }
 
 export async function enrichEventsWithStats(events=[]) {
+  let manualPlayers = [];
+  try { manualPlayers = await getManualParticipants(); } catch (e) { manualPlayers = []; }
+  const manualCount = manualPlayers.length;
   const enriched = [];
   for (const ev of events) {
-    const players = await getEventPlayers(ev);
-    enriched.push({ ...ev, applications_count: players.length, players_count: players.length });
+    enriched.push({ ...ev, applications_count: manualCount, players_count: manualCount });
   }
   return enriched;
 }

@@ -1,6 +1,6 @@
-import { ADMIN_IDS, SHEETS, BOT_TOKEN } from './config.js';
+import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested } from './sheets.js';
+import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating } from './sheets.js';
 import { sendMessage } from './telegram.js';
 
 function isAdminId(id) {
@@ -33,6 +33,16 @@ function publicContact(row) {
     whatsapp: row.whatsapp || '',
     crm_tags: row.crm_tags || ''
   };
+}
+
+
+function ratingUpdateKeyboard(lang='en') {
+  return { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Указать NTRP (Raketo)' : '🎾 Add NTRP (Raketo)', web_app: { url: `${PUBLIC_URL}/apply?mode=rating` } }]] };
+}
+function missingRatingMessage(lang='en') {
+  return lang === 'ru'
+    ? '<b>🎾 Обновите рейтинг NTRP (Raketo)</b>\n\nВ вашей анкете Phuket Tennis Family не указан рейтинг NTRP (Raketo).\n\nЧтобы анкета считалась заполненной полностью, укажите свой рейтинг из приложения Raketo. Если рейтинга Raketo у вас нет, пройдите короткий тест по кнопке ниже — бот рассчитает примерный уровень и обновит вашу уже существующую анкету.'
+    : '<b>🎾 Update your NTRP (Raketo)</b>\n\nYour Phuket Tennis Family profile does not include NTRP (Raketo).\n\nTo complete your profile, enter your rating from the Raketo app. If you do not have a Raketo rating, take the short test using the button below — the bot will estimate your level and update your existing profile.';
 }
 
 function applyFilters(rows, filters={}) {
@@ -124,6 +134,30 @@ export function registerAdminRoutes(app) {
         }
       }
       await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:JSON.stringify(req.body.filters || {}), language:'mixed', message_text:message, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+      res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+
+  app.post('/api/admin/request-rating', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const contacts = applyFilters(await getContacts(), req.body.filters || {}).filter(hasMissingRating);
+      const broadcastId = uid('broadcast');
+      let sent = 0, failed = 0;
+      for (const c of contacts) {
+        const lang = c.language === 'ru' ? 'ru' : 'en';
+        try {
+          await sendMessage(c.telegram_id, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
+          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'missing_rating_panel' });
+          sent++;
+        } catch(e) {
+          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:lang, segment_filter:'missing_rating_panel' });
+          failed++;
+        }
+      }
+      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:'missing_rating_panel', language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
