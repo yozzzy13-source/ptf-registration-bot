@@ -1,5 +1,5 @@
 import { sheets as sheetsClient } from './google.js';
-import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID } from './config.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID } from './config.js';
 import { nowISO, safe } from './util.js';
 
 const cache = new Map();
@@ -184,10 +184,109 @@ function buildParticipantGroups(players=[], divisions=[]) {
   if (unassigned.length) groups.push({ division: '', size: 0, count: unassigned.length, active: unassigned.filter(p => p.status === 'active').length, waitlist: unassigned.filter(p => p.status === 'waitlist').length, players: unassigned, unassigned: true });
   return groups;
 }
+// ---------------------------------------------------------------------------
+// Website player pages (read-only backend sheet of phukettennis.com).
+// Used to make names in the participants list clickable and show avatars.
+// ---------------------------------------------------------------------------
+const WEBSITE_CACHE_MS = 5 * 60_000;
+let websitePlayersCache = { t: 0, v: null };
+
+function normalizePersonName(value='') {
+  return String(value || '').toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+const FIRST_NAME_ALIASES = {
+  alex:'alexander', alexandr:'alexander', aleksandr:'alexander', sasha:'alexander',
+  ilya:'ilia', ilia:'ilia', misha:'michael', mikhail:'michael', mike:'michael',
+  tim:'timofei', slava:'viacheslav', vyacheslav:'viacheslav', kostya:'kostas', konstantin:'kostas',
+  dima:'dmitry', dmitriy:'dmitry', dmitrii:'dmitry', sergey:'sergei', serge:'sergei',
+  andrey:'andrei', andrew:'andrei', evgeny:'evgenii', evgeniy:'evgenii', eugene:'evgenii',
+  nick:'nikolai', nikolay:'nikolai', vlad:'vladislav', dasha:'daria', darya:'daria', masha:'maria', mariya:'maria',
+  olya:'olga', anya:'anna', ksenia:'xenia', kseniya:'xenia', ira:'irina'
+};
+function nameKeys(value='') {
+  const norm = normalizePersonName(value);
+  if (!norm) return [];
+  const parts = norm.split(' ');
+  const keys = new Set([norm]);
+  if (parts.length >= 2) {
+    const first = FIRST_NAME_ALIASES[parts[0]] || parts[0];
+    const last = parts[parts.length - 1];
+    keys.add(`${first} ${last}`);
+    keys.add(`${last} ${first}`);
+    keys.add(`${first.slice(0,3)}* ${last}`);
+  }
+  return [...keys];
+}
+
+async function websitePlayersSheetTitle() {
+  const meta = await spreadsheetMetaFor(WEBSITE_SPREADSHEET_ID);
+  const sheets = meta.sheets || [];
+  const byId = sheets.find(sh => String(sh.properties?.sheetId || '') === String(WEBSITE_PLAYERS_SHEET_ID));
+  return byId?.properties?.title || null;
+}
+
+export async function getWebsitePlayers() {
+  if (websitePlayersCache.v && Date.now() - websitePlayersCache.t < WEBSITE_CACHE_MS) return websitePlayersCache.v;
+  const title = await websitePlayersSheetTitle();
+  if (!title) return [];
+  const values = await valuesGetFromSpreadsheet(WEBSITE_SPREADSHEET_ID, `'${title}'!A:AZ`);
+  const headerRowIndex = values.findIndex(r => {
+    const h = (r || []).map(normalizeHeader);
+    return h.includes('player_name') && (h.includes('profile_url_by_id') || h.includes('profile_url_by_name') || h.includes('player_slug'));
+  });
+  if (headerRowIndex < 0) return [];
+  const headers = values[headerRowIndex].map(normalizeHeader);
+  const players = [];
+  for (let r = headerRowIndex + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    const obj = {};
+    headers.forEach((h, i) => { if (h) obj[h] = String(row[i] ?? '').trim(); });
+    if (!obj.player_name) continue;
+    const rel = obj.profile_url_by_id || obj.profile_url_by_name || (obj.player_id ? `/player-profile?playerId=${encodeURIComponent(obj.player_id)}&player=${encodeURIComponent(obj.player_name)}` : '');
+    if (!rel) continue;
+    players.push({
+      player_id: obj.player_id || '',
+      slug: obj.player_slug || '',
+      name: obj.player_name,
+      photo_url: obj.player_photo_url || '',
+      division: obj.current_division || '',
+      profile_url: /^https?:\/\//i.test(rel) ? rel : `${WEBSITE_URL}${rel.startsWith('/') ? '' : '/'}${rel}`
+    });
+  }
+  websitePlayersCache = { t: Date.now(), v: players };
+  return players;
+}
+
+// Adds profile_url / photo_url to manual participants when a website page exists for the same person.
+export async function attachWebsiteProfiles(players=[]) {
+  let site = [];
+  try { site = await getWebsitePlayers(); } catch (e) { console.error('website players load failed:', e.message); return players; }
+  if (!site.length) return players;
+  const exact = new Map();
+  const loose = new Map();
+  for (const sp of site) {
+    const keys = nameKeys(sp.name);
+    if (keys[0]) exact.set(keys[0], sp);
+    keys.slice(1).forEach(k => { if (!loose.has(k)) loose.set(k, sp); });
+  }
+  for (const p of players) {
+    const keys = nameKeys(p.name);
+    const hit = (keys[0] && exact.get(keys[0])) || keys.slice(1).map(k => loose.get(k)).find(Boolean) || null;
+    if (hit) { p.profile_url = hit.profile_url; p.photo_url = hit.photo_url; p.website_player_id = hit.player_id; }
+  }
+  return players;
+}
+
 export async function getManualParticipants() {
   const title = await manualParticipantsSheetTitle();
   const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
-  return parseManualParticipantsValues(values);
+  const parsed = parseManualParticipantsValues(values);
+  await attachWebsiteProfiles(parsed.players); // groups reference the same player objects
+  return parsed;
 }
 export function parseManualParticipantsValues(values=[]) {
   if (!values.length) return { players: [], groups: [], divisions: [], note: '', totals: { total:0, active:0, waitlist:0 } };
