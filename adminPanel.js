@@ -2,6 +2,7 @@ import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
 import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating } from './sheets.js';
 import { sendMessage } from './telegram.js';
+import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 
 function isAdminId(id) {
   if (!ADMIN_IDS.length) return false;
@@ -35,15 +36,6 @@ function publicContact(row) {
   };
 }
 
-
-function ratingUpdateKeyboard(lang='en') {
-  return { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Указать NTRP (Raketo)' : '🎾 Add NTRP (Raketo)', web_app: { url: `${PUBLIC_URL}/apply?mode=rating` } }]] };
-}
-function missingRatingMessage(lang='en') {
-  return lang === 'ru'
-    ? '<b>🎾 Обновите рейтинг NTRP (Raketo)</b>\n\nВ вашей анкете Phuket Tennis Family не указан рейтинг NTRP (Raketo).\n\nЧтобы анкета считалась заполненной полностью, укажите свой рейтинг из приложения Raketo. Если рейтинга Raketo у вас нет, пройдите короткий тест по кнопке ниже — бот рассчитает примерный уровень и обновит вашу уже существующую анкету.'
-    : '<b>🎾 Update your NTRP (Raketo)</b>\n\nYour Phuket Tennis Family profile does not include NTRP (Raketo).\n\nTo complete your profile, enter your rating from the Raketo app. If you do not have a Raketo rating, take the short test using the button below — the bot will estimate your level and update your existing profile.';
-}
 
 function applyFilters(rows, filters={}) {
   const status = norm(filters.status);

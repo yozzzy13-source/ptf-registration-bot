@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantLead } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -55,22 +55,38 @@ function playerTopicName(profileOrFrom={}) {
   return base.slice(0, 120) || `Player ${id}`;
 }
 
+// telegram_id -> { threadId, topicName }. Saves a Sheets round-trip on every message and
+// protects against a second topic being created while the sheet write is still in flight.
+const topicCache = new Map();
+export function forgetPlayerTopic(telegramId) { topicCache.delete(String(telegramId || '')); }
+
 export async function getOrCreatePlayerTopic(player={}) {
   const chatId = await getAdminChatId();
   if (!chatId) return null;
   const telegramId = player.telegram_id || player.id;
   if (!telegramId) return null;
+  const key = String(telegramId);
+
+  const cached = topicCache.get(key);
+  if (cached?.threadId) return { chatId, message_thread_id: Number(cached.threadId), topicName: cached.topicName, existing:true };
 
   return withTopicLock(telegramId, async () => {
-    const freshProfile = await findApplicantByTelegramId(telegramId).catch(() => null);
-    const currentTopicId = freshProfile?.admin_topic_id || player.admin_topic_id || '';
+    const again = topicCache.get(key);
+    if (again?.threadId) return { chatId, message_thread_id: Number(again.threadId), topicName: again.topicName, existing:true };
+
+    // One Applicants row per telegram_id is the source of truth for the topic id.
+    let freshProfile = await findApplicantByTelegramId(telegramId).catch(() => null);
+    if (!freshProfile && (player.username || player.telegram_username)) {
+      freshProfile = await findApplicantByTelegramIdentity({ id: telegramId, username: player.username || player.telegram_username }).catch(() => null);
+    }
+    if (!freshProfile) {
+      freshProfile = await ensureApplicantLead({ ...player, id: telegramId }).catch(e => { console.error('ensureApplicantLead failed:', e.message); return null; });
+    }
+    const currentTopicId = String(freshProfile?.admin_topic_id || player.admin_topic_id || '').trim();
     if (currentTopicId) {
-      return {
-        chatId,
-        message_thread_id: Number(currentTopicId),
-        topicName: freshProfile?.admin_topic_name || playerTopicName(freshProfile || player),
-        existing:true
-      };
+      const topicName = freshProfile?.admin_topic_name || playerTopicName(freshProfile || player);
+      topicCache.set(key, { threadId: currentTopicId, topicName });
+      return { chatId, message_thread_id: Number(currentTopicId), topicName, existing:true };
     }
 
     const topicName = playerTopicName(freshProfile || player);
@@ -78,11 +94,12 @@ export async function getOrCreatePlayerTopic(player={}) {
       const topic = await createForumTopic(chatId, topicName);
       const threadId = topic?.message_thread_id;
       if (threadId) {
+        topicCache.set(key, { threadId: String(threadId), topicName });
         await updateApplicantAdminTopic(telegramId, {
           admin_topic_id:String(threadId),
           admin_topic_name:topicName,
           admin_topic_created_at:nowISO()
-        }).catch(() => {});
+        }, player).catch(e => console.error('save admin_topic_id failed:', e.message));
         return { chatId, message_thread_id: threadId, topicName, existing:false };
       }
     } catch (e) {
@@ -90,6 +107,13 @@ export async function getOrCreatePlayerTopic(player={}) {
     }
     return { chatId, topicName, existing:false };
   });
+}
+
+// Recreate a topic only when Telegram says the thread itself is gone/closed.
+// Any other failure (rate limit, HTML parse error, network) must NOT spawn a new topic.
+function isTopicGoneError(e) {
+  const desc = String(e?.telegram?.description || e?.message || '').toLowerCase();
+  return desc.includes('thread not found') || desc.includes('topic_deleted') || desc.includes('topic_closed') || desc.includes('topic closed') || desc.includes('message thread not found');
 }
 
 function withTopicOpts(topic, opts={}) {
@@ -205,11 +229,13 @@ Notes: ${escapeHtml(profile.notes)}`, withTopicOpts(topic, {
 
 async function resetPlayerTopic(telegramId) {
   if (!telegramId) return null;
+  forgetPlayerTopic(telegramId);
   await updateApplicantAdminTopic(telegramId, { admin_topic_id:'', admin_topic_name:'', admin_topic_created_at:'' }).catch(() => {});
 }
 
-async function getFreshPlayerTopic(from, oldTopic=null) {
+async function getFreshPlayerTopic(from, oldTopic=null, error=null) {
   if (!oldTopic?.message_thread_id) return oldTopic;
+  if (error && !isTopicGoneError(error)) return oldTopic; // transient error: keep the existing topic
   await resetPlayerTopic(from.id || from.telegram_id);
   return getOrCreatePlayerTopic(from).catch(() => oldTopic);
 }
@@ -222,7 +248,7 @@ async function sendMessageToTopicOrGeneral({ chatId, topic, text, opts={}, from,
     console.error(`${fallbackTitle}: send to topic failed:`, e.message);
     let freshTopic = null;
     if (topic?.message_thread_id) {
-      freshTopic = await getFreshPlayerTopic(from, topic).catch(() => null);
+      freshTopic = await getFreshPlayerTopic(from, topic, e).catch(() => null);
       if (freshTopic?.message_thread_id && String(freshTopic.message_thread_id) !== String(topic.message_thread_id)) {
         try {
           const res = await sendMessage(chatId, text, withTopicOpts(freshTopic, opts));
@@ -246,7 +272,7 @@ async function copyMessageToTopicOrGeneral({ chatId, topic, sourceChatId, telegr
     console.error(`${fallbackTitle}: copy to topic failed:`, e.message);
     let freshTopic = null;
     if (topic?.message_thread_id) {
-      freshTopic = await getFreshPlayerTopic(from, topic).catch(() => null);
+      freshTopic = await getFreshPlayerTopic(from, topic, e).catch(() => null);
       if (freshTopic?.message_thread_id && String(freshTopic.message_thread_id) !== String(topic.message_thread_id)) {
         try {
           await copyMessage(chatId, sourceChatId, telegramMessageId, withTopicOpts(freshTopic, {}));
@@ -403,12 +429,12 @@ Please ask the player to resend the screenshot.`, sent.usedTopic ? withTopicOpts
 }
 
 
-function ratingUpdateKeyboard(lang='en') {
+export function ratingUpdateKeyboard(lang='en') {
   const url = `${PUBLIC_URL}/apply?mode=rating`;
   return { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Указать NTRP (Raketo)' : '🎾 Add NTRP (Raketo)', web_app: { url } }]] };
 }
 
-function missingRatingMessage(lang='en') {
+export function missingRatingMessage(lang='en') {
   return lang === 'ru'
     ? `<b>🎾 Обновите рейтинг NTRP (Raketo)</b>
 

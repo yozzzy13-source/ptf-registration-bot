@@ -73,100 +73,130 @@ async function manualParticipantsSheetTitle() {
   const byId = sheets.find(s => String(s.properties?.sheetId || '') === String(PARTICIPANTS_SHEET_ID));
   return byId?.properties?.title || sheets[0]?.properties?.title || 'Sheet1';
 }
+// ---------------------------------------------------------------------------
+// Manual participants sheet (separate spreadsheet, filled by hand).
+// Real layout of the sheet:
+//   [note rows: "The division has not yet been formed..."]
+//   [ blank | Players | Division Size ]
+//   [ PRIME | 0 | 8 ]  [ Division A | 4 | 8 | active ] ... [ Division Woman | 8 | 8 ]
+//   [ Name | ntrp | Division | status | ... contact columns ... ]
+//   [ player rows ]
+// Only public columns are exposed to the WebApp; contacts are never sent.
+// ---------------------------------------------------------------------------
+const PARTICIPANT_NAME_HEADERS = ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок'];
+const PARTICIPANT_PUBLIC_KEYS = new Set(['name','ntrp','ntrp_raketo','raketo','rating','рейтинг','division','дивизион','group','группа','status','статус']);
+const DIVISION_LETTER_TO_NAME = { p:'PRIME', prime:'PRIME', w:'Division Woman', woman:'Division Woman', women:'Division Woman', ladies:'Division Woman', a:'Division A', b:'Division B', c:'Division C', d:'Division D', e:'Division E' };
+
 function isLikelyDivisionHeader(value='') {
   const v = String(value || '').trim().toLowerCase();
   if (!v) return false;
   return /^(prime|division\s*[a-z0-9]+|division\s*woman|women|woman|ladies|дивизион\s*[a-zа-я0-9]+)$/i.test(v);
 }
+function normalizeDivisionName(value='') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const v = raw.toLowerCase().replace(/^(division|дивизион)\s*/i, '').trim();
+  if (DIVISION_LETTER_TO_NAME[v]) return DIVISION_LETTER_TO_NAME[v];
+  if (isLikelyDivisionHeader(raw)) return raw;
+  return raw.length <= 2 ? `Division ${raw.toUpperCase()}` : raw;
+}
+function normalizeRating(value='') {
+  const v = String(value || '').trim().replace(/,/g, '.');
+  if (!v || ['unknown','не знаю','n/a','na','-','?'].includes(v.toLowerCase())) return '';
+  return v;
+}
+function normalizeStatus(value='') {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return '';
+  if (['active','активен','активный','активна','подтвержден','подтверждён','confirmed','paid'].includes(v)) return 'active';
+  if (['waitlist','wait list','waiting','лист ожидания','ожидание','pending'].includes(v)) return 'waitlist';
+  return v;
+}
 function isGenericPlayerCell(value='') {
   const v = String(value || '').trim().toLowerCase();
-  return !v || ['name','player','players','participant','participants','имя','игрок','игроки','участник','участники','ntrp','raketo','rating','рейтинг','status','статус','country','страна','telegram','whatsapp','phone','телефон'].includes(v);
+  return !v || ['name','player','players','participant','participants','имя','игрок','игроки','участник','участники','ntrp','raketo','rating','рейтинг','status','статус','country','страна','telegram','whatsapp','phone','телефон','division','дивизион'].includes(v);
 }
-function makeGroupsFromPlayers(players=[]) {
-  const map = new Map();
-  for (const p of players) {
-    const division = String(p.division || 'Players').trim();
-    if (!map.has(division)) map.set(division, []);
-    map.get(division).push(p);
+function findParticipantsHeaderRow(values=[]) {
+  return values.findIndex(r => (r || []).some(c => PARTICIPANT_NAME_HEADERS.includes(normalizeHeader(c))));
+}
+function parseDivisionSummary(values=[], headerRowIndex=-1) {
+  // Rows above the player table where column A is a division name and column B/C hold numbers.
+  const limit = headerRowIndex >= 0 ? headerRowIndex : values.length;
+  const divisions = [];
+  let note = '';
+  for (let r = 0; r < limit; r++) {
+    const row = values[r] || [];
+    const first = String(row[0] || '').trim();
+    if (!note) {
+      const long = row.map(c => String(c || '').trim()).find(c => c.length > 40 && !/^\d/.test(c));
+      if (long) note = long;
+    }
+    if (!isLikelyDivisionHeader(first)) continue;
+    const size = Number(String(row[2] || '').replace(/[^0-9]/g, '')) || 0;
+    const declared = Number(String(row[1] || '').replace(/[^0-9]/g, '')) || 0;
+    divisions.push({ division: normalizeDivisionName(first), size, declared_count: declared, order: divisions.length });
   }
-  return [...map.entries()].map(([division, players]) => ({ division, players }));
+  return { divisions, note };
 }
-function parseParticipantsAsDivisionMatrix(values=[]) {
-  const headerRowIndex = values.findIndex(r => (r || []).filter(v => String(v || '').trim()).length >= 2);
-  if (headerRowIndex < 0) return { players: [], groups: [] };
-  const headerRow = values[headerRowIndex] || [];
-  const divisionColumns = [];
-  headerRow.forEach((cell, col) => {
-    const title = String(cell || '').trim();
-    if (title && (isLikelyDivisionHeader(title) || !isGenericPlayerCell(title))) divisionColumns.push({ col, division: title });
-  });
-  if (divisionColumns.length < 2) return { players: [], groups: [] };
-
-  const groups = divisionColumns.map(d => ({ division: d.division, players: [] }));
+function parseParticipantRows(values=[], headerRowIndex=0) {
+  const headers = values[headerRowIndex] || [];
+  const normHeaders = headers.map(normalizeHeader);
   const players = [];
   for (let r = headerRowIndex + 1; r < values.length; r++) {
     const row = values[r] || [];
-    for (let i = 0; i < divisionColumns.length; i++) {
-      const { col, division } = divisionColumns[i];
-      const value = String(row[col] ?? '').trim();
-      if (isGenericPlayerCell(value)) continue;
-      const p = {
-        rowNumber: r + 1,
-        name: value,
-        division,
-        rating: '',
-        status: '',
-        telegram: '',
-        country: '',
-        fields: [
-          { key:'division', label:'Division', value: division },
-          { key:'name', label:'Name', value }
-        ]
-      };
-      groups[i].players.push(p);
-      players.push(p);
-    }
-  }
-  return { players, groups: groups.filter(g => g.players.length) };
-}
-function parseParticipantsAsRows(values=[]) {
-  const headers = values[0] || [];
-  const normHeaders = headers.map(normalizeHeader);
-  const players = values.slice(1).map((r, idx) => {
     const raw = {};
+    headers.forEach((h, i) => { const key = normHeaders[i] || `col_${i+1}`; raw[key] = String(row[i] ?? '').trim(); });
+    const name = firstNonEmpty(raw, PARTICIPANT_NAME_HEADERS);
+    if (!name || isGenericPlayerCell(name)) continue;
+    const divisionRaw = firstNonEmpty(raw, ['division','дивизион','group','группа']);
+    const rating = normalizeRating(firstNonEmpty(raw, ['ntrp','ntrp_raketo','raketo','rating','рейтинг','рейтинг_ntrp']));
+    const status = normalizeStatus(firstNonEmpty(raw, ['status','статус']));
     const fields = [];
     headers.forEach((h, i) => {
+      const key = normHeaders[i];
       const label = String(h || '').trim();
-      const value = r[i] ?? '';
-      const key = normHeaders[i] || `col_${i+1}`;
-      raw[key] = value;
-      if (label && String(value).trim()) fields.push({ key, label, value: String(value).trim() });
+      const value = String(row[i] ?? '').trim();
+      if (label && value && PARTICIPANT_PUBLIC_KEYS.has(key)) fields.push({ key, label, value });
     });
-    const name = firstNonEmpty(raw, ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок']) || firstNonEmpty(Object.fromEntries(fields.map(f => [f.label, f.value])), headers.slice(0,2));
-    const division = firstNonEmpty(raw, ['division','дивизион','group','группа']);
-    const rating = firstNonEmpty(raw, ['ntrp','ntrp_raketo','raketo','rating','рейтинг','рейтинг_ntrp']);
-    const status = firstNonEmpty(raw, ['status','статус']);
-    const telegram = firstNonEmpty(raw, ['telegram','telegram_username','username','tg','телеграм']);
-    const country = firstNonEmpty(raw, ['country','country_of_origin','страна']);
-    return { rowNumber: idx + 2, name, division, rating, status, telegram, country, fields };
-  }).filter(r => r.fields.length && r.name && !isGenericPlayerCell(r.name));
-  return { players, groups: makeGroupsFromPlayers(players) };
+    players.push({ rowNumber: r + 1, name, division: normalizeDivisionName(divisionRaw), division_raw: divisionRaw, rating, status, fields });
+  }
+  return players;
+}
+function buildParticipantGroups(players=[], divisions=[]) {
+  const byName = new Map();
+  divisions.forEach(d => byName.set(d.division, { division: d.division, size: d.size || 0, order: d.order, players: [] }));
+  let extraOrder = divisions.length;
+  for (const p of players) {
+    const key = p.division || '';
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, { division: key, size: 0, order: extraOrder++, players: [] });
+    byName.get(key).players.push(p);
+  }
+  const unassigned = players.filter(p => !p.division);
+  const groups = [...byName.values()].sort((a,b) => a.order - b.order).map(g => ({
+    division: g.division,
+    size: g.size,
+    count: g.players.length,
+    active: g.players.filter(p => p.status === 'active').length,
+    waitlist: g.players.filter(p => p.status === 'waitlist').length,
+    players: g.players
+  }));
+  if (unassigned.length) groups.push({ division: '', size: 0, count: unassigned.length, active: unassigned.filter(p => p.status === 'active').length, waitlist: unassigned.filter(p => p.status === 'waitlist').length, players: unassigned, unassigned: true });
+  return groups;
 }
 export async function getManualParticipants() {
   const title = await manualParticipantsSheetTitle();
   const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
-  if (!values.length) return { players: [], groups: [] };
-
-  const firstNonEmptyRow = values.find(r => (r || []).some(v => String(v || '').trim())) || [];
-  const firstRowLooksLikeDivisions = firstNonEmptyRow.filter(v => isLikelyDivisionHeader(v)).length >= 2;
-  const hasRowNameHeader = (values[0] || []).map(normalizeHeader).some(h => ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок'].includes(h));
-
-  const parsed = firstRowLooksLikeDivisions || !hasRowNameHeader
-    ? parseParticipantsAsDivisionMatrix(values)
-    : parseParticipantsAsRows(values);
-
-  if (!parsed.players.length && hasRowNameHeader) return parseParticipantsAsRows(values);
-  return parsed;
+  return parseManualParticipantsValues(values);
+}
+export function parseManualParticipantsValues(values=[]) {
+  if (!values.length) return { players: [], groups: [], divisions: [], note: '', totals: { total:0, active:0, waitlist:0 } };
+  const headerRowIndex = findParticipantsHeaderRow(values);
+  const { divisions, note } = parseDivisionSummary(values, headerRowIndex);
+  const players = headerRowIndex >= 0 ? parseParticipantRows(values, headerRowIndex) : [];
+  const groups = buildParticipantGroups(players, divisions);
+  const totals = { total: players.length, active: players.filter(p => p.status === 'active').length, waitlist: players.filter(p => p.status === 'waitlist').length };
+  return { players, groups, divisions, note, totals };
 }
 
 async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
@@ -354,8 +384,33 @@ export async function enrichEventsWithStats(events=[]) {
 }
 
 
+let applicantAdminColumnsReady = null;
 export async function ensureApplicantAdminColumns() {
-  return ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_created_at']);
+  // Header check hits the Sheets metadata API; do it once per process.
+  if (!applicantAdminColumnsReady) {
+    applicantAdminColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_created_at'])
+      .catch(e => { applicantAdminColumnsReady = null; throw e; });
+  }
+  return applicantAdminColumnsReady;
+}
+
+// Minimal lead row so every Telegram user has exactly one Applicants row that can hold admin_topic_id.
+export async function ensureApplicantLead(user={}) {
+  const telegramId = user.id || user.telegram_id || '';
+  if (!telegramId) return null;
+  const username = user.username || user.telegram_username || '';
+  const existing = await findApplicantByTelegramIdentity({ id: telegramId, username });
+  if (existing) return existing;
+  const name = user.name || [user.first_name, user.last_name].filter(Boolean).join(' ') || '';
+  const newRow = {
+    date: nowISO(), created_at: nowISO(), updated_at: nowISO(),
+    name, status: 'lead', division: 'pending',
+    telegram_id: telegramId, telegram_username: username, telegram: username ? `t.me/${username}` : '',
+    language: ['ru','en'].includes(String(user.language || '').toLowerCase()) ? String(user.language).toLowerCase() : '',
+    source: 'telegram_lead', crm_tags: 'lead', profile_completed: 'no', selfie_status: 'optional_missing'
+  };
+  await appendObject(SHEETS.applicants, newRow);
+  return { ...newRow, _rowNumber: null };
 }
 
 export async function findApplicantByAdminTopicId(topicId) {
@@ -364,9 +419,9 @@ export async function findApplicantByAdminTopicId(topicId) {
   return rows.find(r => String(r.admin_topic_id || '') === String(topicId));
 }
 
-export async function updateApplicantAdminTopic(telegramId, patch) {
+export async function updateApplicantAdminTopic(telegramId, patch, user={}) {
   await ensureApplicantAdminColumns();
-  const found = await findApplicantByTelegramId(telegramId);
+  const found = await findApplicantByTelegramId(telegramId) || (user?.username ? await findApplicantByTelegramIdentity({ id: telegramId, username: user.username }) : null);
   if (!found) return null;
   await updateObjectByRow(SHEETS.applicants, found._rowNumber, { ...patch, updated_at: nowISO() });
   return { ...found, ...patch };

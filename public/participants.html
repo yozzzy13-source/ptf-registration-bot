@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PTF Participants</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root{--bg:#141414;--card:#202020;--card2:#292929;--text:#f6f4ef;--muted:#a9a49b;--accent:#ef5f00;--accent2:#ff8a2a;--border:#3a3a3a;--danger:#ff6b6b;--green:#19c37d;--green2:#0f7a4f;--yellow:#e8b93a;--yellow2:#7a5d10;--prime:#d9534f;--divA:#e08a6a;--divB:#f0b27a;--divC:#f5d78e;--divD:#8fd19e;--divW:#c9a7e6}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#0f0f0f,#1b1b1b);color:var(--text);min-height:100vh;padding:14px}
+    .wrap{max-width:620px;margin:0 auto}
+    h1{font-size:24px;margin:4px 0 6px;line-height:1.15}
+    .sub{color:var(--muted);font-size:13px;line-height:1.45;margin:0 0 12px}
+    .note{background:rgba(232,185,58,.12);border:1px solid rgba(232,185,58,.45);color:#ffe29a;border-radius:14px;padding:10px 12px;font-size:13px;line-height:1.4;margin:0 0 12px}
+    .totals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 14px}
+    .tot{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:10px 12px}
+    .tot small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+    .tot b{font-size:22px;line-height:1.2}
+    .tot.active b{color:var(--green)} .tot.waitlist b{color:var(--yellow)}
+    .overview{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;margin:0 0 14px}
+    .overview h3{margin:0 0 8px;font-size:14px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+    .ov-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #2c2c2c}
+    .ov-row:last-child{border-bottom:0}
+    .ov-name{display:flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+    .dot{width:10px;height:10px;border-radius:50%;flex:0 0 10px}
+    .bar{position:relative;width:120px;height:18px;border-radius:9px;background:#2e2e2e;overflow:hidden;border:1px solid #3c3c3c}
+    .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--green2)}
+    .bar i.full{background:var(--green)}
+    .bar i.over{background:var(--danger)}
+    .bar span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+    .div{background:var(--card);border:1px solid var(--border);border-radius:18px;margin:0 0 12px;overflow:hidden}
+    .div-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 14px;border-left:6px solid var(--accent);background:#242424}
+    .div-title{font-weight:900;font-size:16px}
+    .div-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid var(--border);background:#303030;color:var(--muted);white-space:nowrap}
+    .pill.cap{color:#fff;background:#3a3a3a}
+    .pill.cap.full{background:var(--green2);border-color:var(--green);color:#dfffee}
+    .pill.cap.over{background:#6a2222;border-color:var(--danger);color:#ffd5d5}
+    .pill.free{color:#dfffee;border-color:var(--green2)}
+    table{width:100%;border-collapse:collapse}
+    td{padding:8px 12px;border-top:1px solid #2b2b2b;font-size:14px;vertical-align:middle}
+    td.n{width:28px;color:var(--muted);font-size:12px;text-align:right;padding-right:4px}
+    td.name{font-weight:700}
+    td.rating{width:64px;text-align:center;font-weight:800;color:#f2d2b9;white-space:nowrap}
+    td.rating.unk{color:var(--muted);font-weight:600;font-size:12px}
+    td.status{width:86px;text-align:right}
+    .st{display:inline-block;min-width:70px;text-align:center;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.03em}
+    .st.active{background:var(--green2);color:#e6fff2}
+    .st.waitlist{background:var(--yellow2);color:#ffe9a8}
+    .st.other{background:#3a3a3a;color:#ddd}
+    .empty-row td{color:var(--muted);font-size:13px;text-align:center;padding:12px}
+    .free-row td{color:var(--muted);font-size:12px;text-align:center;padding:6px 12px;background:rgba(25,195,125,.05)}
+    .error{color:var(--danger);white-space:pre-wrap}
+    .loading{color:var(--muted);padding:20px;text-align:center}
+    button{width:100%;border:0;border-radius:16px;padding:14px 16px;font-size:16px;font-weight:900;margin-top:12px;cursor:pointer;background:#272727;color:var(--text);border:1px solid var(--border)}
+    .foot{color:var(--muted);font-size:11px;text-align:center;margin-top:10px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Participants</h1>
+  <p class="sub" id="sub"></p>
+  <div id="content"><div class="loading" id="loading">Loading…</div></div>
+  <button id="closeBtn">Close</button>
+  <div class="foot" id="foot"></div>
+</div>
+<script>
+const tg=window.Telegram?.WebApp; if(tg){tg.expand();tg.ready();}
+const initData=tg?.initData||'';
+let lang=(tg?.initDataUnsafe?.user?.language_code||'').toLowerCase().startsWith('ru')?'ru':'en';
+const L={
+  ru:{title:'Список участников',sub:'Актуальный состав дивизионов. Список обновляется организатором вручную.',loading:'Загружаем список…',empty:'Список участников пока пуст.',total:'Всего',active:'Active',waitlist:'Waitlist',overview:'Заполненность дивизионов',unassigned:'Без дивизиона',noPlayers:'Пока нет игроков',free:'Свободно мест:',full:'дивизион заполнен',over:'больше лимита',close:'Главное меню',updated:'Данные из таблицы участников PTF'},
+  en:{title:'Participants List',sub:'Current division lineups. The list is maintained manually by the organizer.',loading:'Loading list…',empty:'The participants list is empty.',total:'Total',active:'Active',waitlist:'Waitlist',overview:'Division fill',unassigned:'No division yet',noPlayers:'No players yet',free:'Spots left:',full:'division is full',over:'over the limit',close:'Main menu',updated:'Data from the PTF participants sheet'}
+};
+const $=id=>document.getElementById(id);
+const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const DIV_COLORS={'PRIME':'var(--prime)','Division A':'var(--divA)','Division B':'var(--divB)','Division C':'var(--divC)','Division D':'var(--divD)','Division Woman':'var(--divW)'};
+function divColor(name){return DIV_COLORS[name]||'var(--accent2)'}
+function divLabel(name){if(!name)return L[lang].unassigned; if(lang==='ru'){if(name==='Division Woman')return 'Дивизион Woman'; return name.replace(/^Division\s+/,'Дивизион ')} return name}
+function applyLang(){$('title').textContent=L[lang].title;$('sub').textContent=L[lang].sub;$('closeBtn').textContent=L[lang].close;$('foot').textContent=L[lang].updated;const ld=$('loading');if(ld)ld.textContent=L[lang].loading}
+function capPill(g){if(!g.size)return `<span class="pill">${g.count}</span>`;const cls=g.count>g.size?'over':(g.count>=g.size?'full':'');return `<span class="pill cap ${cls}">${g.count} / ${g.size}</span>`}
+function bar(g){if(!g.size)return `<span class="pill">${g.count}</span>`;const pct=Math.min(100,Math.round(g.count/g.size*100));const cls=g.count>g.size?'over':(g.count>=g.size?'full':'');return `<div class="bar"><i class="${cls}" style="width:${pct}%"></i><span>${g.count} / ${g.size}</span></div>`}
+function statusPill(s){const x=L[lang];const k=s==='active'?'active':(s==='waitlist'?'waitlist':'other');const label=k==='active'?x.active:(k==='waitlist'?x.waitlist:(s||'—'));return `<span class="st ${k}">${esc(label)}</span>`}
+function render(data){
+  const x=L[lang]; const groups=data.groups||[]; const t=data.totals||{total:0,active:0,waitlist:0};
+  if(!groups.length){$('content').innerHTML=`<p class="sub">${esc(x.empty)}</p>`;return}
+  let html='';
+  if(data.note) html+=`<div class="note">${esc(data.note)}</div>`;
+  html+=`<div class="totals"><div class="tot"><small>${x.total}</small><b>${t.total}</b></div><div class="tot active"><small>${x.active}</small><b>${t.active}</b></div><div class="tot waitlist"><small>${x.waitlist}</small><b>${t.waitlist}</b></div></div>`;
+  const sized=groups.filter(g=>!g.unassigned);
+  if(sized.length){html+=`<div class="overview"><h3>${esc(x.overview)}</h3>`+sized.map(g=>`<div class="ov-row"><div class="ov-name"><span class="dot" style="background:${divColor(g.division)}"></span>${esc(divLabel(g.division))}</div>${bar(g)}</div>`).join('')+`</div>`}
+  for(const g of groups){
+    const free=g.size?g.size-g.count:0;
+    html+=`<div class="div"><div class="div-head" style="border-left-color:${divColor(g.division)}"><div class="div-title">${esc(divLabel(g.division))}</div><div class="div-meta">${g.active?`<span class="pill" style="color:#dfffee">${x.active}: ${g.active}</span>`:''}${g.waitlist?`<span class="pill" style="color:#ffe9a8">${x.waitlist}: ${g.waitlist}</span>`:''}${capPill(g)}</div></div><table><tbody>`;
+    if(!g.players.length) html+=`<tr class="empty-row"><td colspan="4">${esc(x.noPlayers)}</td></tr>`;
+    g.players.forEach((p,i)=>{html+=`<tr><td class="n">${i+1}</td><td class="name">${esc(p.name)}</td><td class="rating ${p.rating?'':'unk'}">${esc(p.rating||'?')}</td><td class="status">${statusPill(p.status)}</td></tr>`});
+    if(g.size&&free>0) html+=`<tr class="free-row"><td colspan="4">${esc(x.free)} ${free}</td></tr>`;
+    else if(g.size&&free===0) html+=`<tr class="free-row"><td colspan="4">${esc(x.full)}</td></tr>`;
+    else if(g.size&&free<0) html+=`<tr class="free-row"><td colspan="4">+${-free} ${esc(x.over)}</td></tr>`;
+    html+='</tbody></table></div>';
+  }
+  $('content').innerHTML=html;
+}
+async function load(){
+  applyLang();
+  try{
+    const r=await fetch('/api/participants?initData='+encodeURIComponent(initData),{cache:'no-store'});
+    const j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Participants loading error');
+    if(j.lang==='ru'||j.lang==='en'){lang=j.lang;applyLang();}
+    render(j);
+  }catch(e){$('content').innerHTML=`<p class="error">${esc(e.message)}</p>`}
+}
+$('closeBtn').onclick=()=>{if(tg)tg.close();else location.href='/'};
+load();
+</script>
+</body>
+</html>

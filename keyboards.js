@@ -7,13 +7,13 @@ export function languageKeyboard() { return inlineKeyboard([[{text:'🇷🇺 Р�
 
 export function mainKeyboard(lang) { return inlineKeyboard([
   [webAppButton(t(lang,'join_event'),'/apply?mode=event')],
-  [webAppButton(t(lang,'participants'),'/apply?mode=participants')],
+  [webAppButton(t(lang,'participants'),'/participants')],
   [{text:t(lang,'about'),callback_data:'website_menu'}],
   [{text:t(lang,'how'),callback_data:'text:how_league_works'}],
   [{text:t(lang,'yearly'),callback_data:'text:yearly_race'},{text:t(lang,'pass'),callback_data:'payment_entry'}],
   [{text:t(lang,'contact'),callback_data:'contact'}]
 ]); }
-export function textKeyboard(lang,key) { const rows=[[webAppButton(t(lang,'join_event'),'/apply?mode=event')],[webAppButton(t(lang,'participants'),'/apply?mode=participants')]]; if(key!=='how_league_works') rows.push([{text:t(lang,'how'),callback_data:'text:how_league_works'}]); if(key!=='yearly_race') rows.push([{text:t(lang,'yearly'),callback_data:'text:yearly_race'}]); if(key!=='yearly_race') rows.push([{text:t(lang,'about'),callback_data:'website_menu'}]); rows.push([{text:t(lang,'contact'),callback_data:'contact'},{text:t(lang,'back'),callback_data:'main'}]); return inlineKeyboard(rows); }
+export function textKeyboard(lang,key) { const rows=[[webAppButton(t(lang,'join_event'),'/apply?mode=event')],[webAppButton(t(lang,'participants'),'/participants')]]; if(key!=='how_league_works') rows.push([{text:t(lang,'how'),callback_data:'text:how_league_works'}]); if(key!=='yearly_race') rows.push([{text:t(lang,'yearly'),callback_data:'text:yearly_race'}]); if(key!=='yearly_race') rows.push([{text:t(lang,'about'),callback_data:'website_menu'}]); rows.push([{text:t(lang,'contact'),callback_data:'contact'},{text:t(lang,'back'),callback_data:'main'}]); return inlineKeyboard(rows); }
 export function websiteKeyboard(lang, urls) { return inlineKeyboard([[{text:'🎾 Matches',url:urls.matches}],[{text:lang==='ru'?'🏆 Дивизионы':'🏆 Divisions',url:urls.divisions}],[{text:'⭐ Yearly Race',url:urls.yearlyRace}],[{text:lang==='ru'?'👥 Игроки':'👥 Players',url:urls.players}],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]); }
 export function contactOpenKeyboard(lang) { return inlineKeyboard([[{text:t(lang,'main_menu'),callback_data:'main'},{text:t(lang,'close_chat'),callback_data:'close_contact'}]]); }
 export function paymentKeyboard(lang, applicationId) { return inlineKeyboard([[{text:t(lang,'bank'),callback_data:`pay:${applicationId}:thai_bank`}],[{text:t(lang,'crypto'),callback_data:`crypto:${applicationId}`}],[{text:t(lang,'pay_later'),callback_data:`paylater:${applicationId}`}],[{text:t(lang,'call_admin'),callback_data:'contact'}]]); }

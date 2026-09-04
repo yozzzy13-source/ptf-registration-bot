@@ -18,6 +18,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 
 app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
+function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
+app.get('/participants', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'participants.html')); });
 app.get('/apply', (req, res) => { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); res.sendFile(path.join(__dirname, 'public', 'apply.html')); });
 registerAdminRoutes(app);
 
@@ -53,6 +55,19 @@ app.get('/api/bootstrap', async (req, res) => {
   }
 });
 
+async function participantsPayload(initData='') {
+  const { user } = parseInitData(initData);
+  let lang = '';
+  if (user?.id) {
+    const profile = await findApplicantByTelegramId(user.id).catch(() => null);
+    lang = ['ru','en'].includes(String(profile?.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : '';
+  }
+  if (!lang) lang = String(user?.language_code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+  const data = await getManualParticipants();
+  const players = (data.players || []).map((p, idx) => ({ n: idx + 1, ...p }));
+  return { ok:true, lang, total: players.length, totals: data.totals, note: data.note, divisions: data.divisions, groups: data.groups, players };
+}
+
 app.get('/api/event-players', async (req, res) => {
   try {
     const initData = req.query.initData || '';
@@ -60,10 +75,7 @@ app.get('/api/event-players', async (req, res) => {
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
     const eventId = String(req.query.event_id || '').trim();
     if (!eventId) return res.status(400).json({ ok:false, error:'event_id is required' });
-    const data = await getManualParticipants();
-    const players = Array.isArray(data) ? data : (data.players || []);
-    const groups = Array.isArray(data) ? [] : (data.groups || []);
-    res.json({ ok:true, event_id:eventId, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })), groups });
+    res.json({ event_id:eventId, ...(await participantsPayload(initData)) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
@@ -74,16 +86,11 @@ app.get('/api/participants', async (req, res) => {
     const initData = req.query.initData || '';
     const verified = verifyTelegramInitData(initData);
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
-    const data = await getManualParticipants();
-    const players = Array.isArray(data) ? data : (data.players || []);
-    const groups = Array.isArray(data) ? [] : (data.groups || []);
-    res.json({ ok:true, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })), groups });
+    res.json(await participantsPayload(initData));
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
 });
-
-
 
 function requireRacketRating(profile = {}) {
   const rating = safe(profile.racket_rating || profile.ntrp);
