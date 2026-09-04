@@ -73,12 +73,66 @@ async function manualParticipantsSheetTitle() {
   const byId = sheets.find(s => String(s.properties?.sheetId || '') === String(PARTICIPANTS_SHEET_ID));
   return byId?.properties?.title || sheets[0]?.properties?.title || 'Sheet1';
 }
-export async function getManualParticipants() {
-  const title = await manualParticipantsSheetTitle();
-  const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+function isLikelyDivisionHeader(value='') {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return false;
+  return /^(prime|division\s*[a-z0-9]+|division\s*woman|women|woman|ladies|дивизион\s*[a-zа-я0-9]+)$/i.test(v);
+}
+function isGenericPlayerCell(value='') {
+  const v = String(value || '').trim().toLowerCase();
+  return !v || ['name','player','players','participant','participants','имя','игрок','игроки','участник','участники','ntrp','raketo','rating','рейтинг','status','статус','country','страна','telegram','whatsapp','phone','телефон'].includes(v);
+}
+function makeGroupsFromPlayers(players=[]) {
+  const map = new Map();
+  for (const p of players) {
+    const division = String(p.division || 'Players').trim();
+    if (!map.has(division)) map.set(division, []);
+    map.get(division).push(p);
+  }
+  return [...map.entries()].map(([division, players]) => ({ division, players }));
+}
+function parseParticipantsAsDivisionMatrix(values=[]) {
+  const headerRowIndex = values.findIndex(r => (r || []).filter(v => String(v || '').trim()).length >= 2);
+  if (headerRowIndex < 0) return { players: [], groups: [] };
+  const headerRow = values[headerRowIndex] || [];
+  const divisionColumns = [];
+  headerRow.forEach((cell, col) => {
+    const title = String(cell || '').trim();
+    if (title && (isLikelyDivisionHeader(title) || !isGenericPlayerCell(title))) divisionColumns.push({ col, division: title });
+  });
+  if (divisionColumns.length < 2) return { players: [], groups: [] };
+
+  const groups = divisionColumns.map(d => ({ division: d.division, players: [] }));
+  const players = [];
+  for (let r = headerRowIndex + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    for (let i = 0; i < divisionColumns.length; i++) {
+      const { col, division } = divisionColumns[i];
+      const value = String(row[col] ?? '').trim();
+      if (isGenericPlayerCell(value)) continue;
+      const p = {
+        rowNumber: r + 1,
+        name: value,
+        division,
+        rating: '',
+        status: '',
+        telegram: '',
+        country: '',
+        fields: [
+          { key:'division', label:'Division', value: division },
+          { key:'name', label:'Name', value }
+        ]
+      };
+      groups[i].players.push(p);
+      players.push(p);
+    }
+  }
+  return { players, groups: groups.filter(g => g.players.length) };
+}
+function parseParticipantsAsRows(values=[]) {
   const headers = values[0] || [];
   const normHeaders = headers.map(normalizeHeader);
-  const rows = values.slice(1).map((r, idx) => {
+  const players = values.slice(1).map((r, idx) => {
     const raw = {};
     const fields = [];
     headers.forEach((h, i) => {
@@ -90,13 +144,29 @@ export async function getManualParticipants() {
     });
     const name = firstNonEmpty(raw, ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок']) || firstNonEmpty(Object.fromEntries(fields.map(f => [f.label, f.value])), headers.slice(0,2));
     const division = firstNonEmpty(raw, ['division','дивизион','group','группа']);
-    const rating = firstNonEmpty(raw, ['ntrp','ntrp_raketo','raketo','rating','рейтинг','рейтинг_ntrp','ntrp_raketo']);
+    const rating = firstNonEmpty(raw, ['ntrp','ntrp_raketo','raketo','rating','рейтинг','рейтинг_ntrp']);
     const status = firstNonEmpty(raw, ['status','статус']);
     const telegram = firstNonEmpty(raw, ['telegram','telegram_username','username','tg','телеграм']);
     const country = firstNonEmpty(raw, ['country','country_of_origin','страна']);
     return { rowNumber: idx + 2, name, division, rating, status, telegram, country, fields };
-  }).filter(r => r.fields.length && r.name);
-  return rows;
+  }).filter(r => r.fields.length && r.name && !isGenericPlayerCell(r.name));
+  return { players, groups: makeGroupsFromPlayers(players) };
+}
+export async function getManualParticipants() {
+  const title = await manualParticipantsSheetTitle();
+  const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+  if (!values.length) return { players: [], groups: [] };
+
+  const firstNonEmptyRow = values.find(r => (r || []).some(v => String(v || '').trim())) || [];
+  const firstRowLooksLikeDivisions = firstNonEmptyRow.filter(v => isLikelyDivisionHeader(v)).length >= 2;
+  const hasRowNameHeader = (values[0] || []).map(normalizeHeader).some(h => ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок'].includes(h));
+
+  const parsed = firstRowLooksLikeDivisions || !hasRowNameHeader
+    ? parseParticipantsAsDivisionMatrix(values)
+    : parseParticipantsAsRows(values);
+
+  if (!parsed.players.length && hasRowNameHeader) return parseParticipantsAsRows(values);
+  return parsed;
 }
 
 async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
@@ -274,7 +344,7 @@ export async function getEventPlayers(event={}) {
 
 export async function enrichEventsWithStats(events=[]) {
   let manualPlayers = [];
-  try { manualPlayers = await getManualParticipants(); } catch (e) { manualPlayers = []; }
+  try { const data = await getManualParticipants(); manualPlayers = Array.isArray(data) ? data : (data.players || []); } catch (e) { manualPlayers = []; }
   const manualCount = manualPlayers.length;
   const enriched = [];
   for (const ev of events) {

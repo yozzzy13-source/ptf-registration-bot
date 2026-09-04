@@ -60,8 +60,10 @@ app.get('/api/event-players', async (req, res) => {
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
     const eventId = String(req.query.event_id || '').trim();
     if (!eventId) return res.status(400).json({ ok:false, error:'event_id is required' });
-    const players = await getManualParticipants();
-    res.json({ ok:true, event_id:eventId, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })) });
+    const data = await getManualParticipants();
+    const players = Array.isArray(data) ? data : (data.players || []);
+    const groups = Array.isArray(data) ? [] : (data.groups || []);
+    res.json({ ok:true, event_id:eventId, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })), groups });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
@@ -72,8 +74,10 @@ app.get('/api/participants', async (req, res) => {
     const initData = req.query.initData || '';
     const verified = verifyTelegramInitData(initData);
     if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
-    const players = await getManualParticipants();
-    res.json({ ok:true, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })) });
+    const data = await getManualParticipants();
+    const players = Array.isArray(data) ? data : (data.players || []);
+    const groups = Array.isArray(data) ? [] : (data.groups || []);
+    res.json({ ok:true, total:players.length, players:players.map((p,idx) => ({ n:idx+1, ...p })), groups });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
