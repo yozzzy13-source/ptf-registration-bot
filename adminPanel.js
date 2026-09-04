@@ -32,7 +32,9 @@ function publicContact(row) {
     last_application_event: row.last_application_event || '',
     country: row.country_of_origin || '',
     whatsapp: row.whatsapp || '',
-    crm_tags: row.crm_tags || ''
+    crm_tags: row.crm_tags || '',
+    ntrp: row.ntrp || '',
+    missing_rating: hasMissingRating(row)
   };
 }
 
@@ -44,6 +46,7 @@ function applyFilters(rows, filters={}) {
   const selfie = norm(filters.selfie_status);
   const event = norm(filters.event);
   const search = norm(filters.search);
+  const rating = norm(filters.rating);
   const selected = Array.isArray(filters.selected_ids) ? filters.selected_ids.map(String) : [];
   return rows.filter(r => {
     if (!r.telegram_id) return false;
@@ -57,6 +60,8 @@ function applyFilters(rows, filters={}) {
       } else if (norm(r.selfie_status) !== selfie) return false;
     }
     if (event && !norm(r.last_application_event).includes(event)) return false;
+    if (rating === 'missing' && !hasMissingRating(r)) return false;
+    if (rating === 'set' && hasMissingRating(r)) return false;
     if (search) {
       const hay = [r.name, r.telegram_username, r.telegram_id, r.whatsapp, r.country_of_origin, r.crm_tags].map(norm).join(' ');
       if (!hay.includes(search)) return false;
@@ -167,11 +172,41 @@ export function registerAdminRoutes(app) {
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
+  // Broadcast history: one row per broadcast (newest first), recipients loaded on demand.
+  app.get('/api/admin/broadcasts', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit || 60)));
+      const rows = (await getRows(SHEETS.broadcasts, { useCache:false })).rows
+        .filter(r => r.broadcast_id)
+        .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))
+        .slice(0, limit)
+        .map(r => ({ broadcast_id:r.broadcast_id, created_at:r.created_at || '', admin_name:r.admin_name || r.admin_id || '', segment_filter:r.segment_filter || '', message_text:String(r.message_text || ''), media_type:r.media_type || 'text', recipients:Number(r.recipients_count || 0), sent:Number(r.sent_count || 0), failed:Number(r.failed_count || 0) }));
+      res.json({ ok:true, broadcasts:rows });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  app.get('/api/admin/broadcast-logs', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const broadcastId = String(req.query.broadcast_id || '').trim();
+      if (!broadcastId) return res.status(400).json({ ok:false, error:'broadcast_id is required' });
+      const rows = (await getRows(SHEETS.broadcastLogs, { useCache:false })).rows
+        .filter(r => String(r.broadcast_id) === broadcastId)
+        .map(r => ({ telegram_id:r.telegram_id || '', name:r.name || '', telegram_username:r.telegram_username || '', status:r.status || '', sent_at:r.sent_at || '', error:r.error || '', language:r.language || '' }))
+        .sort((a,b) => (a.status === 'failed' ? 0 : 1) - (b.status === 'failed' ? 0 : 1));
+      res.json({ ok:true, broadcast_id:broadcastId, logs:rows });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
   app.post('/api/admin/request-selfie', async (req, res) => {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
       const contacts = applyFilters(await getContacts(), { ...(req.body.filters || {}), selfie_status:'missing' }).filter(r => String(r.status).toLowerCase() === 'active');
+      const broadcastId = uid('broadcast');
       let sent = 0, failed = 0;
       for (const c of contacts) {
         const lang = c.language === 'ru' ? 'ru' : 'en';
@@ -181,10 +216,15 @@ export function registerAdminRoutes(app) {
         try {
           await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '📸 Загрузить селфи' : '📸 Upload Selfie', callback_data:'upload_selfie' } ]] } });
           await markSelfieRequested(c.telegram_id);
+          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'selfie_request_panel' });
           sent++;
-        } catch(e) { failed++; }
+        } catch(e) {
+          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:lang, segment_filter:'selfie_request_panel' });
+          failed++;
+        }
       }
-      res.json({ ok:true, recipients:contacts.length, sent, failed });
+      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:'selfie_request_panel', language:'mixed', message_text:'Selfie request', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+      res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 }
