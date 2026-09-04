@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 import { BOT_TOKEN, PUBLIC_URL, CLUB_CHAT_URL } from './config.js';
 
-const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
+const API = `${(process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/$/, '')}/bot${BOT_TOKEN}`;
 
 const migratedChats = new Map();
 
@@ -62,6 +62,7 @@ export const sendVideoNote = (chat_id, video_note, opts={}) => call('sendVideoNo
 export const sendSticker = (chat_id, sticker, opts={}) => call('sendSticker', { chat_id, sticker, ...opts });
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
+export const getChat = (chat_id) => call('getChat', { chat_id });
 export const sendPoll = (chat_id, question, options, opts={}) => call('sendPoll', { chat_id, question, options, ...opts });
 
 export async function setWebhook() {

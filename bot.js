@@ -4,7 +4,7 @@ import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplica
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT } from './config.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -348,6 +348,7 @@ export async function handleMessage(msg) {
 
   if (isAdminUser(from.id)) {
     if (text === '/stats') return adminStats(chatId);
+    if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/events') return adminEvents(chatId);
     if (text === '/pending') return adminPending(chatId);
     if (text === '/messages') return adminMessages(chatId);
@@ -370,8 +371,11 @@ export async function handleMessage(msg) {
 
     const aState = adminState.get(String(from.id));
     if (aState?.mode === 'reply_waiting') {
-      await sendMessage(aState.targetTelegramId, msg.text || msg.caption || '');
-      await logMessage({ message_id:uid('msg'), telegram_id:aState.targetTelegramId, direction:'outgoing', message_type:'text', message_text:msg.text || msg.caption || '', timestamp:nowISO(), admin_id:from.id, admin_name:from.username || from.first_name || '', status:'sent' });
+      const replyText = msg.text || msg.caption || '';
+      if (paymentProofMedia(msg)) await copyMessage(aState.targetTelegramId, msg.chat.id, msg.message_id);
+      else if (replyText) await sendMessage(aState.targetTelegramId, replyText);
+      else return sendMessage(chatId, 'Send text or media to forward to the player.');
+      await logMessage({ message_id:uid('msg'), telegram_id:aState.targetTelegramId, direction:'outgoing', message_type:messageType(msg), message_text:replyText || '[media]', timestamp:nowISO(), admin_id:from.id, admin_name:from.username || from.first_name || '', status:'sent' });
       adminState.delete(String(from.id));
       return null;
     }
@@ -422,6 +426,14 @@ export async function handleMessage(msg) {
 
   if (state?.mode === 'contact') return handleContactMessage(msg, state, lang);
   if (state?.mode === 'challenge_chat') return forwardChallengeChat(msg, state);
+
+  // Catch-all: media sent in a private chat outside any flow must still reach the player's admin topic.
+  if (isPrivate && paymentProofMedia(msg)) {
+    const type = messageType(msg);
+    await logMessage({ message_id:uid('msg'), telegram_id:from.id, telegram_username:from.username || '', name:contactName(from), direction:'incoming', message_type:type, message_text:msg.caption || '[media]', timestamp:nowISO(), status:'new', telegram_message_id:msg.message_id }).catch(e => console.error('log media failed:', e.message));
+    await notifyPlayerMedia({ id:from.id, username:from.username, name:contactName(from) }, msg, 'Sent outside payment/contact flow').catch(e => console.error('notify player media failed:', e.message));
+    return sendMessage(chatId, lang === 'ru' ? '✅ Файл получен и передан организатору.' : '✅ File received and forwarded to the organizer.', { reply_markup: mainKeyboard(lang) });
+  }
   return sendMain(chatId, lang);
 }
 
