@@ -68,19 +68,6 @@ async function participantsPayload(initData='') {
   return { ok:true, lang, total: players.length, totals: data.totals, note: data.note, divisions: data.divisions, groups: data.groups, players };
 }
 
-app.get('/api/event-players', async (req, res) => {
-  try {
-    const initData = req.query.initData || '';
-    const verified = verifyTelegramInitData(initData);
-    if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
-    const eventId = String(req.query.event_id || '').trim();
-    if (!eventId) return res.status(400).json({ ok:false, error:'event_id is required' });
-    res.json({ event_id:eventId, ...(await participantsPayload(initData)) });
-  } catch (e) {
-    res.status(500).json({ ok:false, error:e.message });
-  }
-});
-
 app.get('/api/participants', async (req, res) => {
   try {
     const initData = req.query.initData || '';
