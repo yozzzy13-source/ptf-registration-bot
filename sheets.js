@@ -880,6 +880,25 @@ export async function getPlayerDivision(profile = {}) {
   return (await getPlayerLeagueInfo(profile)).division;
 }
 
+// Все живые пользователи бота — для ленты результатов. Лига идёт для всех, кто в боте,
+// а не только для тех, кто попал в текущий состав дивизионов: результат видят все,
+// кроме тех, кто отписался или был отклонён.
+const DEAD_SUBSCRIBER_STATUSES = ['inactive','declined','rejected','blocked','banned','left','unsubscribed'];
+
+export async function getAllBotSubscribers() {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const id = String(r.telegram_id || '').trim();
+    if (!id || seen.has(id)) continue;
+    if (DEAD_SUBSCRIBER_STATUSES.includes(String(r.status || '').toLowerCase())) continue;
+    seen.add(id);
+    out.push({ telegram_id: id, name: r.name || '', language: r.language || '' });
+  }
+  return out;
+}
+
 // Все активные игроки лиги с Telegram — для общих рассылок (результаты матчей).
 export async function getAllActiveLeaguePlayers() {
   const [data, { rows: applicants }] = await Promise.all([

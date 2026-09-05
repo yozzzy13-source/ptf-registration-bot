@@ -34,7 +34,8 @@ export const LEAGUE_CHAT_ID = process.env.LEAGUE_CHAT_ID || '';
 // Можно задать переменными, но проще привязать командой /results_here прямо в нужной теме.
 export const RESULTS_CHAT_ID = process.env.RESULTS_CHAT_ID || '';
 export const RESULTS_TOPIC_ID = process.env.RESULTS_TOPIC_ID || '';
-// Свободная бронь корта: пока доступна только админам. Поставьте true, когда откроете всем.
-export const COURT_BOOKING_OPEN = String(process.env.COURT_BOOKING_OPEN || 'false').toLowerCase() === 'true';
+// Свободная бронь корта открыта всем активным игрокам лиги (в мини-приложение и так
+// пускают только их). COURT_BOOKING_OPEN=false снова закрывает её до админов.
+export const COURT_BOOKING_OPEN = String(process.env.COURT_BOOKING_OPEN || 'true').toLowerCase() === 'true';
 export const MATCH_DURATION_MIN = Number(process.env.MATCH_DURATION_MIN || 120);
 export const MATCH_HORIZON_DAYS = Number(process.env.MATCH_HORIZON_DAYS || 21);

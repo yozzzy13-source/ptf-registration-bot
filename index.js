@@ -532,8 +532,14 @@ app.post('/api/match/result', async (req, res) => {
     if (!sides.includes(String(v.user.id))) return res.status(403).json({ ok:false, error:'Not your match' });
 
     let score = scoreFromBody(b.sets);
-    // Игрок вводит счёт «от себя» — в таблице он хранится от автора заявки.
-    if (String(v.user.id) !== String(slot.from_telegram_id)) score = reverseScoreSafe(score);
+    // Мини-приложение присылает счёт ОТ ПОБЕДИТЕЛЯ (perspective:'winner') — так игрок
+    // не путает стороны. Старые клиенты слали «от себя»; эту ветку оставляем на всякий.
+    if (String(b.perspective) === 'winner') {
+      if (!sides.includes(String(b.winner || ''))) return res.status(400).json({ ok:false, error:'Выберите победителя' });
+      if (String(b.winner) !== String(slot.from_telegram_id)) score = reverseScoreSafe(score);
+    } else if (String(v.user.id) !== String(slot.from_telegram_id)) {
+      score = reverseScoreSafe(score);
+    }
     const check = validateMatchScore(score);
     if (!check.ok) return res.status(400).json({ ok:false, error: check.message });
 
@@ -572,7 +578,15 @@ app.post('/api/match/manual', async (req, res) => {
     const date = String(b.date || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok:false, error:'Date is required' });
 
-    const score = scoreFromBody(b.sets); // автор ручного матча = from, счёт уже от него
+    // Автор ручного матча = from. Счёт из мини-приложения приходит от победителя.
+    let score = scoreFromBody(b.sets);
+    if (String(b.perspective) === 'winner') {
+      const w = String(b.winner || '');
+      if (w !== String(v.user.id) && w !== String(opponent.telegram_id)) {
+        return res.status(400).json({ ok:false, error:'Выберите победителя' });
+      }
+      if (w !== String(v.user.id)) score = reverseScoreSafe(score);
+    }
     const check = validateMatchScore(score);
     if (!check.ok) return res.status(400).json({ ok:false, error: check.message });
 

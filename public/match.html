@@ -68,6 +68,11 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .setrow .dash{text-align:center;color:var(--muted);font-weight:800}
 .tbrow{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;margin:0 0 10px;padding-left:0}
 .tbrow .lbl{font-size:11px;color:var(--muted);font-weight:700;min-width:44px}
+.scorehead{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;margin:0 0 4px}
+.scorehead .lbl{min-width:44px}
+.scorehead .nm{font-size:12px;font-weight:800;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scorehead .nm.win{color:var(--text)}
+.scorehead .dash{text-align:center;color:var(--muted);font-weight:800}
 .photo-btn{display:block;width:100%;padding:14px;border-radius:12px;border:1.5px dashed var(--border);background:var(--card2);color:var(--muted);text-align:center;font-size:13px;font-weight:800;cursor:pointer}
 .photo-prev{width:100%;border-radius:12px;margin-top:8px;max-height:220px;object-fit:cover}
 </style>
@@ -115,6 +120,9 @@ var T={
       tRes:'Результаты',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
       resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',
       set3mode:'Решающий сет',full:'Полный сет',mtb:'Чемпионский тай-брейк',noSet3:'Не игрался',
+      winnerFirst:'Сначала отметьте победителя — счёт пишется от него.',
+      scoreOrder:'Первым идёт счёт победителя.',
+      set3hint:'По сетам 1:1 — укажите, как игрался решающий сет.',
       photo:'Фото матча (необязательно)',note:'Комментарий (необязательно)',
       sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
       manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
@@ -148,6 +156,9 @@ var T={
       tRes:'Results',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
       resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',
       set3mode:'Deciding set',full:'Full set',mtb:'Match tie-break',noSet3:'Not played',
+      winnerFirst:'Pick the winner first — the score is written from their side.',
+      scoreOrder:'The winner’s score comes first.',
+      set3hint:'Sets are 1:1 — say how the deciding set was played.',
       photo:'Match photo (optional)',note:'Comment (optional)',
       sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
       manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
@@ -326,32 +337,101 @@ function setSelect(id,val,max){
   for(var i=0;i<=max;i++)o+='<option value="'+i+'"'+(String(val)===String(i)?' selected':'')+'>'+i+'</option>';
   return '<select id="'+id+'">'+o+'</select>';
 }
+// Счёт вводится ОТ ПОБЕДИТЕЛЯ: левая колонка всегда его, и она подписана именем.
+// Поэтому редактор счёта закрыт, пока победитель не выбран.
+// Тай-брейк спрашиваем только там, где он вообще мог быть (7:6), а решающий сет —
+// только когда по сетам 1:1; «не игрался» как вариант больше не предлагаем.
 function renderScoreEditor(prefix){
-  var h='<label>'+esc(X.score)+'</label>';
+  var h='<div id="'+prefix+'scorewrap" class="hidden">'
+    +'<label>'+esc(X.score)+'</label>'
+    +'<div class="scorehead"><span class="lbl"></span>'
+      +'<span class="nm win" id="'+prefix+'nmW">—</span><span class="dash">:</span>'
+      +'<span class="nm" id="'+prefix+'nmL">—</span></div>'
+    +'<div class="hint">'+esc(X.scoreOrder)+'</div>';
   for(var n=1;n<=2;n++){
     h+='<div class="setrow"><span class="lbl">'+esc(X.set)+' '+n+'</span>'+setSelect(prefix+'s'+n+'a','',7)
       +'<span class="dash">:</span>'+setSelect(prefix+'s'+n+'b','',7)+'</div>'
-      +'<div class="tbrow"><span class="lbl">'+esc(X.tb)+'</span>'+setSelect(prefix+'s'+n+'tba','',20)
+      +'<div class="tbrow hidden" id="'+prefix+'tb'+n+'"><span class="lbl">'+esc(X.tb)+'</span>'+setSelect(prefix+'s'+n+'tba','',20)
       +'<span class="dash">:</span>'+setSelect(prefix+'s'+n+'tbb','',20)+'</div>';
   }
-  h+='<label>'+esc(X.set3mode)+'</label>'
-    +'<div class="seg"><div class="s on" data-m="none" onclick="pickSet3(this,\''+prefix+'\')">'+esc(X.noSet3)+'</div>'
-    +'<div class="s" data-m="full" onclick="pickSet3(this,\''+prefix+'\')">'+esc(X.full)+'</div>'
+  h+='<div id="'+prefix+'set3wrap" class="hidden">'
+    +'<label>'+esc(X.set3mode)+'</label>'
+    +'<div class="hint">'+esc(X.set3hint)+'</div>'
+    +'<div class="seg"><div class="s on" data-m="full" onclick="pickSet3(this,\''+prefix+'\')">'+esc(X.full)+'</div>'
     +'<div class="s" data-m="mtb" onclick="pickSet3(this,\''+prefix+'\')">'+esc(X.mtb)+'</div></div>'
-    +'<div id="'+prefix+'set3box" class="hidden"></div>';
+    +'<div id="'+prefix+'set3box"></div></div>'
+    +'</div>';
   return h;
+}
+function bindScore(prefix){
+  ['s1a','s1b','s2a','s2b'].forEach(function(k){
+    var el=$(prefix+k); if(el)el.onchange=function(){syncScore(prefix)};
+  });
+  syncScore(prefix);
+}
+// Имена сторон над колонками — чтобы было видно, чей результат пишется первым.
+function setScoreNames(prefix,winnerName,loserName){
+  var wrap=$(prefix+'scorewrap'); if(!wrap)return;
+  var has=Boolean(winnerName);
+  wrap.className=has?'':'hidden';
+  if($(prefix+'nmW'))$(prefix+'nmW').textContent=winnerName||'—';
+  if($(prefix+'nmL'))$(prefix+'nmL').textContent=loserName||'—';
+}
+function setWinnerOf(a,b){
+  if(a===''||b==='')return '';
+  a=Number(a);b=Number(b);
+  if(a===b)return '';
+  return a>b?'A':'B';
+}
+function isTb(a,b){
+  if(a===''||b==='')return false;
+  a=Number(a);b=Number(b);
+  return (a===7&&b===6)||(a===6&&b===7);
+}
+function clearVals(ids){ids.forEach(function(id){var el=$(id);if(el)el.value=''})}
+function syncScore(prefix){
+  var g=function(id){var el=$(prefix+id);return el?el.value:''};
+  for(var n=1;n<=2;n++){
+    var row=$(prefix+'tb'+n); if(!row)continue;
+    var on=isTb(g('s'+n+'a'),g('s'+n+'b'));
+    row.className='tbrow'+(on?'':' hidden');
+    if(!on)clearVals([prefix+'s'+n+'tba',prefix+'s'+n+'tbb']);
+  }
+  var w1=setWinnerOf(g('s1a'),g('s1b')),w2=setWinnerOf(g('s2a'),g('s2b'));
+  var split=Boolean(w1&&w2&&w1!==w2);
+  var wrap=$(prefix+'set3wrap'); if(!wrap)return;
+  wrap.className=split?'':'hidden';
+  if(split){ if(!$(prefix+'s3a'))renderSet3(prefix,currentSet3Mode(prefix)); }
+  else { $(prefix+'set3box').innerHTML=''; }
+}
+function currentSet3Mode(prefix){
+  var on=$(prefix+'set3wrap').querySelector('.seg .s.on');
+  return on?on.dataset.m:'full';
 }
 function pickSet3(node,prefix){
   var box=node.parentNode;
   Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){s.classList.remove('on')});
   node.classList.add('on');
-  var mode=node.dataset.m,el=$(prefix+'set3box');
-  if(mode==='none'){el.className='hidden';el.innerHTML='';return}
-  el.className='';
-  el.innerHTML=mode==='full'
-    ? '<div class="setrow"><span class="lbl">'+esc(X.set)+' 3</span>'+setSelect(prefix+'s3a','',7)+'<span class="dash">:</span>'+setSelect(prefix+'s3b','',7)+'</div>'
-      +'<div class="tbrow"><span class="lbl">'+esc(X.tb)+'</span>'+setSelect(prefix+'s3tba','',20)+'<span class="dash">:</span>'+setSelect(prefix+'s3tbb','',20)+'</div>'
-    : '<div class="setrow"><span class="lbl">'+esc(X.mtb)+'</span>'+setSelect(prefix+'s3a','',30)+'<span class="dash">:</span>'+setSelect(prefix+'s3b','',30)+'</div>';
+  renderSet3(prefix,node.dataset.m);
+}
+function renderSet3(prefix,mode){
+  var el=$(prefix+'set3box'); if(!el)return;
+  if(mode==='mtb'){
+    el.innerHTML='<div class="setrow"><span class="lbl">'+esc(X.mtb)+'</span>'+setSelect(prefix+'s3a','',30)
+      +'<span class="dash">:</span>'+setSelect(prefix+'s3b','',30)+'</div>';
+    return;
+  }
+  el.innerHTML='<div class="setrow"><span class="lbl">'+esc(X.set)+' 3</span>'+setSelect(prefix+'s3a','',7)
+    +'<span class="dash">:</span>'+setSelect(prefix+'s3b','',7)+'</div>'
+    +'<div class="tbrow hidden" id="'+prefix+'tb3"><span class="lbl">'+esc(X.tb)+'</span>'+setSelect(prefix+'s3tba','',20)
+    +'<span class="dash">:</span>'+setSelect(prefix+'s3tbb','',20)+'</div>';
+  var f=function(){
+    var row=$(prefix+'tb3');
+    var on=isTb($(prefix+'s3a').value,$(prefix+'s3b').value);
+    row.className='tbrow'+(on?'':' hidden');
+    if(!on)clearVals([prefix+'s3tba',prefix+'s3tbb']);
+  };
+  $(prefix+'s3a').onchange=f;$(prefix+'s3b').onchange=f;
 }
 function collectSets(prefix){
   var g=function(id){var el=$(prefix+id);return el&&el.value!==''?Number(el.value):''};
@@ -416,21 +496,29 @@ function renderResultForm(s){
   $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.resTitle)+'</h3>'
     +'<div class="hint">'+esc(me.name||'')+' '+esc(X.vs)+' '+esc(opp.n||'')+' · '+esc(fmtDay(s.agreed_date))+'</div>'
     +'<label>'+esc(X.winner)+'</label>'
-    +'<div class="seg"><div class="s" data-w="'+esc(meId)+'" onclick="pickWinner(this)">'+esc(me.name||'')+'</div>'
-    +'<div class="s" data-w="'+esc(opp.id)+'" onclick="pickWinner(this)">'+esc(opp.n||'')+'</div></div>'
-    +'<div class="hint">'+esc(X.hintScoreSelf||'Счёт вводится от вашего имени: первым — ваш результат в сете.')+'</div>'
+    +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
+    +'<div class="seg"><div class="s" data-w="'+esc(meId)+'" data-n="'+esc(me.name||'')+'" onclick="pickWinner(this,\'r\')">'+esc(me.name||'')+'</div>'
+    +'<div class="s" data-w="'+esc(opp.id)+'" data-n="'+esc(opp.n||'')+'" onclick="pickWinner(this,\'r\')">'+esc(opp.n||'')+'</div></div>'
     +renderScoreEditor('r')
     +photoField('rPhoto')
     +'<label>'+esc(X.note)+'</label><textarea id="rNote"></textarea>'
     +'<button class="primary" onclick="submitResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.sendRes)+'</button>'
     +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
     +'<div id="rRes" class="res"></div></div>';
+  selWinner='';bindScore('r');setScoreNames('r','','');
 }
 var selWinner='';
-function pickWinner(node){
+// Победитель выбирается ДО счёта: от него зависит, чьё имя стоит слева.
+function pickWinner(node,prefix){
   var box=node.parentNode;
-  Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){s.classList.remove('on')});
-  node.classList.add('on');selWinner=node.dataset.w;
+  var loser='';
+  Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){
+    if(s!==node){s.classList.remove('on');loser=s.dataset.n||''}
+  });
+  node.classList.add('on');
+  selWinner=node.dataset.w;
+  setScoreNames(prefix||'r',node.dataset.n||'',loser);
+  syncScore(prefix||'r');
 }
 function submitResult(id,btn){
   var res=$('rRes');res.className='res';
@@ -438,7 +526,7 @@ function submitResult(id,btn){
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,challenge_id:id,sets:sets,winner:selWinner,photo:resPhoto,note:($('rNote').value||'').trim()
+    initData:initData,challenge_id:id,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim()
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
@@ -455,19 +543,37 @@ function openManual(){
     +'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>'
     +'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
     +'<label>'+esc(X.pickCourt)+'</label><select id="mCourtSel">'+courtOpts+'</select>'
-    +'<div class="hint">'+esc(X.hintScoreSelf||'Счёт вводится от вашего имени: первым — ваш результат в сете.')+'</div>'
+    +'<label>'+esc(X.winner)+'</label>'
+    +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
+    +'<div class="seg" id="mWinSeg"></div>'
     +renderScoreEditor('m')
     +photoField('mPhoto')
     +'<button class="primary" onclick="submitManual(this)">'+esc(X.sendRes)+'</button>'
     +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
     +'<div id="mResBox" class="res"></div></div>';
+  var oppSel=$('mOpp');
+  if(oppSel)oppSel.onchange=renderManualWinner;
+  renderManualWinner();
+}
+// Кнопки победителя для ручного матча перерисовываются при смене соперника.
+function renderManualWinner(){
+  var seg=$('mWinSeg');if(!seg)return;
+  var oppSel=$('mOpp');
+  var oppName='';
+  if(oppSel&&oppSel.selectedIndex>=0&&oppSel.options[oppSel.selectedIndex])oppName=oppSel.options[oppSel.selectedIndex].text;
+  var meId=String(me&&me.id||'');
+  seg.innerHTML='<div class="s" data-w="'+esc(meId)+'" data-n="'+esc(me&&me.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(me&&me.name||'')+'</div>'
+    +'<div class="s" data-w="'+esc(oppSel?oppSel.value:'')+'" data-n="'+esc(oppName)+'" onclick="pickWinner(this,\'m\')">'+esc(oppName||'—')+'</div>';
+  selWinner='';setScoreNames('m','','');bindScore('m');
 }
 function submitManual(btn){
   var res=$('mResBox');res.className='res';
   var sets=collectSets('m');
+  if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,to_telegram_id:$('mOpp').value,date:$('mDate').value,court:$('mCourtSel').value,sets:sets,photo:resPhoto
+    initData:initData,to_telegram_id:$('mOpp').value,date:$('mDate').value,court:$('mCourtSel').value,
+    sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');

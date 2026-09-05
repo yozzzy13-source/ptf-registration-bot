@@ -79,6 +79,30 @@ async function findDivisionRow(spreadsheetId, sheetName, p1, p2) {
   return null;
 }
 
+// Защита от дублей.
+// Старый results-бот продолжает разбирать счёт, вручную выложенный в тему результатов,
+// и дописывает свою строку. Дату он ставит СЕГОДНЯШНЮЮ (день сообщения), а не день матча,
+// поэтому сверять только по дате нельзя — ищем ту же пару в окне ±7 дней в любом порядке имён.
+const DUPLICATE_WINDOW_DAYS = 7;
+
+async function findExistingResultRow(p1, p2, dateSerial) {
+  const values = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!B2:J`);
+  const t1 = norm(p1), t2 = norm(p2);
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i] || [];
+    const a = norm(row[7]);   // колонка I
+    const b = norm(row[8]);   // колонка J
+    if (!a || !b) continue;
+    const samePair = (a === t1 && b === t2) || (a === t2 && b === t1);
+    if (!samePair) continue;
+    const when = Number(row[0]);
+    const close = !Number.isFinite(when) || !Number.isFinite(dateSerial)
+      || Math.abs(when - dateSerial) <= DUPLICATE_WINDOW_DAYS;
+    if (close) return { row: i + 2, date: when };
+  }
+  return null;
+}
+
 // Счёт в слоте всегда «от from_telegram_id», поэтому p1 = from_name.
 export async function writeConfirmedResult(slot) {
   if (!LEAGUE_RESULTS_SHEET_ID) return { status: 'skipped', reason: 'LEAGUE_RESULTS_SHEET_ID не задан' };
@@ -88,9 +112,18 @@ export async function writeConfirmedResult(slot) {
   const parsed = cellToScore(slot.result_score);
 
   try {
+    const dateSerial = localDateSerial(slot.agreed_date);
+    // Если строка этой пары уже есть — не дописываем вторую. Скорее всего её внёс
+    // старый бот из сообщения в чате; счёт из мини-приложения при этом подтверждён
+    // обоими игроками, поэтому расхождение стоит проверить руками.
+    const existing = await findExistingResultRow(p1, p2, dateSerial);
+    if (existing) {
+      const division = await writeDivisionRow(p1, p2, parsed).catch(e => ({ status: 'error', reason: e.message }));
+      return { status: 'duplicate', row: existing.row, division };
+    }
     const row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
     await batchUpdate(LEAGUE_RESULTS_SHEET_ID, [
-      { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[localDateSerial(slot.agreed_date)]] },
+      { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[dateSerial]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!K${row}:V${row}`, values: [scoreValues(parsed).map(coerceNumber)] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!W${row}:X${row}`, values: [[detectSet3Mode(parsed), 'Yes']] }
@@ -127,6 +160,9 @@ export function describeWrite(result) {
   if (!result) return '';
   if (result.status === 'skipped') return 'таблицы лиги не подключены';
   if (result.status === 'error') return `ошибка записи: ${result.reason}`;
+  if (result.status === 'duplicate') {
+    return `в общем логе уже есть строка этой пары (строка ${result.row}) — вторую не добавлял, счёт дивизиона обновлён. Проверьте, совпадает ли счёт.`;
+  }
   const d = result.division;
   if (d?.status === 'saved') return `записано в Division ${d.division}`;
   if (d?.status === 'cross_division') return 'междивизионный матч — только общий лог';

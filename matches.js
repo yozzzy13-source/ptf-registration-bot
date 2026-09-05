@@ -11,7 +11,8 @@
 // Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
 // дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
 import { sendMessage, sendPhoto } from './telegram.js';
-import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllActiveLeaguePlayers } from './sheets.js';
+import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers } from './sheets.js';
+import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
 import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
@@ -420,14 +421,24 @@ ${resultBlock(slot)}
 }
 
 // ---------------------------------------------------------------------------
-// Лента результатов: подтверждённый матч уходит всем активным игрокам лиги
-// и одним сообщением в общую группу. Участникам матча повторно не шлём —
-// они уже получили персональную карточку.
+// Лента результатов: подтверждённый матч уходит ВСЕМ живым пользователям бота —
+// не только текущему составу дивизионов, чтобы каждый видел, что лига идёт, —
+// плюс копией одним сообщением в общую группу игроков. Участникам матча повторно
+// не шлём: они уже получили персональную карточку.
 // ---------------------------------------------------------------------------
 async function resultsChat() {
   const chatId = RESULTS_CHAT_ID || await getSetting('results_chat_id');
   const topicId = RESULTS_TOPIC_ID || await getSetting('results_topic_id');
   return chatId ? { chatId, topicId: topicId ? Number(topicId) : null } : null;
+}
+
+// Счёт в таблице хранится «от автора заявки», а в ленте пары идут «победитель — проигравший».
+// Если победил второй игрок, счёт нужно перевернуть, иначе 6:4 в тексте читается наоборот.
+export function winnerFirstScore(slot) {
+  const raw = String(slot.result_score || '');
+  if (!raw) return '';
+  if (String(slot.result_winner) === String(slot.from_telegram_id)) return raw;
+  return formatScore(reverseScore(cellToScore(raw)));
 }
 
 function feedText(slot) {
@@ -437,7 +448,7 @@ function feedText(slot) {
   return `<b>🎾 Результат матча</b>${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
 
 🏆 <b>${escapeHtml(winner || '')}</b> — ${escapeHtml(loser || '')}
-📊 <b>${escapeHtml(slot.result_score || '')}</b>${slot.result_set3_mode === 'Match TB' ? ' <i>(чемпионский тай-брейк)</i>' : ''}
+📊 <b>${escapeHtml(winnerFirstScore(slot))}</b>${slot.result_set3_mode === 'Match TB' ? ' <i>(чемпионский тай-брейк)</i>' : ''}
 📅 ${escapeHtml(formatDate(slot.agreed_date))}`;
 }
 
@@ -455,10 +466,10 @@ export async function broadcastResult(slot) {
     } catch (e) { console.error('results group post failed:', e.message); }
   }
 
-  // 2. Личная рассылка активным игрокам лиги.
+  // 2. Личная рассылка всем живым пользователям бота.
   let sent = 0, failed = 0;
   try {
-    const players = await getAllActiveLeaguePlayers();
+    const players = await getAllBotSubscribers();
     for (const p of players) {
       if (skip.has(String(p.telegram_id))) continue;
       try {
