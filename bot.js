@@ -1,11 +1,13 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage } from './telegram.js';
 import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, websiteKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants, isActiveLeaguePlayer } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants, isActiveLeaguePlayer } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
-import { findSlot as findMatchSlot, acceptProposal, rejectProposal } from './matchesdb.js';
-import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, sendBookingHelper } from './matches.js';
+import { findSlot as findMatchSlot, acceptProposal, rejectProposal, confirmCourt, confirmResult, disputeResult } from './matchesdb.js';
+import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
+  notifyResultConfirmed, notifyResultDisputed, broadcastResult } from './matches.js';
+import { writeConfirmedResult, describeWrite } from './results.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, adminMatchTest, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
 
 export const userState = new Map();
@@ -399,6 +401,12 @@ export async function handleMessage(msg) {
     if (text === '/stats') return adminStats(chatId);
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/match_test') return adminMatchTest(msg);
+    // Выполняется прямо в той группе и теме, куда должны падать результаты.
+    if (text === '/results_here') {
+      await setSetting('results_chat_id', String(msg.chat.id), 'Группа для ленты результатов матчей');
+      await setSetting('results_topic_id', String(msg.message_thread_id || ''), 'Тема для ленты результатов матчей');
+      return sendMessage(chatId, `✅ Лента результатов привязана.\n\nchat_id: <code>${escapeHtml(msg.chat.id)}</code>${msg.message_thread_id ? `\ntopic: <code>${escapeHtml(msg.message_thread_id)}</code>` : ''}`, msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
+    }
     if (text === '/events') return adminEvents(chatId);
     if (text === '/pending') return adminPending(chatId);
     if (text === '/messages') return adminMessages(chatId);
@@ -564,6 +572,47 @@ export async function handleCallback(q) {
     if (!slot) return null;
     if (![String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(String(from.id))) return null;
     return sendBookingHelper(chatId, slot).catch(e => console.error('sendBookingHelper failed:', e.message));
+  }
+
+  // Соперник подтверждает счёт — только теперь результат идёт в таблицы лиги.
+  if (data.startsWith('res_ok:')) {
+    const r = await confirmResult(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
+    if (!r.ok) {
+      const ru = lang === 'ru';
+      const texts = { not_pending: ru ? 'Результат уже обработан.' : 'Already processed.',
+        own_result: ru ? 'Подтверждает соперник, а не тот, кто вносил счёт.' : 'The opponent confirms, not the submitter.',
+        not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
+        not_found: ru ? 'Матч не найден.' : 'Not found.' };
+      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+    }
+    const write = await writeConfirmedResult(r.slot).catch(e => ({ status:'error', reason:e.message }));
+    await notifyResultConfirmed(r.slot, describeWrite(write)).catch(e => console.error('notifyResultConfirmed failed:', e.message));
+    // Лента лиги: общая группа + личная рассылка активным игрокам.
+    broadcastResult(r.slot).catch(e => console.error('broadcastResult failed:', e.message));
+    return null;
+  }
+  if (data.startsWith('res_no:')) {
+    const r = await disputeResult(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
+    if (!r.ok) return answerCallbackQuery(q.id, lang === 'ru' ? 'Уже обработано.' : 'Already processed.', true).catch(() => {});
+    await notifyResultDisputed(r.previous).catch(e => console.error('notifyResultDisputed failed:', e.message));
+    return sendMessage(chatId, lang === 'ru'
+      ? 'Понял. Договоритесь с соперником и внесите согласованный счёт.'
+      : 'Got it. Agree with your opponent and submit the corrected score.').catch(() => {});
+  }
+
+  // Площадка подтвердила бронь — матч активен для обоих игроков.
+  if (data.startsWith('match_court_ok:')) {
+    const r = await confirmCourt(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
+    if (!r.ok) {
+      const ru = lang === 'ru';
+      const texts = { already_confirmed: ru ? 'Корт уже подтверждён.' : 'Already confirmed.',
+        not_accepted: ru ? 'Матч ещё не согласован.' : 'Match is not agreed yet.',
+        not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
+        not_found: ru ? 'Матч не найден.' : 'Not found.' };
+      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+    }
+    await notifyCourtConfirmed(r.slot).catch(e => console.error('notifyCourtConfirmed failed:', e.message));
+    return null;
   }
 
   if (data.startsWith('match_decline:')) {

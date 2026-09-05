@@ -64,6 +64,20 @@ export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call(
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 export const getChat = (chat_id) => call('getChat', { chat_id });
 export const getWebhookInfo = () => call('getWebhookInfo', {});
+
+// Фото из мини-приложения приходит бинарём — его нужно отправить multipart-ом,
+// обычный JSON-вызов принимает только file_id или URL.
+export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg') {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  const ext = String(mimeType).split('/')[1] || 'jpg';
+  const form = new FormData();
+  form.append('chat_id', String(chat_id));
+  form.append('photo', new Blob([buffer], { type: mimeType }), `result.${ext}`);
+  const res = await fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
+  const json = await res.json().catch(() => ({}));
+  if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
+  return json.result;
+}
 export const getMe = () => call('getMe', {});
 export const sendPoll = (chat_id, question, options, opts={}) => call('sendPoll', { chat_id, question, options, ...opts });
 

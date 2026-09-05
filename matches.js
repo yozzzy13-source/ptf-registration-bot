@@ -5,80 +5,17 @@
 // поэтому «Играю» в чате дивизиона ведёт в мини-приложение, где нужно выбрать,
 // а не назначает матч вслепую.
 //
-//   open   — заявка публикуется в топик дивизиона, забрать может любой из дивизиона;
-//   direct — та же заявка, адресованная конкретному сопернику (уходит ему в личку).
+//   open   — заявка рассылается всем активным игрокам дивизиона, забрать может любой;
+//   direct — та же заявка, адресованная конкретному сопернику.
 //
-// Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js), основная таблица PTF не трогается.
-import { sendMessage, editMessageText, createForumTopic } from './telegram.js';
-import { getSetting, setSetting, findApplicantByTelegramId } from './sheets.js';
+// Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
+// дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
+import { sendMessage, sendPhoto } from './telegram.js';
+import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllActiveLeaguePlayers } from './sheets.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
-import { LEAGUE_CHAT_ID, PUBLIC_URL } from './config.js';
+import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
-
-const topicLocks = new Map();
-const topicCache = new Map();
-
-async function withLock(key, fn) {
-  const k = String(key || '');
-  const prev = topicLocks.get(k) || Promise.resolve();
-  let release;
-  const cur = new Promise(r => { release = r; });
-  topicLocks.set(k, prev.then(() => cur, () => cur));
-  try {
-    await prev.catch(() => {});
-    return await fn();
-  } finally {
-    release();
-    setTimeout(() => { if (topicLocks.get(k) === cur) topicLocks.delete(k); }, 30000).unref?.();
-  }
-}
-
-export async function leagueChatId() {
-  return LEAGUE_CHAT_ID || await getSetting('league_chat_id') || await getAdminChatId();
-}
-
-// Один топик на дивизион: id хранится в Settings основной таблицы, в памяти — кэш,
-// параллельные публикации разводит замок (иначе два топика на один дивизион).
-export async function getOrCreateDivisionTopic(division) {
-  const chatId = await leagueChatId();
-  if (!chatId) return null;
-  const key = String(division || '').trim();
-  if (!key) return { chatId };
-
-  const cached = topicCache.get(key);
-  if (cached) return { chatId, message_thread_id: Number(cached), division: key };
-
-  return withLock(`div:${key}`, async () => {
-    const again = topicCache.get(key);
-    if (again) return { chatId, message_thread_id: Number(again), division: key };
-    const settingKey = `division_topic_${key}`;
-    const saved = await getSetting(settingKey).catch(() => '');
-    if (saved) {
-      topicCache.set(key, saved);
-      return { chatId, message_thread_id: Number(saved), division: key };
-    }
-    try {
-      const topic = await createForumTopic(chatId, `🎾 ${key}`.slice(0, 120));
-      const threadId = topic?.message_thread_id;
-      if (threadId) {
-        topicCache.set(key, String(threadId));
-        await setSetting(settingKey, String(threadId), `Топик дивизиона ${key} для окон матчей`).catch(() => {});
-        return { chatId, message_thread_id: threadId, division: key };
-      }
-    } catch (e) {
-      console.error('createForumTopic (division) failed:', e.message);
-    }
-    return { chatId, division: key };
-  });
-}
-
-export function forgetDivisionTopic(division) { topicCache.delete(String(division || '')); }
-
-function isTopicGoneError(e) {
-  const d = String(e?.telegram?.description || e?.message || '').toLowerCase();
-  return d.includes('thread not found') || d.includes('topic_deleted') || d.includes('topic_closed') || d.includes('topic closed') || d.includes('message thread not found');
-}
 
 function playerLink(name, username) {
   const safeName = escapeHtml(name || 'Игрок');
@@ -143,55 +80,58 @@ ${agreedBlock(slot)}
 Окно закрыто.`;
 }
 
-// В чате дивизиона кнопка ведёт в мини-приложение: там соперник выбирает дату и корт.
-// Telegram не умеет web_app-кнопки в группах, поэтому используем прямую ссылку на бота
-// с параметром — бот откроет нужный экран.
-function takeKeyboard(slot, botUsername) {
-  const url = botUsername
-    ? `https://t.me/${botUsername}?start=match_${slot.challenge_id}`
-    : `${PUBLIC_URL}/match?slot=${encodeURIComponent(slot.challenge_id)}`;
-  return { inline_keyboard: [[{ text: '🎾 Играю', url }]] };
-}
-
+// Окна больше не уходят в общий чат: бот рассылает их в личку каждому активному
+// игроку того же дивизиона. Так игроки получают только релевантные окна, и не нужен
+// ещё один общий чат. Автору своё окно не шлём.
 let cachedBotUsername = '';
 export function setBotUsername(u) { cachedBotUsername = String(u || '').replace(/^@/, ''); }
 
+function openSlotKeyboard(slot) {
+  return { inline_keyboard: [[{ text: '🎾 Играю', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slot.challenge_id)}` } }]] };
+}
+
 export async function publishOpenSlot(slot) {
-  const topic = await getOrCreateDivisionTopic(slot.division);
-  if (!topic?.chatId) return null;
+  const recipients = await getDivisionOpponents(slot.division, slot.from_telegram_id).catch(e => {
+    console.error('division recipients failed:', e.message);
+    return [];
+  });
   const text = openSlotText(slot);
-  const opts = { reply_markup: takeKeyboard(slot, cachedBotUsername) };
-  const send = (tp) => sendMessage(tp.chatId, text, tp.message_thread_id ? { ...opts, message_thread_id: tp.message_thread_id } : opts);
-
-  let sent = null;
-  try {
-    sent = await send(topic);
-  } catch (e) {
-    console.error('publishOpenSlot failed:', e.message);
-    if (isTopicGoneError(e) && topic.message_thread_id) {
-      forgetDivisionTopic(slot.division);
-      await setSetting(`division_topic_${slot.division}`, '', 'сброшен: топик удалён').catch(() => {});
-      const fresh = await getOrCreateDivisionTopic(slot.division).catch(() => null);
-      if (fresh?.message_thread_id) { try { sent = await send(fresh); } catch (e2) { console.error('publishOpenSlot retry failed:', e2.message); } }
+  const opts = { reply_markup: openSlotKeyboard(slot) };
+  let sent = 0, failed = 0;
+  for (const r of recipients) {
+    try {
+      await sendMessage(r.telegram_id, text, opts);
+      sent++;
+      await new Promise(res => setTimeout(res, 45)); // мягкий темп, чтобы не упереться в лимит Telegram
+    } catch (e) {
+      failed++;
+      console.error(`open slot to ${r.telegram_id} failed:`, e.message);
     }
-    if (!sent) { try { sent = await send({ chatId: topic.chatId }); } catch (e3) { console.error('publishOpenSlot general failed:', e3.message); } }
   }
-  if (sent?.message_id) {
-    await updateSlot(slot.challenge_id, {
-      chat_id: String(sent.chat?.id || topic.chatId),
-      message_thread_id: String(sent.message_thread_id || topic.message_thread_id || ''),
-      message_id: String(sent.message_id)
-    }).catch(e => console.error('save slot message ref failed:', e.message));
-  }
-  return sent;
+  await logMatchEvent('broadcast', slot, { telegram_id: slot.from_telegram_id, name: slot.from_name },
+    `дивизион ${slot.division}: отправлено ${sent}, ошибок ${failed}`);
+
+  // Автору — сводка, сколько игроков увидели окно.
+  await sendMessage(slot.from_telegram_id, sent
+    ? `📣 Окно отправлено игрокам дивизиона: <b>${sent}</b>.\nКак только кто-то откликнется, я пришлю предложение.`
+    : `📣 В вашем дивизионе пока некому отправить окно — нет активных игроков с Telegram.`).catch(() => {});
+
+  // Копия в админский топик — чтобы организатор видел активность.
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (chatId) {
+      await sendMessage(chatId, `<b>📣 Новое окно</b>\n\n${text}\n\nРазослано игрокам: <b>${sent}</b>`,
+        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
+    }
+  } catch (e) { console.error('admin copy of open slot failed:', e.message); }
+
+  return { sent, failed };
 }
 
-async function closeSlotCard(slot) {
-  if (!slot.chat_id || !slot.message_id) return;
-  try {
-    await editMessageText(slot.chat_id, Number(slot.message_id), takenSlotText(slot), { reply_markup: { inline_keyboard: [] } });
-  } catch (e) { console.error('closeSlotCard failed:', e.message); }
-}
+// Окно рассылалось в личку многим игрокам, поэтому «закрывать карточку» негде.
+// Тем, кто откроет мини-приложение, оно уже покажет, что окно занято.
+async function closeSlotCard() { /* больше не требуется */ }
 
 function contactsKeyboard(username, profileUrl, slot) {
   const rows = [];
@@ -252,13 +192,6 @@ export async function declineDirectChallenge(slot, actor = {}) {
 export async function cancelSlot(slot, actor = {}) {
   await updateSlot(slot.challenge_id, { status: 'cancelled', cancelled_at: nowISO() });
   await logMatchEvent('cancelled', slot, actor);
-  if (slot.chat_id && slot.message_id) {
-    try {
-      await editMessageText(slot.chat_id, Number(slot.message_id),
-        `<b>🚫 Окно снято автором</b>\n\n${escapeHtml(slot.from_name)}${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}\n${offerBlock(slot)}`,
-        { reply_markup: { inline_keyboard: [] } });
-    } catch (e) { console.error('cancel slot card failed:', e.message); }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -317,36 +250,273 @@ export function bookingMessage(slot, court) {
   const d = new Date(`${slot.agreed_date}T12:00:00Z`);
   const human = Number.isNaN(d.getTime()) ? slot.agreed_date
     : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  // Пишем напрямую администратору площадки, поэтому корт и число игроков не повторяем.
+  // Пометка PTF нужна, чтобы админ понимал, от какой организации бронь.
   return [
-    'Hello! I would like to book a tennis court.',
+    'Hello! I would like to book a court for a PTF match.',
     '',
     `Date: ${human}`,
     `Time: ${start}${end ? '–' + end : ''} (${dur / 60}h)`,
-    'Players: 2',
-    court?.name ? `Court: ${court.name}` : '',
     '',
     'Is it available? Thank you!'
-  ].filter(Boolean).join('\n');
+  ].join('\n');
 }
 
 export async function sendBookingHelper(chatId, slot) {
   const court = await courtByName(slot.agreed_court);
   const text = bookingMessage(slot, court);
+  const confirmRow = [{ text: '✅ Корт подтвердил', callback_data: `match_court_ok:${slot.challenge_id}` }];
   if (!court?.whatsapp) {
     return sendMessage(chatId, `<b>📲 Сообщение для брони корта</b>
 
 ${slot.agreed_court ? `Для площадки «${escapeHtml(slot.agreed_court)}» не указан номер WhatsApp в листе Courts, поэтому кнопки нет — скопируйте текст и отправьте сами.` : 'Площадка не выбрана — укажите её в переписке с соперником.'}
 
-<code>${escapeHtml(text)}</code>`);
+<code>${escapeHtml(text)}</code>`, { reply_markup: { inline_keyboard: [confirmRow] } });
   }
   return sendMessage(chatId, `<b>📲 Бронь корта</b>
 
-Площадка: <b>${escapeHtml(court.name)}</b>${court.price ? ` · ${escapeHtml(court.price)} ${escapeHtml(court.currency || 'THB')}/ч` : ''}
-Сообщение готово — откройте WhatsApp и отправьте.
+Площадка: <b>${escapeHtml(court.name)}</b>${court.address ? `\n${escapeHtml(court.address)}` : ''}
+Откройте WhatsApp и отправьте сообщение. Когда площадка ответит согласием — нажмите «Корт подтвердил».
 
 <code>${escapeHtml(text)}</code>`, {
-    reply_markup: { inline_keyboard: [[{ text: '📲 Открыть WhatsApp', url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(text)}` }]] }
+    reply_markup: { inline_keyboard: [
+      [{ text: '📲 Открыть WhatsApp', url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(text)}` }],
+      confirmRow
+    ] }
   });
+}
+
+// Матч подтверждён окончательно: корт забронирован, обе стороны уведомлены,
+// каждому — ссылка на добавление события в календарь.
+export function matchCalendarUrl(slot) {
+  const start = slot.agreed_time || slot.time_from || '00:00';
+  const end = endTime(start, slot.duration_min);
+  const title = `🎾 PTF: ${slot.from_name} — ${slot.to_name}`;
+  const params = new URLSearchParams({
+    t: title,
+    s: `${slot.agreed_date}T${start}:00+07:00`,
+    e: `${slot.agreed_date}T${end}:00+07:00`,
+    l: slot.agreed_court || ''
+  });
+  return `${PUBLIC_URL}/cal?${params.toString()}`;
+}
+
+export async function notifyCourtConfirmed(slot) {
+  const cal = matchCalendarUrl(slot);
+  const card = (oppName, oppUsername) => `<b>✅ Матч активен — корт забронирован</b>
+
+Соперник: ${playerLink(oppName, oppUsername)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
+${agreedBlock(slot)}
+
+Оба игрока уведомлены. Добавьте матч в календарь, чтобы не забыть.`;
+  const kb = (username) => ({ inline_keyboard: [
+    [{ text: '📅 Добавить в календарь', web_app: { url: cal } }],
+    ...(username ? [[{ text: '💬 Написать сопернику', url: `https://t.me/${String(username).replace(/^@/, '')}` }]] : [])
+  ] });
+  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: kb(slot.to_username) }).catch(e => console.error('confirm notify author failed:', e.message));
+  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: kb(slot.from_username) }).catch(e => console.error('confirm notify taker failed:', e.message));
+
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (chatId) {
+      await sendMessage(chatId, `<b>✅ Матч активен (корт подтверждён)</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}`,
+        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
+    }
+  } catch (e) { console.error('confirm notify admin failed:', e.message); }
+}
+
+// ---------------------------------------------------------------------------
+// Результаты
+// ---------------------------------------------------------------------------
+function opponentOf(slot, telegramId) {
+  return String(slot.from_telegram_id) === String(telegramId)
+    ? { id: String(slot.to_telegram_id), name: slot.to_name, username: slot.to_username }
+    : { id: String(slot.from_telegram_id), name: slot.from_name, username: slot.from_username };
+}
+
+// «Матч закончен — внесите результат». Уходит обоим после времени окончания.
+export async function notifyResultPrompt(slot) {
+  const kb = { inline_keyboard: [[{ text: '📝 Внести результат', web_app: { url: `${PUBLIC_URL}/match?result=${encodeURIComponent(slot.challenge_id)}` } }]] };
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    const opp = opponentOf(slot, side);
+    await sendMessage(side, `<b>🎾 Матч сыгран?</b>
+
+Соперник: ${playerLink(opp.name, opp.username)}
+${agreedBlock(slot)}
+
+Внесите счёт — соперник подтвердит, и матч попадёт в статистику лиги.`, { reply_markup: kb }).catch(e => console.error('result prompt failed:', e.message));
+  }
+}
+
+function resultBlock(slot) {
+  const winnerName = String(slot.result_winner) === String(slot.from_telegram_id) ? slot.from_name : slot.to_name;
+  return `🏆 Победитель: <b>${escapeHtml(winnerName || '')}</b>
+📊 Счёт: <b>${escapeHtml(slot.result_score || '')}</b>${slot.result_set3_mode ? ` (${escapeHtml(slot.result_set3_mode)})` : ''}`;
+}
+
+// Счёт внесён одной стороной — вторая подтверждает или оспаривает.
+export async function notifyResultForVerification(slot) {
+  const to = opponentOf(slot, slot.result_by);
+  const by = String(slot.result_by) === String(slot.from_telegram_id)
+    ? { name: slot.from_name, username: slot.from_username }
+    : { name: slot.to_name, username: slot.to_username };
+  if (!to.id) return null;
+  const text = `<b>📊 Подтвердите результат матча</b>
+
+${playerLink(by.name, by.username)} внёс счёт:
+${agreedBlock(slot)}
+
+${resultBlock(slot)}
+
+Если всё верно — подтвердите. Если нет — нажмите «Не согласен» и внесите свой вариант.`;
+  const kb = { inline_keyboard: [
+    [{ text: '✅ Подтверждаю', callback_data: `res_ok:${slot.challenge_id}` }],
+    [{ text: '❌ Не согласен', callback_data: `res_no:${slot.challenge_id}` }]
+  ] };
+  if (slot.result_photo_file_id) {
+    return sendPhoto(to.id, slot.result_photo_file_id, { caption: text, reply_markup: kb })
+      .catch(async e => { console.error('result photo failed:', e.message); return sendMessage(to.id, text, { reply_markup: kb }); });
+  }
+  return sendMessage(to.id, text, { reply_markup: kb }).catch(e => console.error('verify request failed:', e.message));
+}
+
+export async function notifyResultConfirmed(slot, writeInfo = '') {
+  const text = (opp) => `<b>✅ Результат засчитан</b>
+
+Соперник: ${escapeHtml(opp.name || '')}
+${agreedBlock(slot)}
+
+${resultBlock(slot)}`;
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    await sendMessage(side, text(opponentOf(slot, side))).catch(() => {});
+  }
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (chatId) {
+      const body = `<b>✅ Результат матча</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${agreedBlock(slot)}\n\n${resultBlock(slot)}${writeInfo ? `\n\n<i>${escapeHtml(writeInfo)}</i>` : ''}`;
+      const opts = topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {};
+      if (slot.result_photo_file_id) await sendPhoto(chatId, slot.result_photo_file_id, { caption: body, ...opts }).catch(() => sendMessage(chatId, body, opts));
+      else await sendMessage(chatId, body, opts);
+    }
+  } catch (e) { console.error('admin result copy failed:', e.message); }
+}
+
+export async function notifyResultDisputed(slot) {
+  const to = String(slot.result_by || '');
+  if (!to) return null;
+  const opp = opponentOf(slot, to);
+  return sendMessage(to, `<b>❌ Соперник не согласен со счётом</b>
+
+${escapeHtml(opp.name || 'Соперник')} оспорил результат:
+${resultBlock(slot)}
+
+Свяжитесь и внесите согласованный счёт заново.`, {
+    reply_markup: { inline_keyboard: [[{ text: '📝 Внести заново', web_app: { url: `${PUBLIC_URL}/match?result=${encodeURIComponent(slot.challenge_id)}` } }]] }
+  }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Лента результатов: подтверждённый матч уходит всем активным игрокам лиги
+// и одним сообщением в общую группу. Участникам матча повторно не шлём —
+// они уже получили персональную карточку.
+// ---------------------------------------------------------------------------
+async function resultsChat() {
+  const chatId = RESULTS_CHAT_ID || await getSetting('results_chat_id');
+  const topicId = RESULTS_TOPIC_ID || await getSetting('results_topic_id');
+  return chatId ? { chatId, topicId: topicId ? Number(topicId) : null } : null;
+}
+
+function feedText(slot) {
+  const winnerIsFrom = String(slot.result_winner) === String(slot.from_telegram_id);
+  const winner = winnerIsFrom ? slot.from_name : slot.to_name;
+  const loser = winnerIsFrom ? slot.to_name : slot.from_name;
+  return `<b>🎾 Результат матча</b>${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
+
+🏆 <b>${escapeHtml(winner || '')}</b> — ${escapeHtml(loser || '')}
+📊 <b>${escapeHtml(slot.result_score || '')}</b>${slot.result_set3_mode === 'Match TB' ? ' <i>(чемпионский тай-брейк)</i>' : ''}
+📅 ${escapeHtml(formatDate(slot.agreed_date))}`;
+}
+
+export async function broadcastResult(slot) {
+  const text = feedText(slot);
+  const skip = new Set([String(slot.from_telegram_id), String(slot.to_telegram_id)]);
+
+  // 1. Общая группа — одно сообщение вместо десятков личных.
+  const chat = await resultsChat();
+  if (chat) {
+    const opts = chat.topicId ? { message_thread_id: chat.topicId } : {};
+    try {
+      if (slot.result_photo_file_id) await sendPhoto(chat.chatId, slot.result_photo_file_id, { caption: text, ...opts });
+      else await sendMessage(chat.chatId, text, opts);
+    } catch (e) { console.error('results group post failed:', e.message); }
+  }
+
+  // 2. Личная рассылка активным игрокам лиги.
+  let sent = 0, failed = 0;
+  try {
+    const players = await getAllActiveLeaguePlayers();
+    for (const p of players) {
+      if (skip.has(String(p.telegram_id))) continue;
+      try {
+        await sendMessage(p.telegram_id, text);
+        sent++;
+        await new Promise(r => setTimeout(r, 45));
+      } catch (e) { failed++; }
+    }
+  } catch (e) { console.error('results broadcast failed:', e.message); }
+  await logMatchEvent('result_broadcast', slot, { telegram_id: slot.result_by, name: '' },
+    `лента: ${chat ? 'группа + ' : ''}личных ${sent}, ошибок ${failed}`);
+  return { sent, failed, group: Boolean(chat) };
+}
+
+// ---------------------------------------------------------------------------
+// Свободная бронь корта: игрок выбирает дату, время, длительность и несколько
+// площадок — бот выдаёт по сообщению на каждую с готовой ссылкой в WhatsApp.
+// Бот сам ничего не отправляет: отправляет игрок.
+// ---------------------------------------------------------------------------
+export function courtRequestMessage({ date, time, durationMin }, lang = 'en') {
+  const end = endTime(time, durationMin);
+  const d = new Date(`${date}T12:00:00Z`);
+  const human = Number.isNaN(d.getTime()) ? date
+    : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return [
+    'Hello! I would like to book a tennis court.',
+    '',
+    `Date: ${human}`,
+    `Time: ${time}${end ? '–' + end : ''} (${Number(durationMin) / 60}h)`,
+    '',
+    'Is it available? Thank you!'
+  ].join('\n');
+}
+
+export async function sendCourtRequests(chatId, lang, form, courtsList) {
+  const ru = lang === 'ru';
+  const text = courtRequestMessage(form, lang);
+  const chosen = (courtsList || []).filter(c => (form.courts || []).includes(c.name));
+  if (!chosen.length) return { sent: 0 };
+
+  await sendMessage(chatId, ru
+    ? `<b>📲 Запросы на бронь готовы</b>\n\n📅 <b>${escapeHtml(formatDate(form.date))}</b>\n🕐 <b>${escapeHtml(form.time)}–${escapeHtml(endTime(form.time, form.durationMin))}</b>\n\nНиже — по сообщению на каждую площадку. Откройте WhatsApp и отправьте; текст уже подставлен.`
+    : `<b>📲 Booking requests ready</b>\n\n📅 <b>${escapeHtml(formatDate(form.date))}</b>\n🕐 <b>${escapeHtml(form.time)}–${escapeHtml(endTime(form.time, form.durationMin))}</b>\n\nBelow is one message per venue. Open WhatsApp and send — the text is prefilled.`);
+
+  let sent = 0;
+  for (const court of chosen) {
+    const rows = [];
+    if (court.whatsapp) rows.push([{ text: ru ? `📲 Написать ${court.name}` : `📲 Message ${court.name}`, url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(text)}` }]);
+    const body = `<b>${escapeHtml(court.name)}</b>${court.address ? `\n${escapeHtml(court.address)}` : ''}${court.whatsapp ? '' : `\n<i>${ru ? 'Номер WhatsApp не заполнен в листе Courts — скопируйте текст и отправьте вручную.' : 'No WhatsApp number in the Courts sheet — copy the text and send it manually.'}</i>`}\n\n<code>${escapeHtml(text)}</code>`;
+    try {
+      await sendMessage(chatId, body, rows.length ? { reply_markup: { inline_keyboard: rows } } : {});
+      sent++;
+      await new Promise(r => setTimeout(r, 45));
+    } catch (e) { console.error('court request failed:', e.message); }
+  }
+  await logMatchEvent('court_request', { challenge_id: '', division: '' }, { telegram_id: chatId, name: '' },
+    `${form.date} ${form.time} · ${Number(form.durationMin) / 60}ч · ${chosen.map(c => c.name).join(', ')}`);
+  return { sent };
 }
 
 export { findSlot };

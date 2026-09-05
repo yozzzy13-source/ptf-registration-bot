@@ -880,6 +880,29 @@ export async function getPlayerDivision(profile = {}) {
   return (await getPlayerLeagueInfo(profile)).division;
 }
 
+// Все активные игроки лиги с Telegram — для общих рассылок (результаты матчей).
+export async function getAllActiveLeaguePlayers() {
+  const [data, { rows: applicants }] = await Promise.all([
+    getManualParticipants().catch(() => ({ players: [] })),
+    getRows(SHEETS.applicants, { useCache:false })
+  ]);
+  const byKey = new Map();
+  for (const a of applicants) {
+    if (!a.telegram_id) continue;
+    for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
+  }
+  const out = [];
+  for (const p of (data.players || [])) {
+    if (String(p.status || '').toLowerCase() !== 'active') continue;
+    const hit = (p.telegram_id && applicants.find(a => String(a.telegram_id) === String(p.telegram_id)))
+      || nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+    if (!hit) continue;
+    if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+    out.push({ telegram_id: String(hit.telegram_id), name: p.name, division: p.division || '', language: hit.language || '' });
+  }
+  return out;
+}
+
 // Доступ к матчам — только у активных игроков текущего состава.
 export async function isActiveLeaguePlayer(profile = {}) {
   const info = await getPlayerLeagueInfo(profile);

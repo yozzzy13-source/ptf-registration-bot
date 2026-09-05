@@ -18,7 +18,23 @@ export const WEBSITE_PLAYERS_SHEET_ID = process.env.WEBSITE_PLAYERS_SHEET_ID || 
 // Если не задана, окна уходят в админский чат (чтобы ничего не терялось на этапе настройки).
 // Отдельная таблица под матчи: заявки и журнал лиги живут вне основной таблицы PTF.
 export const MATCHES_SPREADSHEET_ID = process.env.MATCHES_SPREADSHEET_ID || '';
-export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log', courts:'Courts' };
+export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log', courts:'Courts', results:'Match Results' };
+// Таблицы лиги, куда зеркалим подтверждённый счёт (как это делал results-бот).
+// Если не заданы — результат просто остаётся в таблице матчей.
+export const LEAGUE_RESULTS_SHEET_ID = process.env.LEAGUE_RESULTS_SHEET_ID || '';
+export const LEAGUE_RESULTS_SHEETS = { log:'Cross_Division_Match_Log', master:'Players_Master' };
+export const DIVISION_SPREADSHEETS = {
+  A: process.env.DIVISION_A_SPREADSHEET_ID || '',
+  B: process.env.DIVISION_B_SPREADSHEET_ID || '',
+  C: process.env.DIVISION_C_SPREADSHEET_ID || '',
+  D: process.env.DIVISION_D_SPREADSHEET_ID || ''
+};
 export const LEAGUE_CHAT_ID = process.env.LEAGUE_CHAT_ID || '';
+// Куда публиковать подтверждённые результаты (общая лента лиги).
+// Можно задать переменными, но проще привязать командой /results_here прямо в нужной теме.
+export const RESULTS_CHAT_ID = process.env.RESULTS_CHAT_ID || '';
+export const RESULTS_TOPIC_ID = process.env.RESULTS_TOPIC_ID || '';
+// Свободная бронь корта: пока доступна только админам. Поставьте true, когда откроете всем.
+export const COURT_BOOKING_OPEN = String(process.env.COURT_BOOKING_OPEN || 'false').toLowerCase() === 'true';
 export const MATCH_DURATION_MIN = Number(process.env.MATCH_DURATION_MIN || 120);
 export const MATCH_HORIZON_DAYS = Number(process.env.MATCH_HORIZON_DAYS || 21);

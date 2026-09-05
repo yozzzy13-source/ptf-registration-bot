@@ -20,9 +20,12 @@ const SLOT_HEADERS = [
   'from_telegram_id', 'from_name', 'from_username',
   'to_telegram_id', 'to_name', 'to_username',
   'dates', 'time_from', 'time_to', 'duration_min', 'courts', 'comment',
-  'agreed_date', 'agreed_time', 'agreed_court', 'pending_by', 'round',
+  'agreed_date', 'agreed_time', 'agreed_court', 'pending_by', 'round', 'court_confirmed_at', 'court_confirmed_by',
   'chat_id', 'message_thread_id', 'message_id',
-  'created_at', 'responded_at', 'cancelled_at'
+  'created_at', 'responded_at', 'cancelled_at',
+  'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
+  'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
+  'result_prompt_sent_at'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -359,6 +362,127 @@ export async function rejectProposal(challengeId, actor = {}) {
     const merged = { ...slot, ...patch };
     await logMatchEvent('rejected', { ...slot }, actor);
     return { ok: true, slot: merged, previous: slot };
+  });
+}
+
+// Корт подтвердил бронь — матч становится полностью активным.
+export async function confirmCourt(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
+    if (slot.court_confirmed_at) return { ok: false, reason: 'already_confirmed', slot };
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (!sides.includes(String(actor.telegram_id))) return { ok: false, reason: 'not_a_player', slot };
+    const patch = { court_confirmed_at: nowISO(), court_confirmed_by: String(actor.telegram_id || '') };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('court_confirmed', merged, actor, merged.agreed_court || '');
+    return { ok: true, slot: merged };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Результаты матчей.
+// Внёсший счёт указывает победителя и сет-счёт; матч засчитывается только после
+// подтверждения соперником. Счёт всегда хранится «от игрока from_telegram_id».
+// ---------------------------------------------------------------------------
+
+// Матч сыгран (время закончилось), результата ещё нет, напоминание не отправляли.
+export async function listMatchesNeedingResultPrompt() {
+  const rows = await allSlots();
+  return rows.filter(r => {
+    if (String(r.status || '').toLowerCase() !== 'accepted') return false;
+    if (r.result_status) return false;
+    if (r.result_prompt_sent_at) return false;
+    const end = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
+    if (Number.isNaN(end)) return false;
+    return Date.now() > end + Number(r.duration_min || 120) * 60000;
+  });
+}
+
+export async function markResultPromptSent(challengeId) {
+  return updateSlot(challengeId, { result_prompt_sent_at: nowISO() });
+}
+
+// Матчи, по которым игрок может внести или подтвердить результат.
+export async function listResultTasks(telegramId) {
+  const id = String(telegramId);
+  const rows = await allSlots();
+  return rows.filter(r => {
+    if (![String(r.from_telegram_id), String(r.to_telegram_id)].includes(id)) return false;
+    if (String(r.status || '').toLowerCase() !== 'accepted') return false;
+    const st = String(r.result_status || '').toLowerCase();
+    if (st === 'confirmed') return false;
+    if (st === 'pending') return true;           // ждёт подтверждения одной из сторон
+    const end = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
+    return !Number.isNaN(end) && Date.now() > end + Number(r.duration_min || 120) * 60000;
+  }).sort((a, b) => String(b.agreed_date).localeCompare(String(a.agreed_date)));
+}
+
+// Ручной матч: игроки договорились вне бота. Сразу создаётся согласованным,
+// результат так же уходит сопернику на подтверждение.
+export async function createManualMatch(row) {
+  await appendObject(MATCH_SHEETS.slots, SLOT_HEADERS, row);
+  await logMatchEvent('manual_created', row, { telegram_id: row.from_telegram_id, name: row.from_name },
+    `${row.agreed_date} ${row.result_score}`);
+  return row;
+}
+
+export async function submitResult(challengeId, actor = {}, result = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
+    if (String(slot.result_status || '').toLowerCase() === 'confirmed') return { ok: false, reason: 'already_confirmed', slot };
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (!sides.includes(String(actor.telegram_id))) return { ok: false, reason: 'not_a_player', slot };
+    const patch = {
+      result_status: 'pending',
+      result_by: String(actor.telegram_id || ''),
+      result_winner: String(result.winner || ''),
+      result_score: String(result.score || ''),
+      result_set3_mode: String(result.set3Mode || ''),
+      result_photo_file_id: String(result.photoFileId || slot.result_photo_file_id || ''),
+      result_note: String(result.note || ''),
+      result_submitted_at: nowISO(),
+      result_confirmed_at: ''
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('result_submitted', merged, actor, `${patch.result_score} · победил ${patch.result_winner}`);
+    return { ok: true, slot: merged };
+  });
+}
+
+export async function confirmResult(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
+    // Подтверждает всегда ВТОРАЯ сторона — не та, что вносила счёт.
+    if (String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (!sides.includes(String(actor.telegram_id))) return { ok: false, reason: 'not_a_player', slot };
+    const patch = { result_status: 'confirmed', result_confirmed_at: nowISO() };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('result_confirmed', merged, actor, merged.result_score);
+    return { ok: true, slot: merged };
+  });
+}
+
+export async function disputeResult(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
+    if (String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
+    const previous = { ...slot };
+    const patch = { result_status: 'disputed', result_confirmed_at: '' };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    await logMatchEvent('result_disputed', slot, actor, slot.result_score);
+    return { ok: true, slot: { ...slot, ...patch }, previous };
   });
 }
 
