@@ -8,7 +8,8 @@
     "start": "node index.js",
     "dev": "node index.js",
     "setup:payments": "node scripts/setup-payments.js",
-    "setup:events": "node scripts/setup-events.js"
+    "setup:events": "node scripts/setup-events.js",
+    "setup:courts": "node scripts/setup-courts.js"
   },
   "engines": {
     "node": ">=18"

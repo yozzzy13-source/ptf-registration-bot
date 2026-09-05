@@ -1,9 +1,11 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage } from './telegram.js';
 import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, websiteKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage } from './sheets.js';
+import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
-import { DEFAULT_USDT_AMOUNT } from './config.js';
+import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
+import { findSlot as findMatchSlot } from './matchesdb.js';
+import { declineDirectChallenge } from './matches.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
 
 export const userState = new Map();
@@ -16,8 +18,34 @@ async function sendLanguageChoice(chatId) {
   return sendMessage(chatId, t('en','choose_language'), { reply_markup: languageKeyboard() });
 }
 async function sendMain(chatId, lang) { closeContactSession(chatId); userState.delete(String(chatId)); const l=fallbackLang(lang); const txt=await getBotText('welcome_main',l); await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l)}); }
-function siteUrls(settings={}) { const home=settings.website_url || 'https://phukettennis.com/'; const base=home.replace(/\/$/,''); return {home, matches:settings.website_matches||`${base}/matches`, divisions:settings.website_divisions||`${base}/divisions`, yearlyRace:settings.website_yearly_race||`${base}/yearly-race`, players:settings.website_players||`${base}/players`, regulations:settings.website_regulations||`${base}/regulations`}; }
-async function sendWebsiteMenu(chatId, lang, editMsgId=null) { const settings={website_url: await getSetting('website_url') || 'https://phukettennis.com/', website_matches: await getSetting('website_matches'), website_divisions: await getSetting('website_divisions'), website_yearly_race: await getSetting('website_yearly_race'), website_players: await getSetting('website_players')}; const urls=siteUrls(settings); const txt=await getBotText('website_button',lang); const body=txt?.html_text || (lang==='ru'?'<b>ℹ️ О PTF</b>\n\nЗдесь собрана главная информация о лиге и турнирах: матчи, дивизионы, годовая гонка и игроки.':'<b>ℹ️ About PTF</b>\n\nHere you can find the main information about the league and tournaments: matches, divisions, Yearly Race and players.'); const opts={reply_markup:websiteKeyboard(lang,urls)}; if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
+function siteUrls(settings={}) { const home=settings.website_url || 'https://www.phukettennis.com/'; const base=home.replace(/\/$/,''); return {home, matches:settings.website_matches||`${base}/matches`, divisions:settings.website_divisions||`${base}/divisions`, yearlyRace:settings.website_yearly_race||`${base}/yearly-race`, players:settings.website_players||`${base}/players`, regulations:settings.website_regulations||`${base}/regulations`}; }
+
+// Ссылка на страницу конкретного дивизиона строится по шаблону из Settings —
+// так адрес правится в таблице без деплоя, когда на сайте меняется маршрут или сезон.
+// {division} — «Division A», {letter} — «A», {season} — номер сезона из Settings.
+function divisionUrl(template, base, division, season) {
+  const letter = String(division || '').replace(/^(Division|Дивизион)\s*/i, '').trim();
+  const tpl = template || `${base}/divisions?division={division}`;
+  return tpl
+    .replace(/\{division\}/g, encodeURIComponent(division || ''))
+    .replace(/\{letter\}/g, encodeURIComponent(letter))
+    .replace(/\{slug\}/g, encodeURIComponent(String(division || '').toLowerCase().replace(/\s+/g, '-')))
+    .replace(/\{season\}/g, encodeURIComponent(season || ''));
+}
+async function sendWebsiteMenu(chatId, lang, editMsgId=null) {
+  const settings={website_url: await getSetting('website_url') || 'https://www.phukettennis.com/', website_matches: await getSetting('website_matches'), website_divisions: await getSetting('website_divisions'), website_yearly_race: await getSetting('website_yearly_race'), website_players: await getSetting('website_players')};
+  const urls=siteUrls(settings);
+  const txt=await getBotText('website_button',lang);
+  const body=txt?.html_text || (lang==='ru'?'<b>ℹ️ О PTF</b>\n\nЗдесь собрана главная информация о лиге: составы дивизионов текущего сезона, матчи, годовая гонка и игроки.':'<b>ℹ️ About PTF</b>\n\nMain league info: current-season division standings, matches, Yearly Race and players.');
+  // Дивизионы берём из таблицы участников — в меню ровно те, что есть в этом сезоне.
+  let divisions=[];
+  try { const data=await getManualParticipants(); divisions=(data.groups||[]).filter(g=>g.division&&!g.unassigned).map(g=>g.division); } catch(e) { console.error('divisions for menu failed:', e.message); }
+  const template=await getSetting('website_division_url_template');
+  const season=await getSetting('season_number');
+  const divisionLinks=divisions.map(d=>({ text:(lang==='ru'?d.replace(/^Division\s+/,'Дивизион '):d), url:divisionUrl(template, urls.home.replace(/\/$/,''), d, season) }));
+  const opts={reply_markup:websiteKeyboard(lang,urls,divisionLinks)};
+  if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts);
+}
 async function sendTextSection(chatId, lang, key, editMsgId=null) { const txt=await getBotText(key,lang); const body=txt?.html_text || `<b>${escapeHtml(key)}</b>`; let opts={reply_markup:textKeyboard(lang,key)}; if(key==='yearly_race'){ const ratingUrl=await getSetting('website_yearly_race') || (await getSetting('website_url') || 'https://phukettennis.com/').replace(/\/$/,'') + '/yearly-race'; opts={reply_markup:{inline_keyboard:[[{text:lang==='ru'?'📊 Посмотреть рейтинг':'📊 View Ranking',url:ratingUrl}],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]}}; } if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
 function cleanPaymentAmount(value) {
   const raw = String(value ?? '').trim();
@@ -321,6 +349,15 @@ export async function handleMessage(msg) {
       return sendLanguageChoice(chatId);
     }
     if (param.startsWith('challenge_')) return handleChallengeStart(chatId, from, lang, param.replace('challenge_', ''));
+    // Ссылка «Играю» из чата дивизиона: открываем мини-приложение сразу на этой заявке.
+    if (param.startsWith('match_')) {
+      const slotId = param.replace(/^match_/, '');
+      return sendMessage(chatId, lang === 'ru'
+        ? '🎾 Выберите удобные дату и корт из предложенных соперником.'
+        : '🎾 Pick a date and court from what your opponent offered.', {
+        reply_markup: { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Выбрать и принять' : '🎾 Choose and accept', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slotId)}` } }]] }
+      });
+    }
     return sendMain(chatId, lang);
   }
 
@@ -487,6 +524,16 @@ export async function handleCallback(q) {
     const [, applicationId, methodId] = data.split(':');
     return sendPaymentInstructions(chatId, lang, applicationId, methodId);
   }
+  // Матч отклонён адресатом. Принятие идёт через мини-приложение: соперник
+  // должен выбрать конкретные дату и корт из предложенных автором.
+  if (data.startsWith('match_decline:')) {
+    const slot = await findMatchSlot(data.split(':')[1]);
+    if (!slot) return null;
+    if (String(slot.to_telegram_id) !== String(from.id)) return null;
+    await declineDirectChallenge(slot, { telegram_id: from.id, name: from.first_name || '' }).catch(e => console.error('declineDirectChallenge failed:', e.message));
+    return sendMessage(chatId, lang === 'ru' ? 'Вызов отклонён.' : 'Challenge declined.').catch(() => {});
+  }
+
   if (data.startsWith('challenge_accept:')) return acceptChallenge(chatId, from, lang, data.split(':')[1]);
   if (data.startsWith('challenge_decline:')) return declineChallenge(chatId, from, lang, data.split(':')[1]);
 

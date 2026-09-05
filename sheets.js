@@ -836,3 +836,75 @@ export async function markSelfieRequested(telegramId) {
 }
 
 export async function getBotMenuRows(parent='main', language='en'){try{const {rows}=await getRows(SHEETS.botMenu,{useCache:false});const lang=language==='ru'?'ru':'en';return rows.filter(r=>String(r.status||'active').toLowerCase()==='active'&&String(r.parent||'main')===String(parent)&&String(r.language||'en')===lang).sort((a,b)=>Number(a.row||999)-Number(b.row||999)||Number(a.sort_order||999)-Number(b.sort_order||999));}catch(e){return []}}
+
+
+// ===========================================================================
+// МАТЧИ МЕЖДУ ИГРОКАМИ
+// Открытое окно: игрок публикует своё свободное время в топик своего дивизиона,
+// любой из этого дивизиона может его забрать. Адресный вызов: то же окно, но
+// сразу закреплённое за конкретным соперником.
+// Обе формы живут в одном листе Match Challenges (колонка match_type).
+// ===========================================================================
+export async function getCourts() {
+  try {
+    const { rows } = await getRows(SHEETS.courts, { useCache:false });
+    return rows
+      .filter(r => (r.name || r.court || r.title) && String(r.status || 'active').toLowerCase() !== 'inactive')
+      .map(r => ({
+        name: safe(r.name || r.court || r.title),
+        area: safe(r.area || r.district || r.location),
+        price: safe(r.price || r.price_thb),
+        notes: safe(r.notes)
+      }));
+  } catch (e) {
+    // Листа Courts может не быть — интерфейс тогда разрешает ввести площадку текстом.
+    return [];
+  }
+}
+
+// Дивизион игрока берём из ручной таблицы участников (она — источник правды по составам),
+// сопоставляя по имени тем же алгоритмом, что и страницы игроков на сайте.
+export async function getPlayerDivision(profile = {}) {
+  const name = String(profile.name || '').trim();
+  if (!name) return '';
+  let data;
+  try { data = await getManualParticipants(); } catch (e) { return safe(profile.division) === 'pending' ? '' : safe(profile.division); }
+  const players = data.players || [];
+  const keys = nameKeys(name);
+  for (const p of players) {
+    const pk = nameKeys(p.name);
+    if (keys.some(k => pk.includes(k))) return p.division || '';
+  }
+  return '';
+}
+
+// Соперники: участники того же дивизиона, у которых есть telegram_id в Applicants.
+export async function getDivisionOpponents(division, excludeTelegramId = '') {
+  if (!division) return [];
+  const [data, { rows: applicants }] = await Promise.all([
+    getManualParticipants().catch(() => ({ players: [] })),
+    getRows(SHEETS.applicants, { useCache:false })
+  ]);
+  const byKey = new Map();
+  for (const a of applicants) {
+    if (!a.telegram_id) continue;
+    for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
+  }
+  const out = [];
+  for (const p of (data.players || [])) {
+    if (p.division !== division) continue;
+    const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+    if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
+    if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+    out.push({
+      telegram_id: String(hit.telegram_id),
+      name: p.name,
+      username: hit.telegram_username || '',
+      rating: p.rating || '',
+      status: p.status || '',
+      profile_url: p.profile_url || '',
+      photo_url: p.photo_url || ''
+    });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity:'base' }));
+}

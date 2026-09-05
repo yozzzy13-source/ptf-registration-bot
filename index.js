@@ -2,12 +2,14 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
-import { setWebhook, setCommands, sendMessage } from './telegram.js';
+import { setWebhook, setCommands, sendMessage, getMe } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getCourts, getPlayerDivision, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
+import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername } from './matches.js';
+import { createSlot, findSlot, claimSlot, listOpenSlots, listMySlots, listToCell, cellToList } from './matchesdb.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +22,7 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
 function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
 app.get('/participants', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'participants.html')); });
+app.get('/match', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'match.html')); });
 app.get('/apply', (req, res) => { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); res.sendFile(path.join(__dirname, 'public', 'apply.html')); });
 registerAdminRoutes(app);
 
@@ -272,6 +275,129 @@ You can now join an open event.`, { reply_markup:{ inline_keyboard:[[ { text: la
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// МАТЧИ. Заявка формируется ровно как бронь в боте тренировок: дата, интервал,
+// длительность, площадка — и уходит либо в топик дивизиона (открытое окно),
+// либо лично сопернику (адресный вызов).
+// ---------------------------------------------------------------------------
+async function matchViewer(initData) {
+  const verified = verifyTelegramInitData(initData);
+  const { user } = parseInitData(initData);
+  if (!user?.id) return { ok:false, code:400, error:'Telegram WebApp user not found' };
+  if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return { ok:false, code:403, error:'Invalid Telegram initData' };
+  const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
+  if (!profile) return { ok:false, code:404, error:'Player profile not found. Complete the profile first.' };
+  const division = await getPlayerDivision(profile);
+  const lang = ['ru','en'].includes(String(profile.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : 'en';
+  return { ok:true, user, profile, division, lang };
+}
+
+app.get('/api/match/bootstrap', async (req, res) => {
+  try {
+    const v = await matchViewer(req.query.initData || '');
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const [courts, opponents, openSlots, mySlots] = await Promise.all([
+      getCourts(),
+      getDivisionOpponents(v.division, v.user.id),
+      listOpenSlots(v.division, v.user.id),
+      listMySlots(v.user.id)
+    ]);
+    const byId = new Map(opponents.map(o => [String(o.telegram_id), o]));
+    const shape = (s) => ({
+      ...s,
+      dates: cellToList(s.dates),
+      courts: cellToList(s.courts),
+      from: byId.get(String(s.from_telegram_id)) || null
+    });
+    res.json({
+      ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
+      courts, opponents,
+      open_slots: openSlots.map(shape),
+      my_matches: mySlots.map(shape),
+      focus_slot: String(req.query.slot || '')
+    });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/match/create', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const v = await matchViewer(b.initData || '');
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.division) return res.status(400).json({ ok:false, error:'You are not assigned to a division yet.' });
+    const dates = (Array.isArray(b.dates) ? b.dates : []).map(d => String(d).trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+    if (!dates.length) return res.status(400).json({ ok:false, error:'Pick at least one date' });
+    const timeFrom = String(b.time_from || '').trim();
+    const timeTo = String(b.time_to || timeFrom).trim();
+    if (!/^\d{2}:\d{2}$/.test(timeFrom)) return res.status(400).json({ ok:false, error:'Time is required' });
+    const duration = Number(b.duration_min || 90);
+    const courts = (Array.isArray(b.courts) ? b.courts : []).map(c => String(c).trim()).filter(Boolean);
+    const isDirect = String(b.match_type || 'open') === 'direct';
+    let opponent = null;
+    if (isDirect) {
+      const list = await getDivisionOpponents(v.division, v.user.id);
+      opponent = list.find(o => String(o.telegram_id) === String(b.to_telegram_id));
+      if (!opponent) return res.status(400).json({ ok:false, error:'Opponent not found in your division' });
+    }
+    const slot = {
+      challenge_id: uid('match'),
+      match_type: isDirect ? 'direct' : 'open',
+      status: 'open',
+      division: v.division,
+      from_telegram_id: String(v.user.id),
+      from_name: v.profile.name || [v.user.first_name, v.user.last_name].filter(Boolean).join(' '),
+      from_username: v.user.username || v.profile.telegram_username || '',
+      to_telegram_id: isDirect ? String(opponent.telegram_id) : '',
+      to_name: isDirect ? opponent.name : '',
+      to_username: isDirect ? opponent.username : '',
+      dates: listToCell(dates), time_from: timeFrom, time_to: timeTo,
+      duration_min: duration, courts: listToCell(courts), comment: safe(b.comment),
+      agreed_date:'', agreed_time:'', agreed_court:'',
+      created_at: nowISO()
+    };
+    await createSlot(slot);
+    if (isDirect) await sendDirectChallenge(slot).catch(e => console.error('sendDirectChallenge failed:', e.message));
+    else await publishOpenSlot(slot).catch(e => console.error('publishOpenSlot failed:', e.message));
+    res.json({ ok:true, challenge_id: slot.challenge_id });
+  } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
+});
+
+// Отвечающий обязан выбрать конкретную дату (и корт, если автор предложил несколько).
+app.post('/api/match/take', async (req, res) => {
+  try {
+    const v = await matchViewer(req.body?.initData || '');
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const result = await claimSlot(req.body.challenge_id, {
+      telegram_id: v.user.id, name: v.profile.name, username: v.user.username || v.profile.telegram_username || ''
+    }, { date: req.body.date, court: req.body.court, time: req.body.time });
+    if (!result.ok) {
+      const messages = {
+        taken:'This slot has just been taken.', own:'This is your own slot.', closed:'This slot is closed.',
+        not_for_you:'This challenge is addressed to another player.', not_found:'Slot not found.',
+        already_yours:'You have already taken this slot.', bad_date:'Pick one of the offered dates.',
+        bad_court:'Pick one of the offered courts.'
+      };
+      return res.status(409).json({ ok:false, error: messages[result.reason] || 'Slot unavailable' });
+    }
+    await notifyMatchAgreed(result.slot).catch(e => console.error('notifyMatchAgreed failed:', e.message));
+    res.json({ ok:true });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/match/cancel', async (req, res) => {
+  try {
+    const v = await matchViewer(req.body?.initData || '');
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const slot = await findSlot(req.body.challenge_id);
+    if (!slot) return res.status(404).json({ ok:false, error:'Slot not found' });
+    if (String(slot.from_telegram_id) !== String(v.user.id)) return res.status(403).json({ ok:false, error:'Not your slot' });
+    if (String(slot.status).toLowerCase() === 'accepted') return res.status(409).json({ ok:false, error:'Match is already agreed — contact your opponent.' });
+    await cancelMatchSlot(slot, { telegram_id: v.user.id, name: v.profile.name });
+    res.json({ ok:true });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
 app.listen(PORT, async () => {
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);
@@ -281,6 +407,7 @@ app.listen(PORT, async () => {
     if (BOT_TOKEN && PUBLIC_URL) {
       await setWebhook();
       await setCommands();
+      try { const me = await getMe(); setBotUsername(me?.username); } catch (e) { console.error('getMe failed:', e.message); }
       console.log('Webhook and commands installed');
     }
   } catch (e) {

@@ -63,11 +63,16 @@ export const sendSticker = (chat_id, sticker, opts={}) => call('sendSticker', { 
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 export const getChat = (chat_id) => call('getChat', { chat_id });
+export const getWebhookInfo = () => call('getWebhookInfo', {});
+export const getMe = () => call('getMe', {});
 export const sendPoll = (chat_id, question, options, opts={}) => call('sendPoll', { chat_id, question, options, ...opts });
 
 export async function setWebhook() {
   if (!PUBLIC_URL) throw new Error('PUBLIC_URL env is empty');
-  return call('setWebhook', { url: `${PUBLIC_URL}/webhook`, drop_pending_updates: true });
+  // drop_pending_updates НЕ ставим: при рестарте/деплое Telegram держит недоставленные апдейты
+  // и повторяет их — с drop_pending_updates:true присланный в этот момент скриншот оплаты
+  // терялся навсегда. Дубли отсекает кэш update_id в index.js.
+  return call('setWebhook', { url: `${PUBLIC_URL}/webhook`, allowed_updates: ['message','callback_query','poll'] });
 }
 
 export async function setCommands() {

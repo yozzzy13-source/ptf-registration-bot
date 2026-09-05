@@ -1,0 +1,253 @@
+// Хранилище матчей — ОТДЕЛЬНАЯ Google-таблица (MATCHES_SPREADSHEET_ID).
+//
+// Почему отдельно: заявки на матчи и их история растут быстрее всего остального и
+// нужны для статистики сезона. Держать их в основной таблице PTF — значит смешивать
+// операционные данные (анкеты, оплаты) с журналом лиги. Здесь свои листы, свой лог,
+// своя чистка; основная таблица не затрагивается.
+//
+// Листы:
+//   Match Slots — активные и завершённые заявки, одна строка на заявку;
+//   Match Log   — журнал только на дозапись: кто, что и когда сделал.
+//
+// Заявка может нести НЕСКОЛЬКО дат и НЕСКОЛЬКО кортов (хранятся строкой через запятую).
+// Отвечающий выбирает конкретную дату и корт — они пишутся в agreed_*.
+import { sheets as sheetsClient } from './google.js';
+import { MATCHES_SPREADSHEET_ID, MATCH_SHEETS } from './config.js';
+import { nowISO, safe } from './util.js';
+
+const SLOT_HEADERS = [
+  'challenge_id', 'match_type', 'status', 'division',
+  'from_telegram_id', 'from_name', 'from_username',
+  'to_telegram_id', 'to_name', 'to_username',
+  'dates', 'time_from', 'time_to', 'duration_min', 'courts', 'comment',
+  'agreed_date', 'agreed_time', 'agreed_court',
+  'chat_id', 'message_thread_id', 'message_id',
+  'created_at', 'responded_at', 'cancelled_at'
+];
+const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
+
+function assertConfigured() {
+  if (!MATCHES_SPREADSHEET_ID) {
+    throw new Error('MATCHES_SPREADSHEET_ID не задан. Создайте отдельную таблицу для матчей и добавьте её ID в переменные Railway.');
+  }
+}
+
+function colToA1(n) {
+  let s = '';
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - m) / 26); }
+  return s;
+}
+
+async function valuesGet(range) {
+  assertConfigured();
+  const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId: MATCHES_SPREADSHEET_ID, range });
+  return res.data.values || [];
+}
+async function valuesUpdate(range, values) {
+  assertConfigured();
+  await sheetsClient().spreadsheets.values.update({
+    spreadsheetId: MATCHES_SPREADSHEET_ID, range, valueInputOption: 'USER_ENTERED', requestBody: { values }
+  });
+}
+async function valuesAppend(range, values) {
+  assertConfigured();
+  await sheetsClient().spreadsheets.values.append({
+    spreadsheetId: MATCHES_SPREADSHEET_ID, range, valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS', requestBody: { values }
+  });
+}
+
+// Листы создаём при первом обращении — руками ничего заводить не нужно.
+const ready = new Map();
+async function ensureSheet(title, headers) {
+  if (ready.has(title)) return ready.get(title);
+  const task = (async () => {
+    assertConfigured();
+    const meta = await sheetsClient().spreadsheets.get({ spreadsheetId: MATCHES_SPREADSHEET_ID });
+    const exists = (meta.data.sheets || []).some(s => s.properties?.title === title);
+    if (!exists) {
+      await sheetsClient().spreadsheets.batchUpdate({
+        spreadsheetId: MATCHES_SPREADSHEET_ID,
+        requestBody: { requests: [{ addSheet: { properties: { title, gridProperties: { rowCount: 2000, columnCount: Math.max(headers.length, 12), frozenRowCount: 1 } } } }] }
+      });
+    }
+    const first = await valuesGet(`'${title}'!A1:BZ1`).catch(() => []);
+    const current = first[0] || [];
+    const merged = [...current];
+    for (const h of headers) if (!merged.includes(h)) merged.push(h);
+    if (merged.join('|') !== current.join('|')) await valuesUpdate(`'${title}'!A1:${colToA1(merged.length)}1`, [merged]);
+    return merged;
+  })().catch(e => { ready.delete(title); throw e; });
+  ready.set(title, task);
+  return task;
+}
+
+async function readObjects(title, headers) {
+  await ensureSheet(title, headers);
+  const values = await valuesGet(`'${title}'!A:BZ`);
+  const head = values[0] || [];
+  return values.slice(1).map((r, i) => {
+    const o = { _rowNumber: i + 2 };
+    head.forEach((h, k) => { o[h] = r[k] ?? ''; });
+    return o;
+  });
+}
+
+async function appendObject(title, headers, obj) {
+  const head = await ensureSheet(title, headers);
+  await valuesAppend(`'${title}'!A:BZ`, [head.map(h => obj[h] ?? '')]);
+}
+
+async function updateRow(title, headers, rowNumber, patch) {
+  const head = await ensureSheet(title, headers);
+  const rows = await readObjects(title, headers);
+  const current = rows.find(r => r._rowNumber === rowNumber) || {};
+  const merged = { ...current, ...patch };
+  await valuesUpdate(`'${title}'!A${rowNumber}:${colToA1(head.length)}${rowNumber}`, [head.map(h => merged[h] ?? '')]);
+}
+
+// --- журнал -----------------------------------------------------------------
+export async function logMatchEvent(action, slot = {}, actor = {}, details = '') {
+  try {
+    await appendObject(MATCH_SHEETS.log, LOG_HEADERS, {
+      timestamp: nowISO(),
+      challenge_id: slot.challenge_id || '',
+      action,
+      actor_telegram_id: String(actor.telegram_id || actor.id || ''),
+      actor_name: safe(actor.name),
+      division: slot.division || '',
+      details: safe(details)
+    });
+  } catch (e) {
+    // Журнал не должен ломать основной сценарий.
+    console.error('logMatchEvent failed:', e.message);
+  }
+}
+
+// --- список значений через запятую ------------------------------------------
+export function listToCell(list = []) {
+  return (Array.isArray(list) ? list : String(list || '').split(','))
+    .map(v => String(v || '').trim()).filter(Boolean).join(', ');
+}
+export function cellToList(cell = '') {
+  return String(cell || '').split(',').map(v => v.trim()).filter(Boolean);
+}
+
+// --- заявки -----------------------------------------------------------------
+export async function createSlot(slot) {
+  await appendObject(MATCH_SHEETS.slots, SLOT_HEADERS, slot);
+  await logMatchEvent('created', slot, { telegram_id: slot.from_telegram_id, name: slot.from_name },
+    `${slot.match_type} · ${slot.dates} ${slot.time_from}-${slot.time_to} · ${slot.courts || 'любой корт'}`);
+  return slot;
+}
+
+export async function allSlots() {
+  return (await readObjects(MATCH_SHEETS.slots, SLOT_HEADERS)).filter(r => r.challenge_id);
+}
+
+export async function findSlot(challengeId) {
+  const rows = await allSlots();
+  return rows.find(r => String(r.challenge_id) === String(challengeId)) || null;
+}
+
+export async function updateSlot(challengeId, patch) {
+  const rows = await allSlots();
+  const found = rows.find(r => String(r.challenge_id) === String(challengeId));
+  if (!found) return null;
+  await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
+// Замок по заявке: два одновременных «Играю» иначе оба прочитают статус open
+// и оба запишут себя — окно достанется двоим.
+const claimLocks = new Map();
+async function withClaimLock(key, fn) {
+  const k = String(key || '');
+  const prev = claimLocks.get(k) || Promise.resolve();
+  let release;
+  const cur = new Promise(r => { release = r; });
+  claimLocks.set(k, prev.then(() => cur, () => cur));
+  try {
+    await prev.catch(() => {});
+    return await fn();
+  } finally {
+    release();
+    setTimeout(() => { if (claimLocks.get(k) === cur) claimLocks.delete(k); }, 30000).unref?.();
+  }
+}
+
+// taker выбирает КОНКРЕТНЫЕ дату/корт из предложенных автором.
+export async function claimSlot(challengeId, taker = {}, choice = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    const status = String(slot.status || '').toLowerCase();
+    if (status === 'accepted') {
+      return { ok: false, reason: String(slot.to_telegram_id) === String(taker.telegram_id) ? 'already_yours' : 'taken', slot };
+    }
+    if (['cancelled', 'declined', 'expired'].includes(status)) return { ok: false, reason: 'closed', slot };
+    if (String(slot.from_telegram_id) === String(taker.telegram_id)) return { ok: false, reason: 'own', slot };
+    if (slot.to_telegram_id && String(slot.to_telegram_id) !== String(taker.telegram_id)) return { ok: false, reason: 'not_for_you', slot };
+
+    const dates = cellToList(slot.dates);
+    const courts = cellToList(slot.courts);
+    const date = String(choice.date || '').trim() || dates[0] || '';
+    if (dates.length && !dates.includes(date)) return { ok: false, reason: 'bad_date', slot };
+    const court = String(choice.court || '').trim() || (courts.length === 1 ? courts[0] : '');
+    if (courts.length && court && !courts.includes(court)) return { ok: false, reason: 'bad_court', slot };
+    const time = String(choice.time || '').trim() || slot.time_from || '';
+
+    const patch = {
+      status: 'accepted',
+      to_telegram_id: String(taker.telegram_id || ''),
+      to_name: safe(taker.name),
+      to_username: safe(taker.username),
+      agreed_date: date, agreed_court: court, agreed_time: time,
+      responded_at: nowISO()
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('accepted', merged, taker, `${date} ${time}${court ? ' · ' + court : ''}`);
+    return { ok: true, slot: merged };
+  });
+}
+
+// --- выборки ----------------------------------------------------------------
+function lastDateMillis(slot = {}) {
+  const dates = cellToList(slot.dates);
+  const last = dates[dates.length - 1] || '';
+  const t = String(slot.time_to || slot.time_from || '23:59');
+  const ms = Date.parse(`${last}T${t}:00+07:00`);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+function firstDateMillis(slot = {}) {
+  const dates = cellToList(slot.dates);
+  const ms = Date.parse(`${dates[0] || ''}T${slot.time_from || '00:00'}:00+07:00`);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+export function isSlotPast(slot = {}) {
+  const ms = lastDateMillis(slot);
+  return ms > 0 && ms < Date.now();
+}
+
+export async function listOpenSlots(division, viewerTelegramId = '') {
+  const rows = await allSlots();
+  return rows
+    .filter(r => String(r.status || '').toLowerCase() === 'open')
+    .filter(r => !division || !r.division || r.division === division)
+    .filter(r => !r.to_telegram_id || String(r.to_telegram_id) === String(viewerTelegramId))
+    .filter(r => !isSlotPast(r))
+    .sort((a, b) => firstDateMillis(a) - firstDateMillis(b));
+}
+
+export async function listMySlots(telegramId) {
+  const id = String(telegramId);
+  const rows = await allSlots();
+  return rows
+    .filter(r => String(r.from_telegram_id) === id || String(r.to_telegram_id) === id)
+    .filter(r => !['cancelled', 'declined'].includes(String(r.status || '').toLowerCase()))
+    .filter(r => !isSlotPast(r))
+    .sort((a, b) => firstDateMillis(a) - firstDateMillis(b));
+}
+
+export { SLOT_HEADERS, LOG_HEADERS };

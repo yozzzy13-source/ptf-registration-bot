@@ -1,4 +1,4 @@
-import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat } from './telegram.js';
+import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
 import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantLead } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
@@ -435,9 +435,27 @@ Please ask the player to resend the screenshot.`, withTopicOpts(res.topic, revie
 
 // Admin diagnostic: verifies admin chat, forum mode and topic delivery for the admin's own topic.
 export async function adminTopicTest(msg) {
+  // 1. Вебхук: если он указывает не на наш PUBLIC_URL, бот вообще не получает сообщения
+  // от игроков (их забирает другой сервис) — при этом заявки из WebApp продолжают приходить,
+  // потому что идут HTTP-запросом мимо Telegram. Это первое, что нужно исключать.
+  const lines = [];
+  try {
+    const me = await getMe();
+    const info = await getWebhookInfo();
+    const expected = `${PUBLIC_URL}/webhook`;
+    const match = String(info.url || '') === expected;
+    lines.push(`bot: <b>@${escapeHtml(me.username || '')}</b>`);
+    lines.push(`webhook: <code>${escapeHtml(info.url || '(не задан)')}</code>`);
+    lines.push(`ожидается: <code>${escapeHtml(expected)}</code>`);
+    lines.push(`совпадает: <b>${match ? 'да ✅' : 'НЕТ ⚠️ — сообщения игроков забирает другой сервис'}</b>`);
+    if (info.pending_update_count) lines.push(`в очереди недоставлено: <b>${info.pending_update_count}</b>`);
+    if (info.last_error_message) lines.push(`последняя ошибка Telegram: <code>${escapeHtml(info.last_error_message)}</code>${info.last_error_date ? ' (' + new Date(info.last_error_date * 1000).toISOString() + ')' : ''}`);
+  } catch (e) { lines.push(`getWebhookInfo failed: <code>${escapeHtml(e.message)}</code>`); }
+  lines.push('');
+
   const chatId = await getAdminChatId();
-  if (!chatId) return sendMessage(msg.chat.id, '⚠️ admin_chat_id is not set. Run /admin_init inside the admin supergroup.');
-  const lines = [`admin_chat_id: <code>${escapeHtml(chatId)}</code>`];
+  if (!chatId) return sendMessage(msg.chat.id, `<b>Topic diagnostics</b>\n\n${lines.join('\n')}\n⚠️ admin_chat_id не задан. Выполните /admin_init внутри админской супергруппы.`);
+  lines.push(`admin_chat_id: <code>${escapeHtml(chatId)}</code>`);
   try {
     const chat = await getChat(chatId);
     lines.push(`chat: <b>${escapeHtml(chat.title || '')}</b> (${escapeHtml(chat.type)})`, `is_forum: <b>${chat.is_forum ? 'yes' : 'NO — enable Topics in group settings'}</b>`);
