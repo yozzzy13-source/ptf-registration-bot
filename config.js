@@ -18,6 +18,7 @@ export const WEBSITE_PLAYERS_SHEET_ID = process.env.WEBSITE_PLAYERS_SHEET_ID || 
 // Если не задана, окна уходят в админский чат (чтобы ничего не терялось на этапе настройки).
 // Отдельная таблица под матчи: заявки и журнал лиги живут вне основной таблицы PTF.
 export const MATCHES_SPREADSHEET_ID = process.env.MATCHES_SPREADSHEET_ID || '';
-export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log' };
+export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log', courts:'Courts' };
 export const LEAGUE_CHAT_ID = process.env.LEAGUE_CHAT_ID || '';
+export const MATCH_DURATION_MIN = Number(process.env.MATCH_DURATION_MIN || 120);
 export const MATCH_HORIZON_DAYS = Number(process.env.MATCH_HORIZON_DAYS || 21);

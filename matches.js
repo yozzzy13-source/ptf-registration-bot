@@ -10,8 +10,8 @@
 //
 // Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js), основная таблица PTF не трогается.
 import { sendMessage, editMessageText, createForumTopic } from './telegram.js';
-import { getSetting, setSetting, findApplicantByTelegramId, getCourts } from './sheets.js';
-import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide } from './matchesdb.js';
+import { getSetting, setSetting, findApplicantByTelegramId } from './sheets.js';
+import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
 import { LEAGUE_CHAT_ID, PUBLIC_URL } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
@@ -108,13 +108,20 @@ function courtsLine(slot) {
 }
 function offerBlock(slot) {
   const time = slot.time_to && slot.time_to !== slot.time_from ? `${escapeHtml(slot.time_from)}–${escapeHtml(slot.time_to)}` : escapeHtml(slot.time_from);
-  const dur = slot.duration_min ? ` · ${Number(slot.duration_min) / 60} ч` : '';
+  const dur = ` · матч ${Number(slot.duration_min || 120) / 60} ч`;
   const courts = courtsLine(slot);
   return `📅 <b>${escapeHtml(datesLine(slot))}</b>\n🕐 <b>${time}</b>${dur}${courts ? `\n📍 ${escapeHtml(courts)}` : ''}`;
 }
+function endTime(start, durationMin) {
+  const [h, m] = String(start || '').split(':').map(Number);
+  if (Number.isNaN(h)) return '';
+  const total = h * 60 + (m || 0) + Number(durationMin || 120);
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
 function agreedBlock(slot) {
-  const time = slot.agreed_time || slot.time_from || '';
-  return `📅 <b>${escapeHtml(formatDate(slot.agreed_date))}</b>\n🕐 <b>${escapeHtml(time)}</b>${slot.agreed_court ? `\n📍 ${escapeHtml(slot.agreed_court)}` : ''}`;
+  const start = slot.agreed_time || slot.time_from || '';
+  const end = endTime(start, slot.duration_min);
+  return `📅 <b>${escapeHtml(formatDate(slot.agreed_date))}</b>\n🕐 <b>${escapeHtml(start)}${end ? '–' + escapeHtml(end) : ''}</b>${slot.agreed_court ? `\n📍 ${escapeHtml(slot.agreed_court)}` : ''}`;
 }
 
 export function openSlotText(slot) {
@@ -124,7 +131,7 @@ export function openSlotText(slot) {
 👤 ${playerLink(slot.from_name, slot.from_username)}${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
 ${offerBlock(slot)}${slot.comment ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}
 
-${multi ? 'Нажми «Играю» и выбери удобные дату и корт из предложенных.' : 'Нажми «Играю», и я свяжу вас напрямую.'}`;
+${multi ? 'Нажми «Играю» и выбери дату, время и корт из предложенных.' : 'Нажми «Играю», и я свяжу вас напрямую.'}`;
 }
 
 export function takenSlotText(slot) {
@@ -304,14 +311,9 @@ export async function courtByName(name) {
 }
 
 export function bookingMessage(slot, court) {
-  const dur = Number(slot.duration_min || 90);
+  const dur = Number(slot.duration_min || 120);
   const start = slot.agreed_time || slot.time_from || '';
-  const end = (() => {
-    const [h, mm] = String(start).split(':').map(Number);
-    if (Number.isNaN(h)) return '';
-    const total = h * 60 + (mm || 0) + dur;
-    return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-  })();
+  const end = endTime(start, dur);
   const d = new Date(`${slot.agreed_date}T12:00:00Z`);
   const human = Number.isNaN(d.getTime()) ? slot.agreed_date
     : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });

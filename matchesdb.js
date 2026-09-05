@@ -106,6 +106,28 @@ async function updateRow(title, headers, rowNumber, patch) {
   await valuesUpdate(`'${title}'!A${rowNumber}:${colToA1(head.length)}${rowNumber}`, [head.map(h => merged[h] ?? '')]);
 }
 
+// --- корты -------------------------------------------------------------------
+// Лист Courts в таблице матчей. Нужны только название, адрес и номер WhatsApp —
+// цены и депозиты появятся здесь же, когда подключим оплату; лишние колонки не мешают.
+export async function getCourts() {
+  try {
+    const rows = await readObjects(MATCH_SHEETS.courts, ['name', 'address', 'whatsapp']);
+    return rows
+      .filter(r => (r.name || r.court || r.title))
+      .filter(r => !['false','no','0','inactive','нет'].includes(String(r.active ?? r.status ?? 'true').trim().toLowerCase()))
+      .map(r => ({
+        name: safe(r.name || r.court || r.title),
+        address: safe(r.address || r.location),
+        // номер вставляют как удобно («66 64 471 8080») — оставляем только цифры
+        whatsapp: safe(r.whatsapp || r.phone || r.contact).replace(/[^0-9]/g, ''),
+        type: safe(r.type)
+      }));
+  } catch (e) {
+    console.error('getCourts failed:', e.message);
+    return [];
+  }
+}
+
 // --- журнал -----------------------------------------------------------------
 export async function logMatchEvent(action, slot = {}, actor = {}, details = '') {
   try {
@@ -196,7 +218,15 @@ export async function claimSlot(challengeId, taker = {}, choice = {}) {
     if (dates.length && !dates.includes(date)) return { ok: false, reason: 'bad_date', slot };
     const court = String(choice.court || '').trim() || (courts.length === 1 ? courts[0] : '');
     if (courts.length && court && !courts.includes(court)) return { ok: false, reason: 'bad_court', slot };
+    // Время выбирает отвечающий, но только внутри интервала автора и так, чтобы
+    // матч целиком в него помещался.
+    const toMin = (v) => { const [h, mm] = String(v || '').split(':').map(Number); return (h || 0) * 60 + (mm || 0); };
     const time = String(choice.time || '').trim() || slot.time_from || '';
+    const dur = Number(slot.duration_min || 120);
+    const lo = toMin(slot.time_from || '00:00');
+    const hi = toMin(slot.time_to || slot.time_from || '23:59');
+    const t = toMin(time);
+    if (t < lo || (hi > lo && t + dur > hi)) return { ok: false, reason: 'bad_time', slot };
 
     const patch = {
       status: 'pending',

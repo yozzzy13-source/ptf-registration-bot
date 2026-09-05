@@ -848,27 +848,6 @@ export async function getBotMenuRows(parent='main', language='en'){try{const {ro
 // сразу закреплённое за конкретным соперником.
 // Обе формы живут в одном листе Match Challenges (колонка match_type).
 // ===========================================================================
-export async function getCourts() {
-  try {
-    const { rows } = await getRows(SHEETS.courts, { useCache:false });
-    return rows
-      .filter(r => (r.name || r.court || r.title) && String(r.status || 'active').toLowerCase() !== 'inactive')
-      .map(r => ({
-        name: safe(r.name || r.court || r.title),
-        area: safe(r.area || r.district || r.location),
-        address: safe(r.address),
-        // номер для брони в WhatsApp: только цифры, в международном формате
-        whatsapp: safe(r.whatsapp || r.phone || r.contact).replace(/[^0-9]/g, ''),
-        price: safe(r.price || r.price_thb),
-        currency: safe(r.currency) || 'THB',
-        notes: safe(r.notes)
-      }));
-  } catch (e) {
-    // Листа Courts может не быть — интерфейс тогда разрешает ввести площадку текстом.
-    return [];
-  }
-}
-
 // Кто игрок в лиге: дивизион и статус из ручной таблицы участников (она — источник
 // правды по составам). Сначала пробуем точную привязку по telegram_id, если колонка
 // заведена; иначе — сопоставление по имени, как для страниц игроков на сайте.

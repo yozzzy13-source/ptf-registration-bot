@@ -1,15 +1,15 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
+import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getCourts, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername, notifyProposal } from './matches.js';
-import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList } from './matchesdb.js';
+import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts } from './matchesdb.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -281,6 +281,8 @@ You can now join an open event.`, { reply_markup:{ inline_keyboard:[[ { text: la
 // длительность, площадка — и уходит либо в топик дивизиона (открытое окно),
 // либо лично сопернику (адресный вызов).
 // ---------------------------------------------------------------------------
+function hhmmToMin(v) { const [h, m] = String(v || '').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
+
 async function matchViewer(initData) {
   const verified = verifyTelegramInitData(initData);
   const { user } = parseInitData(initData);
@@ -325,7 +327,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
     });
     res.json({
       ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
-      courts, opponents,
+      courts, opponents, duration_min: MATCH_DURATION_MIN,
       open_slots: openSlots.map(shape),
       my_matches: mySlots.map(shape),
       focus_slot: String(req.query.slot || ''),
@@ -345,7 +347,11 @@ app.post('/api/match/create', async (req, res) => {
     const timeFrom = String(b.time_from || '').trim();
     const timeTo = String(b.time_to || timeFrom).trim();
     if (!/^\d{2}:\d{2}$/.test(timeFrom)) return res.status(400).json({ ok:false, error:'Time is required' });
-    const duration = Number(b.duration_min || 90);
+    // Длительность матча всегда одна — игрок её не выбирает.
+    const duration = MATCH_DURATION_MIN;
+    if (hhmmToMin(timeTo) - hhmmToMin(timeFrom) < duration) {
+      return res.status(400).json({ ok:false, error:`Time window must be at least ${duration / 60}h long` });
+    }
     const courts = (Array.isArray(b.courts) ? b.courts : []).map(c => String(c).trim()).filter(Boolean);
     const isDirect = String(b.match_type || 'open') === 'direct';
     let opponent = null;
@@ -390,7 +396,7 @@ app.post('/api/match/take', async (req, res) => {
         taken:'This slot has just been taken.', own:'This is your own slot.', closed:'This slot is closed.',
         not_for_you:'This challenge is addressed to another player.', not_found:'Slot not found.',
         already_yours:'You have already taken this slot.', bad_date:'Pick one of the offered dates.',
-        bad_court:'Pick one of the offered courts.'
+        bad_court:'Pick one of the offered courts.', bad_time:'Pick a time inside the offered window.'
       };
       return res.status(409).json({ ok:false, error: messages[result.reason] || 'Slot unavailable' });
     }
