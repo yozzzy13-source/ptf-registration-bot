@@ -25,7 +25,7 @@ const SLOT_HEADERS = [
   'created_at', 'responded_at', 'cancelled_at',
   'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
   'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
-  'result_prompt_sent_at', 'reminder_sent'
+  'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -438,17 +438,23 @@ export async function expireStaleSlots() {
 // Два письма на матч: за сутки и за три часа. Больше не нужно — лишние
 // уведомления быстро приучают их не читать.
 //
-// Тихие часы: с 21:00 до 09:00 по Пхукету бот молчит. Напоминание за сутки в это
-// окно не уходит, а ждёт утра — окно 3.5–30 часов заведомо шире тихой ночи, поэтому
-// оно всё равно успеет (матч, назначенный поздно вечером, напомнит о себе утром —
-// текст в этом случае говорит «сегодня», а не «завтра»). Напоминание за три часа
-// уходит ВСЕГДА: матч в 08:00 попадает в тихое окно, но человеку нужно вставать и ехать.
-export const QUIET_FROM_HOUR = 21;
-export const QUIET_TO_HOUR = 9;
+// Всё, что игрок вызвал сам или что случилось прямо сейчас — вызов, отклик,
+// внесённый счёт — уходит мгновенно в любое время суток: отложенное уведомление
+// рискует потеряться, а пропущенный вызов дороже разбудившего телефона.
+//
+// А вот ПОВТОРНЫЕ уведомления — те, что бот шлёт по своему таймеру, а не в ответ
+// на действие человека — ночью придержим: после 22:30 они ждут восьми утра.
+// Ничего не теряется, просто сдвигается: таймер продолжает идти, и утром
+// приходит то, что накопилось.
+export const NIGHT_FROM_MIN = 22 * 60 + 30;   // 22:30
+export const NIGHT_TO_MIN = 8 * 60;           // 08:00
 
-export function isQuietHour(now = Date.now(), timeZone = TIMEZONE) {
-  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hour12: false }).format(new Date(now)));
-  return hour >= QUIET_FROM_HOUR || hour < QUIET_TO_HOUR;
+export function isNightHold(now = Date.now(), timeZone = TIMEZONE) {
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })
+    .formatToParts(new Date(now));
+  const g = (t) => Number(p.find(x => x.type === t).value);
+  const minutes = (g('hour') % 24) * 60 + g('minute');
+  return minutes >= NIGHT_FROM_MIN || minutes < NIGHT_TO_MIN;
 }
 
 export function remindersDue(slot, now = Date.now()) {
@@ -456,8 +462,9 @@ export function remindersDue(slot, now = Date.now()) {
   if (start === null) return '';
   const hours = (start - now) / 3600000;
   const sent = String(slot.reminder_sent || '').split(',').filter(Boolean);
+  // За три часа до матча — всегда: матч в 08:00 нужно не проспать.
   if (hours >= 2.5 && hours <= 3.5 && !sent.includes('h3')) return 'h3';
-  if (hours >= 3.5 && hours <= 30 && !sent.includes('day') && !isQuietHour(now)) return 'day';
+  if (hours >= 3.5 && hours <= 28 && !sent.includes('day') && !isNightHold(now)) return 'day';
   return '';
 }
 
@@ -501,6 +508,119 @@ export async function matchesOverview(now = Date.now()) {
   const byStart = (a, b) => (slotStartMs(a) || 0) - (slotStartMs(b) || 0);
   out.upcoming.sort(byStart); out.awaitingCourt.sort(byStart); out.awaitingResult.sort(byStart);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Подталкивание застрявших заявок.
+//
+// Ход всегда за конкретным человеком: ответить на вызов, подтвердить дату,
+// согласиться на новое время, подтвердить счёт. Если он молчит, всё висит.
+// Цепочка: через 2 часа напоминание, ещё через 2 — второе с предупреждением,
+// ещё через сутки заявка закрывается сама. Часы обычные, без тихих окон.
+export const NUDGE_FIRST_H = 2;
+export const NUDGE_SECOND_H = 4;
+export const NUDGE_CLOSE_H = 28;
+
+export function hoursBetween(fromMs, toMs) {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return 0;
+  return (toMs - fromMs) / 3600000;
+}
+
+function stageFor(hours, done = []) {
+  // 'close' тоже помечаем: для счёта закрытия не происходит, и без отметки
+  // эскалация организатору повторялась бы каждые 15 минут.
+  if (hours >= NUDGE_CLOSE_H) return done.includes('close') ? '' : 'close';
+  if (hours >= NUDGE_SECOND_H && !done.includes('n2')) return 'n2';
+  if (hours >= NUDGE_FIRST_H && !done.includes('n1')) return 'n1';
+  return '';
+}
+function marks(cell = '') { return String(cell || '').split(',').filter(Boolean); }
+
+// Все заявки, где кто-то молчит дольше положенного.
+// scope: negotiation — вызов, отклик или встречное предложение;
+//        time — предложенное новое время; result — счёт без подтверждения.
+export async function listStuck(now = Date.now()) {
+  // Это всё повторные уведомления по таймеру — ночью не будим, ждём восьми утра.
+  if (isNightHold(now)) return [];
+  const rows = await allSlots();
+  const out = [];
+  for (const r of rows) {
+    const status = String(r.status || '').toLowerCase();
+
+    if (status === 'pending') {
+      const since = Date.parse(r.responded_at || r.created_at || '');
+      const stage = stageFor(hoursBetween(since, now), marks(r.nudge_sent));
+      if (stage) out.push({ slot: r, scope: 'negotiation', stage, waiting: awaitingSide(r), proposer: proposerSide(r) });
+      continue;
+    }
+    if (status !== 'accepted') continue;
+
+    const proposal = parseTimeChange(r.time_change);
+    if (proposal) {
+      const done = marks(String(r.time_change).split('|')[3] || '');
+      const stage = stageFor(hoursBetween(Date.parse(proposal.at || ''), now), done);
+      if (stage) {
+        const waitingId = String(proposal.by) === String(r.from_telegram_id) ? r.to_telegram_id : r.from_telegram_id;
+        out.push({ slot: r, scope: 'time', stage, proposal, waitingId });
+      }
+      continue;
+    }
+    if (String(r.result_status || '').toLowerCase() === 'pending') {
+      const stage = stageFor(hoursBetween(Date.parse(r.result_submitted_at || ''), now), marks(r.result_nudge));
+      if (stage) {
+        const waitingId = String(r.result_by) === String(r.from_telegram_id) ? r.to_telegram_id : r.from_telegram_id;
+        out.push({ slot: r, scope: 'result', stage, waitingId });
+      }
+    }
+  }
+  return out;
+}
+
+export async function markStuckNudge(challengeId, scope, stage) {
+  const slot = await findSlot(challengeId);
+  if (!slot) return null;
+  if (scope === 'time') {
+    const [time, by, at] = String(slot.time_change || '').split('|');
+    if (!time) return null;
+    const done = marks(String(slot.time_change).split('|')[3] || '');
+    if (!done.includes(stage)) done.push(stage);
+    return updateSlot(challengeId, { time_change: `${time}|${by}|${at}|${done.join(',')}` });
+  }
+  const field = scope === 'result' ? 'result_nudge' : 'nudge_sent';
+  const done = marks(slot[field]);
+  if (!done.includes(stage)) done.push(stage);
+  return updateSlot(challengeId, { [field]: done.join(',') });
+}
+
+// Закрытие по молчанию. Отклик на открытое окно не убиваем — возвращаем окно
+// в открытые: автор не ответил, но само окно живое и его может забрать другой.
+export async function closeStuckSlot(challengeId) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
+    const backToOpen = String(slot.match_type) !== 'direct';
+    const patch = backToOpen
+      ? { status: 'open', to_telegram_id: '', to_name: '', to_username: '', agreed_date: '', agreed_time: '',
+          agreed_court: '', pending_by: '', round: '', nudge_sent: '', responded_at: nowISO() }
+      : { status: 'expired', cancelled_at: nowISO() };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent(backToOpen ? 'claim_expired' : 'challenge_expired', merged,
+      { telegram_id: slot.from_telegram_id, name: slot.from_name }, 'без ответа');
+    return { ok: true, slot: merged, previous: slot, backToOpen };
+  });
+}
+
+// Молчание в ответ на новое время: предложение снимаем, время матча не трогаем.
+export async function dropStuckTimeChange(challengeId) {
+  const slot = await findSlot(challengeId);
+  if (!slot) return { ok: false };
+  const proposal = parseTimeChange(slot.time_change);
+  if (!proposal) return { ok: false };
+  await updateSlot(challengeId, { time_change: '' });
+  await logMatchEvent('time_change_expired', slot, { telegram_id: proposal.by, name: '' }, proposal.time);
+  return { ok: true, slot: { ...slot, time_change: '' }, proposal };
 }
 
 // ---------------------------------------------------------------------------

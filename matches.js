@@ -450,6 +450,114 @@ function plural(n, one, few, many) {
 }
 
 // ---------------------------------------------------------------------------
+// Подталкивание застрявших заявок: 2 часа → ещё 2 → закрытие.
+// Кнопки повторяют исходное сообщение, чтобы отвечать можно было прямо отсюда.
+// ---------------------------------------------------------------------------
+const LAST_CALL = 'Если не ответить, заявка закроется сама.';
+
+export async function notifyStuckNegotiation({ slot, stage, waiting, proposer }) {
+  if (!waiting?.id) return null;
+  const isDirect = String(slot.match_type) === 'direct';
+  const head = stage === 'n2'
+    ? '<b>⏳ Соперник всё ещё ждёт ответа</b>'
+    : (isDirect ? '<b>🎾 Вас вызвали на матч</b>' : '<b>⏳ Ждёт вашего подтверждения</b>');
+  const body = isDirect
+    ? `${playerLink(proposer.name, proposer.username)} предлагает сыграть:\n${offerBlock(slot)}`
+    : `${playerLink(proposer.name, proposer.username)} выбрал время из вашего окна:\n${agreedBlock(slot)}`;
+  const url = `${PUBLIC_URL}/match?${isDirect ? 'slot' : 'counter'}=${encodeURIComponent(slot.challenge_id)}`;
+  const rows = isDirect
+    ? [[{ text: '✅ Выбрать время и принять', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slot.challenge_id)}` } }],
+       [{ text: '❌ Отклонить', callback_data: `match_decline:${slot.challenge_id}` }]]
+    : [[{ text: '✅ Принять', callback_data: `match_ok:${slot.challenge_id}` }],
+       [{ text: '🕐 Другое время', web_app: { url: `${url}&f=time` } },
+        { text: '📍 Другой корт', web_app: { url: `${url}&f=court` } }],
+       [{ text: '❌ Отклонить', callback_data: `match_no:${slot.challenge_id}` }]];
+  await sendMessage(waiting.id, `${head}\n\n${body}${stage === 'n2' ? `\n\n<i>${LAST_CALL}</i>` : ''}`,
+    { reply_markup: { inline_keyboard: rows } }).catch(() => {});
+
+  // На втором напоминании автор тоже узнаёт, что ответа нет.
+  if (stage === 'n2' && proposer?.id) {
+    const rowsAuthor = waiting.username
+      ? [[{ text: '💬 Написать сопернику', url: `https://t.me/${String(waiting.username).replace(/^@/, '')}` }]]
+      : [];
+    await sendMessage(proposer.id, `<b>⏳ Соперник пока не ответил</b>
+
+${playerLink(waiting.name, waiting.username)} не отвечает уже несколько часов. Можно написать напрямую — иногда так быстрее.`,
+      rowsAuthor.length ? { reply_markup: { inline_keyboard: rowsAuthor } } : {}).catch(() => {});
+  }
+  return true;
+}
+
+export async function notifyNegotiationExpired(slot, { backToOpen = false } = {}) {
+  const text = backToOpen
+    ? `<b>⌛ Заявка закрыта без ответа</b>\n\nАвтор окна не ответил, поэтому окно снова открыто — его может забрать другой игрок.\n${offerBlock(slot)}`
+    : `<b>⌛ Вызов закрыт без ответа</b>\n\n${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}\nСоперник не ответил. Создайте новое окно, когда будете готовы.`;
+  const kb = { inline_keyboard: [[{ text: '🎾 Матчи', web_app: { url: `${PUBLIC_URL}/match` } }]] };
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    await sendMessage(side, text, { reply_markup: kb }).catch(() => {});
+  }
+}
+
+export async function notifyStuckTimeChange({ slot, stage, proposal, waitingId }) {
+  if (!waitingId) return null;
+  const by = opponentOf(slot, waitingId);
+  return sendMessage(waitingId, `<b>⏳ Ждёт ответа: новое время матча</b>
+
+${playerLink(by.name, by.username)} предложил перенести на <b>${escapeHtml(proposal.time)}</b>.
+📅 ${escapeHtml(formatDate(slot.agreed_date))}${slot.agreed_court ? ` · ${escapeHtml(slot.agreed_court)}` : ''}${stage === 'n2' ? `\n\n<i>Если не ответить, предложение снимется и время останется прежним.</i>` : ''}`, {
+    reply_markup: { inline_keyboard: [[
+      { text: '✅ Подходит', callback_data: `mt_ok:${slot.challenge_id}:${proposal.time}` },
+      { text: '❌ Не могу', callback_data: `mt_no:${slot.challenge_id}:${proposal.time}` }
+    ]] }
+  }).catch(() => null);
+}
+
+export async function notifyTimeChangeExpired(slot, proposal) {
+  const by = String(proposal?.by || '');
+  if (!by) return null;
+  return sendMessage(by, `<b>⌛ Соперник не ответил на новое время</b>
+
+Предложение <b>${escapeHtml(proposal.time)}</b> снято, время матча осталось прежним: <b>${escapeHtml(slot.agreed_time || '—')}</b>.`, {
+    reply_markup: { inline_keyboard: [[{ text: '🕐 Предложить снова', callback_data: `match_retime:${slot.challenge_id}` }]] }
+  }).catch(() => null);
+}
+
+export async function notifyStuckResult({ slot, stage, waitingId }) {
+  if (!waitingId) return null;
+  const by = opponentOf(slot, waitingId);
+  return sendMessage(waitingId, `<b>⏳ Счёт ждёт вашего подтверждения</b>
+
+${playerLink(by.name, by.username)} внёс результат:
+${resultDateBlock(slot)}
+
+${resultBlock(slot)}${stage === 'n2' ? '\n\n<i>Пока вы не подтвердите, матч не попадёт в таблицу лиги.</i>' : ''}`, {
+    reply_markup: { inline_keyboard: [[
+      { text: '✅ Подтверждаю', callback_data: `res_ok:${slot.challenge_id}` },
+      { text: '❌ Не согласен', callback_data: `res_no:${slot.challenge_id}` }
+    ]] }
+  }).catch(() => null);
+}
+
+// Счёт не отменяем и не засчитываем сами — эскалируем организатору.
+export async function notifyResultStalled(slot) {
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (!chatId) return null;
+    return sendMessage(chatId, `<b>⚠️ Счёт висит без подтверждения</b>
+
+${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
+${resultDateBlock(slot)}
+
+${resultBlock(slot)}
+
+Соперник не подтверждает третьи сутки. Нужно разобраться вручную.`,
+      topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
+  } catch (e) { console.error('notifyResultStalled failed:', e.message); return null; }
+}
+
+// ---------------------------------------------------------------------------
 // Перенос времени на том же корте
 // ---------------------------------------------------------------------------
 // Клавиатура выбора: полный игровой день с шагом 30 минут, по 4 в ряд.

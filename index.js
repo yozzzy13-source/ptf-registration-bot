@@ -11,10 +11,13 @@ import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
-  notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline } from './matches.js';
+  notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
+  notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
+  notifyStuckResult, notifyResultStalled } from './matches.js';
 import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
-  proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict, isQuietHour } from './matchesdb.js';
+  proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
+  listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
 
@@ -708,6 +711,35 @@ app.post('/api/match/retime', async (req, res) => {
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
+// Заявки, где кто-то молчит: два напоминания и закрытие.
+// Счёт исключение — его не закрываем, а отдаём организатору.
+async function runStuckNudges() {
+  const stuck = await listStuck().catch(e => { console.error('listStuck failed:', e.message); return []; });
+  for (const item of stuck) {
+    try {
+      if (item.stage === 'close') {
+        if (item.scope === 'negotiation') {
+          const r = await closeStuckSlot(item.slot.challenge_id);
+          if (r.ok) await notifyNegotiationExpired(r.previous, { backToOpen: r.backToOpen });
+        } else if (item.scope === 'time') {
+          const r = await dropStuckTimeChange(item.slot.challenge_id);
+          if (r.ok) await notifyTimeChangeExpired(r.slot, r.proposal);
+        } else {
+          await notifyResultStalled(item.slot);
+          await markStuckNudge(item.slot.challenge_id, 'result', 'close');
+        }
+        continue;
+      }
+      if (item.scope === 'negotiation') await notifyStuckNegotiation(item);
+      else if (item.scope === 'time') await notifyStuckTimeChange(item);
+      else await notifyStuckResult(item);
+      await markStuckNudge(item.slot.challenge_id, item.scope, item.stage);
+    } catch (e) {
+      console.error(`stuck nudge ${item.scope}/${item.stage} failed:`, e.message);
+    }
+  }
+}
+
 // Напоминание о незакрытых матчах — раз в неделю, по понедельникам утром.
 // Дата окончания сезона берётся из Settings (season_deadline, формат ГГГГ-ММ-ДД);
 // без неё письмо всё равно уходит, просто без обратного отсчёта.
@@ -716,7 +748,6 @@ async function runDeadlineNudge() {
   const local = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
   if (local.getDay() !== 1) return;                 // только понедельник
   if (local.getHours() !== 10) return;              // одно окно в сутки
-  if (isQuietHour()) return;                        // на всякий случай: в тихие часы молчим
   const stamp = `${local.getFullYear()}-${local.getMonth() + 1}-${local.getDate()}`;
   if (await getSetting('deadline_nudge_last') === stamp) return;
   await setSetting('deadline_nudge_last', stamp, 'Дата последней рассылки о незакрытых матчах');
@@ -763,6 +794,7 @@ app.listen(PORT, async () => {
         await markResultPromptSent(slot.challenge_id).catch(e => console.error('mark result prompt failed:', e.message));
       }
       await expireStaleSlots().catch(e => console.error('expire slots failed:', e.message));
+      await runStuckNudges().catch(e => console.error('stuck nudges failed:', e.message));
       await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));
     } catch (e) {
       console.error('match sweep failed:', e.message);
