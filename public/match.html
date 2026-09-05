@@ -530,19 +530,17 @@ function submitResult(id,btn){
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=X.resSent;
+    res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;
     selWinner='';resPhoto='';resultSlotId='';load(true);
   }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 function openManual(){
   var today=new Date();
   var opts=opponents.map(function(o){return '<option value="'+esc(o.telegram_id)+'">'+esc(o.name)+'</option>'}).join('');
-  var courtOpts='<option value="">—</option>'+courts.map(function(c){return '<option value="'+esc(c.name)+'">'+esc(c.name)+'</option>'}).join('');
   $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
     +'<div class="hint">'+esc(X.manualHint)+'</div>'
     +'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>'
     +'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
-    +'<label>'+esc(X.pickCourt)+'</label><select id="mCourtSel">'+courtOpts+'</select>'
     +'<label>'+esc(X.winner)+'</label>'
     +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
     +'<div class="seg" id="mWinSeg"></div>'
@@ -572,12 +570,12 @@ function submitManual(btn){
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,to_telegram_id:$('mOpp').value,date:$('mDate').value,court:$('mCourtSel').value,
+    initData:initData,to_telegram_id:$('mOpp').value,date:$('mDate').value,
     sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=X.resSent;resPhoto='';load(true);
+    res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;resPhoto='';load(true);
   }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 function renderBook(){

@@ -481,6 +481,37 @@ export async function adminMatchTest(msg) {
     }
   } catch (e) { lines.push(`<code>${escapeHtml(e.message).slice(0, 200)}</code>`); }
 
+  // Подтверждённый счёт зеркалится в таблицы лиги. Если их ID не заданы или нет
+  // доступа — счёт останется только в таблице матчей, и в Match_Log ничего не появится.
+  lines.push('', '<b>Таблицы лиги (куда пишется счёт)</b>');
+  try {
+    const { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS } = await import('./config.js');
+    const { sheets } = await import('./google.js');
+    if (!LEAGUE_RESULTS_SHEET_ID) {
+      lines.push('LEAGUE_RESULTS_SHEET_ID: <b>НЕ ЗАДАН ⚠️</b> — счёт никуда не зеркалится');
+    } else {
+      try {
+        const meta = await sheets().spreadsheets.get({ spreadsheetId: LEAGUE_RESULTS_SHEET_ID });
+        const titles = (meta.data.sheets || []).map(s => s.properties?.title).filter(Boolean);
+        lines.push(`общая таблица: <b>${escapeHtml(meta.data.properties?.title || '')}</b> ✅`);
+        for (const need of [LEAGUE_RESULTS_SHEETS.log, LEAGUE_RESULTS_SHEETS.master]) {
+          lines.push(`${titles.includes(need) ? '✅' : '⚠️'} ${escapeHtml(need)}${titles.includes(need) ? '' : ' — листа нет'}`);
+        }
+      } catch (e) {
+        lines.push(`общая таблица: <b>НЕТ ДОСТУПА ⚠️</b> — расшарьте её сервисному аккаунту`);
+      }
+    }
+    for (const [letter, id] of Object.entries(DIVISION_SPREADSHEETS)) {
+      if (!id) { lines.push(`Division ${letter}: <b>ID не задан</b>`); continue; }
+      try {
+        const meta = await sheets().spreadsheets.get({ spreadsheetId: id });
+        const titles = (meta.data.sheets || []).map(s => s.properties?.title).filter(Boolean);
+        lines.push(`Division ${letter}: ✅ ${titles.includes('Match_Log') ? 'Match_Log есть' : '<b>нет листа Match_Log ⚠️</b>'}`);
+      } catch (e) { lines.push(`Division ${letter}: <b>нет доступа ⚠️</b>`); }
+    }
+    lines.push('', '<i>Счёт пишется в существующую строку пары в Match_Log. Если строки этой пары в расписании нет, писать некуда — это самая частая причина «результат не появился».</i>');
+  } catch (e) { lines.push(`<code>${escapeHtml(e.message).slice(0, 200)}</code>`); }
+
   return sendMessage(msg.chat.id, `<b>Проверка таблицы матчей</b>\n\n${lines.join('\n')}`);
 }
 

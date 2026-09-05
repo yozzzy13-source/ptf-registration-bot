@@ -509,15 +509,23 @@ function scoreFromBody(sets = []) {
 }
 
 // Фото приходит из мини-приложения как data URL; отдаём его Telegram и храним file_id.
+// Фото уходит в личку игроку, чтобы получить постоянный file_id — дальше карточки
+// и лента используют уже его. Сбой загрузки НЕ должен терять внесённый счёт:
+// сохраняем результат без фото и предупреждаем игрока.
 async function uploadResultPhoto(chatId, dataUrl) {
-  if (!dataUrl || typeof dataUrl !== 'string') return '';
+  if (!dataUrl || typeof dataUrl !== 'string') return { fileId: '', warning: '' };
   const m = dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
-  if (!m) return '';
+  if (!m) return { fileId: '', warning: 'Фото не распознано — счёт сохранён без него.' };
   const buf = Buffer.from(m[2], 'base64');
   if (buf.length > 8 * 1024 * 1024) throw new Error('Фото больше 8 МБ — уменьшите размер');
-  const sent = await sendPhotoBuffer(chatId, buf, m[1]);
-  const sizes = sent?.photo || [];
-  return sizes.length ? sizes[sizes.length - 1].file_id : '';
+  try {
+    const sent = await sendPhotoBuffer(chatId, buf, m[1], { caption: '📸 Фото матча' });
+    const sizes = sent?.photo || [];
+    return { fileId: sizes.length ? sizes[sizes.length - 1].file_id : '', warning: '' };
+  } catch (e) {
+    console.error('result photo upload failed:', e.message);
+    return { fileId: '', warning: 'Фото не загрузилось — счёт сохранён без него.' };
+  }
 }
 
 app.post('/api/match/result', async (req, res) => {
@@ -548,18 +556,18 @@ app.post('/api/match/result', async (req, res) => {
       return res.status(400).json({ ok:false, error:'Указанный победитель не совпадает со счётом' });
     }
 
-    let photoFileId = '';
-    try { photoFileId = await uploadResultPhoto(v.user.id, b.photo); }
+    let photo = { fileId: '', warning: '' };
+    try { photo = await uploadResultPhoto(v.user.id, b.photo); }
     catch (e) { return res.status(400).json({ ok:false, error:e.message }); }
 
     const saved = await submitResult(b.challenge_id, { telegram_id: v.user.id, name: v.profile.name },
-      { winner: winnerId, score: formatScore(score), set3Mode: detectSet3Mode(score), photoFileId, note: safe(b.note) });
+      { winner: winnerId, score: formatScore(score), set3Mode: detectSet3Mode(score), photoFileId: photo.fileId, note: safe(b.note) });
     if (!saved.ok) {
       const messages = { not_found:'Match not found.', not_accepted:'Match is not agreed.', already_confirmed:'Result already confirmed.', not_a_player:'Not your match.' };
       return res.status(409).json({ ok:false, error: messages[saved.reason] || 'Cannot save result' });
     }
     await notifyResultForVerification(saved.slot).catch(e => console.error('notifyResultForVerification failed:', e.message));
-    res.json({ ok:true, score: saved.slot.result_score });
+    res.json({ ok:true, score: saved.slot.result_score, warning: photo.warning || '' });
   } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
 });
 
@@ -590,8 +598,8 @@ app.post('/api/match/manual', async (req, res) => {
     const check = validateMatchScore(score);
     if (!check.ok) return res.status(400).json({ ok:false, error: check.message });
 
-    let photoFileId = '';
-    try { photoFileId = await uploadResultPhoto(v.user.id, b.photo); }
+    let photo = { fileId: '', warning: '' };
+    try { photo = await uploadResultPhoto(v.user.id, b.photo); }
     catch (e) { return res.status(400).json({ ok:false, error:e.message }); }
 
     const row = {
@@ -599,18 +607,18 @@ app.post('/api/match/manual', async (req, res) => {
       match_type: 'manual', status: 'accepted', division: v.division,
       from_telegram_id: String(v.user.id), from_name: v.profile.name, from_username: v.user.username || v.profile.telegram_username || '',
       to_telegram_id: String(opponent.telegram_id), to_name: opponent.name, to_username: opponent.username || '',
-      dates: date, time_from: '', time_to: '', duration_min: MATCH_DURATION_MIN, courts: safe(b.court), comment: '',
-      agreed_date: date, agreed_time: '', agreed_court: safe(b.court),
+      dates: date, time_from: '', time_to: '', duration_min: MATCH_DURATION_MIN, courts: '', comment: '',
+      agreed_date: date, agreed_time: '', agreed_court: '',
       pending_by: '', round: '',
       result_status: 'pending', result_by: String(v.user.id),
       result_winner: check.winner === 'p1' ? String(v.user.id) : String(opponent.telegram_id),
       result_score: formatScore(score), result_set3_mode: detectSet3Mode(score),
-      result_photo_file_id: photoFileId, result_note: safe(b.note), result_submitted_at: nowISO(),
+      result_photo_file_id: photo.fileId, result_note: safe(b.note), result_submitted_at: nowISO(),
       created_at: nowISO(), responded_at: nowISO()
     };
     await createManualMatch(row);
     await notifyResultForVerification(row).catch(e => console.error('notifyResultForVerification failed:', e.message));
-    res.json({ ok:true, challenge_id: row.challenge_id });
+    res.json({ ok:true, challenge_id: row.challenge_id, warning: photo.warning || '' });
   } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
 });
 

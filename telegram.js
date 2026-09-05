@@ -67,13 +67,25 @@ export const getWebhookInfo = () => call('getWebhookInfo', {});
 
 // Фото из мини-приложения приходит бинарём — его нужно отправить multipart-ом,
 // обычный JSON-вызов принимает только file_id или URL.
-export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg') {
+// ВАЖНО: здесь берём глобальный fetch (undici из Node), а не node-fetch.
+// Смешивание node-fetch с глобальными FormData/Blob давало на отправке фото
+// «Invalid state: chunk ArrayBuffer is zero-length or detached» — тело формы
+// разъезжалось между двумя реализациями. Плюс копируем байты в свой Uint8Array:
+// Buffer из Node — это view на общий пул памяти, который может быть переиспользован.
+export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', opts = {}) {
   if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  if (!buffer || !buffer.length) throw new Error('sendPhoto: пустой файл');
   const ext = String(mimeType).split('/')[1] || 'jpg';
+  const bytes = new Uint8Array(buffer.length);
+  bytes.set(buffer);
   const form = new FormData();
   form.append('chat_id', String(chat_id));
-  form.append('photo', new Blob([buffer], { type: mimeType }), `result.${ext}`);
-  const res = await fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
+  for (const [k, v] of Object.entries(opts)) {
+    if (v === undefined || v === null || v === '') continue;
+    form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+  }
+  form.append('photo', new Blob([bytes], { type: mimeType }), `result.${ext}`);
+  const res = await globalThis.fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
   const json = await res.json().catch(() => ({}));
   if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
   return json.result;

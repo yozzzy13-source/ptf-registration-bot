@@ -264,6 +264,24 @@ export async function getWebsitePlayers() {
   return players;
 }
 
+// Ссылка на страницу игрока на сайте по имени — для ленты результатов,
+// где имена победителя и проигравшего кликабельны.
+export async function getWebsiteProfileUrl(name) {
+  if (!name) return '';
+  let site = [];
+  try { site = await getWebsitePlayers(); } catch (e) { return ''; }
+  if (!site.length) return '';
+  const exact = new Map(), loose = new Map();
+  for (const sp of site) {
+    const keys = nameKeys(sp.name);
+    if (keys[0]) exact.set(keys[0], sp);
+    keys.slice(1).forEach(k => { if (!loose.has(k)) loose.set(k, sp); });
+  }
+  const keys = nameKeys(name);
+  const hit = (keys[0] && exact.get(keys[0])) || keys.slice(1).map(k => loose.get(k)).find(Boolean) || null;
+  return hit ? hit.profile_url : '';
+}
+
 // Adds profile_url / photo_url to manual participants when a website page exists for the same person.
 export async function attachWebsiteProfiles(players=[]) {
   let site = [];

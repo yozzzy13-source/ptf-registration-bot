@@ -11,10 +11,10 @@
 // Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
 // дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
 import { sendMessage, sendPhoto } from './telegram.js';
-import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers } from './sheets.js';
+import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers, getWebsiteProfileUrl } from './sheets.js';
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
-import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID } from './config.js';
+import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
 
@@ -51,6 +51,7 @@ function offerBlock(slot) {
   return `📅 <b>${escapeHtml(datesLine(slot))}</b>\n🕐 <b>${time}</b>${dur}${courts ? `\n📍 ${escapeHtml(courts)}` : ''}`;
 }
 function endTime(start, durationMin) {
+  if (!String(start || '').trim()) return '';
   const [h, m] = String(start || '').split(':').map(Number);
   if (Number.isNaN(h)) return '';
   const total = h * 60 + (m || 0) + Number(durationMin || 120);
@@ -345,16 +346,35 @@ export async function notifyResultPrompt(slot) {
     await sendMessage(side, `<b>🎾 Матч сыгран?</b>
 
 Соперник: ${playerLink(opp.name, opp.username)}
-${agreedBlock(slot)}
+${resultDateBlock(slot)}
 
 Внесите счёт — соперник подтвердит, и матч попадёт в статистику лиги.`, { reply_markup: kb }).catch(e => console.error('result prompt failed:', e.message));
   }
 }
 
+// Стороны матча в порядке «победитель — проигравший».
+function resultSides(slot) {
+  const winnerIsFrom = String(slot.result_winner) === String(slot.from_telegram_id);
+  return {
+    winner: { name: winnerIsFrom ? slot.from_name : slot.to_name, username: winnerIsFrom ? slot.from_username : slot.to_username },
+    loser:  { name: winnerIsFrom ? slot.to_name : slot.from_name, username: winnerIsFrom ? slot.to_username : slot.from_username }
+  };
+}
+
+// Одна строка: победитель, счёт, проигравший — как это выглядело в старом боте.
+function resultLine(slot) {
+  const { winner, loser } = resultSides(slot);
+  return `<b>${escapeHtml(winner.name || '')}</b>  ${escapeHtml(winnerFirstScore(slot))}  ${escapeHtml(loser.name || '')}`;
+}
+
 function resultBlock(slot) {
-  const winnerName = String(slot.result_winner) === String(slot.from_telegram_id) ? slot.from_name : slot.to_name;
-  return `🏆 Победитель: <b>${escapeHtml(winnerName || '')}</b>
-📊 Счёт: <b>${escapeHtml(slot.result_score || '')}</b>${slot.result_set3_mode ? ` (${escapeHtml(slot.result_set3_mode)})` : ''}`;
+  return `🏆 ${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? '\n<i>чемпионский тай-брейк</i>' : ''}`;
+}
+
+// В карточках результата время и корт не показываем: матч уже сыгран,
+// а при ручном вводе их вообще не спрашиваем.
+function resultDateBlock(slot) {
+  return slot.agreed_date ? `📅 ${escapeHtml(formatDate(slot.agreed_date))}` : '';
 }
 
 // Счёт внесён одной стороной — вторая подтверждает или оспаривает.
@@ -367,7 +387,7 @@ export async function notifyResultForVerification(slot) {
   const text = `<b>📊 Подтвердите результат матча</b>
 
 ${playerLink(by.name, by.username)} внёс счёт:
-${agreedBlock(slot)}
+${resultDateBlock(slot)}
 
 ${resultBlock(slot)}
 
@@ -387,7 +407,7 @@ export async function notifyResultConfirmed(slot, writeInfo = '') {
   const text = (opp) => `<b>✅ Результат засчитан</b>
 
 Соперник: ${escapeHtml(opp.name || '')}
-${agreedBlock(slot)}
+${resultDateBlock(slot)}
 
 ${resultBlock(slot)}`;
   for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
@@ -398,7 +418,7 @@ ${resultBlock(slot)}`;
     const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
     const chatId = topic?.chatId || await getAdminChatId();
     if (chatId) {
-      const body = `<b>✅ Результат матча</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${agreedBlock(slot)}\n\n${resultBlock(slot)}${writeInfo ? `\n\n<i>${escapeHtml(writeInfo)}</i>` : ''}`;
+      const body = `<b>✅ Результат матча</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${resultDateBlock(slot)}\n\n${resultBlock(slot)}${writeInfo ? `\n\n<i>${escapeHtml(writeInfo)}</i>` : ''}`;
       const opts = topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {};
       if (slot.result_photo_file_id) await sendPhoto(chatId, slot.result_photo_file_id, { caption: body, ...opts }).catch(() => sendMessage(chatId, body, opts));
       else await sendMessage(chatId, body, opts);
@@ -441,25 +461,61 @@ export function winnerFirstScore(slot) {
   return formatScore(reverseScore(cellToScore(raw)));
 }
 
-function feedText(slot) {
-  const winnerIsFrom = String(slot.result_winner) === String(slot.from_telegram_id);
-  const winner = winnerIsFrom ? slot.from_name : slot.to_name;
-  const loser = winnerIsFrom ? slot.to_name : slot.from_name;
-  return `<b>🎾 Результат матча</b>${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
+// Первое имя — всегда победитель, счёт развёрнут в его сторону.
+// Формат повторяет прежнюю ленту результатов: заголовок, дивизион и сезон,
+// одна строка «победитель — счёт — проигравший», имена ведут на профили сайта.
+async function feedCard(slot) {
+  const { winner, loser } = resultSides(slot);
+  const [winnerUrl, loserUrl, season, standings] = await Promise.all([
+    getWebsiteProfileUrl(winner.name),
+    getWebsiteProfileUrl(loser.name),
+    getSetting('season_number').catch(() => ''),
+    standingsUrl(slot.division)
+  ]);
+  const link = (name, url) => url
+    ? `<a href="${escapeHtml(url)}">${escapeHtml(name || '')}</a>`
+    : `<b>${escapeHtml(name || '')}</b>`;
+  const subtitle = [slot.division, season ? `Season ${season}` : ''].filter(Boolean).join(' ');
 
-🏆 <b>${escapeHtml(winner || '')}</b> — ${escapeHtml(loser || '')}
-📊 <b>${escapeHtml(winnerFirstScore(slot))}</b>${slot.result_set3_mode === 'Match TB' ? ' <i>(чемпионский тай-брейк)</i>' : ''}
-📅 ${escapeHtml(formatDate(slot.agreed_date))}`;
+  const text = `🎾 <b>Match Result</b>${subtitle ? `\n${escapeHtml(subtitle)}` : ''}
+
+${link(winner.name, winnerUrl)}  <b>${escapeHtml(winnerFirstScore(slot))}</b>  ${link(loser.name, loserUrl)}${slot.result_set3_mode === 'Match TB' ? '\n<i>чемпионский тай-брейк</i>' : ''}`;
+
+  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || 'player';
+  const row = [];
+  if (winnerUrl) row.push({ text: `🏆 Profile ${firstName(winner.name)}`, url: winnerUrl });
+  if (loserUrl) row.push({ text: `👤 Profile ${firstName(loser.name)}`, url: loserUrl });
+  const keyboard = [];
+  if (row.length) keyboard.push(row);
+  if (standings) keyboard.push([{ text: '📊 View standings', url: standings }]);
+  return { text, reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined };
+}
+
+// Ссылка на таблицу дивизиона на сайте — тем же шаблоном, что и кнопки в меню «О PTF».
+async function standingsUrl(division) {
+  try {
+    const base = String(await getSetting('website_url') || WEBSITE_URL).replace(/\/$/, '');
+    if (!division) return `${base}/divisions`;
+    const template = await getSetting('website_division_url_template');
+    const season = await getSetting('season_number');
+    const letter = String(division).replace(/^(Division|Дивизион)\s*/i, '').trim();
+    const tpl = template || `${base}/divisions?division={division}`;
+    return tpl
+      .replace(/\{division\}/g, encodeURIComponent(division))
+      .replace(/\{letter\}/g, encodeURIComponent(letter))
+      .replace(/\{slug\}/g, encodeURIComponent(String(division).toLowerCase().replace(/\s+/g, '-')))
+      .replace(/\{season\}/g, encodeURIComponent(season || ''));
+  } catch (e) { return ''; }
 }
 
 export async function broadcastResult(slot) {
-  const text = feedText(slot);
+  const { text, reply_markup } = await feedCard(slot);
   const skip = new Set([String(slot.from_telegram_id), String(slot.to_telegram_id)]);
 
   // 1. Общая группа — одно сообщение вместо десятков личных.
   const chat = await resultsChat();
   if (chat) {
-    const opts = chat.topicId ? { message_thread_id: chat.topicId } : {};
+    const opts = { ...(chat.topicId ? { message_thread_id: chat.topicId } : {}), ...(reply_markup ? { reply_markup } : {}) };
     try {
       if (slot.result_photo_file_id) await sendPhoto(chat.chatId, slot.result_photo_file_id, { caption: text, ...opts });
       else await sendMessage(chat.chatId, text, opts);
@@ -467,13 +523,14 @@ export async function broadcastResult(slot) {
   }
 
   // 2. Личная рассылка всем живым пользователям бота.
+  const dmOpts = reply_markup ? { reply_markup } : {};
   let sent = 0, failed = 0;
   try {
     const players = await getAllBotSubscribers();
     for (const p of players) {
       if (skip.has(String(p.telegram_id))) continue;
       try {
-        await sendMessage(p.telegram_id, text);
+        await sendMessage(p.telegram_id, text, dmOpts);
         sent++;
         await new Promise(r => setTimeout(r, 45));
       } catch (e) { failed++; }
