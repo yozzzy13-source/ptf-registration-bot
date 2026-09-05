@@ -20,7 +20,7 @@ const SLOT_HEADERS = [
   'from_telegram_id', 'from_name', 'from_username',
   'to_telegram_id', 'to_name', 'to_username',
   'dates', 'time_from', 'time_to', 'duration_min', 'courts', 'comment',
-  'agreed_date', 'agreed_time', 'agreed_court',
+  'agreed_date', 'agreed_time', 'agreed_court', 'pending_by', 'round',
   'chat_id', 'message_thread_id', 'message_id',
   'created_at', 'responded_at', 'cancelled_at'
 ];
@@ -176,7 +176,8 @@ async function withClaimLock(key, fn) {
   }
 }
 
-// taker выбирает КОНКРЕТНЫЕ дату/корт из предложенных автором.
+// Отклик на окно = предложение конкретных даты/корта. Матч назначается только
+// после подтверждения второй стороной (как заявка на тренировку у тренера).
 export async function claimSlot(challengeId, taker = {}, choice = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
@@ -198,16 +199,17 @@ export async function claimSlot(challengeId, taker = {}, choice = {}) {
     const time = String(choice.time || '').trim() || slot.time_from || '';
 
     const patch = {
-      status: 'accepted',
+      status: 'pending',
       to_telegram_id: String(taker.telegram_id || ''),
       to_name: safe(taker.name),
       to_username: safe(taker.username),
       agreed_date: date, agreed_court: court, agreed_time: time,
+      pending_by: String(taker.telegram_id || ''), round: '1',
       responded_at: nowISO()
     };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
-    await logMatchEvent('accepted', merged, taker, `${date} ${time}${court ? ' · ' + court : ''}`);
+    await logMatchEvent('proposed', merged, taker, `${date} ${time}${court ? ' · ' + court : ''}`);
     return { ok: true, slot: merged };
   });
 }
@@ -248,6 +250,84 @@ export async function listMySlots(telegramId) {
     .filter(r => !['cancelled', 'declined'].includes(String(r.status || '').toLowerCase()))
     .filter(r => !isSlotPast(r))
     .sort((a, b) => firstDateMillis(a) - firstDateMillis(b));
+}
+
+// Кто сейчас ждёт ответа: сторона, которая НЕ делала последнее предложение.
+export function awaitingSide(slot = {}) {
+  const by = String(slot.pending_by || '');
+  return by && String(slot.from_telegram_id) === by
+    ? { id: String(slot.to_telegram_id), name: slot.to_name, username: slot.to_username }
+    : { id: String(slot.from_telegram_id), name: slot.from_name, username: slot.from_username };
+}
+export function proposerSide(slot = {}) {
+  const by = String(slot.pending_by || '');
+  return by && String(slot.from_telegram_id) === by
+    ? { id: String(slot.from_telegram_id), name: slot.from_name, username: slot.from_username }
+    : { id: String(slot.to_telegram_id), name: slot.to_name, username: slot.to_username };
+}
+
+// Контрпредложение: другая сторона предлагает свои дату/время/корт. Ходы считаем,
+// чтобы переписка не превратилась в бесконечный пинг-понг.
+const MAX_ROUNDS = 6;
+export async function counterSlot(challengeId, actor = {}, offer = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
+    const waiting = awaitingSide(slot);
+    if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
+    const round = Number(slot.round || 1) + 1;
+    if (round > MAX_ROUNDS) return { ok: false, reason: 'too_many_rounds', slot };
+    const patch = {
+      agreed_date: String(offer.date || slot.agreed_date || '').trim(),
+      agreed_time: String(offer.time || slot.agreed_time || '').trim(),
+      agreed_court: String(offer.court ?? slot.agreed_court ?? '').trim(),
+      pending_by: String(actor.telegram_id || ''),
+      round: String(round),
+      responded_at: nowISO()
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('countered', merged, actor, `${patch.agreed_date} ${patch.agreed_time}${patch.agreed_court ? ' · ' + patch.agreed_court : ''}`);
+    return { ok: true, slot: merged };
+  });
+}
+
+// Подтверждение последнего предложения — матч назначен.
+export async function acceptProposal(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    const status = String(slot.status || '').toLowerCase();
+    if (status === 'accepted') return { ok: false, reason: 'already_accepted', slot };
+    if (status !== 'pending') return { ok: false, reason: 'not_pending', slot };
+    const waiting = awaitingSide(slot);
+    if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
+    const patch = { status: 'accepted', responded_at: nowISO() };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('accepted', merged, actor, `${slot.agreed_date} ${slot.agreed_time}${slot.agreed_court ? ' · ' + slot.agreed_court : ''}`);
+    return { ok: true, slot: merged };
+  });
+}
+
+// Отказ от предложения: окно снова свободно и висит в дивизионе.
+export async function rejectProposal(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
+    const waiting = awaitingSide(slot);
+    if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
+    const wasDirect = String(slot.match_type) === 'direct';
+    const patch = wasDirect
+      ? { status: 'declined', responded_at: nowISO() }
+      : { status: 'open', to_telegram_id: '', to_name: '', to_username: '', agreed_date: '', agreed_time: '', agreed_court: '', pending_by: '', round: '', responded_at: nowISO() };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('rejected', { ...slot }, actor);
+    return { ok: true, slot: merged, previous: slot };
+  });
 }
 
 export { SLOT_HEADERS, LOG_HEADERS };

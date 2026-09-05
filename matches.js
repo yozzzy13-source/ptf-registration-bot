@@ -10,8 +10,8 @@
 //
 // Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js), основная таблица PTF не трогается.
 import { sendMessage, editMessageText, createForumTopic } from './telegram.js';
-import { getSetting, setSetting, findApplicantByTelegramId } from './sheets.js';
-import { findSlot, updateSlot, cellToList, logMatchEvent } from './matchesdb.js';
+import { getSetting, setSetting, findApplicantByTelegramId, getCourts } from './sheets.js';
+import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide } from './matchesdb.js';
 import { LEAGUE_CHAT_ID, PUBLIC_URL } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
@@ -87,8 +87,10 @@ function playerLink(name, username) {
 
 const DAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+// Якорь ставим в полдень UTC: при чтении через getUTC* дата не съезжает на соседний
+// день, как это происходит с полуночью и офсетом +07:00.
 export function formatDate(iso) {
-  const d = new Date(`${iso}T00:00:00+07:00`);
+  const d = new Date(`${iso}T12:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
   return `${DAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 }
@@ -184,8 +186,9 @@ async function closeSlotCard(slot) {
   } catch (e) { console.error('closeSlotCard failed:', e.message); }
 }
 
-function contactsKeyboard(username, profileUrl) {
+function contactsKeyboard(username, profileUrl, slot) {
   const rows = [];
+  if (slot?.challenge_id) rows.push([{ text: '📲 Забронировать корт', callback_data: `match_book:${slot.challenge_id}` }]);
   if (username) rows.push([{ text: '💬 Написать сопернику', url: `https://t.me/${String(username).replace(/^@/, '')}` }]);
   if (profileUrl) rows.push([{ text: '👤 Профиль игрока', url: profileUrl }]);
   rows.push([{ text: '🎾 Мои матчи', web_app: { url: `${PUBLIC_URL}/match?tab=mine` } }]);
@@ -205,10 +208,10 @@ export async function notifyMatchAgreed(slot) {
 Соперник: ${playerLink(oppName, oppUsername)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
 ${agreedBlock(slot)}
 
-Договоритесь о точном времени и корте напрямую. После игры передайте счёт организатору.`;
+Нажмите «Забронировать корт», и я подготовлю сообщение для площадки. После игры передайте счёт организатору.`;
 
-  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: contactsKeyboard(slot.to_username, toUrl) }).catch(e => console.error('notify author failed:', e.message));
-  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: contactsKeyboard(slot.from_username, fromUrl) }).catch(e => console.error('notify taker failed:', e.message));
+  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: contactsKeyboard(slot.to_username, toUrl, slot) }).catch(e => console.error('notify author failed:', e.message));
+  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: contactsKeyboard(slot.from_username, fromUrl, slot) }).catch(e => console.error('notify taker failed:', e.message));
 
   try {
     const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
@@ -249,6 +252,99 @@ export async function cancelSlot(slot, actor = {}) {
         { reply_markup: { inline_keyboard: [] } });
     } catch (e) { console.error('cancel slot card failed:', e.message); }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Переговоры. Отклик и контрпредложение приходят второй стороне в личку с теми же
+// кнопками, что у заявки на тренировку в боте тренера: принять, другое время,
+// другой корт, отклонить.
+// ---------------------------------------------------------------------------
+function proposalKeyboard(slot) {
+  return { inline_keyboard: [
+    [{ text: '✅ Принять', callback_data: `match_ok:${slot.challenge_id}` }],
+    [{ text: '🕐 Другое время', web_app: { url: `${PUBLIC_URL}/match?counter=${encodeURIComponent(slot.challenge_id)}&f=time` } },
+     { text: '📍 Другой корт', web_app: { url: `${PUBLIC_URL}/match?counter=${encodeURIComponent(slot.challenge_id)}&f=court` } }],
+    [{ text: '❌ Отклонить', callback_data: `match_no:${slot.challenge_id}` }]
+  ] };
+}
+
+export async function notifyProposal(slot, { isCounter = false } = {}) {
+  const to = awaitingSide(slot);
+  const by = proposerSide(slot);
+  if (!to.id) return null;
+  const head = isCounter ? '<b>🔄 Встречное предложение</b>' : '<b>🎾 Отклик на твоё окно</b>';
+  const text = `${head}
+
+${playerLink(by.name, by.username)} предлагает сыграть:
+${agreedBlock(slot)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
+
+Подтверди или предложи своё.`;
+  return sendMessage(to.id, text, { reply_markup: proposalKeyboard(slot) }).catch(e => console.error('notifyProposal failed:', e.message));
+}
+
+export async function notifyProposalRejected(slot, previous = {}) {
+  const rejectedFor = String(previous.pending_by || '');
+  if (!rejectedFor) return null;
+  const reopened = String(slot.status || '').toLowerCase() === 'open';
+  const text = reopened
+    ? `❌ Предложение на ${escapeHtml(formatDate(previous.agreed_date))} отклонено. Окно снова свободно — можно предложить другое время.`
+    : `❌ ${escapeHtml(previous.from_name || 'Игрок')} отклонил вызов.`;
+  return sendMessage(rejectedFor, text).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Бронь корта в WhatsApp. Номер площадки берём из листа Courts основной таблицы.
+// Бот НИЧЕГО не отправляет сам — только готовит текст и ссылку, отправляет игрок.
+// ---------------------------------------------------------------------------
+export async function courtByName(name) {
+  if (!name) return null;
+  const list = await getCourts().catch(() => []);
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  return list.find(c => norm(c.name) === norm(name)) || null;
+}
+
+export function bookingMessage(slot, court) {
+  const dur = Number(slot.duration_min || 90);
+  const start = slot.agreed_time || slot.time_from || '';
+  const end = (() => {
+    const [h, mm] = String(start).split(':').map(Number);
+    if (Number.isNaN(h)) return '';
+    const total = h * 60 + (mm || 0) + dur;
+    return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  })();
+  const d = new Date(`${slot.agreed_date}T12:00:00Z`);
+  const human = Number.isNaN(d.getTime()) ? slot.agreed_date
+    : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return [
+    'Hello! I would like to book a tennis court.',
+    '',
+    `Date: ${human}`,
+    `Time: ${start}${end ? '–' + end : ''} (${dur / 60}h)`,
+    'Players: 2',
+    court?.name ? `Court: ${court.name}` : '',
+    '',
+    'Is it available? Thank you!'
+  ].filter(Boolean).join('\n');
+}
+
+export async function sendBookingHelper(chatId, slot) {
+  const court = await courtByName(slot.agreed_court);
+  const text = bookingMessage(slot, court);
+  if (!court?.whatsapp) {
+    return sendMessage(chatId, `<b>📲 Сообщение для брони корта</b>
+
+${slot.agreed_court ? `Для площадки «${escapeHtml(slot.agreed_court)}» не указан номер WhatsApp в листе Courts, поэтому кнопки нет — скопируйте текст и отправьте сами.` : 'Площадка не выбрана — укажите её в переписке с соперником.'}
+
+<code>${escapeHtml(text)}</code>`);
+  }
+  return sendMessage(chatId, `<b>📲 Бронь корта</b>
+
+Площадка: <b>${escapeHtml(court.name)}</b>${court.price ? ` · ${escapeHtml(court.price)} ${escapeHtml(court.currency || 'THB')}/ч` : ''}
+Сообщение готово — откройте WhatsApp и отправьте.
+
+<code>${escapeHtml(text)}</code>`, {
+    reply_markup: { inline_keyboard: [[{ text: '📲 Открыть WhatsApp', url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(text)}` }]] }
+  });
 }
 
 export { findSlot };

@@ -856,7 +856,11 @@ export async function getCourts() {
       .map(r => ({
         name: safe(r.name || r.court || r.title),
         area: safe(r.area || r.district || r.location),
+        address: safe(r.address),
+        // номер для брони в WhatsApp: только цифры, в международном формате
+        whatsapp: safe(r.whatsapp || r.phone || r.contact).replace(/[^0-9]/g, ''),
         price: safe(r.price || r.price_thb),
+        currency: safe(r.currency) || 'THB',
         notes: safe(r.notes)
       }));
   } catch (e) {

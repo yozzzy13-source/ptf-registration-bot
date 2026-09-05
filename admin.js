@@ -434,6 +434,33 @@ Please ask the player to resend the screenshot.`, withTopicOpts(res.topic, revie
 }
 
 // Admin diagnostic: verifies admin chat, forum mode and topic delivery for the admin's own topic.
+// Самопроверка подключения таблицы матчей: видно ли переменную, доступна ли таблица
+// сервисному аккаунту, какие листы в ней есть.
+export async function adminMatchTest(msg) {
+  const lines = [];
+  const { MATCHES_SPREADSHEET_ID, MATCH_SHEETS } = await import('./config.js');
+  lines.push(`MATCHES_SPREADSHEET_ID: <b>${MATCHES_SPREADSHEET_ID ? 'задан' : 'НЕ ЗАДАН ⚠️'}</b>`);
+  if (!MATCHES_SPREADSHEET_ID) {
+    lines.push('', 'Добавьте переменную в Railway и <b>сделайте редеплой</b> — без него процесс её не увидит.');
+    return sendMessage(msg.chat.id, `<b>Проверка таблицы матчей</b>\n\n${lines.join('\n')}`);
+  }
+  lines.push(`id: <code>${escapeHtml(MATCHES_SPREADSHEET_ID)}</code>`);
+  try {
+    const { sheets } = await import('./google.js');
+    const meta = await sheets().spreadsheets.get({ spreadsheetId: MATCHES_SPREADSHEET_ID });
+    const titles = (meta.data.sheets || []).map(s => s.properties?.title).filter(Boolean);
+    lines.push(`доступ: <b>есть ✅</b>`, `таблица: <b>${escapeHtml(meta.data.properties?.title || '')}</b>`);
+    lines.push(`листы: ${titles.map(t => `<code>${escapeHtml(t)}</code>`).join(', ') || '(пусто)'}`);
+    for (const need of [MATCH_SHEETS.slots, MATCH_SHEETS.log]) {
+      lines.push(`${titles.includes(need) ? '✅' : '⏳'} ${escapeHtml(need)}${titles.includes(need) ? '' : ' — создастся при первой заявке'}`);
+    }
+  } catch (e) {
+    lines.push(`доступ: <b>НЕТ ⚠️</b>`, `<code>${escapeHtml(e.message).slice(0, 300)}</code>`);
+    lines.push('', 'Чаще всего это значит, что таблица не расшарена сервисному аккаунту как «Редактор».');
+  }
+  return sendMessage(msg.chat.id, `<b>Проверка таблицы матчей</b>\n\n${lines.join('\n')}`);
+}
+
 export async function adminTopicTest(msg) {
   // 1. Вебхук: если он указывает не на наш PUBLIC_URL, бот вообще не получает сообщения
   // от игроков (их забирает другой сервис) — при этом заявки из WebApp продолжают приходить,

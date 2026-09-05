@@ -4,9 +4,9 @@ import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplica
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
-import { findSlot as findMatchSlot } from './matchesdb.js';
-import { declineDirectChallenge } from './matches.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
+import { findSlot as findMatchSlot, acceptProposal, rejectProposal } from './matchesdb.js';
+import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, sendBookingHelper } from './matches.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, adminMatchTest, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -398,6 +398,7 @@ export async function handleMessage(msg) {
   if (isAdminUser(from.id)) {
     if (text === '/stats') return adminStats(chatId);
     if (text === '/topic_test') return adminTopicTest(msg);
+    if (text === '/match_test') return adminMatchTest(msg);
     if (text === '/events') return adminEvents(chatId);
     if (text === '/pending') return adminPending(chatId);
     if (text === '/messages') return adminMessages(chatId);
@@ -536,8 +537,35 @@ export async function handleCallback(q) {
     const [, applicationId, methodId] = data.split(':');
     return sendPaymentInstructions(chatId, lang, applicationId, methodId);
   }
-  // Матч отклонён адресатом. Принятие идёт через мини-приложение: соперник
-  // должен выбрать конкретные дату и корт из предложенных автором.
+  // Подтверждение предложенных даты/корта — матч назначен.
+  if (data.startsWith('match_ok:')) {
+    const r = await acceptProposal(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
+    if (!r.ok) {
+      const ru = lang === 'ru';
+      const texts = { already_accepted: ru ? 'Матч уже подтверждён.' : 'Already confirmed.',
+        not_pending: ru ? 'Предложение больше неактуально.' : 'No longer pending.',
+        not_your_turn: ru ? 'Сейчас ход соперника.' : 'It is your opponent\'s turn.',
+        not_found: ru ? 'Заявка не найдена.' : 'Not found.' };
+      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+    }
+    await notifyMatchAgreed(r.slot).catch(e => console.error('notifyMatchAgreed failed:', e.message));
+    return null;
+  }
+  // Отказ: для открытого окна оно снова свободно, для адресного вызова — закрыт.
+  if (data.startsWith('match_no:')) {
+    const r = await rejectProposal(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
+    if (!r.ok) return answerCallbackQuery(q.id, lang === 'ru' ? 'Уже неактуально.' : 'No longer pending.', true).catch(() => {});
+    await notifyProposalRejected(r.slot, r.previous).catch(e => console.error('notifyProposalRejected failed:', e.message));
+    return sendMessage(chatId, lang === 'ru' ? 'Предложение отклонено.' : 'Proposal declined.').catch(() => {});
+  }
+  // Подготовка сообщения для брони корта в WhatsApp.
+  if (data.startsWith('match_book:')) {
+    const slot = await findMatchSlot(data.split(':')[1]);
+    if (!slot) return null;
+    if (![String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(String(from.id))) return null;
+    return sendBookingHelper(chatId, slot).catch(e => console.error('sendBookingHelper failed:', e.message));
+  }
+
   if (data.startsWith('match_decline:')) {
     const slot = await findMatchSlot(data.split(':')[1]);
     if (!slot) return null;

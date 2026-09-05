@@ -8,8 +8,8 @@ import { getCourts, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, 
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
-import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername } from './matches.js';
-import { createSlot, findSlot, claimSlot, listOpenSlots, listMySlots, listToCell, cellToList } from './matchesdb.js';
+import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername, notifyProposal } from './matches.js';
+import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList } from './matchesdb.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -309,6 +309,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '');
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const counterId = String(req.query.counter || '');
     const [courts, opponents, openSlots, mySlots] = await Promise.all([
       getCourts(),
       getDivisionOpponents(v.division, v.user.id),
@@ -327,7 +328,8 @@ app.get('/api/match/bootstrap', async (req, res) => {
       courts, opponents,
       open_slots: openSlots.map(shape),
       my_matches: mySlots.map(shape),
-      focus_slot: String(req.query.slot || '')
+      focus_slot: String(req.query.slot || ''),
+      counter_slot: String(req.query.counter || '')
     });
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
@@ -392,7 +394,25 @@ app.post('/api/match/take', async (req, res) => {
       };
       return res.status(409).json({ ok:false, error: messages[result.reason] || 'Slot unavailable' });
     }
-    await notifyMatchAgreed(result.slot).catch(e => console.error('notifyMatchAgreed failed:', e.message));
+    // Матч ещё не назначен: автор окна должен подтвердить предложенные дату и корт.
+    await notifyProposal(result.slot).catch(e => console.error('notifyProposal failed:', e.message));
+    res.json({ ok:true, status:'pending' });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+// Встречное предложение: сторона, которая сейчас отвечает, называет свои дату/время/корт.
+app.post('/api/match/counter', async (req, res) => {
+  try {
+    const v = await matchViewer(req.body?.initData || '');
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const result = await counterSlot(req.body.challenge_id, { telegram_id: v.user.id, name: v.profile.name },
+      { date: req.body.date, time: req.body.time, court: req.body.court });
+    if (!result.ok) {
+      const messages = { not_found:'Slot not found.', not_pending:'This slot is not awaiting an answer.',
+        not_your_turn:'It is the other player\'s turn to answer.', too_many_rounds:'Too many rounds — agree in chat instead.' };
+      return res.status(409).json({ ok:false, error: messages[result.reason] || 'Cannot counter' });
+    }
+    await notifyProposal(result.slot, { isCounter:true }).catch(e => console.error('notifyProposal failed:', e.message));
     res.json({ ok:true });
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
