@@ -98,6 +98,7 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+var unplayed={known:false,names:[]};
 var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
@@ -116,6 +117,12 @@ var T={
       hintOpen:'Окно уйдёт в чат твоего дивизиона. Любой игрок дивизиона сможет его забрать.',
       hintDirect:'Вызов уйдёт лично выбранному игроку.',
       hintRange:'Отметь все удобные дни и корты — соперник выберет конкретные.',
+      retime:'🕐 Перенести',cancelMatch:'✖️ Отменить',courtOk:'корт подтверждён',timePending:'ждёт подтверждения времени',
+      retimeTitle:'Перенести время матча',retimeHint:'Дата и корт остаются прежними. Соперник подтвердит новое время — тогда оно станет основным.',
+      retimeSend:'🕐 Отправить сопернику',retimeSent:'✅ Новое время отправлено сопернику на подтверждение.',
+      cancelMatchAsk:'Отменить матч? Соперник получит уведомление, договариваться придётся заново.',
+      unplayedTitle:'Ещё не сыграно',unplayedHint:'Соперники по дивизиону, с которыми матч ещё не сыгран. Нажмите на имя — отправим вызов.',
+      noTelegram:'У этого игрока пока нет Telegram в базе:',
       you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.',
       tRes:'Результаты',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
       resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',
@@ -152,6 +159,12 @@ var T={
       hintOpen:'The slot goes to your division chat. Any player from the division can take it.',
       hintDirect:'The challenge goes privately to the selected player.',
       hintRange:'Mark every day and court that suits you — your opponent picks the exact ones.',
+      retime:'🕐 Reschedule',cancelMatch:'✖️ Cancel',courtOk:'court confirmed',timePending:'new time pending',
+      retimeTitle:'Reschedule the match',retimeHint:'Date and court stay the same. Once your opponent confirms, the new time becomes final.',
+      retimeSend:'🕐 Send to opponent',retimeSent:'✅ New time sent to your opponent for confirmation.',
+      cancelMatchAsk:'Cancel this match? Your opponent will be notified and you will have to arrange it again.',
+      unplayedTitle:'Still to play',unplayedHint:'Division opponents you have not played yet. Tap a name to send a challenge.',
+      noTelegram:'This player has no Telegram on file yet:',
       you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.',
       tRes:'Results',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
       resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',
@@ -205,9 +218,27 @@ function showTab(t){
   if(t==='open')renderOpen();else if(t==='new')renderNew();else if(t==='mine')renderMine();else if(t==='res')renderRes();else renderBook();
 }
 
+// Кого ещё не сыграл в дивизионе — главное, что игроку нужно видеть в лиге.
+// Имена берём из расписания дивизиона, тап по имени открывает создание вызова.
+function unplayedBlock(){
+  if(!unplayed.known||!unplayed.names.length)return '';
+  var chips=unplayed.names.map(function(n){
+    return '<div class="chip" onclick="challengeByName(\''+esc(n).replace(/'/g,"\\'")+'\')">'+esc(n)+'</div>';
+  }).join('');
+  var done=(unplayed.played||0)+' / '+(unplayed.total||unplayed.names.length);
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">'+esc(X.unplayedTitle)+' · '+esc(done)+'</h3>'
+    +'<div class="hint">'+esc(X.unplayedHint)+'</div><div class="chips" style="margin-top:10px">'+chips+'</div></div>';
+}
+// Тап по имени: переходим в создание заявки с уже выбранным соперником.
+function challengeByName(name){
+  var hit=opponents.filter(function(o){return String(o.name||'').toLowerCase()===String(name).toLowerCase()})[0];
+  if(!hit){ if(tg&&tg.showAlert)tg.showAlert(X.noTelegram+' '+name); else alert(X.noTelegram+' '+name); return }
+  mode='direct';selOpp=String(hit.telegram_id);showTab('new');
+}
 function renderOpen(){
-  if(!openSlots.length){$('viewOpen').innerHTML='<div class="empty">'+esc(X.emptyOpen)+'</div>';return}
-  $('viewOpen').innerHTML=openSlots.map(function(s){
+  var top=unplayedBlock();
+  if(!openSlots.length){$('viewOpen').innerHTML=top+'<div class="empty">'+esc(X.emptyOpen)+'</div>';return}
+  $('viewOpen').innerHTML=top+openSlots.map(function(s){
     var mine=String(s.from_telegram_id)===String(me&&me.id);
     return '<div class="slot'+(mine?' mine':'')+'" id="slot-'+esc(s.challenge_id)+'">'
       +'<div class="slot-head">'+avatar(s.from)+'<div><div class="who">'+esc(s.from_name)+(mine?' <span class="pill">'+esc(X.you)+'</span>':'')+'</div>'
@@ -276,6 +307,11 @@ function confirmTake(id,btn){
 }
 
 function renderMine(){
+  if(retimeId){
+    var rt=myMatches.filter(function(x){return x.challenge_id===retimeId})[0];
+    if(rt){$('viewMine').innerHTML=renderRetimePanel(rt);return}
+    retimeId='';
+  }
   if(!myMatches.length){$('viewMine').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>';return}
   $('viewMine').innerHTML=myMatches.map(function(s){
     var agreed=s.status==='accepted';var pending=s.status==='pending';
@@ -285,11 +321,64 @@ function renderMine(){
       +'<div class="slot-head"><div><div class="who">'+(agreed?esc(opp.name||'—'):esc(X.waiting))+'</div>'
       +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(X.agreed)+'</span>':(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
       +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?(s.agreed_time+'–'+min2hm(hm2min(s.agreed_time)+Number(s.duration_min||matchDuration))):s.time_from)+'</b></div>'
-      +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))+'</div>':'')
-      +(agreed&&opp.username?'<div class="acts"><button class="mini" onclick="openLink(\'https://t.me/'+esc(String(opp.username).replace(/^@/,''))+'\')">💬 '+(L?'Написать':'Message')+'</button></div>':'')
+      +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))
+         +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
+      +(agreed&&pendingTime(s)?'<div class="meta"><span class="pill open">'+esc(X.timePending)+' '+esc(pendingTime(s))+'</span></div>':'')
+      +(agreed?agreedActions(s,opp):'')
       +(!agreed&&iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')
       +'</div>';
   }).join('');
+}
+
+// Что можно сделать с согласованным матчем: написать, перенести время, отменить.
+// Перенос после подтверждения корта доступен только тому, кто корт подтверждал.
+function pendingTime(s){ return String(s.time_change||'').split('|')[0]||'' }
+function canRetime(s){
+  var me_=String(me&&me.id);
+  if(!s.court_confirmed_by) return true;
+  return String(s.court_confirmed_by)===me_;
+}
+function agreedActions(s,opp){
+  var b='<div class="acts">';
+  if(opp.username)b+='<button class="mini" onclick="openLink(\'https://t.me/'+esc(String(opp.username).replace(/^@/,''))+'\')">💬 '+(L?'Написать':'Message')+'</button>';
+  if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';
+  b+='<button class="mini" onclick="cancelMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancelMatch)+'</button>';
+  return b+'</div>';
+}
+// Перенос: дата и корт остаются, меняется только время — как и в чате с ботом.
+var retimeId='';
+function openRetime(id){ retimeId=id; renderMine(); }
+function closeRetime(){ retimeId=''; renderMine(); }
+function renderRetimePanel(s){
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.retimeTitle)+'</h3>'
+    +'<div class="hint">'+esc(X.retimeHint)+'</div>'
+    +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
+    +'<label>'+esc(X.pickTime)+'</label><select id="rtTime">'+timeOptions(s.agreed_time||'17:00')+'</select>'
+    +'<button class="primary" onclick="submitRetime(\''+esc(s.challenge_id)+'\',this)">'+esc(X.retimeSend)+'</button>'
+    +'<button onclick="closeRetime()">'+esc(X.back)+'</button>'
+    +'<div id="rtRes" class="res"></div></div>';
+}
+function submitRetime(id,btn){
+  var res=$('rtRes');res.className='res';
+  var time=$('rtTime').value;
+  btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/retime',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({initData:initData,challenge_id:id,time:time})})
+    .then(function(r){return r.json()}).then(function(j){
+      btn.disabled=false;
+      if(!j.ok)throw new Error(j.error||'Error');
+      res.className='res ok';res.textContent=X.retimeSent;
+      retimeId='';load(true);
+    }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+// Отмена согласованного матча — финальная: соперник получает уведомление, окно закрывается.
+function cancelMatch(id,btn){
+  var go=function(){btn.disabled=true;btn.textContent='…';
+    fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({initData:initData,challenge_id:id})})
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+  if(tg&&tg.showConfirm)tg.showConfirm(X.cancelMatchAsk,function(ok){if(ok)go()});else if(confirm(X.cancelMatchAsk))go();
 }
 
 function renderCounter(){
@@ -705,6 +794,7 @@ function load(keepTab){
       if(!j.ok)throw new Error(j.error||'Error');
       if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
       me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
+      unplayed=j.unplayed||{known:false,names:[]};
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
       $('sub').textContent=division?(X.subDiv+division):X.subNone;

@@ -110,11 +110,15 @@ export async function setWebhook() {
 export const PLAYER_COMMANDS = {
   en: [
     { command: 'menu', description: 'Main menu' },
+    { command: 'help', description: 'What the bot can do' },
+    { command: 'results', description: 'Results feed on / off' },
     { command: 'language', description: 'Choose language' },
     { command: 'cancel', description: 'Cancel current action' }
   ],
   ru: [
     { command: 'menu', description: 'Главное меню' },
+    { command: 'help', description: 'Что умеет бот' },
+    { command: 'results', description: 'Лента результатов вкл / выкл' },
     { command: 'language', description: 'Выбрать язык' },
     { command: 'cancel', description: 'Отменить текущее действие' }
   ]
@@ -136,13 +140,15 @@ export const MATCH_COMMANDS = {
 // Рассылки (в том числе опросы и их статистика) живут в админской панели —
 // в подсказке команд их нет, чтобы не было двух путей к одному и тому же.
 export const ADMIN_COMMANDS = [
-  { command: 'menu', description: 'Main menu' },
+  { command: 'help', description: 'Admin commands' },
+  { command: 'overview', description: 'League overview: matches, courts, results' },
   { command: 'admin', description: 'Admin panel' },
   { command: 'stats', description: 'Stats' },
   { command: 'pending', description: 'Pending payments' },
   { command: 'events', description: 'Events' },
   { command: 'messages', description: 'Recent messages' },
   { command: 'results_here', description: 'Bind the results feed to this topic' },
+  { command: 'menu', description: 'Main menu' },
   { command: 'cancel', description: 'Cancel current action' }
 ];
 

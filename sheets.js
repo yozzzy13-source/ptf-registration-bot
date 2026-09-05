@@ -508,7 +508,7 @@ let applicantAdminColumnsReady = null;
 export async function ensureApplicantAdminColumns() {
   // Header check hits the Sheets metadata API; do it once per process.
   if (!applicantAdminColumnsReady) {
-    applicantAdminColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_created_at'])
+    applicantAdminColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_created_at','results_optout'])
       .catch(e => { applicantAdminColumnsReady = null; throw e; });
   }
   return applicantAdminColumnsReady;
@@ -903,6 +903,21 @@ export async function getPlayerDivision(profile = {}) {
 // кроме тех, кто отписался или был отклонён.
 const DEAD_SUBSCRIBER_STATUSES = ['inactive','declined','rejected','blocked','banned','left','unsubscribed'];
 
+// Отписка касается ТОЛЬКО ленты результатов: свои матчи, оплаты и ответы админа
+// приходят по-прежнему. Хранится одним флагом, отдельного статуса не заводим.
+export function isResultsMuted(row = {}) {
+  return ['yes','true','1','off','muted'].includes(String(row.results_optout || '').trim().toLowerCase());
+}
+
+export async function setResultsOptOut(telegramId, muted) {
+  return updateApplicantByTelegramId(telegramId, { results_optout: muted ? 'yes' : '' });
+}
+
+export async function isResultsMutedFor(telegramId) {
+  const row = await findApplicantByTelegramId(telegramId).catch(() => null);
+  return row ? isResultsMuted(row) : false;
+}
+
 export async function getAllBotSubscribers() {
   const { rows } = await getRows(SHEETS.applicants, { useCache:false });
   const seen = new Set();
@@ -911,6 +926,7 @@ export async function getAllBotSubscribers() {
     const id = String(r.telegram_id || '').trim();
     if (!id || seen.has(id)) continue;
     if (DEAD_SUBSCRIBER_STATUSES.includes(String(r.status || '').toLowerCase())) continue;
+    if (isResultsMuted(r)) continue;   // сам отписался от ленты результатов
     seen.add(id);
     out.push({ telegram_id: id, name: r.name || '', language: r.language || '' });
   }

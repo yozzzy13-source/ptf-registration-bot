@@ -515,6 +515,42 @@ export async function adminMatchTest(msg) {
   return sendMessage(msg.chat.id, `<b>Проверка таблицы матчей</b>\n\n${lines.join('\n')}`);
 }
 
+// Сводка по матчам: одним экраном видно, куда нужно вмешаться.
+// Раньше это было размазано по топикам игроков — целиком картину никто не видел.
+export async function adminMatchesOverview(msg) {
+  let data;
+  try {
+    const { matchesOverview, slotStartMs } = await import('./matchesdb.js');
+    data = { ...(await matchesOverview()), slotStartMs };
+  } catch (e) {
+    return sendMessage(msg.chat.id, `Не удалось прочитать матчи: <code>${escapeHtml(e.message).slice(0, 200)}</code>`);
+  }
+  const { formatDate } = await import('./matches.js');
+  const when = (s) => `${formatDate(s.agreed_date)}${s.agreed_time ? ` ${s.agreed_time}` : ''}`;
+  const pair = (s) => `${escapeHtml(s.from_name || '?')} — ${escapeHtml(s.to_name || '?')}`;
+  const block = (title, rows, line) => {
+    if (!rows.length) return '';
+    const shown = rows.slice(0, 12).map(line).join('\n');
+    const more = rows.length > 12 ? `\n<i>…и ещё ${rows.length - 12}</i>` : '';
+    return `\n\n<b>${title}: ${rows.length}</b>\n${shown}${more}`;
+  };
+
+  let body = '<b>🎾 Матчи — сводка</b>';
+  body += block('Ближайшие', data.upcoming, s =>
+    `• ${when(s)} · ${pair(s)}${s.agreed_court ? ` · ${escapeHtml(s.agreed_court)}` : ''}${s.court_confirmed_at ? ' ✅' : ' ⏳корт'}`);
+  body += block('Ждут подтверждения корта', data.awaitingCourt, s => `• ${when(s)} · ${pair(s)}`);
+  body += block('Ждут ответа соперника', data.awaitingAnswer, s =>
+    `• ${pair(s)}${s.division ? ` · ${escapeHtml(s.division)}` : ''}`);
+  body += block('Сыграны, счёта нет', data.awaitingResult, s =>
+    `• ${when(s)} · ${pair(s)} — ${s._stage === 'verify' ? 'ждёт подтверждения счёта' : 'счёт не внесён'}`);
+  body += block('Открытые окна', data.openSlots, s =>
+    `• ${escapeHtml(s.from_name || '?')}${s.division ? ` · ${escapeHtml(s.division)}` : ''} · ${escapeHtml(String(s.dates || '').slice(0, 40))}`);
+
+  const total = data.upcoming.length + data.awaitingAnswer.length + data.awaitingResult.length + data.openSlots.length;
+  if (!total) body += '\n\nСейчас ничего нет: ни назначенных матчей, ни открытых окон.';
+  return sendMessage(msg.chat.id, body);
+}
+
 export async function adminTopicTest(msg) {
   // 1. Вебхук: если он указывает не на наш PUBLIC_URL, бот вообще не получает сообщения
   // от игроков (их забирает другой сервис) — при этом заявки из WebApp продолжают приходить,

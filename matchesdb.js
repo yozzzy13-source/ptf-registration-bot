@@ -12,7 +12,7 @@
 // Заявка может нести НЕСКОЛЬКО дат и НЕСКОЛЬКО кортов (хранятся строкой через запятую).
 // Отвечающий выбирает конкретную дату и корт — они пишутся в agreed_*.
 import { sheets as sheetsClient } from './google.js';
-import { MATCHES_SPREADSHEET_ID, MATCH_SHEETS } from './config.js';
+import { MATCHES_SPREADSHEET_ID, MATCH_SHEETS, TIMEZONE } from './config.js';
 import { nowISO, safe } from './util.js';
 
 const SLOT_HEADERS = [
@@ -20,12 +20,12 @@ const SLOT_HEADERS = [
   'from_telegram_id', 'from_name', 'from_username',
   'to_telegram_id', 'to_name', 'to_username',
   'dates', 'time_from', 'time_to', 'duration_min', 'courts', 'comment',
-  'agreed_date', 'agreed_time', 'agreed_court', 'pending_by', 'round', 'court_confirmed_at', 'court_confirmed_by',
+  'agreed_date', 'agreed_time', 'agreed_court', 'pending_by', 'round', 'court_confirmed_at', 'court_confirmed_by', 'time_change',
   'chat_id', 'message_thread_id', 'message_id',
   'created_at', 'responded_at', 'cancelled_at',
   'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
   'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
-  'result_prompt_sent_at'
+  'result_prompt_sent_at', 'reminder_sent'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -379,6 +379,201 @@ export async function confirmCourt(challengeId, actor = {}) {
     const merged = { ...slot, ...patch };
     await logMatchEvent('court_confirmed', merged, actor, merged.agreed_court || '');
     return { ok: true, slot: merged };
+  });
+}
+
+// --- время матча -------------------------------------------------------------
+// Единая точка расчёта начала и конца: дальше от неё зависят напоминания,
+// проверка накладок и автозакрытие протухших окон.
+export function slotStartMs(slot) {
+  const date = slot.agreed_date || cellToList(slot.dates)[0] || '';
+  const time = slot.agreed_time || slot.time_from || '00:00';
+  const ms = Date.parse(`${date}T${time}:00+07:00`);
+  return Number.isNaN(ms) ? null : ms;
+}
+export function slotEndMs(slot) {
+  const start = slotStartMs(slot);
+  return start === null ? null : start + Number(slot.duration_min || 120) * 60000;
+}
+
+// Накладка: у игрока уже есть согласованный матч, пересекающийся по времени.
+// Два корта одновременно — самая обидная ошибка, ловим её до согласования.
+export async function findTimeConflict(telegramId, date, time, durationMin, excludeId = '') {
+  const start = Date.parse(`${date}T${time || '00:00'}:00+07:00`);
+  if (Number.isNaN(start)) return null;
+  const end = start + Number(durationMin || 120) * 60000;
+  const id = String(telegramId);
+  const rows = await allSlots();
+  for (const r of rows) {
+    if (String(r.challenge_id) === String(excludeId)) continue;
+    if (String(r.status || '').toLowerCase() !== 'accepted') continue;
+    if (![String(r.from_telegram_id), String(r.to_telegram_id)].includes(id)) continue;
+    const s = slotStartMs(r), e = slotEndMs(r);
+    if (s === null) continue;
+    if (start < e && s < end) return r;   // интервалы пересекаются
+  }
+  return null;
+}
+
+// Окна с прошедшими датами закрываем сами — иначе они висят в списке вечно.
+export async function expireStaleSlots() {
+  const rows = await allSlots();
+  const now = Date.now();
+  const done = [];
+  for (const r of rows) {
+    const status = String(r.status || '').toLowerCase();
+    if (!['open', 'pending'].includes(status)) continue;
+    const dates = cellToList(r.dates);
+    const last = dates.length ? dates[dates.length - 1] : r.agreed_date;
+    const end = Date.parse(`${last}T23:59:00+07:00`);
+    if (Number.isNaN(end) || end > now) continue;
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, r._rowNumber, { status: 'expired', cancelled_at: nowISO() });
+    await logMatchEvent('expired', r, { telegram_id: r.from_telegram_id, name: r.from_name }, last);
+    done.push(r);
+  }
+  return done;
+}
+
+// --- напоминания -------------------------------------------------------------
+// Два письма на матч: за сутки и за три часа. Больше не нужно — лишние
+// уведомления быстро приучают их не читать.
+//
+// Тихие часы: с 21:00 до 09:00 по Пхукету бот молчит. Напоминание за сутки в это
+// окно не уходит, а ждёт утра — окно 3.5–30 часов заведомо шире тихой ночи, поэтому
+// оно всё равно успеет (матч, назначенный поздно вечером, напомнит о себе утром —
+// текст в этом случае говорит «сегодня», а не «завтра»). Напоминание за три часа
+// уходит ВСЕГДА: матч в 08:00 попадает в тихое окно, но человеку нужно вставать и ехать.
+export const QUIET_FROM_HOUR = 21;
+export const QUIET_TO_HOUR = 9;
+
+export function isQuietHour(now = Date.now(), timeZone = TIMEZONE) {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hour12: false }).format(new Date(now)));
+  return hour >= QUIET_FROM_HOUR || hour < QUIET_TO_HOUR;
+}
+
+export function remindersDue(slot, now = Date.now()) {
+  const start = slotStartMs(slot);
+  if (start === null) return '';
+  const hours = (start - now) / 3600000;
+  const sent = String(slot.reminder_sent || '').split(',').filter(Boolean);
+  if (hours >= 2.5 && hours <= 3.5 && !sent.includes('h3')) return 'h3';
+  if (hours >= 3.5 && hours <= 30 && !sent.includes('day') && !isQuietHour(now)) return 'day';
+  return '';
+}
+
+export async function listMatchesNeedingReminder(now = Date.now()) {
+  const rows = await allSlots();
+  return rows
+    .filter(r => String(r.status || '').toLowerCase() === 'accepted')
+    .filter(r => String(r.result_status || '').toLowerCase() !== 'confirmed')
+    .map(r => ({ slot: r, kind: remindersDue(r, now) }))
+    .filter(x => x.kind);
+}
+
+export async function markReminderSent(challengeId, kind) {
+  const slot = await findSlot(challengeId);
+  if (!slot) return null;
+  const sent = String(slot.reminder_sent || '').split(',').filter(Boolean);
+  if (!sent.includes(kind)) sent.push(kind);
+  return updateSlot(challengeId, { reminder_sent: sent.join(',') });
+}
+
+// Сводка для админа: что происходит с матчами прямо сейчас.
+export async function matchesOverview(now = Date.now()) {
+  const rows = await allSlots();
+  const out = { upcoming: [], awaitingCourt: [], awaitingAnswer: [], awaitingResult: [], openSlots: [] };
+  for (const r of rows) {
+    const status = String(r.status || '').toLowerCase();
+    const result = String(r.result_status || '').toLowerCase();
+    if (status === 'open') { out.openSlots.push(r); continue; }
+    if (status === 'pending') { out.awaitingAnswer.push(r); continue; }
+    if (status !== 'accepted') continue;
+    if (result === 'confirmed') continue;
+    const start = slotStartMs(r);
+    if (start !== null && start < now) {
+      if (result === 'pending') out.awaitingResult.push({ ...r, _stage: 'verify' });
+      else out.awaitingResult.push({ ...r, _stage: 'missing' });
+      continue;
+    }
+    out.upcoming.push(r);
+    if (!r.court_confirmed_at) out.awaitingCourt.push(r);
+  }
+  const byStart = (a, b) => (slotStartMs(a) || 0) - (slotStartMs(b) || 0);
+  out.upcoming.sort(byStart); out.awaitingCourt.sort(byStart); out.awaitingResult.sort(byStart);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Перенос времени на том же корте.
+//
+// Площадка в переписке часто предлагает соседний слот. Менять время может только
+// тот, кто бронирует, но применяется оно лишь после «Подходит» от соперника —
+// поэтому предложение живёт в одной колонке time_change как «HH:MM|кто|когда»,
+// а не отдельным статусом. Так же отсекаются устаревшие кнопки: если предложение
+// успели заменить, старая кнопка вернёт stale, а не перепишет время задним числом.
+// ---------------------------------------------------------------------------
+export function parseTimeChange(cell = '') {
+  const [time = '', by = '', at = ''] = String(cell || '').split('|');
+  return time ? { time, by, at } : null;
+}
+
+export async function proposeTimeChange(challengeId, actor = {}, newTime = '') {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    const me = String(actor.telegram_id || '');
+    if (!sides.includes(me)) return { ok: false, reason: 'not_a_player', slot };
+    // Корт бронирует один человек — он же и переносит. До подтверждения корта
+    // кнопка есть только у него, после — только у того, кто подтвердил.
+    if (slot.court_confirmed_by && String(slot.court_confirmed_by) !== me) {
+      return { ok: false, reason: 'not_booker', slot };
+    }
+    if (!/^\d{2}:\d{2}$/.test(String(newTime))) return { ok: false, reason: 'bad_time', slot };
+    if (String(newTime) === String(slot.agreed_time || '')) return { ok: false, reason: 'same_time', slot };
+    const patch = { time_change: `${newTime}|${me}|${nowISO()}` };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('time_change_proposed', merged, actor, `${slot.agreed_time || '—'} → ${newTime}`);
+    return { ok: true, slot: merged, newTime };
+  });
+}
+
+export async function acceptTimeChange(challengeId, actor = {}, expectedTime = '') {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    const proposal = parseTimeChange(slot.time_change);
+    if (!proposal) return { ok: false, reason: 'stale', slot };
+    if (expectedTime && proposal.time !== String(expectedTime)) return { ok: false, reason: 'stale', slot };
+    const me = String(actor.telegram_id || '');
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (!sides.includes(me)) return { ok: false, reason: 'not_a_player', slot };
+    // Подтверждает всегда вторая сторона — не тот, кто перенёс.
+    if (String(proposal.by) === me) return { ok: false, reason: 'own_proposal', slot };
+    const previousTime = slot.agreed_time || '';
+    const patch = { agreed_time: proposal.time, time_change: '' };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('time_changed', merged, actor, `${previousTime || '—'} → ${proposal.time}`);
+    return { ok: true, slot: merged, previousTime };
+  });
+}
+
+export async function rejectTimeChange(challengeId, actor = {}, expectedTime = '') {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    const proposal = parseTimeChange(slot.time_change);
+    if (!proposal) return { ok: false, reason: 'stale', slot };
+    if (expectedTime && proposal.time !== String(expectedTime)) return { ok: false, reason: 'stale', slot };
+    const me = String(actor.telegram_id || '');
+    if (String(proposal.by) === me) return { ok: false, reason: 'own_proposal', slot };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { time_change: '' });
+    const merged = { ...slot, time_change: '' };
+    await logMatchEvent('time_change_rejected', merged, actor, proposal.time);
+    return { ok: true, slot: merged, rejectedTime: proposal.time };
   });
 }
 

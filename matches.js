@@ -50,6 +50,10 @@ function offerBlock(slot) {
   const courts = courtsLine(slot);
   return `📅 <b>${escapeHtml(datesLine(slot))}</b>\n🕐 <b>${time}</b>${dur}${courts ? `\n📍 ${escapeHtml(courts)}` : ''}`;
 }
+function isToday(isoDate) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
+  return String(isoDate || '') === today;
+}
 function endTime(start, durationMin) {
   if (!String(start || '').trim()) return '';
   const [h, m] = String(start || '').split(':').map(Number);
@@ -196,6 +200,46 @@ export async function cancelSlot(slot, actor = {}) {
   await logMatchEvent('cancelled', slot, actor);
 }
 
+// Отмена уже согласованного матча — точка, дальше ничего не происходит.
+// Соперник и админский топик узнают сразу, потому что корт, скорее всего, забронирован.
+export async function notifyMatchCancelled(slot, actor = {}) {
+  const byId = String(actor.telegram_id || '');
+  const byName = String(slot.from_telegram_id) === byId ? slot.from_name : slot.to_name;
+  const bookedNote = slot.court_confirmed_at
+    ? '\n\n⚠️ Корт был забронирован — снимите бронь, площадка об отмене не знает.'
+    : '';
+  // Тому, кто бронировал, сразу даём готовое сообщение об отмене для площадки.
+  const court = slot.court_confirmed_at ? await courtByName(slot.agreed_court) : null;
+  const cancelText = court ? courtCancelMessage(slot) : '';
+  const bookerId = String(slot.court_confirmed_by || '');
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    const mine = String(side) === byId;
+    const opp = opponentOf(slot, side);
+    const rows = [];
+    if (court?.whatsapp && String(side) === bookerId) {
+      rows.push([{ text: '📲 Отменить бронь корта', url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(cancelText)}` }]);
+    }
+    rows.push([{ text: '🎾 Создать окно', web_app: { url: `${PUBLIC_URL}/match?tab=new` } }]);
+    await sendMessage(side, `<b>✖️ Матч отменён</b>
+
+${mine ? 'Вы отменили матч' : `${escapeHtml(byName || 'Соперник')} отменил матч`}: ${playerLink(opp.name, opp.username)}
+${agreedBlock(slot)}${bookedNote}${court?.whatsapp && String(side) === bookerId ? `\n\n<code>${escapeHtml(cancelText)}</code>` : ''}
+
+Договоритесь заново — создайте новое окно, когда будете готовы.`, {
+      reply_markup: { inline_keyboard: rows }
+    }).catch(() => {});
+  }
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (chatId) {
+      await sendMessage(chatId, `<b>✖️ Матч отменён</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}\n\nОтменил: <b>${escapeHtml(byName || '')}</b>${slot.court_confirmed_at ? '\n⚠️ корт был подтверждён' : ''}`,
+        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
+    }
+  } catch (e) { console.error('cancel admin copy failed:', e.message); }
+}
+
 // ---------------------------------------------------------------------------
 // Переговоры. Отклик и контрпредложение приходят второй стороне в личку с теми же
 // кнопками, что у заявки на тренировку в боте тренера: принять, другое время,
@@ -268,12 +312,14 @@ export async function sendBookingHelper(chatId, slot) {
   const court = await courtByName(slot.agreed_court);
   const text = bookingMessage(slot, court);
   const confirmRow = [{ text: '✅ Корт подтвердил', callback_data: `match_court_ok:${slot.challenge_id}` }];
+  // Площадка часто даёт соседний слот — время правится тут же, не выходя из диалога.
+  const retimeRow = [{ text: '🕐 Изменить время', callback_data: `match_retime:${slot.challenge_id}` }];
   if (!court?.whatsapp) {
     return sendMessage(chatId, `<b>📲 Сообщение для брони корта</b>
 
 ${slot.agreed_court ? `Для площадки «${escapeHtml(slot.agreed_court)}» не указан номер WhatsApp в листе Courts, поэтому кнопки нет — скопируйте текст и отправьте сами.` : 'Площадка не выбрана — укажите её в переписке с соперником.'}
 
-<code>${escapeHtml(text)}</code>`, { reply_markup: { inline_keyboard: [confirmRow] } });
+<code>${escapeHtml(text)}</code>`, { reply_markup: { inline_keyboard: [confirmRow, retimeRow] } });
   }
   return sendMessage(chatId, `<b>📲 Бронь корта</b>
 
@@ -283,7 +329,8 @@ ${slot.agreed_court ? `Для площадки «${escapeHtml(slot.agreed_court)
 <code>${escapeHtml(text)}</code>`, {
     reply_markup: { inline_keyboard: [
       [{ text: '📲 Открыть WhatsApp', url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(text)}` }],
-      confirmRow
+      confirmRow,
+      retimeRow
     ] }
   });
 }
@@ -311,12 +358,15 @@ export async function notifyCourtConfirmed(slot) {
 ${agreedBlock(slot)}
 
 Оба игрока уведомлены. Добавьте матч в календарь, чтобы не забыть.`;
-  const kb = (username) => ({ inline_keyboard: [
+  // Кнопка переноса — только у того, кто подтверждал корт: он разговаривает с площадкой.
+  const booker = String(slot.court_confirmed_by || '');
+  const kb = (username, side) => ({ inline_keyboard: [
     [{ text: '📅 Добавить в календарь', web_app: { url: cal } }],
+    ...(String(side) === booker ? [[{ text: '🕐 Изменить время', callback_data: `match_retime:${slot.challenge_id}` }]] : []),
     ...(username ? [[{ text: '💬 Написать сопернику', url: `https://t.me/${String(username).replace(/^@/, '')}` }]] : [])
   ] });
-  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: kb(slot.to_username) }).catch(e => console.error('confirm notify author failed:', e.message));
-  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: kb(slot.from_username) }).catch(e => console.error('confirm notify taker failed:', e.message));
+  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: kb(slot.to_username, slot.from_telegram_id) }).catch(e => console.error('confirm notify author failed:', e.message));
+  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: kb(slot.from_username, slot.to_telegram_id) }).catch(e => console.error('confirm notify taker failed:', e.message));
 
   try {
     const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
@@ -326,6 +376,162 @@ ${agreedBlock(slot)}
         topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
     }
   } catch (e) { console.error('confirm notify admin failed:', e.message); }
+}
+
+// Текст отмены брони — тем же языком и форматом, что и запрос на бронь.
+export function courtCancelMessage(slot) {
+  const start = slot.agreed_time || slot.time_from || '';
+  const end = endTime(start, slot.duration_min);
+  const d = new Date(`${slot.agreed_date}T12:00:00Z`);
+  const human = Number.isNaN(d.getTime()) ? slot.agreed_date
+    : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return [
+    'Hello! I need to cancel our court booking for PTF match.',
+    '',
+    `Date: ${human}`,
+    `Time: ${start}${end ? `–${end}` : ''}`,
+    '',
+    'Sorry for the inconvenience, and thank you!'
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Напоминания о матче: накануне и перед выездом.
+// Бот и так знает время — молчать до самого конца и вспоминать только «внесите
+// счёт» неправильно, большая часть неявок именно от забывчивости.
+// ---------------------------------------------------------------------------
+export async function notifyMatchReminder(slot, kind = 'day') {
+  const start = slot.agreed_time || slot.time_from || '';
+  // «Завтра» или «сегодня» — по календарной дате Пхукета, а не по числу часов:
+  // матч в 09:00 может быть и завтрашним, и сегодняшним.
+  const head = kind === 'day' ? `🎾 <b>${isToday(slot.agreed_date) ? 'Сегодня матч' : 'Завтра матч'}</b>` : '⏰ <b>Матч через 3 часа</b>';
+  const tail = kind === 'day'
+    ? (slot.court_confirmed_at ? 'Корт подтверждён. До встречи!' : 'Корт ещё не подтверждён — уточните бронь у площадки.')
+    : 'Пора собираться. Если что-то поменялось — предупредите соперника.';
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    const opp = opponentOf(slot, side);
+    const rows = [[{ text: '🎾 Мои матчи', web_app: { url: `${PUBLIC_URL}/match?tab=mine` } }]];
+    if (opp.username) rows.push([{ text: '💬 Написать сопернику', url: `https://t.me/${String(opp.username).replace(/^@/, '')}` }]);
+    await sendMessage(side, `${head}
+
+Соперник: ${playerLink(opp.name, opp.username)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
+${agreedBlock(slot)}
+
+${tail}`, { reply_markup: { inline_keyboard: rows } }).catch(() => {});
+  }
+  return { start };
+}
+
+// Напоминание о дедлайне сезона: сколько матчей осталось и сколько дней.
+export async function notifyDeadline(telegramId, { names = [], daysLeft = null, division = '' } = {}) {
+  if (!telegramId || !names.length) return null;
+  const list = names.slice(0, 8).map(n => `• ${escapeHtml(n)}`).join('\n');
+  const more = names.length > 8 ? `\n…и ещё ${names.length - 8}` : '';
+  const when = daysLeft === null ? '' : (daysLeft > 0
+    ? `\n\n⏳ До конца сезона осталось <b>${daysLeft}</b> ${plural(daysLeft, 'день', 'дня', 'дней')}.`
+    : '\n\n⚠️ Срок уже вышел — сыграйте как можно скорее.');
+  return sendMessage(telegramId, `<b>🎾 Незакрытые матчи${division ? ` · ${escapeHtml(division)}` : ''}</b>
+
+Осталось сыграть: <b>${names.length}</b>
+${list}${more}${when}
+
+Откройте окно — соперники увидят его и откликнутся.`, {
+    reply_markup: { inline_keyboard: [[{ text: '🎾 Создать окно', web_app: { url: `${PUBLIC_URL}/match?tab=new` } }]] }
+  }).catch(() => null);
+}
+
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+}
+
+// ---------------------------------------------------------------------------
+// Перенос времени на том же корте
+// ---------------------------------------------------------------------------
+// Клавиатура выбора: полный игровой день с шагом 30 минут, по 4 в ряд.
+export function timeChoiceKeyboard(slot) {
+  const rows = [];
+  let row = [];
+  for (let m = 6 * 60; m <= 22 * 60; m += 30) {
+    const hhmm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    if (hhmm === String(slot.agreed_time || '')) continue; // текущее время предлагать незачем
+    row.push({ text: hhmm, callback_data: `mt_set:${slot.challenge_id}:${hhmm}` });
+    if (row.length === 4) { rows.push(row); row = []; }
+  }
+  if (row.length) rows.push(row);
+  return { inline_keyboard: rows };
+}
+
+export function timeChoiceText(slot) {
+  return `<b>🕐 Новое время матча</b>
+
+${escapeHtml(formatDate(slot.agreed_date))}${slot.agreed_court ? ` · ${escapeHtml(slot.agreed_court)}` : ''}
+Сейчас: <b>${escapeHtml(slot.agreed_time || '—')}</b>
+
+Выберите время, которое дала площадка. Соперник подтвердит — и оно станет основным.`;
+}
+
+// Новое время уходит сопернику на подтверждение: корт мог дать слот, в который он не успевает.
+export async function notifyTimeChange(slot, newTime, proposerId) {
+  const to = opponentOf(slot, proposerId);
+  if (!to.id) return null;
+  const by = opponentOf(slot, to.id);
+  const end = endTime(newTime, slot.duration_min);
+  return sendMessage(to.id, `<b>🕐 Площадка предлагает другое время</b>
+
+${playerLink(by.name, by.username)} бронирует корт${slot.agreed_court ? ` «${escapeHtml(slot.agreed_court)}»` : ''} и просит перенести:
+
+📅 ${escapeHtml(formatDate(slot.agreed_date))}
+Было: <b>${escapeHtml(slot.agreed_time || '—')}</b>
+Станет: <b>${escapeHtml(newTime)}${end ? '–' + escapeHtml(end) : ''}</b>
+
+Корт и дата те же — меняется только время.`, {
+    reply_markup: { inline_keyboard: [[
+      { text: '✅ Подходит', callback_data: `mt_ok:${slot.challenge_id}:${newTime}` },
+      { text: '❌ Не могу', callback_data: `mt_no:${slot.challenge_id}:${newTime}` }
+    ]] }
+  }).catch(e => { console.error('notifyTimeChange failed:', e.message); return null; });
+}
+
+// Соперник согласился: время новое, матч остаётся активным, календарь пересобираем.
+export async function notifyTimeChangeAccepted(slot, previousTime = '') {
+  const cal = matchCalendarUrl(slot);
+  const confirmed = Boolean(slot.court_confirmed_at);
+  const card = (oppName, oppUsername) => `<b>✅ Время матча изменено</b>
+
+Соперник: ${playerLink(oppName, oppUsername)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
+${agreedBlock(slot)}${previousTime ? `\n\n<i>Было: ${escapeHtml(previousTime)}</i>` : ''}
+
+${confirmed ? 'Обновите событие в календаре — старое время больше не действует.' : 'Когда площадка подтвердит бронь, нажмите «Корт подтвердил».'}`;
+  const kb = { inline_keyboard: [[{ text: '📅 Обновить в календаре', web_app: { url: cal } }]] };
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    const opp = opponentOf(slot, side);
+    await sendMessage(side, card(opp.name, opp.username), { reply_markup: kb }).catch(() => {});
+  }
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (chatId) {
+      await sendMessage(chatId, `<b>🕐 Время матча изменено</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}${previousTime ? `\n<i>было ${escapeHtml(previousTime)}</i>` : ''}`,
+        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
+    }
+  } catch (e) { console.error('time change admin copy failed:', e.message); }
+}
+
+// Соперник не может: время остаётся прежним, бронирующий пробует другой слот.
+export async function notifyTimeChangeRejected(slot, rejectedTime, toId) {
+  if (!toId) return null;
+  return sendMessage(toId, `<b>❌ Соперник не может в ${escapeHtml(rejectedTime)}</b>
+
+Время матча осталось прежним: <b>${escapeHtml(slot.agreed_time || '—')}</b>.
+Спросите у площадки другой слот и предложите его снова.`, {
+    reply_markup: { inline_keyboard: [[{ text: '🕐 Предложить другое время', callback_data: `match_retime:${slot.challenge_id}` }]] }
+  }).catch(() => null);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,7 +694,13 @@ ${link(winner.name, winnerUrl)}  <b>${escapeHtml(winnerFirstScore(slot))}</b>  $
   const keyboard = [];
   if (row.length) keyboard.push(row);
   if (standings) keyboard.push([{ text: '📊 View standings', url: standings }]);
-  return { text, reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined };
+  // В группе кнопка отписки бессмысленна — она только для личной рассылки.
+  const dmKeyboard = [...keyboard, [{ text: '🔕 Stop results', callback_data: 'results_mute' }]];
+  return {
+    text,
+    reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined,
+    dm_reply_markup: { inline_keyboard: dmKeyboard }
+  };
 }
 
 // Ссылка на таблицу дивизиона на сайте — тем же шаблоном, что и кнопки в меню «О PTF».
@@ -509,7 +721,7 @@ async function standingsUrl(division) {
 }
 
 export async function broadcastResult(slot) {
-  const { text, reply_markup } = await feedCard(slot);
+  const { text, reply_markup, dm_reply_markup } = await feedCard(slot);
   const skip = new Set([String(slot.from_telegram_id), String(slot.to_telegram_id)]);
 
   // 1. Общая группа — одно сообщение вместо десятков личных.
@@ -523,7 +735,7 @@ export async function broadcastResult(slot) {
   }
 
   // 2. Личная рассылка всем живым пользователям бота.
-  const dmOpts = reply_markup ? { reply_markup } : {};
+  const dmOpts = { reply_markup: dm_reply_markup };
   let sent = 0, failed = 0;
   try {
     const players = await getAllBotSubscribers();

@@ -156,6 +156,50 @@ async function writeDivisionRow(p1, p2, parsed) {
   return { status: 'saved', division: d1, row: info.row, reversed: info.reversed };
 }
 
+// Расписание дивизиона: кто с кем должен сыграть и что уже сыграно.
+// Строки создаются заранее (круговая система), поэтому «осталось сыграть» —
+// это строки без счёта, а не то, чего нет в таблице.
+const scheduleCache = new Map();
+const SCHEDULE_CACHE_MS = 120000;
+
+export async function getDivisionSchedule(division) {
+  const key = String(division || '').trim().toUpperCase().replace(/^(DIVISION|ДИВИЗИОН)\s*/, '');
+  if (!key) return [];
+  const cached = scheduleCache.get(key);
+  if (cached && Date.now() - cached.t < SCHEDULE_CACHE_MS) return cached.v;
+  const spreadsheetId = DIVISION_SPREADSHEETS[key];
+  if (!spreadsheetId) return [];
+  try {
+    // C — первый игрок, E — второй, F.. — счёт, S — отметка «сыграно».
+    const values = await getValues(spreadsheetId, 'Match_Log!C2:S');
+    const out = [];
+    for (let i = 0; i < values.length; i++) {
+      const row = values[i] || [];
+      const p1 = String(row[0] || '').trim();
+      const p2 = String(row[2] || '').trim();
+      if (!p1 || !p2) continue;
+      const hasScore = String(row[3] ?? '').trim() !== '' && String(row[4] ?? '').trim() !== '';
+      out.push({ row: i + 2, p1, p2, played: hasScore });
+    }
+    scheduleCache.set(key, { t: Date.now(), v: out });
+    return out;
+  } catch (e) {
+    console.error('getDivisionSchedule failed:', e.message);
+    return [];
+  }
+}
+
+// Соперники игрока, с которыми матч ещё не сыгран.
+export async function getUnplayedOpponents(division, playerName) {
+  const schedule = await getDivisionSchedule(division);
+  if (!schedule.length) return { known: false, names: [], total: 0, played: 0 };
+  const me = norm(playerName);
+  const mine = schedule.filter(m => norm(m.p1) === me || norm(m.p2) === me);
+  if (!mine.length) return { known: false, names: [], total: 0, played: 0 };
+  const names = mine.filter(m => !m.played).map(m => (norm(m.p1) === me ? m.p2 : m.p1));
+  return { known: true, names, total: mine.length, played: mine.length - names.length };
+}
+
 export function describeWrite(result) {
   if (!result) return '';
   if (result.status === 'skipped') return 'таблицы лиги не подключены';

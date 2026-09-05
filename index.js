@@ -1,19 +1,22 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN } from './config.js';
+import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
-  notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests } from './matches.js';
+  notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
+  notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline } from './matches.js';
 import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
-  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch } from './matchesdb.js';
+  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
+  proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict, isQuietHour } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
+import { getUnplayedOpponents } from './results.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -395,6 +398,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
       ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
       courts, opponents, duration_min: MATCH_DURATION_MIN, is_admin: v.isAdmin,
       can_book_court: COURT_BOOKING_OPEN || v.isAdmin,
+      unplayed: await getUnplayedOpponents(v.division, v.profile.name).catch(() => ({ known:false, names:[] })),
       open_slots: openSlots.map(shape),
       my_matches: mySlots.map(shape),
       result_tasks: resultTasks.map(shape),
@@ -457,6 +461,13 @@ app.post('/api/match/take', async (req, res) => {
   try {
     const v = await matchViewer(req.body?.initData || '');
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    // Два корта на одно время — самая обидная накладка, ловим до согласования.
+    const clash = await findTimeConflict(v.user.id, req.body.date, req.body.time, MATCH_DURATION_MIN, req.body.challenge_id)
+      .catch(() => null);
+    if (clash) {
+      return res.status(409).json({ ok:false,
+        error: `У вас уже назначен матч на это время (${clash.agreed_date} ${clash.agreed_time}). Выберите другой слот.` });
+    }
     const result = await claimSlot(req.body.challenge_id, {
       telegram_id: v.user.id, name: v.profile.name, username: v.user.username || v.profile.telegram_username || ''
     }, { date: req.body.date, court: req.body.court, time: req.body.time }, { allowSelf: v.isAdmin });
@@ -646,37 +657,115 @@ app.post('/api/court/request', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
 });
 
+// Снять своё окно (пока никто не откликнулся) ИЛИ отменить уже согласованный матч.
+// Согласованный может отменить любая из сторон — но тогда обе получают уведомление,
+// и это конец: заново договариваются новым окном.
 app.post('/api/match/cancel', async (req, res) => {
   try {
     const v = await matchViewer(req.body?.initData || '');
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const slot = await findSlot(req.body.challenge_id);
     if (!slot) return res.status(404).json({ ok:false, error:'Slot not found' });
+    const status = String(slot.status).toLowerCase();
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (status === 'accepted') {
+      if (!sides.includes(String(v.user.id))) return res.status(403).json({ ok:false, error:'Not your match' });
+      if (String(slot.result_status || '').toLowerCase() === 'confirmed') {
+        return res.status(409).json({ ok:false, error:'Результат уже засчитан — матч не отменить.' });
+      }
+      await cancelMatchSlot(slot, { telegram_id: v.user.id, name: v.profile.name });
+      await notifyMatchCancelled(slot, { telegram_id: v.user.id, name: v.profile.name })
+        .catch(e => console.error('notifyMatchCancelled failed:', e.message));
+      return res.json({ ok:true, cancelled:'match' });
+    }
     if (String(slot.from_telegram_id) !== String(v.user.id)) return res.status(403).json({ ok:false, error:'Not your slot' });
-    if (String(slot.status).toLowerCase() === 'accepted') return res.status(409).json({ ok:false, error:'Match is already agreed — contact your opponent.' });
     await cancelMatchSlot(slot, { telegram_id: v.user.id, name: v.profile.name });
-    res.json({ ok:true });
+    res.json({ ok:true, cancelled:'slot' });
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
+
+// Перенос времени согласованного матча из карточки в мини-приложении.
+// Дальше всё то же, что и по кнопке в чате: соперник подтверждает или отказывается.
+app.post('/api/match/retime', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const v = await matchViewer(b.initData || '');
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const r = await proposeTimeChange(b.challenge_id, { telegram_id: v.user.id, name: v.profile.name }, String(b.time || ''));
+    if (!r.ok) {
+      const messages = {
+        not_found: 'Матч не найден.',
+        not_accepted: 'Матч ещё не согласован.',
+        not_a_player: 'Это не ваш матч.',
+        not_booker: 'Время меняет тот, кто бронировал корт.',
+        same_time: 'Это и есть текущее время.',
+        bad_time: 'Некорректное время.'
+      };
+      return res.status(409).json({ ok:false, error: messages[r.reason] || 'Не удалось перенести' });
+    }
+    await notifyTimeChange(r.slot, r.newTime, v.user.id).catch(e => console.error('notifyTimeChange failed:', e.message));
+    res.json({ ok:true, time: r.newTime });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+// Напоминание о незакрытых матчах — раз в неделю, по понедельникам утром.
+// Дата окончания сезона берётся из Settings (season_deadline, формат ГГГГ-ММ-ДД);
+// без неё письмо всё равно уходит, просто без обратного отсчёта.
+async function runDeadlineNudge() {
+  const now = new Date();
+  const local = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }));
+  if (local.getDay() !== 1) return;                 // только понедельник
+  if (local.getHours() !== 10) return;              // одно окно в сутки
+  if (isQuietHour()) return;                        // на всякий случай: в тихие часы молчим
+  const stamp = `${local.getFullYear()}-${local.getMonth() + 1}-${local.getDate()}`;
+  if (await getSetting('deadline_nudge_last') === stamp) return;
+  await setSetting('deadline_nudge_last', stamp, 'Дата последней рассылки о незакрытых матчах');
+
+  const deadline = String(await getSetting('season_deadline') || '').trim();
+  const daysLeft = /^\d{4}-\d{2}-\d{2}$/.test(deadline)
+    ? Math.round((Date.parse(`${deadline}T23:59:00+07:00`) - Date.now()) / 86400000)
+    : null;
+
+  const players = await getAllActiveLeaguePlayers().catch(() => []);
+  let sent = 0;
+  for (const p of players) {
+    try {
+      const left = await getUnplayedOpponents(p.division, p.name);
+      if (!left.known || !left.names.length) continue;
+      await notifyDeadline(p.telegram_id, { names: left.names, daysLeft, division: p.division });
+      sent++;
+      await new Promise(r => setTimeout(r, 60));
+    } catch (e) { console.error('deadline nudge for player failed:', e.message); }
+  }
+  if (sent) console.log(`deadline nudge sent to ${sent} players`);
+}
 
 app.listen(PORT, async () => {
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);
   if (!BOT_TOKEN) console.warn('BOT_TOKEN is empty. Set it in Railway Variables.');
   if (!PUBLIC_URL) console.warn('PUBLIC_URL is empty. Set it in Railway Variables.');
-  // Раз в 15 минут проверяем сыгранные матчи без результата и просим внести счёт.
+  // Раз в 15 минут: напоминания о матчах, просьба внести счёт, закрытие протухших окон.
+  // Всё в одном проходе — таблица одна, лишний раз её дёргать незачем.
   let resultSweepBusy = false;
   setInterval(async () => {
     if (resultSweepBusy) return;
     resultSweepBusy = true;
     try {
+      const reminders = await listMatchesNeedingReminder().catch(e => { console.error('reminder scan failed:', e.message); return []; });
+      for (const { slot, kind } of reminders) {
+        await notifyMatchReminder(slot, kind).catch(e => console.error('match reminder failed:', e.message));
+        await markReminderSent(slot.challenge_id, kind).catch(e => console.error('mark reminder failed:', e.message));
+      }
       const due = await listMatchesNeedingResultPrompt();
       for (const slot of due) {
         await notifyResultPrompt(slot).catch(e => console.error('result prompt failed:', e.message));
         await markResultPromptSent(slot.challenge_id).catch(e => console.error('mark result prompt failed:', e.message));
       }
+      await expireStaleSlots().catch(e => console.error('expire slots failed:', e.message));
+      await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));
     } catch (e) {
-      console.error('result sweep failed:', e.message);
+      console.error('match sweep failed:', e.message);
     } finally { resultSweepBusy = false; }
   }, 15 * 60 * 1000).unref?.();
 
