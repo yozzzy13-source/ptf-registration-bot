@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getCourts, getPlayerDivision, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getCourts, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -288,9 +288,21 @@ async function matchViewer(initData) {
   if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return { ok:false, code:403, error:'Invalid Telegram initData' };
   const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
   if (!profile) return { ok:false, code:404, error:'Player profile not found. Complete the profile first.' };
-  const division = await getPlayerDivision(profile);
   const lang = ['ru','en'].includes(String(profile.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : 'en';
-  return { ok:true, user, profile, division, lang };
+  // Матчи доступны только активным игрокам текущего состава. Проверка на сервере —
+  // скрытая кнопка меню это лишь удобство, а не защита.
+  const league = await getPlayerLeagueInfo({ ...profile, id: user.id });
+  if (!league.found) {
+    return { ok:false, code:403, error: lang === 'ru'
+      ? 'Матчи доступны игрокам текущего состава лиги. Вас пока нет в списке участников.'
+      : 'Matches are for players in the current league line-up. You are not on the participants list yet.' };
+  }
+  if (String(league.status || '').toLowerCase() !== 'active') {
+    return { ok:false, code:403, error: lang === 'ru'
+      ? 'Матчи откроются, когда ваше участие станет активным. Сейчас статус: ' + (league.status || 'не указан') + '.'
+      : 'Matches unlock once your participation is active. Current status: ' + (league.status || 'not set') + '.' };
+  }
+  return { ok:true, user, profile, division: league.division, lang };
 }
 
 app.get('/api/match/bootstrap', async (req, res) => {

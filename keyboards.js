@@ -5,9 +5,9 @@ import { PUBLIC_URL } from './config.js';
 
 export function languageKeyboard() { return inlineKeyboard([[{text:'🇷🇺 Русский',callback_data:'lang_select:ru'},{text:'🇬🇧 English',callback_data:'lang_select:en'}]]); }
 
-export function mainKeyboard(lang) { return inlineKeyboard([
+export function mainKeyboard(lang, opts={}) { return inlineKeyboard([
   [webAppButton(t(lang,'join_event'),'/apply?mode=event')],
-  [webAppButton(t(lang,'matches'),'/match')],
+  ...(opts.matches ? [[webAppButton(t(lang,'matches'),'/match')]] : []),
   [webAppButton(t(lang,'participants'),'/participants')],
   [{text:t(lang,'about'),callback_data:'website_menu'}],
   [{text:t(lang,'how'),callback_data:'text:how_league_works'}],

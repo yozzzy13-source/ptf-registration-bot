@@ -1,6 +1,6 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage } from './telegram.js';
 import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, websiteKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants } from './sheets.js';
+import { getBotText, getSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants, isActiveLeaguePlayer } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
@@ -17,7 +17,19 @@ function fallbackLang(lang) { return lang === 'ru' ? 'ru' : 'en'; }
 async function sendLanguageChoice(chatId) {
   return sendMessage(chatId, t('en','choose_language'), { reply_markup: languageKeyboard() });
 }
-async function sendMain(chatId, lang) { closeContactSession(chatId); userState.delete(String(chatId)); const l=fallbackLang(lang); const txt=await getBotText('welcome_main',l); await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l)}); }
+async function sendMain(chatId, lang, from=null) {
+  closeContactSession(chatId); userState.delete(String(chatId));
+  const l=fallbackLang(lang);
+  const txt=await getBotText('welcome_main',l);
+  // Кнопка матчей показывается только активным игрокам состава — остальным она
+  // всё равно ничего не откроет, а в меню создаёт лишний шум.
+  let showMatches=false;
+  try {
+    const profile = await findApplicantByTelegramId(from?.id ?? chatId);
+    if (profile) showMatches = await isActiveLeaguePlayer({ ...profile, id: from?.id ?? chatId });
+  } catch(e) { console.error('main menu league check failed:', e.message); }
+  await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l,{matches:showMatches})});
+}
 function siteUrls(settings={}) { const home=settings.website_url || 'https://www.phukettennis.com/'; const base=home.replace(/\/$/,''); return {home, matches:settings.website_matches||`${base}/matches`, divisions:settings.website_divisions||`${base}/divisions`, yearlyRace:settings.website_yearly_race||`${base}/yearly-race`, players:settings.website_players||`${base}/players`, regulations:settings.website_regulations||`${base}/regulations`}; }
 
 // Ссылка на страницу конкретного дивизиона строится по шаблону из Settings —
@@ -358,7 +370,7 @@ export async function handleMessage(msg) {
         reply_markup: { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Выбрать и принять' : '🎾 Choose and accept', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slotId)}` } }]] }
       });
     }
-    return sendMain(chatId, lang);
+    return sendMain(chatId, lang, from);
   }
 
   if (text === '/language' && isPrivate) return sendLanguageChoice(chatId);
@@ -471,7 +483,7 @@ export async function handleMessage(msg) {
     await notifyPlayerMedia({ id:from.id, username:from.username, name:contactName(from) }, msg, 'Sent outside payment/contact flow').catch(e => console.error('notify player media failed:', e.message));
     return sendMessage(chatId, lang === 'ru' ? '✅ Файл получен и передан организатору.' : '✅ File received and forwarded to the organizer.', { reply_markup: mainKeyboard(lang) });
   }
-  return sendMain(chatId, lang);
+  return sendMain(chatId, lang, from);
 }
 
 export async function handleCallback(q) {
@@ -491,14 +503,14 @@ export async function handleCallback(q) {
     await sendMessage(chatId, t(selected, 'language_saved'));
     const param = state?.pendingStartParam || '';
     if (param.startsWith('challenge_')) return handleChallengeStart(chatId, from, selected, param.replace('challenge_', ''));
-    return sendMain(chatId, selected);
+    return sendMain(chatId, selected, from);
   }
 
   if (!storedLang && msg.chat.type === 'private' && !isAdminUser(from.id)) {
     return sendLanguageChoice(chatId);
   }
 
-  if (data === 'main') return sendMain(chatId, lang);
+  if (data === 'main') return sendMain(chatId, lang, from);
   if (data === 'website_menu') return sendWebsiteMenu(chatId, lang, msg.message_id);
   if (data.startsWith('text:')) return sendTextSection(chatId, lang, data.slice(5), msg.message_id);
   if (data === 'payment_entry') return sendPaymentEntry(chatId, from, lang);

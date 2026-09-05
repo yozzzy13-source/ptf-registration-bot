@@ -158,7 +158,10 @@ function parseParticipantRows(values=[], headerRowIndex=0) {
       const value = String(row[i] ?? '').trim();
       if (label && value && PARTICIPANT_PUBLIC_KEYS.has(key)) fields.push({ key, label, value });
     });
-    players.push({ rowNumber: r + 1, name, division: normalizeDivisionName(divisionRaw), division_raw: divisionRaw, rating, status, fields });
+    // telegram_id из таблицы участников (если колонка заведена) — точная привязка вместо
+    // сопоставления по имени. В WebApp не отдаётся: остаётся только на сервере.
+    const telegramId = firstNonEmpty(raw, ['telegram_id','telegramid','tg_id','telegram']).replace(/^https?:\/\/t\.me\//,'').replace(/^@/,'');
+    players.push({ rowNumber: r + 1, name, division: normalizeDivisionName(divisionRaw), division_raw: divisionRaw, rating, status, telegram_id: /^\d+$/.test(telegramId) ? telegramId : '', fields });
   }
   return players;
 }
@@ -862,20 +865,42 @@ export async function getCourts() {
   }
 }
 
-// Дивизион игрока берём из ручной таблицы участников (она — источник правды по составам),
-// сопоставляя по имени тем же алгоритмом, что и страницы игроков на сайте.
-export async function getPlayerDivision(profile = {}) {
+// Кто игрок в лиге: дивизион и статус из ручной таблицы участников (она — источник
+// правды по составам). Сначала пробуем точную привязку по telegram_id, если колонка
+// заведена; иначе — сопоставление по имени, как для страниц игроков на сайте.
+export async function getPlayerLeagueInfo(profile = {}) {
+  const telegramId = String(profile.telegram_id || profile.id || '').trim();
   const name = String(profile.name || '').trim();
-  if (!name) return '';
   let data;
-  try { data = await getManualParticipants(); } catch (e) { return safe(profile.division) === 'pending' ? '' : safe(profile.division); }
+  try { data = await getManualParticipants(); }
+  catch (e) { console.error('league info failed:', e.message); return { found:false, division:'', status:'', matched_by:'' }; }
   const players = data.players || [];
-  const keys = nameKeys(name);
-  for (const p of players) {
-    const pk = nameKeys(p.name);
-    if (keys.some(k => pk.includes(k))) return p.division || '';
+
+  if (telegramId) {
+    const byId = players.find(p => p.telegram_id && String(p.telegram_id) === telegramId);
+    if (byId) return { found:true, division: byId.division || '', status: byId.status || '', name: byId.name, matched_by:'telegram_id' };
   }
-  return '';
+  if (name) {
+    const keys = nameKeys(name);
+    const byName = players.find(p => nameKeys(p.name).some(k => keys.includes(k)));
+    // Если у строки участника уже проставлен telegram_id и он не наш — это чужая строка,
+    // совпало лишь имя. Пускать нельзя.
+    if (byName && byName.telegram_id && telegramId && String(byName.telegram_id) !== telegramId) {
+      return { found:false, division:'', status:'', matched_by:'name_conflict' };
+    }
+    if (byName) return { found:true, division: byName.division || '', status: byName.status || '', name: byName.name, matched_by:'name' };
+  }
+  return { found:false, division:'', status:'', matched_by:'' };
+}
+
+export async function getPlayerDivision(profile = {}) {
+  return (await getPlayerLeagueInfo(profile)).division;
+}
+
+// Доступ к матчам — только у активных игроков текущего состава.
+export async function isActiveLeaguePlayer(profile = {}) {
+  const info = await getPlayerLeagueInfo(profile);
+  return info.found && String(info.status || '').toLowerCase() === 'active' && Boolean(info.division);
 }
 
 // Соперники: участники того же дивизиона, у которых есть telegram_id в Applicants.
@@ -893,7 +918,9 @@ export async function getDivisionOpponents(division, excludeTelegramId = '') {
   const out = [];
   for (const p of (data.players || [])) {
     if (p.division !== division) continue;
-    const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+    if (String(p.status || '').toLowerCase() !== 'active') continue; // вызвать можно только активного
+    const hit = (p.telegram_id && applicants.find(a => String(a.telegram_id) === String(p.telegram_id)))
+      || nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
     if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
     if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
     out.push({
