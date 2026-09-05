@@ -82,7 +82,7 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
-var me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='';
+var me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Мои матчи',
@@ -90,7 +90,7 @@ var T={
       emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
       modeOpen:'🔓 Открытое окно',modeDirect:'🎯 Конкретный соперник',
       court:'Корты (можно несколько)',courtAny:'Не важно — договоримся',courtOther:'Другая площадка',
-      date:'Даты (можно несколько)',time:'Время',from:'с',to:'до',dur:'Длительность',needDate:'Выбери хотя бы одну дату',pickTitle:'Выбери дату и корт',pickDate:'Дата',pickCourt:'Корт',accept:'✅ Отправить предложение',anyCourt:'Договоримся на месте',multi:'вариантов: ',sent:'✅ Предложение отправлено. Соперник подтвердит или предложит своё — я сообщу.',counterTitle:'Встречное предложение',counterHint:'Предложи свои дату, время и корт — соперник подтвердит или ответит своим вариантом.',counterSend:'🔄 Отправить встречное',pendingLbl:'ждёт ответа',yourTurn:'твой ход',
+      date:'Даты (можно несколько)',time:'Интервал, когда тебе удобно',from:'с',to:'до',dur:'Длительность',timeHint:'Укажи «с» и «до» — соперник выберет внутри этого интервала конкретный слот на 2 часа.',pickTime:'Время матча',durFixed:'Матч — 2 часа',needDate:'Выбери хотя бы одну дату',pickTitle:'Выбери дату, время и корт',pickDate:'Дата',pickCourt:'Корт',accept:'✅ Отправить предложение',anyCourt:'Договоримся на месте',multi:'вариантов: ',sent:'✅ Предложение отправлено. Соперник подтвердит или предложит своё — я сообщу.',counterTitle:'Встречное предложение',counterHint:'Предложи свои дату, время и корт — соперник подтвердит или ответит своим вариантом.',counterSend:'🔄 Отправить встречное',pendingLbl:'ждёт ответа',yourTurn:'твой ход',
       comment:'Комментарий (необязательно)',commentPh:'например: могу подвинуться на час',
       opp:'Соперник',send:'📲 Сформировать заявку',sending:'Отправляю…',
       okOpen:'✅ Окно опубликовано в чате твоего дивизиона. Как только кто-то нажмёт «Играю», я пришлю контакты соперника.',
@@ -99,7 +99,7 @@ var T={
       needOpp:'Выбери соперника',needRange:'Интервал короче длительности матча',
       hintOpen:'Окно уйдёт в чат твоего дивизиона. Любой игрок дивизиона сможет его забрать.',
       hintDirect:'Вызов уйдёт лично выбранному игроку.',
-      hintRange:'Отметь все удобные дни и корты — соперник выберет из них конкретные. Точное время согласуете между собой.',
+      hintRange:'Отметь все удобные дни и корты — соперник выберет конкретные.',
       you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.'},
   en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
       tOpen:'Open slots',tNew:'Create',tMine:'My matches',
@@ -107,7 +107,7 @@ var T={
       emptyMine:'No scheduled matches or open slots yet.',
       modeOpen:'🔓 Open slot',modeDirect:'🎯 Specific opponent',
       court:'Courts (multiple)',courtAny:'Any — we will agree',courtOther:'Other venue',
-      date:'Dates (multiple)',time:'Time',from:'from',to:'to',dur:'Duration',needDate:'Pick at least one date',pickTitle:'Pick a date and court',pickDate:'Date',pickCourt:'Court',accept:'✅ Send proposal',anyCourt:'Agree on the spot',multi:'options: ',sent:'✅ Proposal sent. Your opponent will confirm or counter — I will let you know.',counterTitle:'Counter-proposal',counterHint:'Offer your date, time and court — the other player confirms or answers with their own.',counterSend:'🔄 Send counter',pendingLbl:'awaiting answer',yourTurn:'your turn',
+      date:'Dates (multiple)',time:'When it suits you',from:'from',to:'to',dur:'Duration',timeHint:'Set “from” and “to” — your opponent picks a concrete 2-hour slot inside it.',pickTime:'Match time',durFixed:'Match is 2 hours',needDate:'Pick at least one date',pickTitle:'Pick a date, time and court',pickDate:'Date',pickCourt:'Court',accept:'✅ Send proposal',anyCourt:'Agree on the spot',multi:'options: ',sent:'✅ Proposal sent. Your opponent will confirm or counter — I will let you know.',counterTitle:'Counter-proposal',counterHint:'Offer your date, time and court — the other player confirms or answers with their own.',counterSend:'🔄 Send counter',pendingLbl:'awaiting answer',yourTurn:'your turn',
       comment:'Comment (optional)',commentPh:'e.g. can shift by an hour',
       opp:'Opponent',send:'📲 Create request',sending:'Sending…',
       okOpen:'✅ Slot published in your division chat. As soon as someone taps “I’m in”, I’ll send you their contact.',
@@ -116,13 +116,14 @@ var T={
       needOpp:'Pick an opponent',needRange:'The window is shorter than the match duration',
       hintOpen:'The slot goes to your division chat. Any player from the division can take it.',
       hintDirect:'The challenge goes privately to the selected player.',
-      hintRange:'Mark every day and court that suits you — your opponent picks from them. The exact start is agreed between you.',
+      hintRange:'Mark every day and court that suits you — your opponent picks the exact ones.',
       you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.'}
 };
 var X=L?T.ru:T.en;
 var $=function(id){return document.getElementById(id)};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
 function pad(n){return n<10?'0'+n:''+n}
+function min2hm(m){return pad(Math.floor(m/60)%24)+':'+pad(m%60)}
 function hm2min(hm){var p=String(hm).split(':');return (parseInt(p[0],10)||0)*60+(parseInt(p[1],10)||0)}
 // Шаг 30 минут делаем через <select>: у <input type="time"> атрибут step игнорируется
 // системным WebView Telegram на iOS, и игрок может выкрутить произвольную минуту.
@@ -158,7 +159,7 @@ function renderOpen(){
       +'<div class="slot-head">'+avatar(s.from)+'<div><div class="who">'+esc(s.from_name)+(mine?' <span class="pill">'+esc(X.you)+'</span>':'')+'</div>'
       +'<div class="meta">'+esc(s.division||'')+(s.from&&s.from.rating?' · NTRP '+esc(s.from.rating):'')+'</div></div></div>'
       +'<div class="when">📅 <b>'+s.dates.map(fmtDay).map(esc).join(' · ')+'</b></div>'
-      +'<div class="when">🕐 <b>'+esc(s.time_from)+(s.time_to&&s.time_to!==s.time_from?'–'+esc(s.time_to):'')+'</b>'+(s.duration_min?' · '+(Number(s.duration_min)/60)+' ч':'')+'</div>'
+      +'<div class="when">🕐 <b>'+esc(s.time_from)+(s.time_to&&s.time_to!==s.time_from?'–'+esc(s.time_to):'')+'</b> <span class="pill">'+esc(X.durFixed)+'</span></div>'
       +(s.courts.length?'<div class="meta">📍 '+s.courts.map(esc).join(' · ')+'</div>':'<div class="meta">📍 '+esc(X.anyCourt)+'</div>')
       +(s.comment?'<div class="meta">💬 '+esc(s.comment)+'</div>':'')
       +'<div class="acts">'+(mine
@@ -173,6 +174,13 @@ function openPicker(id){
   var s=openSlots.filter(function(x){return x.challenge_id===id})[0]||myMatches.filter(function(x){return x.challenge_id===id})[0];
   if(!s)return;
   var dates=s.dates.map(function(d,i){return '<div class="chip'+(i===0?' on':'')+'" data-d="'+esc(d)+'" onclick="pickOne(this,\'d\')">'+esc(fmtDay(d))+'</div>'}).join('');
+  // Слоты на всю длительность матча с шагом 30 минут внутри интервала автора.
+  var dur=Number(s.duration_min||matchDuration);
+  var lo=hm2min(s.time_from||'00:00'),hi=hm2min(s.time_to||s.time_from||'23:59');
+  var times='';
+  for(var t=lo;t+dur<=Math.max(hi,lo+dur);t+=30){
+    times+='<div class="chip'+(t===lo?' on':'')+'" data-t="'+min2hm(t)+'" onclick="pickOne(this,\'t\')">'+min2hm(t)+'–'+min2hm(t+dur)+'</div>';
+  }
   var courts=s.courts.length
     ? s.courts.map(function(c,i){return '<div class="chip'+(i===0?' on':'')+'" data-c="'+esc(c)+'" onclick="pickOne(this,\'c\')">'+esc(c)+'</div>'}).join('')
     : '<div class="hint">'+esc(X.anyCourt)+'</div>';
@@ -182,6 +190,7 @@ function openPicker(id){
   el.innerHTML='<div class="sheet"><h3>'+esc(X.pickTitle)+'</h3>'
     +'<div class="hint">'+esc(s.from_name)+' · '+esc(s.time_from)+(s.time_to&&s.time_to!==s.time_from?'–'+esc(s.time_to):'')+'</div>'
     +'<label>'+esc(X.pickDate)+'</label><div class="chips" id="pkDates">'+dates+'</div>'
+    +'<label>'+esc(X.pickTime)+'</label><div class="chips" id="pkTimes">'+times+'</div>'
     +'<label>'+esc(X.pickCourt)+'</label><div class="chips" id="pkCourts">'+courts+'</div>'
     +'<button class="primary" onclick="confirmTake(\''+esc(id)+'\',this)">'+esc(X.accept)+'</button>'
     +'<button onclick="closePicker()">'+esc(L?'Отмена':'Cancel')+'</button>'
@@ -196,12 +205,13 @@ function pickOne(node,kind){
 }
 function confirmTake(id,btn){
   var d=document.querySelector('#pkDates .chip.on');
+  var tm=document.querySelector('#pkTimes .chip.on');
   var c=document.querySelector('#pkCourts .chip.on');
   var res=$('pkRes');res.className='res';
   if(!d){res.className='res err';res.textContent=X.needDate;return}
   btn.disabled=true;btn.textContent='…';
   fetch('/api/match/take',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,challenge_id:id,date:d.dataset.d,court:c?c.dataset.c:''
+    initData:initData,challenge_id:id,date:d.dataset.d,time:tm?tm.dataset.t:'',court:c?c.dataset.c:''
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     closePicker();load(true);showTab('mine');
@@ -218,7 +228,7 @@ function renderMine(){
     return '<div class="slot'+(agreed?' agreed':'')+'">'
       +'<div class="slot-head"><div><div class="who">'+(agreed?esc(opp.name||'—'):esc(X.waiting))+'</div>'
       +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(X.agreed)+'</span>':(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
-      +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?s.agreed_time:s.time_from)+'</b></div>'
+      +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?(s.agreed_time+'–'+min2hm(hm2min(s.agreed_time)+Number(s.duration_min||matchDuration))):s.time_from)+'</b></div>'
       +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))+'</div>':'')
       +(agreed&&opp.username?'<div class="acts"><button class="mini" onclick="openLink(\'https://t.me/'+esc(String(opp.username).replace(/^@/,''))+'\')">💬 '+(L?'Написать':'Message')+'</button></div>':'')
       +(!agreed&&iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')
@@ -249,7 +259,7 @@ function renderCounter(){
     +'<label>'+esc(X.pickDate)+'</label>'
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
     +'<div class="datestrip">'+days+'</div>'
-    +'<label>'+esc(X.time)+'</label><select id="cTime">'+timeOptions(s.agreed_time||s.time_from||'17:00')+'</select>'
+    +'<label>'+esc(X.pickTime)+' <span class="pill">'+esc(X.durFixed)+'</span></label><select id="cTime">'+timeOptions(s.agreed_time||s.time_from||'17:00')+'</select>'
     +'<label>'+esc(X.pickCourt)+'</label><select id="cCourt">'+courtOpts+'</select>'
     +'<button class="primary" onclick="submitCounter(this)">'+esc(X.counterSend)+'</button>'
     +'<div id="cRes" class="res"></div></div>';
@@ -299,8 +309,9 @@ function renderNew(){
     +'<label>'+esc(X.date)+(selDates.length?' <span class="pill">'+selDates.length+'</span>':'')+'</label>'
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
     +'<div class="datestrip" id="strip">'+days+'</div>'
-    +'<label>'+esc(X.time)+'</label>'
-    +'<div class="row"><select id="mFrom">'+timeOptions('17:00')+'</select><select id="mTo">'+timeOptions('20:00')+'</select><select id="mDur"><option value="60">1 ч</option><option value="90" selected>1.5 ч</option><option value="120">2 ч</option></select></div>'
+    +'<label>'+esc(X.time)+' <span class="pill">'+esc(X.durFixed)+'</span></label>'
+    +'<div class="row"><select id="mFrom">'+timeOptions('17:00')+'</select><select id="mTo">'+timeOptions('21:00')+'</select></div>'
+    +'<div class="hint">'+esc(X.timeHint)+'</div>'
     +'<label>'+esc(X.court)+(selCourts.length?' <span class="pill">'+selCourts.length+'</span>':'')+'</label><div class="chips">'+courtChips+'</div>'
     +'<div class="hint">'+esc(X.hintRange)+'</div>'
     +'<label>'+esc(X.comment)+'</label><textarea id="mComment" placeholder="'+esc(X.commentPh)+'"></textarea>'
@@ -317,13 +328,13 @@ function openLink(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blan
 
 function submitSlot(btn){
   var res=$('mRes');res.className='res';
-  var from=$('mFrom').value,to=$('mTo').value,dur=Number($('mDur').value);
+  var from=$('mFrom').value,to=$('mTo').value,dur=matchDuration;
   if(!selDates.length){res.className='res err';res.textContent=X.needDate;return}
   if(hm2min(to)-hm2min(from)<dur){res.className='res err';res.textContent=X.needRange;return}
   if(newMode==='direct'&&!selOpp){res.className='res err';res.textContent=X.needOpp;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,match_type:newMode,dates:selDates,time_from:from,time_to:to,duration_min:dur,
+    initData:initData,match_type:newMode,dates:selDates,time_from:from,time_to:to,
     courts:selCourts,comment:($('mComment').value||'').trim(),to_telegram_id:newMode==='direct'?selOpp:''
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
@@ -346,7 +357,7 @@ function load(keepTab){
     .then(function(r){return r.json()}).then(function(j){
       if(!j.ok)throw new Error(j.error||'Error');
       if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
-      me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];
+      me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];focusSlot=j.focus_slot||'';counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
       $('sub').textContent=division?(X.subDiv+division):X.subNone;
