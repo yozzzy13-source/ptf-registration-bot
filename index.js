@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
@@ -645,13 +645,21 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const v = await matchViewer(String(req.query.initData || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Раздел пока в тестовом режиме.' });
-    const players = await getLeagueProfiles();
+    const [players, history] = await Promise.all([
+      getLeagueProfiles(),
+      getLeagueMatchHistory().catch(() => new Map())
+    ]);
+    // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
+    // игрока открывается мгновенно, без второго запроса на сервер.
+    const matches = {};
+    for (const [pid, list] of history.entries()) matches[pid] = list;
     res.json({
       ok: true,
       lang: v.lang,
       user: { id: v.user.id, name: v.profile.name },
       season: await getSetting('season_number').catch(() => ''),
-      players
+      players,
+      matches
     });
   } catch (e) {
     console.error('league bootstrap failed:', e.message);

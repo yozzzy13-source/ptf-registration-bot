@@ -1,5 +1,5 @@
 import { sheets as sheetsClient } from './google.js';
-import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID } from './config.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID } from './config.js';
 import { nowISO, safe } from './util.js';
 
 const cache = new Map();
@@ -280,6 +280,9 @@ let profilesCache = { t: 0, v: null };
 // экран, увидит уже новые цифры, а не пятиминутной давности.
 export function invalidateLeagueCache() {
   profilesCache = { t: 0, v: null };
+  historyCache = { t: 0, v: null };
+  seasonPointsCache = { t: 0, v: null };
+  seasonHistCache = { t: 0, v: null };
   websitePlayersCache = { t: 0, v: null };
 }
 
@@ -298,6 +301,111 @@ function parseForm(v) {
   return String(v ?? '').trim().split(/\s+/).filter(Boolean)
     .map(x => x.toUpperCase().startsWith('W') ? 'W' : (x.toUpperCase().startsWith('L') ? 'L' : ''))
     .filter(Boolean);
+}
+
+// Универсальное чтение листа «шапка + строки» из чужой таблицы.
+async function readNamedSheet(spreadsheetId, titles, mustHaveHeader) {
+  for (const title of (Array.isArray(titles) ? titles : [titles])) {
+    let values;
+    try { values = await valuesGetFromSpreadsheet(spreadsheetId, `'${title}'!A:BZ`); }
+    catch (e) { continue; }                       // листа с таким именем нет — пробуем следующее
+    const headerRowIndex = values.findIndex(r => (r || []).map(normalizeHeader).includes(mustHaveHeader));
+    if (headerRowIndex < 0) continue;
+    const headers = values[headerRowIndex].map(normalizeHeader);
+    const rows = [];
+    for (let r = headerRowIndex + 1; r < values.length; r++) {
+      const row = values[r] || [];
+      const o = {};
+      headers.forEach((h, i) => { if (h) o[h] = String(row[i] ?? '').trim(); });
+      rows.push(o);
+    }
+    return { headers, rows };
+  }
+  return { headers: [], rows: [] };
+}
+
+// История матчей: лист Match_History_All даёт по строке на игрока на матч,
+// со счётом уже развёрнутым в его сторону и готовой меткой WIN/LOST.
+let historyCache = { t: 0, v: null };
+export async function getLeagueMatchHistory() {
+  if (historyCache.v && Date.now() - historyCache.t < PROFILES_CACHE_MS) return historyCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Match_History_All', 'player_id');
+  const byPlayer = new Map();
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    if (!pid || !r.opponent_name) continue;
+    const item = {
+      match_no: r.match || r.match_no || r.source_match || '',
+      date: r.match_date || '',
+      competition: r.competition || '',
+      opponent_id: r.opponent_id || '',
+      opponent: r.opponent_name || '',
+      opponent_photo: r.opponent_photo_url || '',
+      opponent_division: r.opponent_division || '',
+      division: r.player_division || '',
+      result: String(r.result || '').toUpperCase().startsWith('W') ? 'WIN' : 'LOST',
+      score: r.score || ''
+    };
+    if (!byPlayer.has(pid)) byPlayer.set(pid, []);
+    byPlayer.get(pid).push(item);
+  }
+  // Свежие сверху: сортируем по номеру матча, он растёт со временем.
+  for (const list of byPlayer.values()) list.sort((a, b) => Number(b.match_no || 0) - Number(a.match_no || 0));
+  historyCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
+}
+
+// Очки по сезонам: лист «Year ranking points» в главной таблице, колонки Season 1..10.
+// Заполняется вручную, поэтому читаем как есть и ничего не пересчитываем.
+let seasonPointsCache = { t: 0, v: null };
+async function getSeasonPoints() {
+  if (seasonPointsCache.v && Date.now() - seasonPointsCache.t < PROFILES_CACHE_MS) return seasonPointsCache.v;
+  const byPlayer = new Map();
+  if (!LEAGUE_RESULTS_SHEET_ID) return byPlayer;
+  const { headers, rows } = await readNamedSheet(LEAGUE_RESULTS_SHEET_ID,
+    ['Year ranking points', 'Year ranking points input'], 'player_id').catch(() => ({ headers: [], rows: [] }));
+  const seasonKeys = headers.filter(h => /^season_\d+$/.test(h));
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    if (!pid) continue;
+    const map = {};
+    for (const k of seasonKeys) {
+      const n = Number(k.replace('season_', ''));
+      const v = String(r[k] ?? '').trim();
+      if (v !== '') map[n] = pickNumber(v);
+    }
+    byPlayer.set(pid, map);
+  }
+  seasonPointsCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
+}
+
+// История сезонов: что за сезон, дивизион, место и очки. Место и итог плей-офф
+// в таблице пока не заполнены — тогда строка просто короче, врать не будем.
+let seasonHistCache = { t: 0, v: null };
+async function getSeasonHistory() {
+  if (seasonHistCache.v && Date.now() - seasonHistCache.t < PROFILES_CACHE_MS) return seasonHistCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Season_History_All', 'player_id');
+  const byPlayer = new Map();
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    const num = Number(r.season_number || 0);
+    if (!pid || !num) continue;
+    if (!byPlayer.has(pid)) byPlayer.set(pid, []);
+    byPlayer.get(pid).push({
+      number: num,
+      name: r.season_name || `Season ${num}`,
+      division: r.division || '',
+      regular_finish: r.regular_finish || '',
+      playoff: r.playoff_result || '',
+      position: r.final_position || '',
+      points: pickNumber(r.ranking_points || ''),
+      promotion: r.promotion_status || ''
+    });
+  }
+  for (const list of byPlayer.values()) list.sort((a, b) => b.number - a.number);
+  seasonHistCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
 }
 
 export async function getLeagueProfiles() {
@@ -343,6 +451,39 @@ export async function getLeagueProfiles() {
       titles: parseJsonCell(at(row, 'title_achievements_json'))
     });
   }
+  // Сезоны собираем из трёх мест: сам список — из истории сезонов, очки за сезон —
+  // из листа годовой гонки (там их вводят руками), титулы и повышения — из достижений.
+  const [pointsBy, histBy] = await Promise.all([
+    getSeasonPoints().catch(() => new Map()),
+    getSeasonHistory().catch(() => new Map())
+  ]);
+  for (const p of out) {
+    const pts = pointsBy.get(String(p.id)) || {};
+    const hist = histBy.get(String(p.id)) || [];
+    const numbers = new Set([...hist.map(h => h.number), ...Object.keys(pts).map(Number)]);
+    const seasons = [...numbers].filter(Boolean).sort((a, b) => b - a).map(n => {
+      const h = hist.find(x => x.number === n) || {};
+      const titles = (p.titles || [])
+        .map(t => String(t.type || t.title || ''))
+        .filter(t => t && new RegExp(`season\\s*${n}\\b`, 'i').test(t));
+      const promo = (p.titles || [])
+        .map(t => String(t.type || t.title || ''))
+        .filter(t => /promotion|relegation/i.test(t));
+      return {
+        number: n,
+        name: h.name || `Season ${n}`,
+        division: h.division || (n === Math.max(...numbers) ? p.division : ''),
+        position: h.position || '',
+        regular_finish: h.regular_finish || '',
+        playoff: h.playoff || '',
+        promotion: h.promotion || (promo.length ? promo[0] : ''),
+        points: h.points || pts[n] || 0,
+        titles
+      };
+    });
+    if (seasons.length) p.seasons_list = seasons;
+  }
+
   // Порядок как в годовой гонке: по месту, у кого места нет — в конец по очкам.
   out.sort((a, b) => (a.position || 9999) - (b.position || 9999) || b.points - a.points);
   profilesCache = { t: Date.now(), v: out };

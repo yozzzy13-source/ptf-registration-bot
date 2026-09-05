@@ -77,6 +77,24 @@ h1{font-size:22px;margin:14px 0 2px}
 .line .k{color:var(--muted)}
 button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:900;margin-top:12px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border)}
 .count{color:var(--muted);font-size:12px;margin:0 0 10px}
+/* карточка матча */
+.mt{background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:11px;margin-bottom:9px}
+.mt .top{text-align:center;color:var(--muted);font-size:11px;font-weight:700;margin-bottom:8px}
+.mt .body{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center}
+.mt .oav{width:44px;height:44px;border-radius:50%;object-fit:cover;background:#333;border:1px solid #444}
+.mt .oavh{width:44px;height:44px;border-radius:50%;background:#333;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#8f8a82}
+.mt .who{font-size:13.5px;font-weight:800;line-height:1.25}
+.mt .sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:900;color:var(--accent2);margin-top:3px}
+.mt .rs{font-size:10.5px;font-weight:900;padding:3px 9px;border-radius:999px;white-space:nowrap}
+.mt .rs.w{background:rgba(25,195,125,.16);color:#b7f3d8;border:1px solid #0f7a4f}
+.mt .rs.l{background:rgba(255,107,107,.14);color:#ffc9c9;border:1px solid #7a2f2f}
+.more{width:100%;border:1px dashed var(--border);background:transparent;color:var(--muted);border-radius:12px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;margin-top:2px}
+.season{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+.season:last-child{border-bottom:0}
+.season .sh{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.season .sn{font-size:14px;font-weight:800}
+.season .sp{font-size:13px;font-weight:900;color:var(--accent2);white-space:nowrap}
+.season .sd{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 </style>
 </head>
 <body>
@@ -95,7 +113,7 @@ button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-w
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
-var players=[],season='',me=null,mode='race',openId='',query='',divFilter='';
+var players=[],matches={},season='',me=null,mode='race',openId='',query='',divFilter='',raceQuery='',raceBucket='',allMatches=false;
 
 var T={
   ru:{title:'Лига',race:'Годовая гонка',players:'Игроки',
@@ -106,6 +124,8 @@ var T={
       ntrp:'NTRP',exp:'Опыт',country:'Страна',seasons:'Сезонов',division:'Дивизион',
       form:'Форма',record:'Рекорд',rank:'Место в гонке',points:'Очки гонки',
       titles:'Достижения',history:'Сезоны',back:'⬅️ Назад',site:'🌐 Открыть на сайте',
+      mhistory:'История матчей',showAll:'Показать все матчи',showLess:'Свернуть',noMatches:'Матчей пока нет.',
+      total:'Все',upper:'Upper A+B',lower:'Lower C+D',prime:'PRIME',place:'место',
       noData:'Данных пока нет.',divpos:'в дивизионе'},
   en:{title:'League',race:'Yearly Race',players:'Players',
       sub:'Year ranking, roster and player profiles.',
@@ -115,6 +135,8 @@ var T={
       ntrp:'NTRP',exp:'Experience',country:'Country',seasons:'Seasons',division:'Division',
       form:'Form',record:'Record',rank:'Race place',points:'Race points',
       titles:'Achievements',history:'Seasons',back:'⬅️ Back',site:'🌐 Open on the website',
+      mhistory:'Match history',showAll:'Show all matches',showLess:'Collapse',noMatches:'No matches yet.',
+      total:'Total',upper:'Upper A+B',lower:'Lower C+D',prime:'PRIME',place:'place',
       noData:'No data yet.',divpos:'in division'}
 };
 var X=L?T.ru:T.en;
@@ -139,7 +161,7 @@ function divisions(){
 }
 
 function showTab(t){
-  mode=t;openId='';
+  mode=t;openId='';allMatches=false;syncBackButton();
   ['race','players'].forEach(function(k){
     var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
   });
@@ -151,12 +173,37 @@ function showTab(t){
 }
 
 // --- Годовая гонка -----------------------------------------------------------
+// Корзины сезона — те же, что на сайте: Все, Upper A+B, Lower C+D, PRIME.
+function inBucket(p,b){
+  var d=String(p.division||'').replace(/^division\s*/i,'').trim().toUpperCase();
+  if(!b)return true;
+  if(b==='upper')return d==='A'||d==='B';
+  if(b==='lower')return d==='C'||d==='D';
+  if(b==='prime')return d==='PRIME'||d==='P';
+  return true;
+}
 function renderRace(){
+  var buckets=[['','total'],['upper','upper'],['lower','lower'],['prime','prime']];
+  var chips=buckets.map(function(b){
+    return '<div class="chip'+(raceBucket===b[0]?' on':'')+'" onclick="setBucket(\''+b[0]+'\')">'+esc(X[b[1]])+'</div>';
+  }).join('');
+  // отдельные чипы по дивизионам — появляются сами, когда дивизион есть в данных
+  var divChips=divisions().map(function(d){
+    return '<div class="chip'+(divFilter===d?' on':'')+'" onclick="setRaceDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
+  }).join('');
+  var q=raceQuery.trim().toLowerCase();
   var list=players.filter(function(p){return p.points>0||p.position>0})
+    .filter(function(p){return inBucket(p,raceBucket)})
+    .filter(function(p){return !divFilter||(p.division||'')===divFilter})
+    .filter(function(p){return !q||String(p.name||'').toLowerCase().indexOf(q)>=0})
     .slice().sort(function(a,b){return (a.position||9999)-(b.position||9999)||b.points-a.points});
-  if(!list.length){$('viewRace').innerHTML='<div class="empty">'+esc(X.noData)+'</div>';return}
-  $('viewRace').innerHTML=list.map(function(p,i){
-    var place=p.position||i+1;
+  var head='<input class="search" id="rq" placeholder="'+esc(X.search)+'" value="'+esc(raceQuery)+'" oninput="setRaceQuery(this.value)">'
+    +'<div class="chips">'+chips+'</div>'
+    +(divChips?'<div class="chips">'+divChips+'</div>':'')
+    +'<div class="count">'+esc(X.found)+list.length+'</div>';
+  if(!list.length){$('viewRace').innerHTML=head+'<div class="empty">'+esc(X.nobody)+'</div>';return}
+  $('viewRace').innerHTML=head+list.map(function(p,i){
+    var place=p.position||i+1;   // место всегда из общей гонки, фильтр его не пересчитывает
     return '<div class="rank'+(place<=3?' top':'')+'" onclick="openCard(\''+esc(p.id)+'\')">'
       +'<div class="pos">'+place+'</div>'
       +avatar(p,'av')
@@ -167,7 +214,12 @@ function renderRace(){
       +'<div class="pts"><b>'+p.points+'</b><span>'+esc(X.pts)+'</span></div>'
       +'</div>';
   }).join('');
+  var el=$('rq');
+  if(el&&raceQuery&&document.activeElement!==el){el.focus();el.setSelectionRange(raceQuery.length,raceQuery.length)}
 }
+function setBucket(b){raceBucket=b;divFilter='';renderRace()}
+function setRaceDiv(d){divFilter=(divFilter===d?'':d);renderRace()}
+function setRaceQuery(v){raceQuery=v;renderRace()}
 
 // --- Игроки ------------------------------------------------------------------
 function renderPlayers(){
@@ -229,30 +281,73 @@ function openCard(id){
       +stat(X.seasons,p.seasons||'')
     +'</div></div></div>';
 
-  if(p.titles&&p.titles.length){
-    h+='<div class="card"><h3>'+esc(X.titles)+'</h3>'
-      +p.titles.map(function(t){
-        var name=t.type||t.title||'';
-        return name?'<div class="line"><span>🏆 '+esc(name)+'</span>'+(t.season?'<span class="k">'+esc(t.season)+'</span>':'')+'</div>':'';
-      }).join('')+'</div>';
+  // История матчей: по умолчанию пять последних, ниже разворот на все.
+  var mine=matches[String(p.id)]||[];
+  h+='<div class="card"><h3>'+esc(X.mhistory)+(mine.length?' · '+mine.length:'')+'</h3>';
+  if(!mine.length)h+='<div class="empty" style="padding:10px 0">'+esc(X.noMatches)+'</div>';
+  else{
+    var shown=allMatches?mine:mine.slice(0,5);
+    h+=shown.map(matchCard).join('');
+    if(mine.length>5)h+='<button class="more" onclick="toggleMatches(\''+esc(p.id)+'\')">'+esc(allMatches?X.showLess:X.showAll+' ('+mine.length+')')+'</button>';
   }
+  h+='</div>';
+
   if(p.seasons_list&&p.seasons_list.length){
     h+='<div class="card"><h3>'+esc(X.history)+'</h3>'
       +p.seasons_list.map(function(s){
-        var right=[s.division?'Div '+s.division:'',s.finalPosition?'#'+s.finalPosition:'',s.points?s.points+' '+X.pts:''].filter(Boolean).join(' · ');
-        return '<div class="line"><span>'+esc(s.season||'')+'</span><span class="k">'+esc(right)+'</span></div>';
+        var meta=[];
+        if(s.division)meta.push('<span class="badge div">Div '+esc(s.division)+'</span>');
+        if(s.position)meta.push('<span class="badge gold">'+esc(s.position)+' '+esc(X.place)+'</span>');
+        else if(s.regular_finish)meta.push('<span class="badge">'+esc(s.regular_finish)+' '+esc(X.place)+'</span>');
+        if(s.playoff)meta.push('<span class="badge">'+esc(s.playoff)+'</span>');
+        if(s.promotion)meta.push('<span class="badge act">'+esc(s.promotion)+'</span>');
+        (s.titles||[]).forEach(function(t){meta.push('<span class="badge gold">🏆 '+esc(t)+'</span>')});
+        return '<div class="season"><div class="sh"><span class="sn">'+esc(s.name||('Season '+s.number))+'</span>'
+          +(s.points?'<span class="sp">'+s.points+' '+esc(X.pts)+'</span>':'')+'</div>'
+          +(meta.length?'<div class="sd">'+meta.join('')+'</div>':'')+'</div>';
       }).join('')+'</div>';
   }
+  // Достижения, уже показанные внутри сезонов, второй раз не повторяем.
+  var shownTitles={};
+  (p.seasons_list||[]).forEach(function(s){(s.titles||[]).forEach(function(t){shownTitles[t]=1})});
+  var rest=(p.titles||[]).map(function(t){return t.type||t.title||''}).filter(function(t){return t&&!shownTitles[t]});
+  if(rest.length){
+    h+='<div class="card"><h3>'+esc(X.titles)+'</h3>'
+      +rest.map(function(t){return '<div class="line"><span>🏆 '+esc(t)+'</span></div>'}).join('')+'</div>';
+  }
   if(p.profile_url)h+='<button onclick="openLink(\''+esc(/^https?:/i.test(p.profile_url)?p.profile_url:'https://www.phukettennis.com'+p.profile_url)+'\')">'+esc(X.site)+'</button>';
-  h+='<button onclick="showTab(\''+mode+'\')">'+esc(X.back)+'</button>';
 
   $('viewCard').innerHTML=h;
   $('tabs').classList.add('hidden');
   $('viewRace').classList.add('hidden');
   $('viewPlayers').classList.add('hidden');
   $('viewCard').classList.remove('hidden');
+  syncBackButton();
   window.scrollTo(0,0);
 }
+
+function matchCard(m){
+  var av=m.opponent_photo
+    ? '<img class="oav" src="'+esc(m.opponent_photo)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;oavh&quot;>'+esc(initials(m.opponent))+'</div>\'">'
+    : '<div class="oavh">'+esc(initials(m.opponent))+'</div>';
+  var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition].filter(Boolean).join(' · ');
+  return '<div class="mt"'+(m.opponent_id?' onclick="openCard(\''+esc(m.opponent_id)+'\')" style="cursor:pointer"':'')+'>'
+    +(top?'<div class="top">'+esc(top)+'</div>':'')
+    +'<div class="body">'+av
+    +'<div style="min-width:0"><div class="who">'+esc(m.opponent)+(m.opponent_division?' <span class="badge div">'+esc(m.opponent_division)+'</span>':'')+'</div>'
+    +'<div class="sc">'+esc(m.score||'—')+'</div></div>'
+    +'<div class="rs '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div>'
+    +'</div></div>';
+}
+function toggleMatches(id){allMatches=!allMatches;openCard(id)}
+
+// Штатная стрелка «Назад» в шапке Telegram: на Android на неё же приходит
+// аппаратная кнопка. Отдельная кнопка внизу страницы больше не нужна.
+function syncBackButton(){
+  if(!tg||!tg.BackButton)return;
+  if(openId)tg.BackButton.show();else tg.BackButton.hide();
+}
+if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(mode); });
 
 document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){showTab(b.dataset.t)}});
 
@@ -260,7 +355,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData),{cache:'no-
   .then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
-    players=j.players||[];season=j.season||'';me=j.user||null;
+    players=j.players||[];matches=j.matches||{};season=j.season||'';me=j.user||null;
     $('title').textContent=X.title;
     $('sub').textContent=X.sub+(season?' Season '+season+'.':'');
     document.querySelector('.tab[data-t="race"]').textContent=X.race;
