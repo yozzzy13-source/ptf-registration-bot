@@ -89,15 +89,62 @@ export async function setWebhook() {
   return call('setWebhook', { url: `${PUBLIC_URL}/webhook`, allowed_updates: ['message','callback_query','poll'] });
 }
 
-export async function setCommands() {
-  return call('setMyCommands', { commands: [
-    { command: 'start', description: 'Start / Main menu' },
-    { command: 'help', description: 'Help' },
+// Подсказка команд в Telegram — общая для всех, поэтому админские команды раньше
+// висели и у игроков. Теперь списки разведены по scope: игрокам — свой короткий,
+// админскому чату и личке админа — полный.
+//
+// Команды матчей (/match, /result, /book) в базовый список НЕ входят: их бот
+// добавляет персонально тем, кто в активном составе (setChatCommands ниже).
+export const PLAYER_COMMANDS = {
+  en: [
+    { command: 'menu', description: 'Main menu' },
     { command: 'language', description: 'Choose language' },
-    { command: 'admin', description: 'Open admin panel' },
-    { command: 'poll_stats', description: 'Admin: poll summary' },
     { command: 'cancel', description: 'Cancel current action' }
-  ]});
+  ],
+  ru: [
+    { command: 'menu', description: 'Главное меню' },
+    { command: 'language', description: 'Выбрать язык' },
+    { command: 'cancel', description: 'Отменить текущее действие' }
+  ]
+};
+
+export const MATCH_COMMANDS = {
+  en: [
+    { command: 'match', description: 'Matches: open slots and challenges' },
+    { command: 'result', description: 'Submit a match result' },
+    { command: 'book', description: 'Book a court' }
+  ],
+  ru: [
+    { command: 'match', description: 'Матчи: окна и вызовы' },
+    { command: 'result', description: 'Внести результат матча' },
+    { command: 'book', description: 'Забронировать корт' }
+  ]
+};
+
+// Рассылки (в том числе опросы и их статистика) живут в админской панели —
+// в подсказке команд их нет, чтобы не было двух путей к одному и тому же.
+export const ADMIN_COMMANDS = [
+  { command: 'menu', description: 'Main menu' },
+  { command: 'admin', description: 'Admin panel' },
+  { command: 'stats', description: 'Stats' },
+  { command: 'pending', description: 'Pending payments' },
+  { command: 'events', description: 'Events' },
+  { command: 'messages', description: 'Recent messages' },
+  { command: 'results_here', description: 'Bind the results feed to this topic' },
+  { command: 'cancel', description: 'Cancel current action' }
+];
+
+// Персональный список для одного чата. commands:[] снимает переопределение,
+// и человек снова видит общий список.
+export async function setChatCommands(chatId, commands) {
+  return call('setMyCommands', { commands, scope: { type: 'chat', chat_id: chatId } });
+}
+
+export async function setCommands() {
+  await call('setMyCommands', { commands: PLAYER_COMMANDS.en });
+  await call('setMyCommands', { commands: PLAYER_COMMANDS.en, scope: { type: 'all_private_chats' } });
+  await call('setMyCommands', { commands: PLAYER_COMMANDS.ru, scope: { type: 'all_private_chats' }, language_code: 'ru' });
+  return { ok: true };
 }
 
 export function inlineKeyboard(rows) { return { inline_keyboard: rows }; }

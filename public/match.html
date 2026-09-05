@@ -716,7 +716,10 @@ function load(keepTab){
         // Пришли по кнопке «Другое время / Другой корт» — сразу экран встречного предложения.
         if(counterSlotId){showTab('new');return}
         if(resultSlotId){showTab('res');return}
-        showTab(want==='mine'?'mine':(want==='new'?'new':'open'));
+        // ?tab= приходит из команд бота (/match, /result, /book) — открываем нужную вкладку сразу.
+        var allowed=['open','new','mine','res'];
+        if(canBookCourt)allowed.push('book');
+        showTab(allowed.indexOf(want)>=0?want:'open');
         // Переход по ссылке «Играю» из чата дивизиона — сразу открываем выбор даты и корта.
         if(focusSlot&&openSlots.some(function(s){return s.challenge_id===focusSlot}))openPicker(focusSlot);
       } else showTab(mode);

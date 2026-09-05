@@ -1,4 +1,4 @@
-import { sendMessage, editMessageText, answerCallbackQuery, copyMessage } from './telegram.js';
+import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS } from './telegram.js';
 import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, websiteKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
 import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants, isActiveLeaguePlayer } from './sheets.js';
 import { t, tt } from './i18n.js';
@@ -30,7 +30,54 @@ async function sendMain(chatId, lang, from=null) {
     const profile = await findApplicantByTelegramId(from?.id ?? chatId);
     if (profile) showMatches = await isActiveLeaguePlayer({ ...profile, id: from?.id ?? chatId });
   } catch(e) { console.error('main menu league check failed:', e.message); }
+  await syncUserCommands(chatId, l, { active: showMatches, admin: isAdminUser(from?.id ?? chatId) });
   await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l,{matches:showMatches})});
+}
+
+// Подсказка команд в личке. Общий список короткий; команды матчей добавляются
+// персонально тем, кто в активном составе, админу — полный админский список.
+// Кэш сигнатуры, чтобы не дёргать Telegram на каждое /start.
+const commandSignature = new Map();
+async function syncUserCommands(chatId, lang, { active=false, admin=false } = {}) {
+  const l = lang === 'ru' ? 'ru' : 'en';
+  const sig = `${admin ? 'admin' : (active ? 'match' : 'base')}:${l}`;
+  if (commandSignature.get(String(chatId)) === sig) return;
+  const list = admin ? [...ADMIN_COMMANDS, ...MATCH_COMMANDS[l]]
+    : (active ? [...MATCH_COMMANDS[l], ...PLAYER_COMMANDS[l]] : PLAYER_COMMANDS[l]);
+  try {
+    await setChatCommands(chatId, list);
+    commandSignature.set(String(chatId), sig);
+  } catch (e) { console.error('setChatCommands failed:', e.message); }
+}
+
+// /match, /result, /book — прямой вход в нужную вкладку мини-приложения.
+// Доступны только активным игрокам состава: остальным кнопка всё равно не откроется.
+async function sendMatchShortcut(chatId, lang, from, tab) {
+  const l = fallbackLang(lang);
+  let active = false;
+  try {
+    const profile = await findApplicantByTelegramId(from?.id ?? chatId);
+    if (profile) active = await isActiveLeaguePlayer({ ...profile, id: from?.id ?? chatId });
+  } catch (e) { console.error('match shortcut league check failed:', e.message); }
+  if (!active && !isAdminUser(from?.id)) {
+    return sendMessage(chatId, l === 'ru'
+      ? '🎾 Матчи доступны игрокам действующего состава лиги. Если ты уже подал заявку — дождись распределения по дивизионам.'
+      : '🎾 Matches are for players in the current league roster. If you have applied, wait until divisions are set.',
+      { reply_markup: mainKeyboard(l) });
+  }
+  const titles = {
+    open: l === 'ru' ? '🎾 Матчи и вызовы' : '🎾 Matches and challenges',
+    res:  l === 'ru' ? '📊 Внести результат матча' : '📊 Submit a match result',
+    book: l === 'ru' ? '🎾 Забронировать корт' : '🎾 Book a court'
+  };
+  const buttons = {
+    open: l === 'ru' ? '🎾 Открыть матчи' : '🎾 Open matches',
+    res:  l === 'ru' ? '📊 Внести результат' : '📊 Submit result',
+    book: l === 'ru' ? '🎾 Забронировать' : '🎾 Book'
+  };
+  return sendMessage(chatId, `<b>${titles[tab]}</b>`, {
+    reply_markup: { inline_keyboard: [[{ text: buttons[tab], web_app: { url: `${PUBLIC_URL}/match?tab=${tab}` } }]] }
+  });
 }
 function siteUrls(settings={}) { const home=settings.website_url || 'https://www.phukettennis.com/'; const base=home.replace(/\/$/,''); return {home, matches:settings.website_matches||`${base}/matches`, divisions:settings.website_divisions||`${base}/divisions`, yearlyRace:settings.website_yearly_race||`${base}/yearly-race`, players:settings.website_players||`${base}/players`, regulations:settings.website_regulations||`${base}/regulations`}; }
 
@@ -381,6 +428,12 @@ export async function handleMessage(msg) {
     return sendLanguageChoice(chatId);
   }
 
+  // Быстрые команды вместо похода через /start и меню.
+  if (text === '/menu' && isPrivate) return sendMain(chatId, lang, from);
+  if (text === '/match' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'open');
+  if (text === '/result' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'res');
+  if (text === '/book' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'book');
+
   if (text === '/help') {
     if (isAdminUser(from.id) && (msg.chat.type === 'group' || msg.chat.type === 'supergroup' || await getSetting('admin_chat_id') === String(chatId))) {
       return sendMessage(chatId, t(lang, 'admin_help'));
@@ -390,10 +443,13 @@ export async function handleMessage(msg) {
 
   if (text === '/admin_init') {
     if (!isAdminUser(from.id)) return sendMessage(chatId, t(lang, 'admin_only'));
+    // В админском чате подсказываем полный список админских команд.
+    await setChatCommands(chatId, ADMIN_COMMANDS).catch(e => console.error('admin commands failed:', e.message));
     return handleAdminInit(msg);
   }
   if (text === '/admin') {
     if (!isAdminUser(from.id)) return sendMessage(chatId, t(lang, 'admin_only'));
+    await syncUserCommands(chatId, lang, { admin: true });
     return sendMessage(chatId, '<b>PTF Admin Panel</b>\n\nOpen the admin WebApp to filter players, send broadcasts, request selfies and message players.', { reply_markup: adminPanelKeyboard(lang) });
   }
 
