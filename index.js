@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN } from './config.js';
+import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
@@ -304,7 +304,7 @@ async function matchViewer(initData) {
       ? 'Матчи откроются, когда ваше участие станет активным. Сейчас статус: ' + (league.status || 'не указан') + '.'
       : 'Matches unlock once your participation is active. Current status: ' + (league.status || 'not set') + '.' };
   }
-  return { ok:true, user, profile, division: league.division, lang };
+  return { ok:true, user, profile, division: league.division, lang, isAdmin: ADMIN_IDS.includes(String(user.id)) };
 }
 
 app.get('/api/match/bootstrap', async (req, res) => {
@@ -327,7 +327,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
     });
     res.json({
       ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
-      courts, opponents, duration_min: MATCH_DURATION_MIN,
+      courts, opponents, duration_min: MATCH_DURATION_MIN, is_admin: v.isAdmin,
       open_slots: openSlots.map(shape),
       my_matches: mySlots.map(shape),
       focus_slot: String(req.query.slot || ''),
@@ -390,7 +390,7 @@ app.post('/api/match/take', async (req, res) => {
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const result = await claimSlot(req.body.challenge_id, {
       telegram_id: v.user.id, name: v.profile.name, username: v.user.username || v.profile.telegram_username || ''
-    }, { date: req.body.date, court: req.body.court, time: req.body.time });
+    }, { date: req.body.date, court: req.body.court, time: req.body.time }, { allowSelf: v.isAdmin });
     if (!result.ok) {
       const messages = {
         taken:'This slot has just been taken.', own:'This is your own slot.', closed:'This slot is closed.',

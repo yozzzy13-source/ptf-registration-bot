@@ -82,7 +82,7 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
-var me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='',matchDuration=120;
+var isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Мои матчи',
@@ -164,6 +164,8 @@ function renderOpen(){
       +(s.comment?'<div class="meta">💬 '+esc(s.comment)+'</div>':'')
       +'<div class="acts">'+(mine
           ?'<button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button>'
+            // админу даём откликнуться на своё окно — чтобы прогнать цепочку в одиночку
+            +(isAdmin?'<button class="mini primary" onclick="openPicker(\''+esc(s.challenge_id)+'\')">'+esc(X.play)+' 🧪</button>':'')
           :'<button class="mini primary" onclick="openPicker(\''+esc(s.challenge_id)+'\')">'+esc(X.play)+'</button>')
       +'</div></div>';
   }).join('');
@@ -357,7 +359,7 @@ function load(keepTab){
     .then(function(r){return r.json()}).then(function(j){
       if(!j.ok)throw new Error(j.error||'Error');
       if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
-      me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);
+      me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];focusSlot=j.focus_slot||'';counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
       $('sub').textContent=division?(X.subDiv+division):X.subNone;

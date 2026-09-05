@@ -200,7 +200,9 @@ async function withClaimLock(key, fn) {
 
 // Отклик на окно = предложение конкретных даты/корта. Матч назначается только
 // после подтверждения второй стороной (как заявка на тренировку у тренера).
-export async function claimSlot(challengeId, taker = {}, choice = {}) {
+// allowSelf — тестовый режим для админа: позволяет откликнуться на собственное окно,
+// чтобы прогнать всю цепочку (отклик → встречное → подтверждение → бронь) в одиночку.
+export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
@@ -209,7 +211,7 @@ export async function claimSlot(challengeId, taker = {}, choice = {}) {
       return { ok: false, reason: String(slot.to_telegram_id) === String(taker.telegram_id) ? 'already_yours' : 'taken', slot };
     }
     if (['cancelled', 'declined', 'expired'].includes(status)) return { ok: false, reason: 'closed', slot };
-    if (String(slot.from_telegram_id) === String(taker.telegram_id)) return { ok: false, reason: 'own', slot };
+    if (!opts.allowSelf && String(slot.from_telegram_id) === String(taker.telegram_id)) return { ok: false, reason: 'own', slot };
     if (slot.to_telegram_id && String(slot.to_telegram_id) !== String(taker.telegram_id)) return { ok: false, reason: 'not_for_you', slot };
 
     const dates = cellToList(slot.dates);
