@@ -142,6 +142,7 @@ export const MATCH_COMMANDS = {
 export const ADMIN_COMMANDS = [
   { command: 'help', description: 'Admin commands' },
   { command: 'overview', description: 'League overview: matches, courts, results' },
+  { command: 'league', description: 'League frontend (test)' },
   { command: 'admin', description: 'Admin panel' },
   { command: 'stats', description: 'Stats' },
   { command: 'pending', description: 'Pending payments' },

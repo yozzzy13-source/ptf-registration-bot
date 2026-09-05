@@ -264,6 +264,91 @@ export async function getWebsitePlayers() {
   return players;
 }
 
+// ---------------------------------------------------------------------------
+// Витрина лиги для мини-приложения: годовая гонка, список игроков, карточка.
+//
+// Лист Frontend_Profile_All в таблице профилей — это готовый слой, который
+// собирает сайт: место в гонке, очки, матчи, победы, win rate, дивизион, NTRP,
+// опыт, национальность, форму, фото и достижения. Ничего не пересчитываем,
+// только читаем — иначе цифры в боте и на сайте разъедутся.
+// ---------------------------------------------------------------------------
+const PROFILE_SHEET_TITLE = 'Frontend_Profile_All';
+const PROFILES_CACHE_MS = 5 * 60 * 1000;
+let profilesCache = { t: 0, v: null };
+
+// Сбрасывается, когда бот записал подтверждённый счёт: следующий, кто откроет
+// экран, увидит уже новые цифры, а не пятиминутной давности.
+export function invalidateLeagueCache() {
+  profilesCache = { t: 0, v: null };
+  websitePlayersCache = { t: 0, v: null };
+}
+
+function pickNumber(v) {
+  const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.').replace('%', ''));
+  return Number.isFinite(n) ? n : 0;
+}
+function parseJsonCell(v) {
+  const raw = String(v ?? '').trim();
+  if (!raw || raw === '[]') return [];
+  try { const out = JSON.parse(raw); return Array.isArray(out) ? out : []; }
+  catch (e) { return []; }
+}
+// «WIN WIN LOST WIN» → ['W','W','L','W'] от старого к новому.
+function parseForm(v) {
+  return String(v ?? '').trim().split(/\s+/).filter(Boolean)
+    .map(x => x.toUpperCase().startsWith('W') ? 'W' : (x.toUpperCase().startsWith('L') ? 'L' : ''))
+    .filter(Boolean);
+}
+
+export async function getLeagueProfiles() {
+  if (profilesCache.v && Date.now() - profilesCache.t < PROFILES_CACHE_MS) return profilesCache.v;
+  const values = await valuesGetFromSpreadsheet(WEBSITE_SPREADSHEET_ID, `'${PROFILE_SHEET_TITLE}'!A:BZ`);
+  const headerRowIndex = values.findIndex(r => (r || []).map(normalizeHeader).includes('player_name'));
+  if (headerRowIndex < 0) return [];
+  const headers = values[headerRowIndex].map(normalizeHeader);
+  const at = (row, key) => {
+    const i = headers.indexOf(key);
+    return i < 0 ? '' : String(row[i] ?? '').trim();
+  };
+  const out = [];
+  for (let r = headerRowIndex + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    const name = at(row, 'player_name');
+    if (!name) continue;
+    out.push({
+      id: at(row, 'player_id'),
+      slug: at(row, 'player_slug'),
+      name,
+      photo: at(row, 'player_photo_url'),
+      division: at(row, 'current_division'),
+      position: pickNumber(at(row, 'position')),
+      points: pickNumber(at(row, 'total_ranking_points')),
+      seasons: pickNumber(at(row, 'seasons_played')),
+      matches: pickNumber(at(row, 'matches_played')),
+      wins: pickNumber(at(row, 'wins')),
+      losses: pickNumber(at(row, 'losses')),
+      win_rate: at(row, 'win_rate'),
+      status: at(row, 'status'),
+      division_position: at(row, 'division_position'),
+      form: parseForm(at(row, 'recent_form')),
+      ntrp: at(row, 'ntrp'),
+      experience: at(row, 'experience'),
+      nationality: at(row, 'nationality'),
+      gender: at(row, 'gender'),
+      hand: at(row, 'preferred_hand'),
+      style: at(row, 'playing_style'),
+      joined: at(row, 'joined_ptf'),
+      profile_url: at(row, 'profile_url_by_id') || at(row, 'profile_url_by_name'),
+      seasons_list: parseJsonCell(at(row, 'league_seasons_json')),
+      titles: parseJsonCell(at(row, 'title_achievements_json'))
+    });
+  }
+  // Порядок как в годовой гонке: по месту, у кого места нет — в конец по очкам.
+  out.sort((a, b) => (a.position || 9999) - (b.position || 9999) || b.points - a.points);
+  profilesCache = { t: Date.now(), v: out };
+  return out;
+}
+
 // Ссылка на страницу игрока на сайте по имени — для ленты результатов,
 // где имена победителя и проигравшего кликабельны.
 export async function getWebsiteProfileUrl(name) {

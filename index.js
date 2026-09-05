@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getLeagueProfiles, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
@@ -33,6 +33,7 @@ app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
 function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
 app.get('/participants', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'participants.html')); });
 app.get('/match', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'match.html')); });
+app.get('/league', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
 
 // --- Календарь -------------------------------------------------------------
 // /ics отдаёт сам файл события, /cal — страница мини-приложения с кнопкой:
@@ -636,6 +637,27 @@ app.post('/api/match/manual', async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
 });
 
+
+// Витрина лиги: годовая гонка, список игроков, карточка игрока.
+// Пока открыта только админу — включим всем, когда утвердим вид.
+app.get('/api/league/bootstrap', async (req, res) => {
+  try {
+    const v = await matchViewer(String(req.query.initData || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Раздел пока в тестовом режиме.' });
+    const players = await getLeagueProfiles();
+    res.json({
+      ok: true,
+      lang: v.lang,
+      user: { id: v.user.id, name: v.profile.name },
+      season: await getSetting('season_number').catch(() => ''),
+      players
+    });
+  } catch (e) {
+    console.error('league bootstrap failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
 
 // Свободная бронь корта: не привязана к матчу. Пока доступна админам —
 // COURT_BOOKING_OPEN=true открывает её всем активным игрокам.

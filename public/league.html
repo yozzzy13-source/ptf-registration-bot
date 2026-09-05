@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PTF League</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#141414;--card:#202020;--card2:#292929;--text:#f6f4ef;--muted:#a9a49b;--accent:#ef5f00;--accent2:#ff8a2a;--border:#3a3a3a;--win:#19c37d;--lose:#ff6b6b;--gold:#e8b93a}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#0f0f0f,#1b1b1b);color:var(--text);min-height:100vh;padding:0 14px 40px}
+.wrap{max-width:620px;margin:0 auto}
+h1{font-size:22px;margin:14px 0 2px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 12px}
+.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,#101010 72%,rgba(16,16,16,0));margin-bottom:4px}
+.tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1.5px solid var(--border);font-size:13px;font-weight:800;cursor:pointer;user-select:none;opacity:.55}
+.tab.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14)}
+.hidden{display:none}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
+
+/* поиск и фильтры */
+.search{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--card2);color:var(--text);font-size:15px;margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+.chip{padding:8px 13px;border-radius:11px;background:var(--card2);border:1.5px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;opacity:.6}
+.chip.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14);color:#ffd2a8}
+
+/* годовая гонка */
+.rank{display:grid;grid-template-columns:30px 38px 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:14px;background:var(--card);border:1px solid var(--border);margin-bottom:8px;cursor:pointer}
+.rank.top{border-color:rgba(232,185,58,.5);background:linear-gradient(90deg,rgba(232,185,58,.10),var(--card) 60%)}
+.rank .pos{font-size:15px;font-weight:900;text-align:center;color:var(--muted)}
+.rank.top .pos{color:var(--gold)}
+.rank .nm{font-size:14.5px;font-weight:800;line-height:1.25;min-width:0}
+.rank .sub2{color:var(--muted);font-size:11.5px;margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pts{text-align:right}
+.pts b{font-size:17px;font-weight:900;color:var(--accent2);display:block;line-height:1.1}
+.pts span{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:#333;border:1px solid #444;flex:0 0 38px}
+.avph{width:38px;height:38px;border-radius:50%;background:#333;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#8f8a82}
+
+/* бейджи */
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;border:1px solid var(--border);background:#303030;color:var(--muted);white-space:nowrap}
+.badge.div{background:rgba(239,95,0,.16);border-color:var(--accent);color:#ffd2a8}
+.badge.act{background:rgba(25,195,125,.15);border-color:#0f7a4f;color:#b7f3d8}
+.badge.gold{background:rgba(232,185,58,.15);border-color:var(--gold);color:#f4e2a8}
+
+/* форма W/L */
+.form{display:flex;gap:4px}
+.fm{width:17px;height:17px;border-radius:5px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;color:#111}
+.fm.w{background:var(--win)}
+.fm.l{background:var(--lose)}
+
+/* список игроков сеткой */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pcard{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;cursor:pointer}
+.pcard .ph{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#2a2a2a}
+.pcard .phh{width:100%;aspect-ratio:1/1;background:#2a2a2a;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#4d4a45}
+.pcard .body{padding:10px 11px 12px}
+.pcard .body .nm{font-size:13.5px;font-weight:800;line-height:1.25}
+.pcard .body .row{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+
+/* карточка игрока */
+.hero{background:var(--card);border:1px solid var(--border);border-radius:20px;overflow:hidden;margin-bottom:12px}
+.hero img{width:100%;max-height:330px;object-fit:cover;display:block;background:#2a2a2a}
+.hero .heroph{width:100%;height:220px;background:#2a2a2a;display:flex;align-items:center;justify-content:center;font-size:52px;font-weight:900;color:#4d4a45}
+.hero .info{padding:14px 15px 16px}
+.hero h2{margin:0 0 8px;font-size:21px;line-height:1.2}
+.hero .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat{background:var(--card2);border:1px solid var(--border);border-radius:13px;padding:9px 11px}
+.stat .k{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.stat .v{font-size:16px;font-weight:900;margin-top:2px}
+.stat .v.acc{color:var(--accent2)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:15px;margin-bottom:12px}
+.card h3{margin:0 0 10px;font-size:16px}
+.line{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13.5px}
+.line:last-child{border-bottom:0}
+.line .k{color:var(--muted)}
+button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:900;margin-top:12px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border)}
+.count{color:var(--muted);font-size:12px;margin:0 0 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Лига</h1>
+  <p class="sub" id="sub">Загружаем…</p>
+  <div class="tabs" id="tabs">
+    <div class="tab on" data-t="race">Годовая гонка</div>
+    <div class="tab" data-t="players">Игроки</div>
+  </div>
+  <div id="viewRace"></div>
+  <div id="viewPlayers" class="hidden"></div>
+  <div id="viewCard" class="hidden"></div>
+</div>
+<script>
+var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
+var initData=(tg&&tg.initData)||'';
+var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+var players=[],season='',me=null,mode='race',openId='',query='',divFilter='';
+
+var T={
+  ru:{title:'Лига',race:'Годовая гонка',players:'Игроки',
+      sub:'Годовой рейтинг, состав и профили игроков.',
+      search:'Поиск по имени…',all:'Все',
+      pts:'очков',pos:'место',found:'Найдено: ',nobody:'Никого не нашлось — попробуй другое имя.',
+      matches:'Матчи',wins:'Победы',losses:'Поражения',winrate:'Win rate',mShort:'матчей',wShort:'побед',
+      ntrp:'NTRP',exp:'Опыт',country:'Страна',seasons:'Сезонов',division:'Дивизион',
+      form:'Форма',record:'Рекорд',rank:'Место в гонке',points:'Очки гонки',
+      titles:'Достижения',history:'Сезоны',back:'⬅️ Назад',site:'🌐 Открыть на сайте',
+      noData:'Данных пока нет.',divpos:'в дивизионе'},
+  en:{title:'League',race:'Yearly Race',players:'Players',
+      sub:'Year ranking, roster and player profiles.',
+      search:'Search by name…',all:'All',
+      pts:'points',pos:'place',found:'Found: ',nobody:'Nobody matched — try another name.',
+      matches:'Matches',wins:'Wins',losses:'Losses',winrate:'Win rate',mShort:'played',wShort:'won',
+      ntrp:'NTRP',exp:'Experience',country:'Country',seasons:'Seasons',division:'Division',
+      form:'Form',record:'Record',rank:'Race place',points:'Race points',
+      titles:'Achievements',history:'Seasons',back:'⬅️ Back',site:'🌐 Open on the website',
+      noData:'No data yet.',divpos:'in division'}
+};
+var X=L?T.ru:T.en;
+var $=function(id){return document.getElementById(id)};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+function initials(n){return String(n||'?').trim().split(/\s+/).slice(0,2).map(function(w){return w[0]||''}).join('').toUpperCase()}
+function openLink(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}
+
+function avatar(p,cls){
+  return p.photo
+    ? '<img class="'+cls+'" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;'+cls+'h&quot;>'+esc(initials(p.name))+'</div>\'">'
+    : '<div class="'+cls+'h">'+esc(initials(p.name))+'</div>';
+}
+function formRow(form){
+  if(!form||!form.length)return '';
+  return '<span class="form">'+form.map(function(f){return '<span class="fm '+(f==='W'?'w':'l')+'">'+f+'</span>'}).join('')+'</span>';
+}
+function divisions(){
+  var seen={},out=[];
+  players.forEach(function(p){var d=(p.division||'').trim();if(d&&!seen[d]){seen[d]=1;out.push(d)}});
+  return out.sort();
+}
+
+function showTab(t){
+  mode=t;openId='';
+  ['race','players'].forEach(function(k){
+    var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
+  });
+  $('tabs').classList.remove('hidden');
+  $('viewCard').classList.add('hidden');
+  $('viewRace').classList.toggle('hidden',t!=='race');
+  $('viewPlayers').classList.toggle('hidden',t!=='players');
+  if(t==='race')renderRace();else renderPlayers();
+}
+
+// --- Годовая гонка -----------------------------------------------------------
+function renderRace(){
+  var list=players.filter(function(p){return p.points>0||p.position>0})
+    .slice().sort(function(a,b){return (a.position||9999)-(b.position||9999)||b.points-a.points});
+  if(!list.length){$('viewRace').innerHTML='<div class="empty">'+esc(X.noData)+'</div>';return}
+  $('viewRace').innerHTML=list.map(function(p,i){
+    var place=p.position||i+1;
+    return '<div class="rank'+(place<=3?' top':'')+'" onclick="openCard(\''+esc(p.id)+'\')">'
+      +'<div class="pos">'+place+'</div>'
+      +avatar(p,'av')
+      +'<div style="min-width:0"><div class="nm">'+esc(p.name)+'</div>'
+      +'<div class="sub2">'+(p.division?'<span class="badge div">'+esc(p.division)+'</span>':'')
+        +'<span>'+p.matches+' '+esc(X.mShort)+' · '+p.wins+' '+esc(X.wShort)+'</span>'
+        +(p.win_rate?'<span>'+esc(p.win_rate)+'</span>':'')+'</div></div>'
+      +'<div class="pts"><b>'+p.points+'</b><span>'+esc(X.pts)+'</span></div>'
+      +'</div>';
+  }).join('');
+}
+
+// --- Игроки ------------------------------------------------------------------
+function renderPlayers(){
+  var chips='<div class="chip'+(divFilter===''?' on':'')+'" onclick="setDiv(\'\')">'+esc(X.all)+'</div>'
+    +divisions().map(function(d){
+      return '<div class="chip'+(divFilter===d?' on':'')+'" onclick="setDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
+    }).join('');
+  var q=query.trim().toLowerCase();
+  var list=players.filter(function(p){
+    if(divFilter&&(p.division||'')!==divFilter)return false;
+    if(q&&String(p.name||'').toLowerCase().indexOf(q)<0)return false;
+    return true;
+  });
+  var head='<input class="search" id="q" placeholder="'+esc(X.search)+'" value="'+esc(query)+'" oninput="setQuery(this.value)">'
+    +'<div class="chips">'+chips+'</div>'
+    +'<div class="count">'+esc(X.found)+list.length+'</div>';
+  var body=list.length
+    ? '<div class="grid">'+list.map(function(p){
+        return '<div class="pcard" onclick="openCard(\''+esc(p.id)+'\')">'+avatar(p,'ph')
+          +'<div class="body"><div class="nm">'+esc(p.name)+'</div><div class="row">'
+          +(p.division?'<span class="badge div">'+esc(p.division)+'</span>':'')
+          +(String(p.status||'').toLowerCase()==='active'?'<span class="badge act">Active</span>':'')
+          +'</div><div class="row">'+formRow(p.form)+'</div></div></div>';
+      }).join('')+'</div>'
+    : '<div class="empty">'+esc(X.nobody)+'</div>';
+  $('viewPlayers').innerHTML=head+body;
+  var el=$('q');
+  if(el&&document.activeElement!==el&&query){el.focus();el.setSelectionRange(query.length,query.length)}
+}
+function setQuery(v){query=v;renderPlayers()}
+function setDiv(d){divFilter=d;renderPlayers()}
+
+// --- Карточка игрока ---------------------------------------------------------
+function openCard(id){
+  var p=players.filter(function(x){return String(x.id)===String(id)})[0];
+  if(!p)return;
+  openId=id;
+  var stat=function(k,v,acc){return v?'<div class="stat"><div class="k">'+esc(k)+'</div><div class="v'+(acc?' acc':'')+'">'+esc(v)+'</div></div>':''};
+  var badges='';
+  if(p.division)badges+='<span class="badge div">'+esc(X.division)+' '+esc(p.division)+'</span>';
+  if(p.position)badges+='<span class="badge gold">'+esc(X.rank)+' #'+p.position+'</span>';
+  if(p.division_position)badges+='<span class="badge">#'+esc(p.division_position)+' '+esc(X.divpos)+'</span>';
+  if(String(p.status||'').toLowerCase()==='active')badges+='<span class="badge act">Active</span>';
+  else if(p.status)badges+='<span class="badge">'+esc(p.status)+'</span>';
+
+  var h='<div class="hero">'
+    +(p.photo?'<img src="'+esc(p.photo)+'" alt="">':'<div class="heroph">'+esc(initials(p.name))+'</div>')
+    +'<div class="info"><h2>'+esc(p.name)+'</h2>'
+    +'<div class="row">'+badges+'</div>'
+    +(p.form&&p.form.length?'<div class="row"><span class="badge">'+esc(X.form)+'</span>'+formRow(p.form)+'</div>':'')
+    +'<div class="stats">'
+      +stat(X.points,p.points||'',true)
+      +stat(X.matches,p.matches||'')
+      +stat(X.record,(p.wins||0)+'–'+(p.losses||0))
+      +stat(X.winrate,p.win_rate||'')
+      +stat(X.ntrp,p.ntrp||'')
+      +stat(X.exp,p.experience||'')
+      +stat(X.country,p.nationality||'')
+      +stat(X.seasons,p.seasons||'')
+    +'</div></div></div>';
+
+  if(p.titles&&p.titles.length){
+    h+='<div class="card"><h3>'+esc(X.titles)+'</h3>'
+      +p.titles.map(function(t){
+        var name=t.type||t.title||'';
+        return name?'<div class="line"><span>🏆 '+esc(name)+'</span>'+(t.season?'<span class="k">'+esc(t.season)+'</span>':'')+'</div>':'';
+      }).join('')+'</div>';
+  }
+  if(p.seasons_list&&p.seasons_list.length){
+    h+='<div class="card"><h3>'+esc(X.history)+'</h3>'
+      +p.seasons_list.map(function(s){
+        var right=[s.division?'Div '+s.division:'',s.finalPosition?'#'+s.finalPosition:'',s.points?s.points+' '+X.pts:''].filter(Boolean).join(' · ');
+        return '<div class="line"><span>'+esc(s.season||'')+'</span><span class="k">'+esc(right)+'</span></div>';
+      }).join('')+'</div>';
+  }
+  if(p.profile_url)h+='<button onclick="openLink(\''+esc(/^https?:/i.test(p.profile_url)?p.profile_url:'https://www.phukettennis.com'+p.profile_url)+'\')">'+esc(X.site)+'</button>';
+  h+='<button onclick="showTab(\''+mode+'\')">'+esc(X.back)+'</button>';
+
+  $('viewCard').innerHTML=h;
+  $('tabs').classList.add('hidden');
+  $('viewRace').classList.add('hidden');
+  $('viewPlayers').classList.add('hidden');
+  $('viewCard').classList.remove('hidden');
+  window.scrollTo(0,0);
+}
+
+document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){showTab(b.dataset.t)}});
+
+fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData),{cache:'no-store'})
+  .then(function(r){return r.json()}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Error');
+    if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
+    players=j.players||[];season=j.season||'';me=j.user||null;
+    $('title').textContent=X.title;
+    $('sub').textContent=X.sub+(season?' Season '+season+'.':'');
+    document.querySelector('.tab[data-t="race"]').textContent=X.race;
+    document.querySelector('.tab[data-t="players"]').textContent=X.players;
+    showTab('race');
+  }).catch(function(e){
+    $('sub').textContent='';
+    $('viewRace').innerHTML='<div class="empty" style="color:#ff6b6b">'+esc(e.message)+'</div>';
+  });
+</script>
+</body>
+</html>

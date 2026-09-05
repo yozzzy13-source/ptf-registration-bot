@@ -1,6 +1,6 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS } from './telegram.js';
 import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, websiteKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getManualParticipants, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
@@ -566,6 +566,11 @@ export async function handleMessage(msg) {
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/match_test') return adminMatchTest(msg);
     if (text === '/overview' || text === '/matches') return adminMatchesOverview(msg);
+    if (text === '/league') {
+      return sendMessage(chatId, '<b>🏆 Лига — тест нового интерфейса</b>\n\nГодовая гонка, список игроков и карточка игрока. Пока видно только вам.', {
+        reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть', web_app: { url: `${PUBLIC_URL}/league` } }]] }
+      });
+    }
     // Выполняется прямо в той группе и теме, куда должны падать результаты.
     if (text === '/results_here') {
       await setSetting('results_chat_id', String(msg.chat.id), 'Группа для ленты результатов матчей');
@@ -744,6 +749,8 @@ export async function handleCallback(q) {
       return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
     }
     const write = await writeConfirmedResult(r.slot).catch(e => ({ status:'error', reason:e.message }));
+    // Счёт ушёл в таблицы лиги — витрина должна показать новые цифры сразу.
+    invalidateLeagueCache();
     await notifyResultConfirmed(r.slot, describeWrite(write)).catch(e => console.error('notifyResultConfirmed failed:', e.message));
     // Лента лиги: общая группа + личная рассылка активным игрокам.
     broadcastResult(r.slot).catch(e => console.error('broadcastResult failed:', e.message));
