@@ -458,6 +458,29 @@ export async function adminMatchTest(msg) {
     lines.push(`доступ: <b>НЕТ ⚠️</b>`, `<code>${escapeHtml(e.message).slice(0, 300)}</code>`);
     lines.push('', 'Чаще всего это значит, что таблица не расшарена сервисному аккаунту как «Редактор».');
   }
+  // Вторая причина, по которой раздел матчей может не открыться, — статус игрока.
+  lines.push('', '<b>Ваш доступ к матчам</b>');
+  try {
+    const { getPlayerLeagueInfo } = await import('./sheets.js');
+    const profile = await findApplicantByTelegramId(msg.from.id).catch(() => null);
+    if (!profile) {
+      lines.push('анкета: <b>не найдена ⚠️</b> — раздел матчей закрыт');
+    } else {
+      lines.push(`анкета: <b>${escapeHtml(profile.name || '(без имени)')}</b>`);
+      const info = await getPlayerLeagueInfo({ ...profile, id: msg.from.id });
+      if (!info.found) {
+        lines.push(`в составе: <b>НЕТ ⚠️</b>${info.matched_by === 'name_conflict' ? ' (в таблице участников у этого имени указан другой telegram_id)' : ''}`);
+        lines.push('Проверьте, что имя в анкете совпадает с именем в таблице участников.');
+      } else {
+        const active = String(info.status || '').toLowerCase() === 'active';
+        lines.push(`в составе: <b>да</b> (привязка по ${escapeHtml(info.matched_by === 'telegram_id' ? 'telegram_id' : 'имени')})`);
+        lines.push(`дивизион: <b>${escapeHtml(info.division || '— не указан ⚠️')}</b>`);
+        lines.push(`статус: <b>${escapeHtml(info.status || '—')}</b>`);
+        lines.push(active && info.division ? 'кнопка «Матчи» — <b>показывается ✅</b>' : 'кнопка «Матчи» — <b>скрыта</b>: нужен статус active и дивизион');
+      }
+    }
+  } catch (e) { lines.push(`<code>${escapeHtml(e.message).slice(0, 200)}</code>`); }
+
   return sendMessage(msg.chat.id, `<b>Проверка таблицы матчей</b>\n\n${lines.join('\n')}`);
 }
 
