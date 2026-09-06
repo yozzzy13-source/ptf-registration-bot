@@ -12,8 +12,8 @@ body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-seri
 .wrap{max-width:620px;margin:0 auto}
 h1{font-size:22px;margin:14px 0 2px}
 .sub{color:var(--muted);font-size:13px;margin:0 0 12px}
-.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,#101010 72%,rgba(16,16,16,0));margin-bottom:4px}
-.tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1.5px solid var(--border);font-size:13px;font-weight:800;cursor:pointer;user-select:none;opacity:.55}
+.tabs{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 0 8px;background:linear-gradient(180deg,#101010 78%,rgba(16,16,16,0));margin-bottom:4px}
+.tab{text-align:center;padding:9px 4px;border-radius:11px;background:var(--card2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;cursor:pointer;user-select:none;opacity:.55;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tab.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14)}
 .hidden{display:none}
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
@@ -95,6 +95,28 @@ button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-w
 .season .sn{font-size:14px;font-weight:800}
 .season .sp{font-size:13px;font-weight:900;color:var(--accent2);white-space:nowrap}
 .season .sd{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+/* турнирная таблица */
+.tbl{margin:0 -4px}
+.tbl .tr{display:grid;grid-template-columns:20px minmax(0,1fr) 24px 24px 32px 74px;gap:5px;align-items:center;padding:8px 4px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12.5px;cursor:pointer}
+.tbl.ext .tr{grid-template-columns:20px 1fr 22px 22px 22px 30px 30px 30px 36px;font-size:11.5px;cursor:default}
+.tbl .tr.th{color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;cursor:default;border-bottom:1px solid var(--border)}
+.tbl .tr>span{text-align:center;overflow:hidden}
+.tbl .tr .pl{font-weight:900}
+.tbl .tr .pn{text-align:left;font-weight:800;display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbl .tr .b{font-weight:900;color:var(--accent2)}
+.tbl .tr .badge{font-size:9.5px;padding:2px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.tbl .tr .pn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl .tav{width:22px;height:22px;border-radius:50%;object-fit:cover;flex:0 0 22px;background:#333}
+.tbl .z-playoff{background:rgba(25,195,125,.07)}
+.tbl .z-relegation{background:rgba(255,107,107,.07)}
+/* перекрёстная сетка */
+.mx{overflow-x:auto;margin-top:8px;-webkit-overflow-scrolling:touch}
+.mx table{border-collapse:collapse;font-size:10.5px;white-space:nowrap}
+.mx th,.mx td{border:1px solid var(--border);padding:5px 7px;text-align:center;color:var(--muted)}
+.mx th{background:var(--card2);color:var(--text);font-weight:800;position:sticky;top:0}
+.mx td.rowh,.mx th:first-child{background:var(--card2);color:var(--text);font-weight:800;text-align:left;position:sticky;left:0;z-index:1}
+.mx td.self{background:#1c1c1c}
+.oav.win{border:2px solid var(--win)}
 </style>
 </head>
 <body>
@@ -102,22 +124,37 @@ button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-w
   <h1 id="title">Лига</h1>
   <p class="sub" id="sub">Загружаем…</p>
   <div class="tabs" id="tabs">
-    <div class="tab on" data-t="race">Годовая гонка</div>
+    <div class="tab on" data-t="home">Главная</div>
+    <div class="tab" data-t="div">Дивизионы</div>
+    <div class="tab" data-t="race">Гонка</div>
     <div class="tab" data-t="players">Игроки</div>
+    <div class="tab" data-t="matches">Матчи</div>
+    <div class="tab" data-t="events">Турниры</div>
+    <div class="tab" data-t="about">О лиге</div>
+    <div class="tab" style="opacity:.25;cursor:default" data-t="">Партнёры</div>
   </div>
-  <div id="viewRace"></div>
+  <div id="viewHome"></div>
+  <div id="viewDiv" class="hidden"></div>
+  <div id="viewRace" class="hidden"></div>
   <div id="viewPlayers" class="hidden"></div>
+  <div id="viewMatches" class="hidden"></div>
+  <div id="viewEvents" class="hidden"></div>
+  <div id="viewAbout" class="hidden"></div>
   <div id="viewCard" class="hidden"></div>
 </div>
 <script>
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
-var players=[],matches={},season='',me=null,mode='race',openId='',query='',divFilter='',raceQuery='',raceBucket='',allMatches=false;
+var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='';
+var mode='home',openId='',query='',divFilter='',statusFilter='',raceQuery='',raceBucket='',allMatches=false;
+var feedQuery='',feedDiv='',feedLimit=20;
+var divLetter='',divData=null,divLoading=false,divErr='',showExtended=false,showMatrix=false;
+var VIEWS=['home','div','race','players','matches','events','about'];
 
 var T={
   ru:{title:'Лига',race:'Годовая гонка',players:'Игроки',
-      sub:'Годовой рейтинг, состав и профили игроков.',
+      sub:'Таблицы, матчи, игроки и годовая гонка PTF.',
       search:'Поиск по имени…',all:'Все',
       pts:'очков',pos:'место',found:'Найдено: ',nobody:'Никого не нашлось — попробуй другое имя.',
       matches:'Матчи',wins:'Победы',losses:'Поражения',winrate:'Win rate',mShort:'матчей',wShort:'побед',
@@ -126,9 +163,19 @@ var T={
       titles:'Достижения',history:'Сезоны',back:'⬅️ Назад',site:'🌐 Открыть на сайте',
       mhistory:'История матчей',showAll:'Показать все матчи',showLess:'Свернуть',noMatches:'Матчей пока нет.',
       total:'Все',upper:'Upper A+B',lower:'Lower C+D',prime:'PRIME',place:'место',
+      tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
+      champions:'Чемпионы сезона',yourSeason:'Твой сезон',yourDiv:'Твой дивизион',notInLeague:'Ты пока не в составе дивизиона. Подай заявку — и раздел оживёт.',
+      standings:'Турнирная таблица',extended:'Расширенная статистика',matrix:'Все против всех',playoff:'Плей-офф',champion:'Чемпион',
+      final:'Финал',sf1:'Полуфинал 1',sf2:'Полуфинал 2',seed:'Посев',
+      colP:'#',colPlayer:'Игрок',colM:'М',colW:'П',colL:'Пор',colPts:'Очки',colZone:'Статус',
+      zPlayoff:'Плей-офф',zExtra:'Добор',zRelegation:'Вылет',
+      colSW:'СВ',colSL:'СП',colSD:'±С',colGW:'ГВ',colGL:'ГП',colGD:'±Г',colWR:'WR',
+      noDiv:'Дивизион пока не сформирован.',pickDiv:'Выбери дивизион',
+      allMatchesT:'Все матчи лиги',noEvents:'Турниров пока нет. Появятся здесь, как только заведём первый.',
+      rules:'Как считается таблица',statusF:'Статус',anyStatus:'Любой',showMore:'Показать ещё',
       noData:'Данных пока нет.',divpos:'в дивизионе'},
   en:{title:'League',race:'Yearly Race',players:'Players',
-      sub:'Year ranking, roster and player profiles.',
+      sub:'Standings, matches, players and the yearly race.',
       search:'Search by name…',all:'All',
       pts:'points',pos:'place',found:'Found: ',nobody:'Nobody matched — try another name.',
       matches:'Matches',wins:'Wins',losses:'Losses',winrate:'Win rate',mShort:'played',wShort:'won',
@@ -137,6 +184,16 @@ var T={
       titles:'Achievements',history:'Seasons',back:'⬅️ Back',site:'🌐 Open on the website',
       mhistory:'Match history',showAll:'Show all matches',showLess:'Collapse',noMatches:'No matches yet.',
       total:'Total',upper:'Upper A+B',lower:'Lower C+D',prime:'PRIME',place:'place',
+      tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
+      champions:'Season champions',yourSeason:'Your season',yourDiv:'Your division',notInLeague:'You are not in a division yet. Apply and this section comes alive.',
+      standings:'Standings',extended:'Extended standings',matrix:'Head-to-head',playoff:'Playoffs',champion:'Champion',
+      final:'Final',sf1:'Semifinal 1',sf2:'Semifinal 2',seed:'Seed',
+      colP:'#',colPlayer:'Player',colM:'M',colW:'W',colL:'L',colPts:'Pts',colZone:'Status',
+      zPlayoff:'Playoff',zExtra:'Extra Draw',zRelegation:'Relegation',
+      colSW:'SW',colSL:'SL',colSD:'SD',colGW:'GW',colGL:'GL',colGD:'GD',colWR:'WR',
+      noDiv:'This division is not formed yet.',pickDiv:'Pick a division',
+      allMatchesT:'All league matches',noEvents:'No tournaments yet. They will appear here once we add the first one.',
+      rules:'How the table works',statusF:'Status',anyStatus:'Any',showMore:'Show more',
       noData:'No data yet.',divpos:'in division'}
 };
 var X=L?T.ru:T.en;
@@ -154,22 +211,30 @@ function formRow(form){
   if(!form||!form.length)return '';
   return '<span class="form">'+form.map(function(f){return '<span class="fm '+(f==='W'?'w':'l')+'">'+f+'</span>'}).join('')+'</span>';
 }
-function divisions(){
+function playerDivisions(){
   var seen={},out=[];
   players.forEach(function(p){var d=(p.division||'').trim();if(d&&!seen[d]){seen[d]=1;out.push(d)}});
   return out.sort();
 }
 
+var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
 function showTab(t){
+  if(VIEWS.indexOf(t)<0)return;
   mode=t;openId='';allMatches=false;syncBackButton();
-  ['race','players'].forEach(function(k){
+  VIEWS.forEach(function(k){
     var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
+    $(VIEW_ID[k]).classList.toggle('hidden',k!==t);
   });
   $('tabs').classList.remove('hidden');
   $('viewCard').classList.add('hidden');
-  $('viewRace').classList.toggle('hidden',t!=='race');
-  $('viewPlayers').classList.toggle('hidden',t!=='players');
-  if(t==='race')renderRace();else renderPlayers();
+  if(t==='home')renderHome();
+  else if(t==='div')renderDiv();
+  else if(t==='race')renderRace();
+  else if(t==='players')renderPlayers();
+  else if(t==='matches')renderFeed();
+  else if(t==='events')renderEvents();
+  else renderAbout();
+  window.scrollTo(0,0);
 }
 
 // --- Годовая гонка -----------------------------------------------------------
@@ -188,7 +253,7 @@ function renderRace(){
     return '<div class="chip'+(raceBucket===b[0]?' on':'')+'" onclick="setBucket(\''+b[0]+'\')">'+esc(X[b[1]])+'</div>';
   }).join('');
   // отдельные чипы по дивизионам — появляются сами, когда дивизион есть в данных
-  var divChips=divisions().map(function(d){
+  var divChips=playerDivisions().map(function(d){
     return '<div class="chip'+(divFilter===d?' on':'')+'" onclick="setRaceDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
   }).join('');
   var q=raceQuery.trim().toLowerCase();
@@ -224,17 +289,26 @@ function setRaceQuery(v){raceQuery=v;renderRace()}
 // --- Игроки ------------------------------------------------------------------
 function renderPlayers(){
   var chips='<div class="chip'+(divFilter===''?' on':'')+'" onclick="setDiv(\'\')">'+esc(X.all)+'</div>'
-    +divisions().map(function(d){
+    +playerDivisions().map(function(d){
       return '<div class="chip'+(divFilter===d?' on':'')+'" onclick="setDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
+    }).join('');
+  // Статусы берём из данных, чтобы не хардкодить Active/Waitlist/Waiting.
+  var stats={},statList=[];
+  players.forEach(function(p){var st=(p.status||'').trim();if(st&&!stats[st]){stats[st]=1;statList.push(st)}});
+  var schips='<div class="chip'+(statusFilter===''?' on':'')+'" onclick="setStatus(\'\')">'+esc(X.anyStatus)+'</div>'
+    +statList.sort().map(function(st){
+      return '<div class="chip'+(statusFilter===st?' on':'')+'" onclick="setStatus(\''+esc(st)+'\')">'+esc(st)+'</div>';
     }).join('');
   var q=query.trim().toLowerCase();
   var list=players.filter(function(p){
     if(divFilter&&(p.division||'')!==divFilter)return false;
+    if(statusFilter&&(p.status||'')!==statusFilter)return false;
     if(q&&String(p.name||'').toLowerCase().indexOf(q)<0)return false;
     return true;
   });
   var head='<input class="search" id="q" placeholder="'+esc(X.search)+'" value="'+esc(query)+'" oninput="setQuery(this.value)">'
     +'<div class="chips">'+chips+'</div>'
+    +'<div class="chips">'+schips+'</div>'
     +'<div class="count">'+esc(X.found)+list.length+'</div>';
   var body=list.length
     ? '<div class="grid">'+list.map(function(p){
@@ -251,8 +325,13 @@ function renderPlayers(){
 }
 function setQuery(v){query=v;renderPlayers()}
 function setDiv(d){divFilter=d;renderPlayers()}
+function setStatus(v){statusFilter=v;renderPlayers()}
 
 // --- Карточка игрока ---------------------------------------------------------
+function openCardByName(name){
+  var p=players.filter(function(x){return String(x.name||'').toLowerCase()===String(name).toLowerCase()})[0];
+  if(p)openCard(p.id);
+}
 function openCard(id){
   var p=players.filter(function(x){return String(x.id)===String(id)})[0];
   if(!p)return;
@@ -326,6 +405,238 @@ function openCard(id){
   window.scrollTo(0,0);
 }
 
+// --- Главная ---------------------------------------------------------------
+// На сайте это карточки чемпионов. Здесь добавляем то, чего сайт не умеет:
+// личный блок — бот знает, кто открыл приложение.
+function renderHome(){
+  var h='';
+  var mine=players.filter(function(p){return String(p.name||'').toLowerCase()===String(me&&me.name||'').toLowerCase()})[0];
+  if(mine){
+    h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3>'
+      +'<div class="rank" style="margin:0;cursor:pointer" onclick="openCard(\''+esc(mine.id)+'\')">'
+      +'<div class="pos">'+(mine.position||'—')+'</div>'+avatar(mine,'av')
+      +'<div style="min-width:0"><div class="nm">'+esc(mine.name)+'</div><div class="sub2">'
+      +(mine.division?'<span class="badge div">'+esc(mine.division)+'</span>':'')
+      +'<span>'+mine.matches+' '+esc(X.mShort)+' · '+mine.wins+' '+esc(X.wShort)+'</span></div></div>'
+      +'<div class="pts"><b>'+mine.points+'</b><span>'+esc(X.pts)+'</span></div></div></div>';
+  } else if(!meDivision){
+    h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3><div class="hint">'+esc(X.notInLeague)+'</div></div>';
+  }
+  // Чемпионы: берём тех, у кого в достижениях есть титул чемпиона дивизиона.
+  var champs=players.filter(function(p){
+    return (p.titles||[]).some(function(t){return /champion/i.test(String(t.type||t.title||''))});
+  });
+  if(champs.length){
+    h+='<div class="card"><h3>'+esc(X.champions)+'</h3><div class="grid">'
+      +champs.map(function(p){
+        var title=(p.titles||[]).map(function(t){return String(t.type||t.title||'')}).filter(function(t){return /champion/i.test(t)})[0]||'';
+        return '<div class="pcard" onclick="openCard(\''+esc(p.id)+'\')">'+avatar(p,'ph')
+          +'<div class="body"><div class="nm">'+esc(p.name)+'</div>'
+          +'<div class="row"><span class="badge gold">🏆 '+esc(title)+'</span></div></div></div>';
+      }).join('')+'</div></div>';
+  }
+  h+='<div class="card"><h3>'+esc(X.title)+'</h3><div class="hint">'+esc(X.sub)+'</div>'
+    +'<div class="chips" style="margin-top:10px">'
+    +[['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],['matches',X.tMatches]].map(function(x){
+      return '<div class="chip" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
+    }).join('')+'</div></div>';
+  $('viewHome').innerHTML=h;
+}
+
+// --- Дивизионы --------------------------------------------------------------
+function renderDiv(){
+  if(!divisions.length){$('viewDiv').innerHTML='<div class="empty">'+esc(X.noDiv)+'</div>';return}
+  if(!divLetter)divLetter=(divisions.indexOf(divLetterOfMe())>=0?divLetterOfMe():divisions[0]);
+  var chips='<div class="chips">'+divisions.map(function(d){
+    return '<div class="chip'+(divLetter===d?' on':'')+'" onclick="pickDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
+  }).join('')+'</div>';
+  if(divLoading){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';return}
+  if(divErr){$('viewDiv').innerHTML=chips+'<div class="empty" style="color:#ff6b6b">'+esc(divErr)+'</div>';return}
+  if(!divData){$('viewDiv').innerHTML=chips+'<div class="empty">'+esc(X.pickDiv)+'</div>';loadDiv();return}
+
+  var d=divData,h=chips;
+  var po=d.playoff||{};
+  if(po.champion){
+    h+='<div class="card" style="text-align:center;border-color:rgba(232,185,58,.45)">'
+      +'<div class="badge gold" style="margin-bottom:10px">'+esc(X.champion)+'</div>'
+      +'<div onclick="openCard(\''+esc(po.champion.id)+'\')" style="cursor:pointer">'
+      +(po.champion.photo?'<img src="'+esc(po.champion.photo)+'" style="width:96px;height:96px;border-radius:50%;object-fit:cover;border:3px solid rgba(232,185,58,.5)">':'')
+      +'<div style="font-size:18px;font-weight:900;margin-top:8px">'+esc(po.champion.name)+'</div>'
+      +'<div class="hint" style="margin-top:2px">Division '+esc(d.division)+'</div></div></div>';
+  }
+
+  h+='<div class="card"><h3>'+esc(X.standings)+' · '+esc(d.division)+'</h3><div class="tbl">'
+    +'<div class="tr th"><span>'+esc(X.colP)+'</span><span>'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span>'+esc(X.colZone)+'</span></div>'
+    +d.players.map(function(p){
+      var zn=p.zone==='playoff'?X.zPlayoff:(p.zone==='extra'?X.zExtra:X.zRelegation);
+      return '<div class="tr z-'+esc(p.zone)+'" onclick="openCardByName(\''+esc(String(p.name).replace(/'/g,"\\'"))+'\')">'
+        +'<span class="pl">'+p.place+'</span>'
+        +'<span class="pn">'+(p.photo?'<img class="tav" src="'+esc(p.photo)+'">':'')+'<span>'+esc(p.name)+'</span></span>'
+        +'<span>'+p.matches+'</span><span>'+p.wins+'</span><span class="b">'+p.points+'</span>'
+        +'<span><span class="badge '+(p.zone==='playoff'?'act':(p.zone==='relegation'?'':'div'))+'">'+esc(zn)+'</span></span></div>';
+    }).join('')+'</div>'
+    +'<button class="more" onclick="toggleExtended()">'+esc(X.extended)+(showExtended?' ▲':' ▼')+'</button>'
+    +(showExtended?extendedTable(d):'')
+    +'<button class="more" onclick="toggleMatrix()">'+esc(X.matrix)+(showMatrix?' ▲':' ▼')+'</button>'
+    +(showMatrix?matrixTable(d):'')
+    +'</div>';
+
+  if(po.final||po.sf1||po.sf2){
+    h+='<div class="card"><h3>'+esc(X.playoff)+'</h3>'
+      +poCard(X.final,'',po.final)+poCard(X.sf1,X.seed+' #1 / #4',po.sf1)+poCard(X.sf2,X.seed+' #2 / #3',po.sf2)+'</div>';
+  }
+  $('viewDiv').innerHTML=h;
+}
+function divLetterOfMe(){return String(meDivision||'').replace(/^division\s*/i,'').trim().toUpperCase()}
+function pickDiv(d){divLetter=d;divData=null;divErr='';renderDiv()}
+function toggleExtended(){showExtended=!showExtended;renderDiv()}
+function toggleMatrix(){showMatrix=!showMatrix;renderDiv()}
+function loadDiv(){
+  divLoading=true;divErr='';
+  fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&initData='+encodeURIComponent(initData),{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      divLoading=false;
+      if(!j.ok){divErr=j.error||'Error';divData=null}else divData=j;
+      renderDiv();
+    }).catch(function(e){divLoading=false;divErr=e.message;renderDiv()});
+}
+function extendedTable(d){
+  return '<div class="tbl ext"><div class="tr th"><span>#</span><span>'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colL)+'</span><span>'+esc(X.colPts)+'</span><span>'+esc(X.colSD)+'</span><span>'+esc(X.colGD)+'</span><span>'+esc(X.colWR)+'</span></div>'
+    +d.players.map(function(p){
+      var sd=(p.setDiff>0?'+':'')+p.setDiff,gd=(p.gameDiff>0?'+':'')+p.gameDiff;
+      return '<div class="tr z-'+esc(p.zone)+'"><span class="pl">'+p.place+'</span><span class="pn">'+esc(shortName(p.name))+'</span>'
+        +'<span>'+p.matches+'</span><span>'+p.wins+'</span><span>'+p.losses+'</span><span class="b">'+p.points+'</span>'
+        +'<span>'+esc(sd)+'</span><span>'+esc(gd)+'</span><span>'+p.winRate+'%</span></div>';
+    }).join('')+'</div>';
+}
+function matrixTable(d){
+  var ps=d.players;
+  var head='<tr><th>'+esc(X.colPlayer)+'</th>'+ps.map(function(p){return '<th>'+esc(shortName(p.name))+'</th>'}).join('')+'</tr>';
+  var body=ps.map(function(a){
+    return '<tr><td class="rowh">'+esc(shortName(a.name))+'</td>'+ps.map(function(b){
+      if(a.id===b.id)return '<td class="self">—</td>';
+      return '<td>'+esc(d.matrix[a.id+'-'+b.id]||'')+'</td>';
+    }).join('')+'</tr>';
+  }).join('');
+  return '<div class="mx"><table>'+head+body+'</table></div>';
+}
+function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
+function poCard(title,sub,m){
+  if(!m)return '';
+  var side=function(pl){
+    if(!pl)return '<div class="oavh">?</div>';
+    var win=m.winner_id&&String(m.winner_id)===String(pl.id);
+    return '<div onclick="openCard(\''+esc(pl.id)+'\')" style="cursor:pointer;text-align:center">'
+      +(pl.photo?'<img class="oav'+(win?' win':'')+'" src="'+esc(pl.photo)+'">':'<div class="oavh">'+esc(initials(pl.name))+'</div>')
+      +'<div style="font-size:11px;font-weight:800;margin-top:4px;max-width:74px;line-height:1.2">'+esc(pl.name)+'</div></div>';
+  };
+  return '<div class="mt"><div class="top">'+esc(title)+(sub?' · '+esc(sub):'')+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">'
+    +side(m.first)+'<div class="sc" style="text-align:center;margin:0">'+esc(m.score||'—')+'</div>'+side(m.second)
+    +'</div></div>';
+}
+
+// --- Лента всех матчей ------------------------------------------------------
+// Собираем из той же истории, что и карточки: там по строке на игрока,
+// поэтому берём одну сторону пары, чтобы матч не задвоился.
+function allMatchesList(){
+  var out=[],seen={};
+  Object.keys(matches).forEach(function(pid){
+    (matches[pid]||[]).forEach(function(m){
+      var key=(m.match_no||'')+'-'+[pid,m.opponent_id].sort().join('-');
+      if(seen[key])return;seen[key]=1;
+      var p=players.filter(function(x){return String(x.id)===String(pid)})[0]||{name:'',photo:''};
+      var win=m.result==='WIN';
+      out.push({no:m.match_no,date:m.date,competition:m.competition,
+        winner:win?{id:pid,name:p.name,photo:p.photo,div:m.division}:{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo,div:m.opponent_division},
+        loser:win?{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo,div:m.opponent_division}:{id:pid,name:p.name,photo:p.photo,div:m.division},
+        score:win?m.score:reverseScoreText(m.score),division:m.division||m.opponent_division});
+    });
+  });
+  return out.sort(function(a,b){return Number(b.no||0)-Number(a.no||0)});
+}
+function reverseScoreText(sc){
+  return String(sc||'').split('/').map(function(part){
+    return part.replace(/(\d+):(\d+)/g,function(_,a,b){return b+':'+a});
+  }).join('/');
+}
+function renderFeed(){
+  var list=allMatchesList();
+  var divs=['A','B','C','D','PRIME'].filter(function(d){
+    return list.some(function(m){return String(m.division||'').toUpperCase()===d});
+  });
+  var chips='<div class="chip'+(feedDiv===''?' on':'')+'" onclick="setFeedDiv(\'\')">'+esc(X.all)+'</div>'
+    +divs.map(function(d){return '<div class="chip'+(feedDiv===d?' on':'')+'" onclick="setFeedDiv(\''+d+'\')">'+esc(d)+'</div>'}).join('');
+  var q=feedQuery.trim().toLowerCase();
+  var shown=list.filter(function(m){
+    if(feedDiv&&String(m.division||'').toUpperCase()!==feedDiv)return false;
+    if(q&&(String(m.winner.name).toLowerCase().indexOf(q)<0&&String(m.loser.name).toLowerCase().indexOf(q)<0))return false;
+    return true;
+  });
+  var head='<input class="search" id="fq" placeholder="'+esc(X.search)+'" value="'+esc(feedQuery)+'" oninput="setFeedQuery(this.value)">'
+    +'<div class="chips">'+chips+'</div><div class="count">'+esc(X.found)+shown.length+'</div>';
+  var page=shown.slice(0,feedLimit);
+  $('viewMatches').innerHTML=head+(page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>')
+    +(shown.length>feedLimit?'<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>':'');
+  var el=$('fq');
+  if(el&&feedQuery&&document.activeElement!==el){el.focus();el.setSelectionRange(feedQuery.length,feedQuery.length)}
+}
+function setFeedDiv(d){feedDiv=d;feedLimit=20;renderFeed()}
+function setFeedQuery(v){feedQuery=v;feedLimit=20;renderFeed()}
+function moreFeed(){feedLimit+=20;renderFeed()}
+function feedCard(m){
+  var av=function(p){
+    return p.photo?'<img class="oav" src="'+esc(p.photo)+'" loading="lazy">':'<div class="oavh">'+esc(initials(p.name))+'</div>';
+  };
+  var top=[m.no?'#'+m.no:'',m.date,m.competition].filter(Boolean).join(' · ');
+  return '<div class="mt">'+(top?'<div class="top">'+esc(top)+'</div>':'')
+    +'<div style="display:grid;grid-template-columns:44px 1fr 44px;gap:9px;align-items:center">'
+    +'<div onclick="openCard(\''+esc(m.winner.id)+'\')" style="cursor:pointer">'+av(m.winner)+'</div>'
+    +'<div style="min-width:0;text-align:center">'
+      +'<div class="who"><b>'+esc(m.winner.name)+'</b> <span style="color:var(--muted);font-weight:600">vs</span> '+esc(m.loser.name)+'</div>'
+      +'<div class="sc">'+esc(m.score||'—')+'</div>'
+      +(m.division?'<span class="badge div" style="margin-top:4px">'+esc(m.division)+'</span>':'')
+    +'</div>'
+    +'<div onclick="openCard(\''+esc(m.loser.id)+'\')" style="cursor:pointer">'+av(m.loser)+'</div>'
+    +'</div></div>';
+}
+
+// --- Турниры ----------------------------------------------------------------
+function renderEvents(){
+  if(!events.length){$('viewEvents').innerHTML='<div class="empty">'+esc(X.noEvents)+'</div>';return}
+  $('viewEvents').innerHTML=events.map(function(e){
+    var meta=[e.type,e.format,e.category].filter(Boolean).join(' · ');
+    var when=[e.start,e.end].filter(Boolean).join(' — ');
+    return '<div class="card"><h3>'+esc(e.name)+'</h3>'
+      +(when?'<div class="hint">'+esc(when)+'</div>':'')
+      +(meta?'<div class="row" style="margin-top:8px"><span class="badge">'+esc(meta)+'</span></div>':'')
+      +(e.players.length?'<div style="margin-top:10px">'+e.players.slice(0,10).map(function(p){
+          return '<div class="line"><span>'+esc(p.name)+'</span><span class="k">'+esc([p.standing,p.result].filter(Boolean).join(' · '))+'</span></div>';
+        }).join('')+'</div>':'')
+      +'</div>';
+  }).join('');
+}
+
+// --- О лиге -----------------------------------------------------------------
+function renderAbout(){
+  var ru=L;
+  var rules=ru
+    ? ['Победа — <b>3</b> очка, поражение — <b>1</b>.',
+       'При равенстве очков места определяются так: очки → разница сетов → разница геймов → выигранные сеты.',
+       'Места <b>1–4</b> — плей-офф, <b>5–6</b> — добор, <b>7–8</b> — вылет.',
+       'Тай-брейк в сете отображается в счёте. Чемпионский тай-брейк считается сетом, но не влияет на разницу геймов.',
+       'Техническое поражение (W/O): сопернику 3 очка, сеты и геймы не начисляются.']
+    : ['A win is <b>3</b> points, a loss is <b>1</b>.',
+       'Ties are broken by: points → set difference → game difference → sets won.',
+       'Places <b>1–4</b> go to the playoff, <b>5–6</b> to the extra draw, <b>7–8</b> to relegation.',
+       'Set tie-breaks show in the score. A match tie-break counts as a set but not towards game difference.',
+       'A walkover (W/O) gives the opponent 3 points; no sets or games are added.'];
+  $('viewAbout').innerHTML='<div class="card"><h3>'+esc(X.rules)+'</h3>'
+    +rules.map(function(r){return '<div class="line"><span>'+r+'</span></div>'}).join('')+'</div>'
+    +'<div class="card"><h3>Phuket Tennis Family</h3><div class="hint">'+esc(X.sub)+'</div>'
+    +'<button onclick="openLink(\'https://www.phukettennis.com\')">'+esc(X.site)+'</button></div>';
+}
+
 function matchCard(m){
   var av=m.opponent_photo
     ? '<img class="oav" src="'+esc(m.opponent_photo)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;oavh&quot;>'+esc(initials(m.opponent))+'</div>\'">'
@@ -349,21 +660,25 @@ function syncBackButton(){
 }
 if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(mode); });
 
-document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){showTab(b.dataset.t)}});
+document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){if(b.dataset.t)showTab(b.dataset.t)}});
 
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
-    players=j.players||[];matches=j.matches||{};season=j.season||'';me=j.user||null;
+    players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
+    season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     $('title').textContent=X.title;
     $('sub').textContent=X.sub+(season?' Season '+season+'.':'');
-    document.querySelector('.tab[data-t="race"]').textContent=X.race;
-    document.querySelector('.tab[data-t="players"]').textContent=X.players;
-    showTab('race');
+    var labels={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
+    Object.keys(labels).forEach(function(k){
+      var el=document.querySelector('.tab[data-t="'+k+'"]');if(el)el.textContent=labels[k];
+    });
+    var pt=document.querySelector('.tab[data-t=""]');if(pt)pt.textContent=X.tPartners;
+    showTab('home');
   }).catch(function(e){
     $('sub').textContent='';
-    $('viewRace').innerHTML='<div class="empty" style="color:#ff6b6b">'+esc(e.message)+'</div>';
+    $('viewHome').innerHTML='<div class="empty" style="color:#ff6b6b">'+esc(e.message)+'</div>';
   });
 </script>
 </body>

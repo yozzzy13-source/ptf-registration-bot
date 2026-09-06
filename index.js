@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
@@ -20,6 +20,7 @@ import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlot
   listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
+import { getDivisionTable, availableDivisions, invalidateDivisionCache } from './division.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -645,9 +646,11 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const v = await matchViewer(String(req.query.initData || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Раздел пока в тестовом режиме.' });
-    const [players, history] = await Promise.all([
+    const [players, history, events, divisions] = await Promise.all([
       getLeagueProfiles(),
-      getLeagueMatchHistory().catch(() => new Map())
+      getLeagueMatchHistory().catch(() => new Map()),
+      getLeagueEvents().catch(() => []),
+      availableDivisions().catch(() => [])
     ]);
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
     // игрока открывается мгновенно, без второго запроса на сервер.
@@ -658,11 +661,33 @@ app.get('/api/league/bootstrap', async (req, res) => {
       lang: v.lang,
       user: { id: v.user.id, name: v.profile.name },
       season: await getSetting('season_number').catch(() => ''),
+      me_division: v.division || '',
       players,
-      matches
+      matches,
+      events,
+      divisions
     });
   } catch (e) {
     console.error('league bootstrap failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Таблица дивизиона: состав, перекрёстная сетка и плей-офф. Отдельным запросом,
+// чтобы стартовый экран не ждал чтения ещё четырёх таблиц.
+app.get('/api/league/division', async (req, res) => {
+  try {
+    const v = await matchViewer(String(req.query.initData || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Раздел пока в тестовом режиме.' });
+    const data = await getDivisionTable(String(req.query.letter || ''));
+    if (!data.ok) {
+      const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };
+      return res.status(404).json({ ok:false, error: messages[data.reason] || 'Дивизион недоступен' });
+    }
+    res.json({ ok:true, ...data });
+  } catch (e) {
+    console.error('division api failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
 });

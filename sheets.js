@@ -280,6 +280,7 @@ let profilesCache = { t: 0, v: null };
 // экран, увидит уже новые цифры, а не пятиминутной давности.
 export function invalidateLeagueCache() {
   profilesCache = { t: 0, v: null };
+  eventsCache = { t: 0, v: null };
   historyCache = { t: 0, v: null };
   seasonPointsCache = { t: 0, v: null };
   seasonHistCache = { t: 0, v: null };
@@ -487,6 +488,43 @@ export async function getLeagueProfiles() {
   // Порядок как в годовой гонке: по месту, у кого места нет — в конец по очкам.
   out.sort((a, b) => (a.position || 9999) - (b.position || 9999) || b.points - a.points);
   profilesCache = { t: Date.now(), v: out };
+  return out;
+}
+
+// Турниры и события: реестр в таблице профилей. Пока пустой — раздел покажет
+// честную заглушку, а как только строки появятся, оживёт сам.
+let eventsCache = { t: 0, v: null };
+export async function getLeagueEvents() {
+  if (eventsCache.v && Date.now() - eventsCache.t < PROFILES_CACHE_MS) return eventsCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID,
+    ['Tournament_History_All', 'Events'], 'event_id').catch(() => ({ rows: [] }));
+  const seen = new Map();
+  for (const r of rows) {
+    const id = String(r.event_id || '').trim();
+    const name = String(r.event_name || '').trim();
+    if (!id || !name) continue;
+    if (!seen.has(id)) {
+      seen.set(id, {
+        id, name,
+        type: r.competition_type || '',
+        format: r.format || '',
+        category: r.category || '',
+        start: r.start_date || '',
+        end: r.end_date || '',
+        url: r.source_url || '',
+        notes: r.notes || '',
+        players: []
+      });
+    }
+    const pname = String(r.player_name || '').trim();
+    if (pname) seen.get(id).players.push({
+      id: r.player_id || '', name: pname,
+      standing: r.standing || '', result: r.result_label || '',
+      won: r.matches_won || '', lost: r.matches_lost || '', points: r.points_earned || ''
+    });
+  }
+  const out = [...seen.values()].sort((a, b) => String(b.start).localeCompare(String(a.start)));
+  eventsCache = { t: Date.now(), v: out };
   return out;
 }
 

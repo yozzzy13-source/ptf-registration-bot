@@ -9,6 +9,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   notifyResultConfirmed, notifyResultDisputed, broadcastResult,
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
+import { invalidateDivisionCache } from './division.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
 
 export const userState = new Map();
@@ -751,6 +752,7 @@ export async function handleCallback(q) {
     const write = await writeConfirmedResult(r.slot).catch(e => ({ status:'error', reason:e.message }));
     // Счёт ушёл в таблицы лиги — витрина должна показать новые цифры сразу.
     invalidateLeagueCache();
+    invalidateDivisionCache();
     await notifyResultConfirmed(r.slot, describeWrite(write)).catch(e => console.error('notifyResultConfirmed failed:', e.message));
     // Лента лиги: общая группа + личная рассылка активным игрокам.
     broadcastResult(r.slot).catch(e => console.error('broadcastResult failed:', e.message));
