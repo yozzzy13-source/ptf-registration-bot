@@ -1,6 +1,7 @@
 import { inlineKeyboard, webAppButton, urlButton, clubChatButton } from './telegram.js';
 import { t } from './i18n.js';
 import { PUBLIC_URL } from './config.js';
+import { signWebAppToken } from './util.js';
 
 
 // Единственное место, где проверяется лимит Telegram на callback_data.
@@ -70,23 +71,38 @@ export const MENU_LABELS = {
         menu:'🏠 Menu', contact:'💬 Contact' }
 };
 
-// ВАЖНО: в постоянной клавиатуре кнопки web_app НЕ годятся. Мини-приложение,
-// запущенное из обычной (reply) клавиатуры, получает пустой initData — без
-// user и без подписи, — поэтому сервер отвечает «Telegram WebApp user not found».
-// Такие кнопки в Telegram рассчитаны на sendData(), а не на авторизацию.
-// Поэтому здесь все кнопки текстовые: бот ловит нажатие и отвечает сообщением
-// с inline-кнопкой, а вот она уже запускает мини-приложение уже с initData.
+// Мини-приложение, запущенное из обычной (reply) клавиатуры, получает пустой
+// initData: Telegram отдаёт его только inline-кнопкам, кнопке Menu и прямым
+// ссылкам. Раньше из-за этого сервер отвечал «Telegram WebApp user not found».
+// Решение — персональный токен в адресе кнопки: клавиатура строится под
+// конкретного человека, токен подписан секретом бота и живёт 90 дней.
+// Так раздел открывается в ОДИН тап и при этом знает, кто пришёл.
+const MENU_PATHS = {
+  matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
+  league:'/league', apply:'/apply?mode=event', squad:'/participants'
+};
 
 const MENU_LAYOUTS = {
   active: [['matches','result'], ['court','league'], ['menu','contact']],
+  // Оплата подтверждена, но дивизион ещё не назначен: матчей нет, платить нечего.
+  paid:   [['league','squad'], ['menu','contact']],
   unpaid: [['pay','league'], ['squad','contact'], ['menu']],
   lead:   [['apply','league'], ['squad','contact']]
 };
 
-export function persistentKeyboard(lang, kind='lead') {
+export function persistentKeyboard(lang, kind='lead', telegramId='') {
   const l = lang === 'ru' ? 'ru' : 'en';
   const labels = MENU_LABELS[l];
-  const rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(key => ({ text: labels[key] })));
+  const token = telegramId ? signWebAppToken(telegramId) : '';
+  const rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(key => {
+    const text = labels[key];
+    const path = MENU_PATHS[key];
+    // Без токена (нет BOT_TOKEN или id) кнопка остаётся текстовой — бот ответит
+    // сообщением с inline-кнопкой. Хуже на один тап, но работает всегда.
+    if (!path || !token) return { text };
+    const sep = path.includes('?') ? '&' : '?';
+    return { text, web_app: { url: `${PUBLIC_URL}${path}${sep}t=${encodeURIComponent(token)}` } };
+  }));
   return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 }
 

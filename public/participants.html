@@ -78,6 +78,8 @@
 <script>
 const tg=window.Telegram?.WebApp; if(tg){tg.expand();tg.ready();}
 const initData=tg?.initData||'';
+var linkToken=new URLSearchParams(location.search).get('t')||'';
+var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 let lang=(tg?.initDataUnsafe?.user?.language_code||'').toLowerCase().startsWith('ru')?'ru':'en';
 const L={
   ru:{title:'Список участников',sub:'Актуальный состав дивизионов. Список обновляется организатором вручную.',loading:'Загружаем список…',empty:'Список участников пока пуст.',total:'Всего',active:'Active',waitlist:'Waitlist',overview:'Заполненность дивизионов',unassigned:'Без дивизиона',noPlayers:'Пока нет игроков',free:'Свободно мест:',full:'дивизион заполнен',over:'больше лимита',close:'Главное меню',back:'⬅️ Назад к событию',apply:'🏆 Участвовать в событии',updated:'Данные из таблицы участников PTF'},
@@ -121,7 +123,7 @@ function render(data){
 async function load(){
   applyLang();
   try{
-    const r=await fetch('/api/participants?initData='+encodeURIComponent(initData),{cache:'no-store'});
+    const r=await fetch('/api/participants?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'});
     const j=await r.json();
     if(!j.ok) throw new Error(j.error||'Participants loading error');
     if(j.lang==='ru'||j.lang==='en'){lang=j.lang;applyLang();}

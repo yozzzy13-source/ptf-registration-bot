@@ -361,6 +361,8 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
 <script>
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
+var linkToken=new URLSearchParams(location.search).get('t')||'';
+var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='';
@@ -861,7 +863,7 @@ function toggleExt(){showExt=!showExt;renderDiv()}
 function toggleMx(){showMx=!showMx;renderDiv()}
 function loadDiv(){
   divLoading=true;divErr='';
-  fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&season='+encodeURIComponent(divSeason)+'&initData='+encodeURIComponent(initData),{cache:'no-store'})
+  fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&season='+encodeURIComponent(divSeason)+'&initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
       divLoading=false;
       if(!j.ok){divErr=j.error||'Error';divData=null}else divData=j;
@@ -1107,7 +1109,7 @@ function matchRow(m){
 function toggleMatches(id){allMatches=!allMatches;openPlayer(id)}
 
 // ---------------------------------------------------------------- старт
-fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData),{cache:'no-store'})
+fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}

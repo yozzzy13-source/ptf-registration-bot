@@ -97,6 +97,8 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 <script>
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
+var linkToken=new URLSearchParams(location.search).get('t')||'';
+var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
 var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='',matchDuration=120;
@@ -298,7 +300,7 @@ function confirmTake(id,btn){
   if(!d){res.className='res err';res.textContent=X.needDate;return}
   btn.disabled=true;btn.textContent='…';
   fetch('/api/match/take',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,challenge_id:id,date:d.dataset.d,time:tm?tm.dataset.t:'',court:c?c.dataset.c:''
+    initData:initData,t:linkToken,challenge_id:id,date:d.dataset.d,time:tm?tm.dataset.t:'',court:c?c.dataset.c:''
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     closePicker();load(true);showTab('mine');
@@ -363,7 +365,7 @@ function submitRetime(id,btn){
   var time=$('rtTime').value;
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/retime',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({initData:initData,challenge_id:id,time:time})})
+    body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id,time:time})})
     .then(function(r){return r.json()}).then(function(j){
       btn.disabled=false;
       if(!j.ok)throw new Error(j.error||'Error');
@@ -375,7 +377,7 @@ function submitRetime(id,btn){
 function cancelMatch(id,btn){
   var go=function(){btn.disabled=true;btn.textContent='…';
     fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({initData:initData,challenge_id:id})})
+      body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
       .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
       .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
   if(tg&&tg.showConfirm)tg.showConfirm(X.cancelMatchAsk,function(ok){if(ok)go()});else if(confirm(X.cancelMatchAsk))go();
@@ -413,7 +415,7 @@ function pickCounterDate(iso){selDates=[iso];renderCounter()}
 function submitCounter(btn){
   var res=$('cRes');res.className='res';btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/counter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,challenge_id:counterSlotId,date:selDates[0],time:$('cTime').value,court:$('cCourt').value
+    initData:initData,t:linkToken,challenge_id:counterSlotId,date:selDates[0],time:$('cTime').value,court:$('cCourt').value
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
@@ -615,7 +617,7 @@ function submitResult(id,btn){
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,challenge_id:id,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim()
+    initData:initData,t:linkToken,challenge_id:id,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim()
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
@@ -659,7 +661,7 @@ function submitManual(btn){
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,to_telegram_id:$('mOpp').value,date:$('mDate').value,
+    initData:initData,t:linkToken,to_telegram_id:$('mOpp').value,date:$('mDate').value,
     sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
@@ -705,7 +707,7 @@ function submitBooking(btn){
   if(!bookCourts.length){res.className='res err';res.textContent=X.needCourts;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/court/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,date:bookDate,time:$('bkTime').value,duration_min:Number($('bkDur').value),courts:bookCourts
+    initData:initData,t:linkToken,date:bookDate,time:$('bkTime').value,duration_min:Number($('bkDur').value),courts:bookCourts
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
@@ -770,7 +772,7 @@ function submitSlot(btn){
   if(newMode==='direct'&&!selOpp){res.className='res err';res.textContent=X.needOpp;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,match_type:newMode,dates:selDates,time_from:from,time_to:to,
+    initData:initData,t:linkToken,match_type:newMode,dates:selDates,time_from:from,time_to:to,
     courts:selCourts,comment:($('mComment').value||'').trim(),to_telegram_id:newMode==='direct'?selOpp:''
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
@@ -781,7 +783,7 @@ function submitSlot(btn){
 }
 function cancelSlot(id,btn){
   var go=function(){btn.disabled=true;btn.textContent='…';
-    fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,challenge_id:id})})
+    fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
       .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
       .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
   if(tg&&tg.showConfirm)tg.showConfirm(X.cancelAsk,function(ok){if(ok)go()});else if(confirm(X.cancelAsk))go();
@@ -789,7 +791,7 @@ function cancelSlot(id,btn){
 
 function load(keepTab){
   var q=new URLSearchParams(location.search);var slotQ=q.get('slot')||'',cQ=q.get('counter')||'',rQ=q.get('result')||'';
-  return fetch('/api/match/bootstrap?initData='+encodeURIComponent(initData)+(slotQ?'&slot='+encodeURIComponent(slotQ):'')+(cQ?'&counter='+encodeURIComponent(cQ):'')+(rQ?'&result='+encodeURIComponent(rQ):''),{cache:'no-store'})
+  return fetch('/api/match/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(slotQ?'&slot='+encodeURIComponent(slotQ):'')+(cQ?'&counter='+encodeURIComponent(cQ):'')+(rQ?'&result='+encodeURIComponent(rQ):''),{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
       if(!j.ok)throw new Error(j.error||'Error');
       if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}

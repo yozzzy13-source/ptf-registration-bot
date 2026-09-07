@@ -122,15 +122,7 @@ export async function publishOpenSlot(slot) {
     ? `📣 Окно отправлено игрокам дивизиона: <b>${sent}</b>.\nКак только кто-то откликнется, я пришлю предложение.`
     : `📣 В вашем дивизионе пока некому отправить окно — нет активных игроков с Telegram.`).catch(() => {});
 
-  // Копия в админский топик — чтобы организатор видел активность.
-  try {
-    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
-    const chatId = topic?.chatId || await getAdminChatId();
-    if (chatId) {
-      await sendMessage(chatId, `<b>📣 Новое окно</b>\n\n${text}\n\nРазослано игрокам: <b>${sent}</b>`,
-        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
-    }
-  } catch (e) { console.error('admin copy of open slot failed:', e.message); }
+  await adminMatchCopy(slot, `<b>📣 Новое окно</b>\n\n${text}\n\nРазослано игрокам: <b>${sent}</b>`);
 
   return { sent, failed };
 }
@@ -166,14 +158,7 @@ ${agreedBlock(slot)}
   await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: contactsKeyboard(slot.to_username, toUrl, slot) }).catch(e => console.error('notify author failed:', e.message));
   await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: contactsKeyboard(slot.from_username, fromUrl, slot) }).catch(e => console.error('notify taker failed:', e.message));
 
-  try {
-    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
-    const chatId = topic?.chatId || await getAdminChatId();
-    if (chatId) {
-      const text = `<b>🎾 Матч назначен</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${agreedBlock(slot)}`;
-      await sendMessage(chatId, text, topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
-    }
-  } catch (e) { console.error('notify admin about match failed:', e.message); }
+  await adminMatchCopy(slot, `<b>🎾 Матч назначен</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${agreedBlock(slot)}`);
 }
 
 // Адресный вызов: соперник выбирает дату/корт в мини-приложении, поэтому кнопка ведёт туда.
@@ -230,14 +215,7 @@ ${agreedBlock(slot)}${bookedNote}${court?.whatsapp && String(side) === bookerId 
       reply_markup: { inline_keyboard: rows }
     }).catch(() => {});
   }
-  try {
-    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
-    const chatId = topic?.chatId || await getAdminChatId();
-    if (chatId) {
-      await sendMessage(chatId, `<b>✖️ Матч отменён</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}\n\nОтменил: <b>${escapeHtml(byName || '')}</b>${slot.court_confirmed_at ? '\n⚠️ корт был подтверждён' : ''}`,
-        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
-    }
-  } catch (e) { console.error('cancel admin copy failed:', e.message); }
+  await adminMatchCopy(slot, `<b>✖️ Матч отменён</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}\n\nОтменил: <b>${escapeHtml(byName || '')}</b>${slot.court_confirmed_at ? '\n⚠️ корт был подтверждён' : ''}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,14 +346,7 @@ ${agreedBlock(slot)}
   await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: kb(slot.to_username, slot.from_telegram_id) }).catch(e => console.error('confirm notify author failed:', e.message));
   await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: kb(slot.from_username, slot.to_telegram_id) }).catch(e => console.error('confirm notify taker failed:', e.message));
 
-  try {
-    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
-    const chatId = topic?.chatId || await getAdminChatId();
-    if (chatId) {
-      await sendMessage(chatId, `<b>✅ Матч активен (корт подтверждён)</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}`,
-        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
-    }
-  } catch (e) { console.error('confirm notify admin failed:', e.message); }
+  await adminMatchCopy(slot, `<b>✅ Матч активен (корт подтверждён)</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}`);
 }
 
 // Текст отмены брони — тем же языком и форматом, что и запрос на бронь.
@@ -540,6 +511,30 @@ ${resultBlock(slot)}${stage === 'n2' ? '\n\n<i>Пока вы не подтвер
 }
 
 // Счёт не отменяем и не засчитываем сами — эскалируем организатору.
+// Копии активности по матчам в админский топик. По умолчанию ВЫКЛЮЧЕНЫ:
+// организатору нужны обращения игроков, чеки и заявки, а не вся их переписка
+// между собой. Включить при необходимости: Settings → admin_match_copies = on.
+// Эскалации (счёт висит без подтверждения, спор по счёту) идут всегда — это
+// просьба вмешаться, а не фоновый шум.
+let matchCopyFlag = { t: 0, v: false };
+async function adminCopiesOn() {
+  if (Date.now() - matchCopyFlag.t < 60000) return matchCopyFlag.v;
+  const raw = String(await getSetting('admin_match_copies').catch(() => '')).trim().toLowerCase();
+  matchCopyFlag = { t: Date.now(), v: ['on', 'yes', 'true', '1'].includes(raw) };
+  return matchCopyFlag.v;
+}
+async function adminMatchCopy(slot, body, { photo = '' } = {}) {
+  if (!await adminCopiesOn()) return null;
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    const chatId = topic?.chatId || await getAdminChatId();
+    if (!chatId) return null;
+    const opts = topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {};
+    if (photo) return sendPhoto(chatId, photo, { caption: body, ...opts }).catch(() => sendMessage(chatId, body, opts));
+    return sendMessage(chatId, body, opts);
+  } catch (e) { console.error('admin match copy failed:', e.message); return null; }
+}
+
 export async function notifyResultStalled(slot) {
   try {
     const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
@@ -621,14 +616,7 @@ ${confirmed ? 'Обновите событие в календаре — ста�
     const opp = opponentOf(slot, side);
     await sendMessage(side, card(opp.name, opp.username), { reply_markup: kb }).catch(() => {});
   }
-  try {
-    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
-    const chatId = topic?.chatId || await getAdminChatId();
-    if (chatId) {
-      await sendMessage(chatId, `<b>🕐 Время матча изменено</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}${previousTime ? `\n<i>было ${escapeHtml(previousTime)}</i>` : ''}`,
-        topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {});
-    }
-  } catch (e) { console.error('time change admin copy failed:', e.message); }
+  await adminMatchCopy(slot, `<b>🕐 Время матча изменено</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}${previousTime ? `\n<i>было ${escapeHtml(previousTime)}</i>` : ''}`);
 }
 
 // Соперник не может: время остаётся прежним, бронирующий пробует другой слот.
@@ -728,16 +716,7 @@ ${resultBlock(slot)}`;
     if (!side) continue;
     await sendMessage(side, text(opponentOf(slot, side))).catch(() => {});
   }
-  try {
-    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
-    const chatId = topic?.chatId || await getAdminChatId();
-    if (chatId) {
-      const body = `<b>✅ Результат матча</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${resultDateBlock(slot)}\n\n${resultBlock(slot)}${writeInfo ? `\n\n<i>${escapeHtml(writeInfo)}</i>` : ''}`;
-      const opts = topic?.message_thread_id ? { message_thread_id: topic.message_thread_id } : {};
-      if (slot.result_photo_file_id) await sendPhoto(chatId, slot.result_photo_file_id, { caption: body, ...opts }).catch(() => sendMessage(chatId, body, opts));
-      else await sendMessage(chatId, body, opts);
-    }
-  } catch (e) { console.error('admin result copy failed:', e.message); }
+  await adminMatchCopy(slot, `<b>✅ Результат матча</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${resultDateBlock(slot)}\n\n${resultBlock(slot)}${writeInfo ? `\n\n<i>${escapeHtml(writeInfo)}</i>` : ''}`, { photo: slot.result_photo_file_id || '' });
 }
 
 export async function notifyResultDisputed(slot) {

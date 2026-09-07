@@ -5,7 +5,7 @@ import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEET
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants } from './sheets.js';
-import { parseInitData, verifyTelegramInitData, uid, nowISO, safe } from './util.js';
+import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -356,11 +356,25 @@ You can now join an open event.`, { reply_markup:{ inline_keyboard:[[ { text: la
 // ---------------------------------------------------------------------------
 function hhmmToMin(v) { const [h, m] = String(v || '').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
 
-async function matchViewer(initData) {
+// Кто открыл мини-приложение. Обычный путь — подписанный Telegram initData.
+// Запасной — токен ?t= из адреса: его вшивает бот в кнопки постоянной
+// клавиатуры, потому что там initData не приходит вовсе.
+function webAppUser(initData, token = '') {
   const verified = verifyTelegramInitData(initData);
   const { user } = parseInitData(initData);
-  if (!user?.id) return { ok:false, code:400, error:'Telegram WebApp user not found' };
-  if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return { ok:false, code:403, error:'Invalid Telegram initData' };
+  if (user?.id) {
+    if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return { ok:false, code:403, error:'Invalid Telegram initData' };
+    return { ok:true, user };
+  }
+  const id = verifyWebAppToken(token);
+  if (id) return { ok:true, user: { id: Number(id) || id } };
+  return { ok:false, code:400, error:'Telegram WebApp user not found' };
+}
+
+async function matchViewer(initData, token = '') {
+  const who = webAppUser(initData, token);
+  if (!who.ok) return who;
+  const user = who.user;
   const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
   if (!profile) return { ok:false, code:404, error:'Player profile not found. Complete the profile first.' };
   const lang = ['ru','en'].includes(String(profile.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : 'en';
@@ -383,11 +397,10 @@ async function matchViewer(initData) {
 // Таблицы, гонка и список игроков — открытая часть: те же данные лежат на сайте,
 // прятать их не от кого. Профиль и состав сезона здесь НЕ требуются, поэтому
 // отдельная проверка, а не matchViewer: тот сторожит матчи, бронь и результаты.
-async function leagueViewer(initData) {
-  const verified = verifyTelegramInitData(initData);
-  const { user } = parseInitData(initData);
-  if (!user?.id) return { ok:false, code:400, error:'Telegram WebApp user not found' };
-  if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return { ok:false, code:403, error:'Invalid Telegram initData' };
+async function leagueViewer(initData, token = '') {
+  const who = webAppUser(initData, token);
+  if (!who.ok) return who;
+  const user = who.user;
   const profile = await findApplicantByTelegramIdentity(user).catch(() => null)
     || await findApplicantByTelegramId(user.id).catch(() => null);
   const lang = ['ru','en'].includes(String(profile?.language || '').toLowerCase())
@@ -403,7 +416,7 @@ async function leagueViewer(initData) {
 
 app.get('/api/match/bootstrap', async (req, res) => {
   try {
-    const v = await matchViewer(req.query.initData || '');
+    const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const counterId = String(req.query.counter || '');
     const [courts, opponents, openSlots, mySlots, resultTasks] = await Promise.all([
@@ -438,7 +451,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
 app.post('/api/match/create', async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await matchViewer(b.initData || '');
+    const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.division) return res.status(400).json({ ok:false, error:'You are not assigned to a division yet.' });
     const dates = (Array.isArray(b.dates) ? b.dates : []).map(d => String(d).trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
@@ -485,7 +498,7 @@ app.post('/api/match/create', async (req, res) => {
 // Отвечающий обязан выбрать конкретную дату (и корт, если автор предложил несколько).
 app.post('/api/match/take', async (req, res) => {
   try {
-    const v = await matchViewer(req.body?.initData || '');
+    const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     // Два корта на одно время — самая обидная накладка, ловим до согласования.
     const clash = await findTimeConflict(v.user.id, req.body.date, req.body.time, MATCH_DURATION_MIN, req.body.challenge_id)
@@ -515,7 +528,7 @@ app.post('/api/match/take', async (req, res) => {
 // Встречное предложение: сторона, которая сейчас отвечает, называет свои дату/время/корт.
 app.post('/api/match/counter', async (req, res) => {
   try {
-    const v = await matchViewer(req.body?.initData || '');
+    const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const result = await counterSlot(req.body.challenge_id, { telegram_id: v.user.id, name: v.profile.name },
       { date: req.body.date, time: req.body.time, court: req.body.court });
@@ -568,7 +581,7 @@ async function uploadResultPhoto(chatId, dataUrl) {
 app.post('/api/match/result', async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await matchViewer(b.initData || '');
+    const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
 
     const slot = await findSlot(b.challenge_id);
@@ -612,7 +625,7 @@ app.post('/api/match/result', async (req, res) => {
 app.post('/api/match/manual', async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await matchViewer(b.initData || '');
+    const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.division) return res.status(400).json({ ok:false, error:'You are not assigned to a division yet.' });
 
@@ -664,7 +677,7 @@ app.post('/api/match/manual', async (req, res) => {
 // Пока открыта только админу — включим всем, когда утвердим вид.
 app.get('/api/league/bootstrap', async (req, res) => {
   try {
-    const v = await leagueViewer(String(req.query.initData || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const [players, history, events, seasonList] = await Promise.all([
       getLeagueProfiles(),
@@ -706,7 +719,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
 // чтобы стартовый экран не ждал чтения ещё четырёх таблиц.
 app.get('/api/league/division', async (req, res) => {
   try {
-    const v = await leagueViewer(String(req.query.initData || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const data = await getDivisionTable(String(req.query.letter || ''), String(req.query.season || ''));
     if (!data.ok) {
@@ -725,7 +738,7 @@ app.get('/api/league/division', async (req, res) => {
 app.post('/api/court/request', async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await matchViewer(b.initData || '');
+    const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!COURT_BOOKING_OPEN && !v.isAdmin) return res.status(403).json({ ok:false, error:'Court booking is not open yet.' });
 
@@ -748,7 +761,7 @@ app.post('/api/court/request', async (req, res) => {
 // и это конец: заново договариваются новым окном.
 app.post('/api/match/cancel', async (req, res) => {
   try {
-    const v = await matchViewer(req.body?.initData || '');
+    const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const slot = await findSlot(req.body.challenge_id);
     if (!slot) return res.status(404).json({ ok:false, error:'Slot not found' });
@@ -775,7 +788,7 @@ app.post('/api/match/cancel', async (req, res) => {
 app.post('/api/match/retime', async (req, res) => {
   try {
     const b = req.body || {};
-    const v = await matchViewer(b.initData || '');
+    const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const r = await proposeTimeChange(b.challenge_id, { telegram_id: v.user.id, name: v.profile.name }, String(b.time || ''));
     if (!r.ok) {

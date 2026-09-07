@@ -31,11 +31,19 @@ async function playerState(userId) {
     if (out.profile) out.active = await isActiveLeaguePlayer({ ...out.profile, id: userId });
   } catch (e) { console.error('player state failed:', e.message); }
   if (out.active) { out.kind = 'active'; return out; }
+  // Состав берём из «Short Players list» (там дивизион и допуск к матчам),
+  // а статус оплаты — из Applications. Это два разных источника, и путать их
+  // нельзя: человек может быть оплачен, но ещё не расписан по дивизионам.
   try {
     out.app = await findLatestPayableApplicationByTelegramId(userId);
   } catch (e) { console.error('player state application failed:', e.message); }
-  const pay = String(out.app?.payment_status || '').toLowerCase();
-  if (out.app?.application_id && !['approved'].includes(pay)) out.kind = 'unpaid';
+  if (!out.app?.application_id) return out;
+  const pay = String(out.app.payment_status || '').toLowerCase();
+  const appSt = String(out.app.application_status || '').toLowerCase();
+  // Оплатил, но в составе его пока нет: «Оплатить» показывать уже незачем,
+  // а матчи ещё не открыть.
+  if (pay === 'approved' || appSt === 'active' || appSt === 'payment_approved') out.kind = 'paid';
+  else out.kind = 'unpaid';
   return out;
 }
 
@@ -43,12 +51,12 @@ async function playerState(userId) {
 // поставить один раз и обновлять только при смене состояния. Сигнатуру держим
 // в памяти: лишняя перестановка на каждое сообщение мигает у человека экраном.
 const menuSignature = new Map();
-function keyboardFor(chatId, lang, kind) {
+function keyboardFor(chatId, lang, kind, userId) {
   const key = String(chatId);
   const sig = `${lang}:${kind}`;
   if (menuSignature.get(key) === sig) return null;
   menuSignature.set(key, sig);
-  return persistentKeyboard(lang, kind);
+  return persistentKeyboard(lang, kind, userId);
 }
 
 // Короткая сводка для активного игрока: ближайший матч и то, чего от него ждут.
@@ -103,7 +111,7 @@ async function sendMain(chatId, lang, from=null) {
   // Постоянное меню ставим отдельным коротким сообщением — двух reply_markup
   // в одном сообщении Telegram не принимает.
   if (isPrivateChat) {
-    const kb = keyboardFor(chatId, l, st.kind);
+    const kb = keyboardFor(chatId, l, st.kind, userId);
     if (kb) await sendMessage(chatId, l === 'ru' ? '⌨️ Быстрые кнопки внизу — они всегда под рукой.' : '⌨️ Quick buttons below — always at hand.', { reply_markup: kb }).catch(e => console.error('persistent keyboard failed:', e.message));
   }
 }
@@ -449,6 +457,25 @@ function paymentProofMedia(msg={}) {
   return null;
 }
 
+// Оплата «висит», если у последней заявки взнос ещё не подтверждён. Подтверждённая
+// оплата, уже отправленный чек и активное участие сюда не попадают — по ним чек
+// не ждут, и присланная картинка чеком не является.
+const PENDING_PAYMENT = new Set(['payment_required', 'waiting_payment', 'rejected']);
+async function hasPendingPayment(telegramId) {
+  try {
+    const app = await findLatestApplicationByTelegramId(telegramId);
+    if (!app?.application_id) return false;
+    const pay = String(app.payment_status || '').toLowerCase();
+    const appSt = String(app.application_status || '').toLowerCase();
+    if (['approved', 'proof_received', 'refunded'].includes(pay)) return false;
+    if (['active', 'rejected', 'refunded'].includes(appSt)) return false;
+    return PENDING_PAYMENT.has(pay) || appSt === 'waiting_payment';
+  } catch (e) {
+    console.error('pending payment check failed:', e.message);
+    return false;
+  }
+}
+
 async function handlePaymentProofSubmission(msg, lang, state=null) {
   const proofMedia = paymentProofMedia(msg);
   if (!proofMedia) return false;
@@ -469,6 +496,14 @@ async function handlePaymentProofSubmission(msg, lang, state=null) {
       && !['approved','rejected','refunded'].includes(payStatus)
       && String(latest?.event_id || '').trim();
     if (canAcceptProof) app = latest;
+  }
+  // Без явной платёжной цепочки (state пустой) чек принимаем, только если взнос
+  // действительно не подтверждён. Иначе картинка из обычного диалога сбивала бы
+  // активному игроку статус на proof_received.
+  if (!applicationId && app?.application_id) {
+    const pay = String(app.payment_status || '').toLowerCase();
+    const appSt = String(app.application_status || '').toLowerCase();
+    if (['approved', 'refunded'].includes(pay) || ['active', 'refunded'].includes(appSt)) return false;
   }
   if (!app?.application_id) return false;
 
@@ -627,6 +662,7 @@ export async function handleMessage(msg) {
     }
     // Ссылка-раздел из рассылки: t.me/бот?start=go_<код>.
     if (param.startsWith('go_')) return openDestination(chatId, lang, from, param.replace(/^go_/, ''));
+    if (!isPrivate) return null;
     return sendMain(chatId, lang, from);
   }
 
@@ -756,19 +792,22 @@ export async function handleMessage(msg) {
     return sendMessage(chatId, t(lang, 'send_proof'));
   }
 
-  // If the bot was restarted after the player selected a payment method, in-memory state can be lost.
-  // Keep payment proof recovery before contact/chat fallback: this was the last confirmed
-  // working path for screenshots sent after choosing a payment method. Do not refactor it.
-  if (msg.chat.type === 'private' && paymentProofMedia(msg)) {
+  // Открытый разговор с организатором важнее любых догадок: картинка в диалоге —
+  // это вложение к разговору, а не чек. Раньше платёжная ветка перехватывала её
+  // раньше, и у активного игрока статус откатывался в proof_received.
+  if (state?.mode === 'contact') return handleContactMessage(msg, state, lang);
+  if (state?.mode === 'challenge_chat') return forwardChallengeChat(msg, state);
+
+  // Восстановление после перезапуска: игрок выбрал способ оплаты, бот перезапустился
+  // и потерял состояние в памяти. Срабатывает ТОЛЬКО когда оплата реально висит —
+  // иначе обычное фото в чате засчитывалось как чек и сбивало статус.
+  if (msg.chat.type === 'private' && paymentProofMedia(msg) && await hasPendingPayment(from.id)) {
     const handled = await handlePaymentProofSubmission(msg, lang, null).catch(e => {
       console.error('payment proof recovery failed:', e.message);
       return false;
     });
     if (handled) return null;
   }
-
-  if (state?.mode === 'contact') return handleContactMessage(msg, state, lang);
-  if (state?.mode === 'challenge_chat') return forwardChallengeChat(msg, state);
 
   // Catch-all: media sent in a private chat outside any flow must still reach the player's admin topic.
   if (isPrivate && paymentProofMedia(msg)) {
@@ -777,7 +816,20 @@ export async function handleMessage(msg) {
     await notifyPlayerMedia({ id:from.id, username:from.username, name:contactName(from) }, msg, 'Sent outside payment/contact flow').catch(e => console.error('notify player media failed:', e.message));
     return sendMessage(chatId, lang === 'ru' ? '✅ Файл получен и передан организатору.' : '✅ File received and forwarded to the organizer.', { reply_markup: mainKeyboard(lang) });
   }
+  // В группе главное меню не показываем: оно личное, и вываливать его при
+  // каждом сообщении в общем чате — шум для всех остальных.
+  if (!isPrivate) return null;
   return sendMain(chatId, lang, from);
+}
+
+// Что считается личным экраном: главное меню, тексты, оплата, связь, язык,
+// настройки ленты результатов. Админские (admin_*, bc*) и матчевые кнопки
+// сюда не входят — им место в группе по замыслу.
+const PERSONAL_CALLBACKS = new Set(['main', 'website_menu', 'payment_entry', 'contact', 'close_contact', 'results_mute', 'results_unmute']);
+const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:'];
+function isPersonalCallback(data = '') {
+  const d = String(data);
+  return PERSONAL_CALLBACKS.has(d) || PERSONAL_PREFIXES.some(p => d.startsWith(p));
 }
 
 export async function handleCallback(q) {
@@ -787,6 +839,16 @@ export async function handleCallback(q) {
   const from = q.from || {};
   const storedLang = await userLang(from);
   const lang = fallbackLang(storedLang);
+
+  // Личные экраны — только в личке. Если игрок нажал кнопку на сообщении бота
+  // в общем чате (лига, админская группа), его меню, оплата и переписка не
+  // должны вываливаться туда у всех на виду. Отвечаем всплывающей подсказкой.
+  const inGroup = ['group', 'supergroup', 'channel'].includes(String(msg.chat.type || ''));
+  if (inGroup && isPersonalCallback(data)) {
+    return answerCallbackQuery(q.id, lang === 'ru'
+      ? 'Это личный раздел — откройте его в чате с ботом.'
+      : 'This is a personal section — open it in your chat with the bot.', true).catch(() => {});
+  }
   await answerCallbackQuery(q.id).catch(() => {});
 
   if (data.startsWith('lang_select:')) {

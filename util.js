@@ -37,3 +37,42 @@ export function chunk(arr, n) {
   for (let i=0; i<arr.length; i+=n) out.push(arr.slice(i, i+n));
   return out;
 }
+
+// ------------------------------------------------------- вход по подписанной ссылке
+// Мини-приложение, открытое из постоянной клавиатуры, не получает initData:
+// Telegram отдаёт его только inline-кнопкам, кнопке Menu и прямым ссылкам.
+// Чтобы кнопка открывала раздел в ОДИН тап и при этом знала, кто пришёл,
+// бот вшивает в её адрес короткий токен, подписанный секретом бота.
+// Клавиатура персональная — этот адрес видит только её владелец.
+const TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+function tokenSecret() {
+  return crypto.createHmac('sha256', 'PTFWebAppLink').update(BOT_TOKEN || '').digest();
+}
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+export function signWebAppToken(telegramId, ttlMs = TOKEN_TTL_MS) {
+  const id = String(telegramId || '');
+  if (!id || !BOT_TOKEN) return '';
+  const exp = Date.now() + ttlMs;
+  const payload = `${id}.${exp}`;
+  const sig = b64url(crypto.createHmac('sha256', tokenSecret()).update(payload).digest()).slice(0, 27);
+  return `${payload}.${sig}`;
+}
+
+// Возвращает telegram_id или '' — при неверной подписи, просрочке и любом мусоре.
+export function verifyWebAppToken(token = '') {
+  const raw = String(token || '');
+  const parts = raw.split('.');
+  if (parts.length !== 3) return '';
+  const [id, exp, sig] = parts;
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(exp)) return '';
+  if (Number(exp) < Date.now()) return '';
+  const expected = b64url(crypto.createHmac('sha256', tokenSecret()).update(`${id}.${exp}`).digest()).slice(0, 27);
+  if (expected.length !== sig.length) return '';
+  try { if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return ''; }
+  catch { return ''; }
+  return id;
+}
