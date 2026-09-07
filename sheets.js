@@ -808,7 +808,7 @@ let applicantAdminColumnsReady = null;
 export async function ensureApplicantAdminColumns() {
   // Header check hits the Sheets metadata API; do it once per process.
   if (!applicantAdminColumnsReady) {
-    applicantAdminColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_created_at','results_optout'])
+    applicantAdminColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_chat_id','admin_topic_created_at','admin_topic_last_used_at','results_optout'])
       .catch(e => { applicantAdminColumnsReady = null; throw e; });
   }
   return applicantAdminColumnsReady;

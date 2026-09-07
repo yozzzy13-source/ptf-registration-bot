@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantLead } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -57,15 +57,21 @@ function playerTopicName(profileOrFrom={}) {
 
 // telegram_id -> { threadId, topicName }. Saves a Sheets round-trip on every message and
 // protects against a second topic being created while the sheet write is still in flight.
+// Ключ кэша — telegram_id + чат: при смене админской группы старые треды не подхватываются.
 const topicCache = new Map();
-export function forgetPlayerTopic(telegramId) { topicCache.delete(String(telegramId || '')); }
+const cacheKey = (telegramId, chatId) => `${chatId}:${telegramId}`;
+export function forgetPlayerTopic(telegramId, chatId='') {
+  const id = String(telegramId || '');
+  if (chatId) { topicCache.delete(cacheKey(id, chatId)); return; }
+  for (const k of [...topicCache.keys()]) if (k.endsWith(`:${id}`)) topicCache.delete(k);
+}
 
 export async function getOrCreatePlayerTopic(player={}) {
   const chatId = await getAdminChatId();
   if (!chatId) return null;
   const telegramId = player.telegram_id || player.id;
   if (!telegramId) return null;
-  const key = String(telegramId);
+  const key = cacheKey(telegramId, chatId);
 
   const cached = topicCache.get(key);
   if (cached?.threadId) return { chatId, message_thread_id: Number(cached.threadId), topicName: cached.topicName, existing:true };
@@ -83,10 +89,22 @@ export async function getOrCreatePlayerTopic(player={}) {
       freshProfile = await ensureApplicantLead({ ...player, id: telegramId }).catch(e => { console.error('ensureApplicantLead failed:', e.message); return null; });
     }
     const currentTopicId = String(freshProfile?.admin_topic_id || player.admin_topic_id || '').trim();
-    if (currentTopicId) {
+    // Сохранённый чат темы: пусто — наследие старой версии, тему принимаем и проставляем
+    // текущий чат (иначе разовая правка кода пересоздала бы все темы разом).
+    // Заполнено и не совпадает — тема из другой группы, её номер здесь чужой.
+    const savedChat = String(freshProfile?.admin_topic_chat_id || '').trim();
+    const sameChat = !savedChat || savedChat === String(chatId);
+    if (currentTopicId && sameChat) {
       const topicName = freshProfile?.admin_topic_name || playerTopicName(freshProfile || player);
       topicCache.set(key, { threadId: currentTopicId, topicName });
+      if (!savedChat) {
+        await updateApplicantAdminTopic(telegramId, { admin_topic_chat_id:String(chatId) }, player)
+          .catch(e => console.error('backfill admin_topic_chat_id failed:', e.message));
+      }
       return { chatId, message_thread_id: Number(currentTopicId), topicName, existing:true };
+    }
+    if (currentTopicId && !sameChat) {
+      console.warn(`topic ${currentTopicId} for ${telegramId} belongs to chat ${savedChat}, current is ${chatId} — creating a new one`);
     }
 
     const topicName = playerTopicName(freshProfile || player);
@@ -98,7 +116,9 @@ export async function getOrCreatePlayerTopic(player={}) {
         await updateApplicantAdminTopic(telegramId, {
           admin_topic_id:String(threadId),
           admin_topic_name:topicName,
-          admin_topic_created_at:nowISO()
+          admin_topic_chat_id:String(chatId),
+          admin_topic_created_at:nowISO(),
+          admin_topic_last_used_at:nowISO()
         }, player).catch(e => console.error('save admin_topic_id failed:', e.message));
         return { chatId, message_thread_id: threadId, topicName, existing:false };
       }
@@ -109,11 +129,38 @@ export async function getOrCreatePlayerTopic(player={}) {
   });
 }
 
+// Отметка «тема живая». Пишем не чаще раза в час на игрока: иначе каждое сообщение
+// стоило бы записи в таблицу.
+const lastUsedWrites = new Map();
+const LAST_USED_THROTTLE_MS = 60 * 60 * 1000;
+function markTopicUsed(telegramId) {
+  const id = String(telegramId || '');
+  if (!id) return;
+  const prev = lastUsedWrites.get(id) || 0;
+  if (Date.now() - prev < LAST_USED_THROTTLE_MS) return;
+  lastUsedWrites.set(id, Date.now());
+  updateApplicantAdminTopic(id, { admin_topic_last_used_at: nowISO() })
+    .catch(e => console.error('mark topic used failed:', e.message));
+}
+
 // Recreate a topic only when Telegram says the thread itself is gone/closed.
 // Any other failure (rate limit, HTML parse error, network) must NOT spawn a new topic.
 function isTopicGoneError(e) {
-  const desc = String(e?.telegram?.description || e?.message || '').toLowerCase();
-  return desc.includes('thread not found') || desc.includes('topic_deleted') || desc.includes('topic_closed') || desc.includes('topic closed') || desc.includes('message thread not found');
+  // Только ответ самого Telegram считается приговором теме. Сетевой сбой, таймаут
+  // или ошибка нашего кода не должны приводить к пересозданию: так игрок терял
+  // историю переписки на ровном месте.
+  const tg = e?.telegram;
+  if (!tg || tg.ok !== false) return false;
+  // 429 и 5xx — заведомо временные, даже если в тексте мелькнёт знакомое слово.
+  const code = Number(tg.error_code || 0);
+  if (code === 429 || (code >= 500 && code < 600)) return false;
+  const desc = String(tg.description || '').toLowerCase();
+  return desc.includes('message thread not found')
+    || desc.includes('thread not found')
+    || desc.includes('topic_deleted')
+    || desc.includes('topic deleted')
+    || desc.includes('topic_closed')
+    || desc.includes('topic closed');
 }
 
 function withTopicOpts(topic, opts={}) {
@@ -125,6 +172,13 @@ export async function notifyAdmin(text, opts={}) {
   const chatId = await getAdminChatId();
   if (!chatId) return null;
   return sendMessage(chatId, text, opts);
+}
+
+// Служебное уведомление о конкретном игроке — тоже в его тему.
+export async function notifyAboutPlayer(telegramId, text, opts={}) {
+  const chatId = await getAdminChatId();
+  if (!chatId) return null;
+  return replyInPlayerTopic(chatId, telegramId, text, opts);
 }
 
 export async function handleAdminInit(msg) {
@@ -230,7 +284,7 @@ Notes: ${escapeHtml(profile.notes)}`, withTopicOpts(topic, {
 async function resetPlayerTopic(telegramId) {
   if (!telegramId) return null;
   forgetPlayerTopic(telegramId);
-  await updateApplicantAdminTopic(telegramId, { admin_topic_id:'', admin_topic_name:'', admin_topic_created_at:'' }).catch(() => {});
+  await updateApplicantAdminTopic(telegramId, { admin_topic_id:'', admin_topic_name:'', admin_topic_chat_id:'', admin_topic_created_at:'' }).catch(() => {});
 }
 
 async function getFreshPlayerTopic(from, oldTopic=null, error=null) {
@@ -349,7 +403,13 @@ async function deliverMediaToTopic({ chatId, topic, from, originalMessage, capti
   return { delivered, topic: currentTopic, captioned };
 }
 
-async function deliverPlayerMessage({ chatId, topic, from, originalMessage, text, replyMarkup={}, fallbackTitle='Player message' }) {
+async function deliverPlayerMessage(args) {
+  const res = await deliverPlayerMessageInner(args);
+  if (res?.usedTopic) markTopicUsed(args?.from?.telegram_id || args?.from?.id);
+  return res;
+}
+
+async function deliverPlayerMessageInner({ chatId, topic, from, originalMessage, text, replyMarkup={}, fallbackTitle='Player message' }) {
   // Text-only or media-with-caption goes as ONE message when possible; otherwise header first, media second.
   const media = hasMedia(originalMessage || {});
   if (!media) {
@@ -390,7 +450,12 @@ export async function notifyPlayerMedia(from, originalMessage, note='') {
   if (!chatId) return null;
   const caption = originalMessage?.caption ? `\n\n${escapeHtml(originalMessage.caption)}` : '';
   const body = `<b>📎 Media from player</b>\n\n${playerHeader(from)}${note ? `\n${escapeHtml(note)}` : ''}${caption}`;
-  const replyMarkup = { reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] } };
+  // Кнопка «привязать к оплате» — для случая, когда игрок прислал чек без нажатия
+  // «оплатил» и открытой заявки бот не нашёл. Она подтянет последнюю заявку игрока.
+  const replyMarkup = { reply_markup: { inline_keyboard: [
+    [{ text: '💳 Привязать к оплате', callback_data: `admin_attach_pay:${from.id}` }],
+    [{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]
+  ] } };
   return deliverPlayerMessage({ chatId, topic, from, originalMessage, text: body, replyMarkup, fallbackTitle:'Player media topic fallback' });
 }
 
@@ -431,6 +496,30 @@ ${proof?.fileId ? `file_id: <code>${escapeHtml(proof.fileId)}</code>\n` : ''}
 Please ask the player to resend the screenshot.`, withTopicOpts(res.topic, reviewMarkup)).catch(e => console.error('send proof failure notice failed:', e.message));
   }
   return res.delivered;
+}
+
+// Разовая сверка после ввода admin_topic_chat_id: у строк, где номер темы есть,
+// а чат не записан, проставляем текущий admin_chat_id. Тем самым старые темы
+// признаются своими и не пересоздаются. Ничего не удаляет.
+export async function adminTopicSync(msg) {
+  const chatId = await getAdminChatId();
+  if (!chatId) return sendMessage(msg.chat.id, '⚠️ admin_chat_id не задан. Выполните /admin_init внутри админской супергруппы.');
+  await ensureApplicantAdminColumns().catch(() => {});
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const pending = rows.filter(r => String(r.admin_topic_id || '').trim() && !String(r.admin_topic_chat_id || '').trim());
+  if (!pending.length) {
+    const withTopic = rows.filter(r => String(r.admin_topic_id || '').trim()).length;
+    return sendMessage(msg.chat.id, `<b>Topic sync</b>\n\nВсе темы уже привязаны к чату.\nВсего тем: <b>${withTopic}</b>\nadmin_chat_id: <code>${escapeHtml(chatId)}</code>`, msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
+  }
+  let done = 0, failed = 0;
+  for (const r of pending) {
+    try {
+      await updateApplicantAdminTopic(r.telegram_id, { admin_topic_chat_id: String(chatId) });
+      done++;
+    } catch (e) { failed++; console.error('topic sync failed for', r.telegram_id, e.message); }
+    await new Promise(res => setTimeout(res, 60));
+  }
+  return sendMessage(msg.chat.id, `<b>Topic sync</b>\n\nПривязано тем: <b>${done}</b>\nОшибок: <b>${failed}</b>\nadmin_chat_id: <code>${escapeHtml(chatId)}</code>`, msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
 }
 
 // Admin diagnostic: verifies admin chat, forum mode and topic delivery for the admin's own topic.
@@ -583,6 +672,13 @@ export async function adminTopicTest(msg) {
     lines.push(`your topic: <b>${topic?.message_thread_id ? '#' + topic.message_thread_id + (topic.existing ? ' (existing)' : ' (created)') : 'NONE — bot needs admin rights with “Manage Topics”'}</b>`);
     const res = await deliverPlayerMessage({ chatId, topic, from, originalMessage: msg, text: `<b>🧪 Topic test</b>\n\n${playerHeader(from)}\n\nIf you see this inside your topic, delivery works.`, fallbackTitle:'Topic test' });
     lines.push(`delivery: <b>${res.usedTopic ? 'into topic ✅' : 'into General ⚠️'}</b>`);
+    const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+    const withTopic = rows.filter(r => String(r.admin_topic_id || '').trim());
+    const unbound = withTopic.filter(r => !String(r.admin_topic_chat_id || '').trim()).length;
+    const foreign = withTopic.filter(r => { const c = String(r.admin_topic_chat_id || '').trim(); return c && c !== String(chatId); }).length;
+    lines.push('', `тем всего: <b>${withTopic.length}</b>`,
+      `без привязки к чату: <b>${unbound}</b>${unbound ? ' — выполните /topic_sync' : ' ✅'}`,
+      `из другой группы: <b>${foreign}</b>${foreign ? ' — будут пересозданы при первом сообщении' : ' ✅'}`);
   } catch (e) { lines.push(`topic test failed: <code>${escapeHtml(e.message)}</code>`); }
   return sendMessage(msg.chat.id, `<b>Topic diagnostics</b>\n\n${lines.join('\n')}`);
 }
@@ -818,6 +914,68 @@ export async function executeBroadcast(callbackQuery) {
   await sendMessage(callbackQuery.message.chat.id, `✅ Broadcast finished\n\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>`);
 }
 
+// Ответ админа должен лечь в тему игрока, а не в общую ленту: иначе скриншот
+// лежит в подтопике, а вердикт по нему — отдельно и без контекста.
+async function replyInPlayerTopic(chatId, telegramId, text, opts={}) {
+  let topic = null;
+  if (telegramId) topic = await getOrCreatePlayerTopic({ id: telegramId, telegram_id: telegramId }).catch(() => null);
+  const target = topic?.chatId || chatId;
+  try {
+    const res = await sendMessage(target, text, withTopicOpts(topic, opts));
+    if (topic?.message_thread_id) markTopicUsed(telegramId);
+    return res;
+  } catch (e) {
+    console.error('replyInPlayerTopic failed, falling back:', e.message);
+    return sendMessage(chatId, text, opts).catch(() => null);
+  }
+}
+
+// Игрок прислал чек вне платёжного потока: привязываем файл к его последней заявке
+// и показываем обычную карточку проверки с Approve/Reject.
+export async function attachMediaToPayment({ chatId, telegramId }) {
+  const app = await findLatestApplicationByTelegramId(telegramId).catch(() => null);
+  if (!app?.application_id) {
+    return replyInPlayerTopic(chatId, telegramId, '⚠️ У игрока нет ни одной заявки — привязывать не к чему.');
+  }
+  const payStatus = String(app.payment_status || '').toLowerCase();
+  if (payStatus === 'approved') {
+    return replyInPlayerTopic(chatId, telegramId, `⚠️ По заявке <code>${escapeHtml(app.application_id)}</code> оплата уже подтверждена. Если это новый платёж, заведите заявку на нужное событие.`);
+  }
+  const paymentId = app.payment_id || uid('payment');
+  await updateApplication(app.application_id, {
+    application_status: String(app.application_status || '').toLowerCase() === 'active' ? app.application_status : 'proof_received',
+    payment_status: 'proof_received',
+    payment_proof_status: 'proof_received',
+    payment_id: paymentId
+  }).catch(e => console.error('attach: update application failed:', e.message));
+  await logPayment({
+    payment_id: paymentId,
+    application_id: app.application_id,
+    telegram_id: telegramId,
+    player_name: app.player_name,
+    event_id: app.event_id,
+    event_name: app.event_name,
+    method: app.payment_method || '',
+    network: app.payment_network || '',
+    amount: app.payment_amount || '',
+    currency: app.payment_currency || '',
+    proof_received_at: nowISO(),
+    status: 'proof_received',
+    notes: 'attached manually from player media'
+  }).catch(e => console.error('attach: log payment failed:', e.message));
+
+  const text = `<b>💳 Файл привязан к оплате</b>
+
+Application: <code>${escapeHtml(app.application_id)}</code>
+Payment: <code>${escapeHtml(paymentId)}</code>
+Player: <b>${escapeHtml(app.player_name || '')}</b>
+Event: ${escapeHtml(app.event_name || '')}
+Amount: <b>${escapeHtml(app.payment_amount || '')} ${escapeHtml(app.payment_currency || '')}</b>
+
+Скриншот — в сообщении выше.`;
+  return replyInPlayerTopic(chatId, telegramId, text, { reply_markup: adminPaymentKeyboard(app.application_id, paymentId, telegramId) });
+}
+
 export async function setApplicationStatus({ chatId, applicationId, status }) {
   const app = await updateApplication(applicationId, { application_status: status, reviewed_at: nowISO() });
   if (!app) return sendMessage(chatId, 'Application not found.');
@@ -834,7 +992,7 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
   } else if (status === 'waitlist') {
     await sendMessage(app.telegram_id, t(lang, 'waitlist'));
   }
-  await sendMessage(chatId, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
+  await replyInPlayerTopic(chatId, app.telegram_id, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
 }
 
 export async function setPaymentStatus({ chatId, applicationId, paymentId, status }) {
@@ -842,5 +1000,6 @@ export async function setPaymentStatus({ chatId, applicationId, paymentId, statu
   const appStatus = status === 'approved' ? 'payment_approved' : 'waiting_payment';
   const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: status === 'approved' ? 'approved' : 'rejected', payment_proof_status: status, payment_reviewed_at: nowISO() });
   if (app) await updateApplicantStatusByTelegramId(app.telegram_id, appStatus);
-  await sendMessage(chatId, `Payment ${escapeHtml(status)} for application <code>${escapeHtml(applicationId)}</code>. Participation status is still separate.`);
+  const icon = status === 'approved' ? '✅' : '❌';
+  await replyInPlayerTopic(chatId, app?.telegram_id, `<b>${icon} Payment ${escapeHtml(status)}</b>\n\nApplication: <code>${escapeHtml(applicationId)}</code>\nPlayer: <b>${escapeHtml(app?.player_name || '')}</b>\n\nParticipation status is still separate.`);
 }

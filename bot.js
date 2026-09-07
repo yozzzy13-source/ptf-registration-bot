@@ -10,7 +10,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, adminTopicTest, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -157,6 +157,7 @@ function adminHelpText() {
     '/results_here — привязать ленту результатов к текущей теме',
     '/match_test — проверка таблиц матчей и таблиц лиги',
     '/topic_test — проверка вебхука и топиков игроков',
+    '/topic_sync — привязать существующие темы к текущей админской группе',
     '/profile telegram_id — карточка игрока',
     '',
     '<b>Прочее</b>',
@@ -565,6 +566,7 @@ export async function handleMessage(msg) {
   if (isAdminUser(from.id)) {
     if (text === '/stats') return adminStats(chatId);
     if (text === '/topic_test') return adminTopicTest(msg);
+    if (text === '/topic_sync') return adminTopicSync(msg);
     if (text === '/match_test') return adminMatchTest(msg);
     if (text === '/overview' || text === '/matches') return adminMatchesOverview(msg);
     if (text === '/league') {
@@ -622,7 +624,7 @@ export async function handleMessage(msg) {
     const fileId = msg.photo[msg.photo.length - 1].file_id;
     await updateApplicantByTelegramId(from.id, { selfie_status:'received', selfie_file_id:fileId, selfie_received_at:nowISO() });
     userState.delete(String(chatId));
-    await notifyAdmin(`<b>📸 Selfie received</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.first_name || '')}</b> ${from.username ? '@' + escapeHtml(from.username) : ''}`);
+    await notifyAboutPlayer(from.id, `<b>📸 Selfie received</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.first_name || '')}</b> ${from.username ? '@' + escapeHtml(from.username) : ''}`);
     return sendMessage(chatId, t(lang, 'selfie_received'), { reply_markup: mainKeyboard(lang) });
   }
 
@@ -868,6 +870,10 @@ export async function handleCallback(q) {
     if (data.startsWith('admin_status:')) {
       const [, applicationId, status] = data.split(':');
       return setApplicationStatus({ chatId, applicationId, status });
+    }
+    if (data.startsWith('admin_attach_pay:')) {
+      const telegramId = data.split(':')[1];
+      return attachMediaToPayment({ chatId, telegramId });
     }
     if (data.startsWith('admin_payment:')) {
       const [, applicationId, paymentId, status] = data.split(':');
