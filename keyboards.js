@@ -70,11 +70,12 @@ export const MENU_LABELS = {
         menu:'🏠 Menu', contact:'💬 Contact' }
 };
 
-// Какие кнопки открывают мини-приложение, а какие обрабатывает сам бот.
-const MENU_PATHS = {
-  matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
-  league:'/league', apply:'/apply?mode=event', squad:'/participants'
-};
+// ВАЖНО: в постоянной клавиатуре кнопки web_app НЕ годятся. Мини-приложение,
+// запущенное из обычной (reply) клавиатуры, получает пустой initData — без
+// user и без подписи, — поэтому сервер отвечает «Telegram WebApp user not found».
+// Такие кнопки в Telegram рассчитаны на sendData(), а не на авторизацию.
+// Поэтому здесь все кнопки текстовые: бот ловит нажатие и отвечает сообщением
+// с inline-кнопкой, а вот она уже запускает мини-приложение уже с initData.
 
 const MENU_LAYOUTS = {
   active: [['matches','result'], ['court','league'], ['menu','contact']],
@@ -85,10 +86,7 @@ const MENU_LAYOUTS = {
 export function persistentKeyboard(lang, kind='lead') {
   const l = lang === 'ru' ? 'ru' : 'en';
   const labels = MENU_LABELS[l];
-  const rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(key => {
-    const text = labels[key];
-    return MENU_PATHS[key] ? { text, web_app: { url: `${PUBLIC_URL}${MENU_PATHS[key]}` } } : { text };
-  }));
+  const rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(key => ({ text: labels[key] })));
   return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 }
 
@@ -96,9 +94,7 @@ export function persistentKeyboard(lang, kind='lead') {
 // переключить язык, а клавиатура у него осталась со старыми подписями.
 const ACTION_BY_LABEL = new Map();
 for (const l of ['ru','en']) {
-  for (const [key, text] of Object.entries(MENU_LABELS[l])) {
-    if (!MENU_PATHS[key]) ACTION_BY_LABEL.set(text.toLowerCase(), key);
-  }
+  for (const [key, text] of Object.entries(MENU_LABELS[l])) ACTION_BY_LABEL.set(text.toLowerCase(), key);
 }
 export function menuAction(text='') {
   return ACTION_BY_LABEL.get(String(text).trim().toLowerCase()) || '';

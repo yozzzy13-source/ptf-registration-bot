@@ -151,6 +151,27 @@ async function openDestination(chatId, lang, from, code) {
   });
 }
 
+// Кнопка постоянной клавиатуры не может открыть мини-приложение сама: Telegram
+// не передаёт в него initData. Поэтому отвечаем сообщением с inline-кнопкой —
+// у неё авторизация работает.
+const OPEN_APP = {
+  league: { path:'/league',            ru:'🏆 Открыть лигу',      en:'🏆 Open the league',
+            tru:'Таблицы, годовая гонка, игроки и история матчей.', ten:'Tables, Yearly Race, players and match history.' },
+  squad:  { path:'/participants',      ru:'👥 Открыть состав',    en:'👥 Open the line-up',
+            tru:'Предварительные составы дивизионов сезона.',       ten:'Preliminary division line-ups for the season.' },
+  apply:  { path:'/apply?mode=event',  ru:'🎾 Подать заявку',     en:'🎾 Apply for the season',
+            tru:'Заполни заявку — это пара минут.',                 ten:'Filling in the form takes a couple of minutes.' }
+};
+async function sendOpenApp(chatId, lang, key) {
+  const l = fallbackLang(lang);
+  const d = OPEN_APP[key];
+  if (!d) return sendMain(chatId, l, null);
+  const ru = l === 'ru';
+  return sendMessage(chatId, ru ? d.tru : d.ten, {
+    reply_markup: { inline_keyboard: [[{ text: ru ? d.ru : d.en, web_app: { url: `${PUBLIC_URL}${d.path}` } }]] }
+  });
+}
+
 async function sendMatchShortcut(chatId, lang, from, tab) {
   const l = fallbackLang(lang);
   let active = false;
@@ -705,6 +726,15 @@ export async function handleMessage(msg) {
       openContactSession(chatId, lang);
       return sendMessage(chatId, t(lang, 'contact_prompt'), { reply_markup: contactOpenKeyboard(lang) });
     }
+    // Разделы с проверкой состава открываем через общий шорткат — он сам
+    // объяснит, если человек ещё не в составе.
+    if (act === 'matches') return sendMatchShortcut(chatId, lang, from, 'open');
+    if (act === 'result') return sendMatchShortcut(chatId, lang, from, 'res');
+    if (act === 'court') return sendMatchShortcut(chatId, lang, from, 'book');
+    // Открытые разделы: одно короткое сообщение с inline-кнопкой запуска.
+    if (act === 'league') return sendOpenApp(chatId, lang, 'league');
+    if (act === 'squad') return sendOpenApp(chatId, lang, 'squad');
+    if (act === 'apply') return sendOpenApp(chatId, lang, 'apply');
   }
 
   const state = userState.get(String(chatId));

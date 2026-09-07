@@ -1054,9 +1054,22 @@ export async function setPaymentStatus({ chatId, applicationId, paymentId = '', 
   }
   if (pid) await updatePayment(pid, { status: status === 'approved' ? 'approved' : 'rejected', admin_checked_at: nowISO() });
   else console.error(`setPaymentStatus: payment_id not found for ${applicationId}`);
-  const appStatus = status === 'approved' ? 'payment_approved' : 'waiting_payment';
+  // Подтверждённая оплата — это и есть участие: игрок сразу становится активным,
+  // иначе он застревал в payment_approved, а мини-приложение пускает только
+  // активных. Отдельно жать «Set Active» больше не нужно.
+  const appStatus = status === 'approved' ? 'active' : 'waiting_payment';
   const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: status === 'approved' ? 'approved' : 'rejected', payment_proof_status: status, payment_reviewed_at: nowISO() });
   if (app) await updateApplicantStatusByTelegramId(app.telegram_id, appStatus);
+  // Дальше обычная ветка подтверждения: поздравление и приглашение в клубный чат.
+  if (status === 'approved' && app?.telegram_id && !app.confirmed_message_sent_at) {
+    const lang = (await findApplicantByTelegramId(app.telegram_id))?.language === 'ru' ? 'ru' : 'en';
+    const text = lang === 'ru'
+      ? '<b>Поздравляем!</b> 🎾\n\nОплата подтверждена, твоё участие в сезоне тоже. Добро пожаловать в <b>Phuket Tennis Family</b>.\n\nЗаглядывай в клубный чат — там всё самое живое.'
+      : '<b>Congratulations!</b> 🎾\n\nYour payment is confirmed and so is your place in the season. Welcome to <b>Phuket Tennis Family</b>.\n\nJoin the club chat — that is where everything happens.';
+    await sendMessage(app.telegram_id, text, { reply_markup: clubKeyboard(lang, CLUB_CHAT_URL) })
+      .catch(e => console.error('confirm message failed:', e.message));
+    await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() }).catch(() => {});
+  }
   const icon = status === 'approved' ? '✅' : '❌';
   await replyInPlayerTopic(chatId, app?.telegram_id, `<b>${icon} Payment ${escapeHtml(status)}</b>\n\nApplication: <code>${escapeHtml(applicationId)}</code>\nPlayer: <b>${escapeHtml(app?.player_name || '')}</b>\n\nParticipation status is still separate.`);
 }
