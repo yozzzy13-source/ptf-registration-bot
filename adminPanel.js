@@ -1,6 +1,6 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating } from './sheets.js';
+import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck } from './sheets.js';
 import { sendMessage } from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 import { parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
@@ -181,7 +181,9 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const contacts = applyFilters(await getContacts(), req.body.filters || {}).filter(hasMissingRating);
+      // scope=recheck — вместе с теми, чью цифру организатор не подтверждал.
+      const pick = req.body.scope === 'recheck' ? needsRatingCheck : hasMissingRating;
+      const contacts = applyFilters(await getContacts(), req.body.filters || {}).filter(pick);
       const broadcastId = uid('broadcast');
       let sent = 0, failed = 0;
       for (const c of contacts) {

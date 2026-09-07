@@ -82,13 +82,22 @@ const MENU_PATHS = {
   league:'/league', apply:'/apply?mode=event', squad:'/participants'
 };
 
+// «Состав» нужен всем без исключения, в том числе тем, кто уже в сезоне: люди
+// следят за тем, кто с ними играет, пока дивизионы ещё добираются.
 const MENU_LAYOUTS = {
-  active: [['matches','result'], ['court','league'], ['menu','contact']],
+  active: [['matches','result'], ['court','league'], ['squad','contact'], ['menu']],
   // Оплата подтверждена, но дивизион ещё не назначен: матчей нет, платить нечего.
   paid:   [['league','squad'], ['menu','contact']],
   unpaid: [['pay','league'], ['squad','contact'], ['menu']],
   lead:   [['apply','league'], ['squad','contact']]
 };
+
+// Версия раскладки. Постоянная клавиатура живёт у человека в чате до тех пор,
+// пока бот её не перевыставит, а перевыставляем мы только при смене состояния.
+// Значит после любой правки набора кнопок или адресов номер надо поднять —
+// иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
+// без мгновенного открытия мини-приложения).
+export const MENU_VERSION = 3;
 
 export function persistentKeyboard(lang, kind='lead', telegramId='') {
   const l = lang === 'ru' ? 'ru' : 'en';

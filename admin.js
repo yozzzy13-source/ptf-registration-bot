@@ -687,38 +687,60 @@ export async function adminTopicTest(msg) {
 
 export function ratingUpdateKeyboard(lang='en') {
   const url = `${PUBLIC_URL}/apply?mode=rating`;
-  return { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Указать NTRP (Raketo)' : '🎾 Add NTRP (Raketo)', web_app: { url } }]] };
+  return { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Указать уровень' : '🎾 Set my level', web_app: { url } }]] };
 }
 
+// Одно письмо на две ситуации сразу: у кого рейтинга нет и у кого он есть, но
+// получен старым тестом. Формулировка объясняет, почему просим пройти заново —
+// иначе повторный тест выглядит как ошибка системы.
 export function missingRatingMessage(lang='en') {
   return lang === 'ru'
-    ? `<b>🎾 Обновите рейтинг NTRP (Raketo)</b>
+    ? `<b>🎾 Уточняем уровень игроков перед сезоном</b>
 
-В вашей анкете Phuket Tennis Family не указан рейтинг NTRP (Raketo).
+В вашей анкете PTF либо не указан уровень, либо он проставлен по старой версии теста — она заметно завышала середину, и почти все получали 3.5.
 
-Чтобы анкета считалась заполненной полностью, укажите свой рейтинг из приложения Raketo. Если рейтинга Raketo у вас нет, пройдите короткий тест по кнопке ниже — бот рассчитает примерный уровень и обновит вашу уже существующую анкету.`
-    : `<b>🎾 Update your NTRP (Raketo)</b>
+Мы пересобрали тест: 11 коротких вопросов про стаж, соревновательный опыт и то, как обычно складываются ваши матчи. Пара минут.
 
-Your Phuket Tennis Family profile does not include NTRP (Raketo).
+Зачем это нужно: по уровню мы разводим игроков по дивизионам. Завышенная цифра — это разгромные матчи и испорченное впечатление от сезона, заниженная — скучные.
 
-To complete your profile, enter your rating from the Raketo app. If you do not have a Raketo rating, take the short test using the button below — the bot will estimate your level and update your existing profile.`;
+Если вы играете в приложении <b>Raketo</b> и знаете свой рейтинг оттуда — просто впишите его, это точнее любого теста.`
+    : `<b>🎾 Confirming player levels before the season</b>
+
+Your PTF profile either has no level, or it was set by the old version of the test — that version pushed almost everyone to 3.5.
+
+We have rebuilt it: 11 short questions about your experience, competitive play and how your matches usually go. It takes a couple of minutes.
+
+Why it matters: your level decides your division. An inflated number means one-sided matches and a season you will not enjoy; too low means matches that are not challenging.
+
+If you use the <b>Raketo</b> app and know your rating there, just enter it — it beats any self-assessment test.`;
 }
 
 export async function startMissingRatingBroadcast(chatId, adminId) {
-  const contacts = await getMissingRatingContacts();
-  adminState.set(String(adminId), { mode:'missing_rating_confirm', count:contacts.length });
-  return sendMessage(chatId, `<b>Missing NTRP (Raketo) broadcast</b>
+  const [missing, recheck] = await Promise.all([
+    getMissingRatingContacts('missing'),
+    getMissingRatingContacts('recheck')
+  ]);
+  adminState.set(String(adminId), { mode:'missing_rating_confirm', count:missing.length });
+  return sendMessage(chatId, `<b>Рассылка про уровень игрока</b>
 
-Recipients found: <b>${contacts.length}</b>
+Без рейтинга вообще: <b>${missing.length}</b>
+Плюс те, чью цифру ты не подтверждал: <b>${recheck.length}</b>
 
-This will send a fixed message with a WebApp button to update NTRP (Raketo).`, { reply_markup:{ inline_keyboard:[[ { text:'✅ Send', callback_data:'bcconfirm_missing_rating' }, { text:'❌ Cancel', callback_data:'bccancel' } ]] } });
+Подтверждённой считается строка, где в колонке <code>ntrp_source</code> стоит <code>admin</code>. Тексты одинаковые, отличается только охват.`, { reply_markup:{ inline_keyboard:[
+    [{ text:`📨 Только без рейтинга (${missing.length})`, callback_data:'bcconfirm_missing_rating' }],
+    [{ text:`📨 Все на перепрохождение (${recheck.length})`, callback_data:'bcconfirm_rating_recheck' }],
+    [{ text:'❌ Отмена', callback_data:'bccancel' }]
+  ] } });
 }
 
-export async function executeMissingRatingBroadcast(callbackQuery) {
+// Повторный запуск той же рассылки — частая беда: адмнин жмёт кнопку дважды.
+// Состояние снимаем ДО отправки, поэтому второе нажатие уже ничего не делает.
+export async function executeMissingRatingBroadcast(callbackQuery, scope='missing') {
   const adminId = callbackQuery.from.id;
   const state = adminState.get(String(adminId));
   if (!state || state.mode !== 'missing_rating_confirm') return;
-  const contacts = await getMissingRatingContacts();
+  adminState.delete(String(adminId));
+  const contacts = await getMissingRatingContacts(scope);
   const broadcastId = uid('broadcast');
   let sent = 0, failed = 0;
   for (const c of contacts) {
@@ -726,16 +748,15 @@ export async function executeMissingRatingBroadcast(callbackQuery) {
     try {
       await sendMessage(c.telegram_id, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
       sent++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'missing_rating' });
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:`missing_rating:${scope}` });
       await new Promise(r => setTimeout(r, 45));
     } catch (e) {
       failed++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:lang, segment_filter:'missing_rating' });
+      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:lang, segment_filter:`missing_rating:${scope}` });
     }
   }
-  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'missing_rating', language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-  adminState.delete(String(adminId));
-  return sendMessage(callbackQuery.message.chat.id, `✅ Missing rating broadcast finished
+  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:`missing_rating:${scope}`, language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+  return sendMessage(callbackQuery.message.chat.id, `✅ Рассылка про уровень отправлена
 
 Sent: <b>${sent}</b>
 Failed: <b>${failed}</b>`);

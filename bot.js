@@ -1,5 +1,5 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS } from './telegram.js';
-import { mainKeyboard, persistentKeyboard, menuAction, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
+import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
 import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
@@ -53,10 +53,15 @@ async function playerState(userId) {
 const menuSignature = new Map();
 function keyboardFor(chatId, lang, kind, userId) {
   const key = String(chatId);
-  const sig = `${lang}:${kind}`;
+  // В сигнатуру входит версия раскладки и наличие персонального токена: после
+  // деплоя с новыми кнопками клавиатура обязана обновиться у всех, иначе люди
+  // остаются со старой и жмут кнопки, которые уходят в бот текстом.
+  const kb = persistentKeyboard(lang, kind, userId);
+  const oneTap = kb.keyboard.flat().some(b => b.web_app) ? 'app' : 'txt';
+  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}`;
   if (menuSignature.get(key) === sig) return null;
   menuSignature.set(key, sig);
-  return persistentKeyboard(lang, kind, userId);
+  return kb;
 }
 
 // Короткая сводка для активного игрока: ближайший матч и то, чего от него ждут.
@@ -83,6 +88,19 @@ async function playerDigest(userId, lang) {
     if (tasks.length) lines.push(ru ? `📊 Не внесён счёт: <b>${tasks.length}</b>` : `📊 Result not submitted: <b>${tasks.length}</b>`);
   } catch (e) { console.error('player digest failed:', e.message); }
   return lines.join('\n');
+}
+
+// Перевыставляет постоянную клавиатуру, если она устарела (сменилось состояние
+// игрока, поднялась версия раскладки или у человека висит текстовый вариант).
+// Молчит, когда менять нечего.
+async function refreshMenu(chatId, lang, from) {
+  if (Number(chatId) < 0) return null;
+  const userId = from?.id ?? chatId;
+  const l = fallbackLang(lang);
+  const st = await playerState(userId);
+  const kb = keyboardFor(chatId, l, st.kind, userId);
+  if (!kb) return null;
+  return sendMessage(chatId, l === 'ru' ? '⌨️ Обновил быстрые кнопки — теперь разделы открываются одним нажатием.' : '⌨️ Quick buttons updated — sections now open in one tap.', { reply_markup: kb });
 }
 
 async function sendMain(chatId, lang, from=null) {
@@ -756,6 +774,11 @@ export async function handleMessage(msg) {
   // «связаться» и «чат с соперником» — иначе нажатие уйдёт собеседнику текстом.
   if (isPrivate && text) {
     const act = menuAction(text);
+    // Текст от кнопки меню приходит только со СТАРОЙ клавиатуры: у новой кнопки
+    // открывают мини-приложение сразу и боту ничего не шлют. Значит человек
+    // сидит на прошлой раскладке — тихо подменяем её на актуальную, чтобы
+    // следующее нажатие открывало раздел в один тап.
+    if (act) await refreshMenu(chatId, lang, from).catch(() => {});
     if (act === 'menu') return sendMain(chatId, lang, from);
     if (act === 'pay') return sendPaymentEntry(chatId, from, lang);
     if (act === 'contact') {
@@ -1071,6 +1094,7 @@ export async function handleCallback(q) {
     if (data === 'bcconfirm_menu') return executeBroadcastWithMenu(q);
     if (data === 'bcconfirm_poll') return executeBroadcastPoll(q);
     if (data === 'bcconfirm_missing_rating') return executeMissingRatingBroadcast(q);
+    if (data === 'bcconfirm_rating_recheck') return executeMissingRatingBroadcast(q, 'recheck');
     if (data === 'bccancel') {
       adminState.delete(String(from.id));
       return sendMessage(chatId, 'Broadcast cancelled.');
