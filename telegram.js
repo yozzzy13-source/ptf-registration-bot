@@ -149,6 +149,7 @@ export const ADMIN_COMMANDS = [
   { command: 'events', description: 'Events' },
   { command: 'messages', description: 'Recent messages' },
   { command: 'rating', description: 'Ask players to set their level' },
+  { command: 'rating_to', description: 'Ask one player to set their level' },
   { command: 'results_here', description: 'Bind the results feed to this topic' },
   { command: 'menu', description: 'Main menu' },
   { command: 'cancel', description: 'Cancel current action' }

@@ -120,7 +120,10 @@ app.post('/webhook', async (req, res) => {
 app.get('/api/bootstrap', async (req, res) => {
   try {
     const initData = req.query.initData || '';
-    const { user } = parseInitData(initData);
+    // Раздел мог открыться из постоянной клавиатуры — там Telegram не отдаёт
+    // initData, и человека опознаёт подписанный токен в адресе.
+    const who = webAppUser(initData, req.query.t || '');
+    const user = who.ok ? who.user : null;
     const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en';
     const events = await getActiveEvents();
@@ -131,8 +134,7 @@ app.get('/api/bootstrap', async (req, res) => {
   }
 });
 
-async function participantsPayload(initData='') {
-  const { user } = parseInitData(initData);
+async function participantsPayload(user=null) {
   let lang = '';
   if (user?.id) {
     const profile = await findApplicantByTelegramId(user.id).catch(() => null);
@@ -146,10 +148,12 @@ async function participantsPayload(initData='') {
 
 app.get('/api/participants', async (req, res) => {
   try {
-    const initData = req.query.initData || '';
-    const verified = verifyTelegramInitData(initData);
-    if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return res.status(403).json({ ok:false, error:'Invalid Telegram initData' });
-    res.json(await participantsPayload(initData));
+    // Кнопка «Состав» есть в постоянной клавиатуре, а оттуда приходит токен
+    // вместо initData. Раньше здесь проверялась только initData, и раздел
+    // отвечал «Invalid Telegram initData».
+    const who = webAppUser(req.query.initData || '', req.query.t || '');
+    if (!who.ok) return res.status(who.code).json({ ok:false, error:who.error });
+    res.json(await participantsPayload(who.user));
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }

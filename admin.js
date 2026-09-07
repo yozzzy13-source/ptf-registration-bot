@@ -715,6 +715,25 @@ Why it matters: your level decides your division. An inflated number means one-s
 If you use the <b>Raketo</b> app and know your rating there, just enter it — it beats any self-assessment test.`;
 }
 
+// Точечная отправка одному игроку: /rating_to 123456789 или /rating_to @username.
+// Нужна, когда человек пришёл лично и рассылку гнать незачем.
+export async function sendRatingRequestTo(chatId, argument='') {
+  const raw = String(argument || '').trim();
+  if (!raw) return sendMessage(chatId, 'Кому отправить? Пример: <code>/rating_to @username</code> или <code>/rating_to 309678431</code>');
+  const looksLikeId = /^\d+$/.test(raw);
+  const handle = raw.replace(/^@/, '').replace(/^https?:\/\/t\.me\//i, '');
+  const player = await findApplicantByTelegramIdentity(looksLikeId ? { id: raw } : { username: handle });
+  const target = player?.telegram_id || (looksLikeId ? raw : '');
+  if (!target) return sendMessage(chatId, `Не нашёл игрока <b>${escapeHtml(raw)}</b> в анкетах. Пришли его telegram_id — по нему отправлю в любом случае.`);
+  const lang = String(player?.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
+  try {
+    await sendMessage(target, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
+  } catch (e) {
+    return sendMessage(chatId, `Не доставлено игроку <b>${escapeHtml(player?.name || raw)}</b>: ${escapeHtml(e.message)}\nЧаще всего это значит, что человек не запускал бота или заблокировал его.`);
+  }
+  return sendMessage(chatId, `✅ Отправил просьбу указать уровень: <b>${escapeHtml(player?.name || raw)}</b> (${lang})`);
+}
+
 export async function startMissingRatingBroadcast(chatId, adminId) {
   const [missing, recheck] = await Promise.all([
     getMissingRatingContacts('missing'),
