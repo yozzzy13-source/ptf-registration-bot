@@ -3,6 +3,7 @@ import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from '
 import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating } from './sheets.js';
 import { sendMessage } from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
+import { parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
 
 function isAdminId(id) {
   if (!ADMIN_IDS.length) return false;
@@ -108,7 +109,8 @@ export function registerAdminRoutes(app) {
       const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
       const divisions = [...new Set(contacts.map(r => r.division).filter(Boolean))].sort();
       const statuses = [...new Set(contacts.map(r => r.status).filter(Boolean))].sort();
-      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses });
+      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses,
+        link_codes: DESTINATIONS.map(d => ({ code: d.aliases[0] || d.code, label: d.ru })) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -121,6 +123,23 @@ export function registerAdminRoutes(app) {
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
+  // Предпросмотр рассылки: как будет выглядеть текст и какие кнопки прилипнут.
+  app.post('/api/admin/broadcast-preview', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const lang = String(req.body.lang || 'ru').toLowerCase() === 'en' ? 'en' : 'ru';
+      const parsed = parseTemplate(String(req.body.message || ''));
+      res.json({
+        ok: true,
+        text: renderText(parsed, lang, await getBotUsername()),
+        buttons: parsed.buttons.map(b => b.custom || destinationLabel(b.dest, lang)),
+        inline: parsed.inline.length,
+        unknown: parsed.unknown
+      });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
   app.post('/api/admin/broadcast', async (req, res) => {
     try {
       const auth = adminFromInitData(req.body.initData || '');
@@ -129,12 +148,22 @@ export function registerAdminRoutes(app) {
       if (!message) return res.status(400).json({ ok:false, error:'Message is empty' });
       const button = String(req.body.button || '').trim();
       const contacts = applyFilters(await getContacts(), req.body.filters || {});
+      // Коды разделов в тексте ({оплата}, {состав}, {!гонка}) превращаются
+      // в кнопки под сообщением с названием на языке получателя.
+      const parsed = parseTemplate(message);
+      const username = await getBotUsername();
       const broadcastId = uid('broadcast');
       let sent = 0, failed = 0;
       for (const c of contacts) {
         try {
-          const markup = broadcastButtonMarkup(button, c.language === 'ru' ? 'ru' : 'en');
-          await sendMessage(c.telegram_id, message, markup ? { reply_markup: markup } : {});
+          const lang = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
+          const body = parsed.hasLinks ? renderText(parsed, lang, username) : message;
+          // Кнопка из выпадающего списка панели добавляется отдельной строкой снизу.
+          const fromCodes = renderButtons(parsed, lang);
+          const fromPicker = broadcastButtonMarkup(button, lang);
+          const rows = [...(fromCodes?.inline_keyboard || []), ...(fromPicker?.inline_keyboard || [])];
+          const markup = rows.length ? { inline_keyboard: rows } : null;
+          await sendMessage(c.telegram_id, body, markup ? { reply_markup: markup } : {});
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
           sent++;
         } catch (e) {
