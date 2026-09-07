@@ -380,6 +380,27 @@ async function matchViewer(initData) {
   return { ok:true, user, profile, division: league.division, lang, isAdmin: ADMIN_IDS.includes(String(user.id)) };
 }
 
+// Таблицы, гонка и список игроков — открытая часть: те же данные лежат на сайте,
+// прятать их не от кого. Профиль и состав сезона здесь НЕ требуются, поэтому
+// отдельная проверка, а не matchViewer: тот сторожит матчи, бронь и результаты.
+async function leagueViewer(initData) {
+  const verified = verifyTelegramInitData(initData);
+  const { user } = parseInitData(initData);
+  if (!user?.id) return { ok:false, code:400, error:'Telegram WebApp user not found' };
+  if (BOT_TOKEN && !verified && process.env.NODE_ENV === 'production') return { ok:false, code:403, error:'Invalid Telegram initData' };
+  const profile = await findApplicantByTelegramIdentity(user).catch(() => null)
+    || await findApplicantByTelegramId(user.id).catch(() => null);
+  const lang = ['ru','en'].includes(String(profile?.language || '').toLowerCase())
+    ? String(profile.language).toLowerCase()
+    : (['ru','en'].includes(String(user.language_code || '').toLowerCase()) ? String(user.language_code).toLowerCase() : 'en');
+  let division = '';
+  if (profile) {
+    const league = await getPlayerLeagueInfo({ ...profile, id: user.id }).catch(() => ({ found:false }));
+    if (league.found) division = league.division || '';
+  }
+  return { ok:true, user, profile: profile || {}, division, lang, isAdmin: ADMIN_IDS.includes(String(user.id)) };
+}
+
 app.get('/api/match/bootstrap', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '');
@@ -643,9 +664,8 @@ app.post('/api/match/manual', async (req, res) => {
 // Пока открыта только админу — включим всем, когда утвердим вид.
 app.get('/api/league/bootstrap', async (req, res) => {
   try {
-    const v = await matchViewer(String(req.query.initData || ''));
+    const v = await leagueViewer(String(req.query.initData || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Раздел пока в тестовом режиме.' });
     const [players, history, events, divisions] = await Promise.all([
       getLeagueProfiles(),
       getLeagueMatchHistory().catch(() => new Map()),
@@ -659,7 +679,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
     res.json({
       ok: true,
       lang: v.lang,
-      user: { id: v.user.id, name: v.profile.name },
+      user: { id: v.user.id, name: v.profile.name || [v.user.first_name, v.user.last_name].filter(Boolean).join(' ') },
       season: await getSetting('season_number').catch(() => ''),
       me_division: v.division || '',
       players,
@@ -677,9 +697,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
 // чтобы стартовый экран не ждал чтения ещё четырёх таблиц.
 app.get('/api/league/division', async (req, res) => {
   try {
-    const v = await matchViewer(String(req.query.initData || ''));
+    const v = await leagueViewer(String(req.query.initData || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Раздел пока в тестовом режиме.' });
     const data = await getDivisionTable(String(req.query.letter || ''));
     if (!data.ok) {
       const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };

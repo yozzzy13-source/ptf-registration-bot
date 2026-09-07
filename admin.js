@@ -4,6 +4,7 @@ import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
+import { parseTemplate, renderText, renderButtons, destinationLabel, getBotUsername, linksCheatSheet } from './links.js';
 
 export const adminState = new Map();
 const topicLocks = new Map();
@@ -743,14 +744,17 @@ Failed: <b>${failed}</b>`);
 export async function startBroadcastWithMenu(chatId, adminId) {
   const contacts = await getSegmentContacts('all');
   adminState.set(String(adminId), { mode: 'broadcast_menu_message', segment: 'all', count: contacts.length });
-  await sendMessage(chatId, `<b>Broadcast with menu button</b>\n\nRecipients: <b>${contacts.length}</b>\n\nSend the text that should go to all users. The bot will attach a button that opens the main menu.`);
+  await sendMessage(chatId, `<b>Broadcast with menu button</b>\n\nRecipients: <b>${contacts.length}</b>\n\nПришлите текст рассылки. Если не поставить ни одного кода раздела, снизу будет кнопка «Открыть меню».\n\nКоды разделов: <code>{оплата}</code>, <code>{игроки}</code>, <code>{!гонка}</code> — полный список /links`);
 }
 
 export async function handleBroadcastMenuMessage(msg, state) {
   const text = msg.text || msg.caption || '';
   if (!text) return sendMessage(msg.chat.id, 'Send a text message for this broadcast.');
-  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_menu_confirm', message_text: text });
-  await sendMessage(msg.chat.id, `<b>Broadcast preview</b>\n\nSegment: <b>all</b>\nRecipients: <b>${state.count}</b>\n\n${escapeHtml(text)}\n\nButton: <b>🎾 Open menu</b>\n\nSend now?`, { reply_markup: { inline_keyboard: [[
+  // Без своих кодов работает как раньше — одна кнопка «Открыть меню».
+  const parsed = parseTemplate(text.includes('{') ? text : `${text}\n{menu}`);
+  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_menu_confirm', message_text: text, parsed });
+  const username = await getBotUsername();
+  await sendMessage(msg.chat.id, `<b>Broadcast preview</b>\n\nSegment: <b>all</b>\nRecipients: <b>${state.count}</b>\n\n${renderText(parsed, 'ru', username)}${linksPreview(parsed)}\n\nSend now?`, { reply_markup: { inline_keyboard: [[
     { text: '✅ Send now', callback_data: 'bcconfirm_menu' },
     { text: '❌ Cancel', callback_data: 'bccancel' }
   ]]}});
@@ -761,13 +765,14 @@ export async function executeBroadcastWithMenu(callbackQuery) {
   const state = adminState.get(String(adminId));
   if (!state || state.mode !== 'broadcast_menu_confirm') return;
   const contacts = await getSegmentContacts('all');
+  const parsed = state.parsed || parseTemplate(`${state.message_text}\n{menu}`);
+  const username = await getBotUsername();
   const broadcastId = uid('broadcast');
   let sent = 0, failed = 0;
   for (const c of contacts) {
     try {
-      const l = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
-      const keyboard = { inline_keyboard: [[{ text: l === 'ru' ? '🎾 Открыть меню' : '🎾 Open menu', callback_data: 'main' }]] };
-      await sendMessage(c.telegram_id, state.message_text, { reply_markup: keyboard });
+      const view = renderFor(parsed, c, username);
+      await sendMessage(c.telegram_id, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'all_menu_button' });
       await new Promise(r => setTimeout(r, 45));
@@ -862,7 +867,7 @@ export async function adminPollStats(chatId, text='') {
 
 export async function startBroadcast(chatId, adminId) {
   adminState.set(String(adminId), { mode: 'broadcast_segment' });
-  await sendMessage(chatId, '<b>Create broadcast</b>\n\nChoose segment:', { reply_markup: { inline_keyboard: [
+  await sendMessage(chatId, '<b>Create broadcast</b>\n\nВ тексте можно ставить коды разделов: <code>{оплата}</code>, <code>{игроки}</code>, <code>{!гонка}</code>. Полный список — /links\n\nChoose segment:', { reply_markup: { inline_keyboard: [
     [{ text: 'All contacts', callback_data: 'bcseg:all' }],
     [{ text: 'Season 2 applicants', callback_data: 'bcseg:season2' }],
     [{ text: 'Active', callback_data: 'bcseg:active' }, { text: 'Waitlist', callback_data: 'bcseg:waitlist' }],
@@ -879,13 +884,43 @@ export async function handleBroadcastSegment(callbackQuery, segment) {
   await sendMessage(callbackQuery.message.chat.id, `Segment: <b>${escapeHtml(segment)}</b>\nRecipients found: <b>${contacts.length}</b>\n\nNow send the broadcast text/message.`);
 }
 
+// Общий кусок предпросмотра: что увидят люди и какие кнопки прилипнут.
+// Показываем русский вариант — англоязычным подставятся английские названия.
+function linksPreview(parsed) {
+  if (!parsed.hasLinks && !parsed.unknown.length) return '';
+  const lines = [];
+  if (parsed.buttons.length) {
+    lines.push('', '<b>Кнопки под сообщением:</b>',
+      ...parsed.buttons.map(b => `• ${escapeHtml(b.custom || destinationLabel(b.dest, 'ru'))}`));
+  }
+  if (parsed.inline.length) {
+    lines.push('', `<b>Ссылок внутри текста:</b> ${parsed.inline.length}`);
+  }
+  if (parsed.unknown.length) {
+    lines.push('', `⚠️ <b>Неизвестные коды:</b> ${parsed.unknown.map(u => escapeHtml(u)).join(', ')}`,
+      'Они останутся в тексте как есть. Проверьте написание — /links');
+  }
+  return lines.join('\n');
+}
+
+// Текст и кнопки под конкретного получателя.
+function renderFor(parsed, contact, username) {
+  const lang = String(contact.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
+  return { lang, text: renderText(parsed, lang, username), reply_markup: renderButtons(parsed, lang) };
+}
+
 export async function handleBroadcastMessage(msg, state) {
   const text = msg.text || msg.caption || '';
   if (!text && !msg.photo && !msg.document && !msg.video) {
     return sendMessage(msg.chat.id, 'Send text, photo, document or video for broadcast.');
   }
-  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_confirm', sourceMessage: msg });
-  await sendMessage(msg.chat.id, `<b>Broadcast preview</b>\n\nSegment: <b>${escapeHtml(state.segment)}</b>\nRecipients: <b>${state.count}</b>\n\nSend now?`, { reply_markup: { inline_keyboard: [[
+  const parsed = parseTemplate(text);
+  const hasMediaMsg = Boolean(msg.photo || msg.document || msg.video);
+  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_confirm', sourceMessage: msg, parsed, hasMediaMsg });
+  const username = await getBotUsername();
+  const body = renderText(parsed, 'ru', username);
+  const tooLong = hasMediaMsg && parsed.hasLinks && body.length > 1024;
+  await sendMessage(msg.chat.id, `<b>Broadcast preview</b>\n\nSegment: <b>${escapeHtml(state.segment)}</b>\nRecipients: <b>${state.count}</b>\n\n${body}${linksPreview(parsed)}${tooLong ? '\n\n⚠️ Подпись к медиа длиннее 1024 символов — коды разделов работать не будут. Сократите текст.' : ''}\n\nSend now?`, { reply_markup: { inline_keyboard: [[
     { text: '✅ Send now', callback_data: 'bcconfirm' },
     { text: '❌ Cancel', callback_data: 'bccancel' }
   ]]}});
@@ -896,11 +931,25 @@ export async function executeBroadcast(callbackQuery) {
   const state = adminState.get(String(adminId));
   if (!state || state.mode !== 'broadcast_confirm') return;
   const contacts = await getSegmentContacts(state.segment);
+  const parsed = state.parsed || parseTemplate(state.sourceMessage.text || state.sourceMessage.caption || '');
+  const username = await getBotUsername();
   const broadcastId = uid('broadcast');
   let sent = 0, failed = 0;
   for (const c of contacts) {
     try {
-      await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id);
+      const view = parsed.hasLinks ? renderFor(parsed, c, username) : null;
+      if (view && !state.hasMediaMsg) {
+        // Текстовая рассылка с кодами: у каждого свой язык кнопок и ссылок.
+        await sendMessage(c.telegram_id, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
+      } else if (view) {
+        // Медиа сохраняем копированием, подпись и кнопки подменяем на свои.
+        await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id, {
+          caption: view.text, parse_mode: 'HTML',
+          ...(view.reply_markup ? { reply_markup: view.reply_markup } : {})
+        });
+      } else {
+        await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id);
+      }
       sent++;
       await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:state.segment });
       await new Promise(r => setTimeout(r, 45));
