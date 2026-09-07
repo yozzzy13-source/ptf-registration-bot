@@ -281,6 +281,7 @@ let profilesCache = { t: 0, v: null };
 export function invalidateLeagueCache() {
   profilesCache = { t: 0, v: null };
   eventsCache = { t: 0, v: null };
+  achCache = { t: 0, v: null };
   historyCache = { t: 0, v: null };
   seasonPointsCache = { t: 0, v: null };
   seasonHistCache = { t: 0, v: null };
@@ -454,13 +455,21 @@ export async function getLeagueProfiles() {
   }
   // Сезоны собираем из трёх мест: сам список — из истории сезонов, очки за сезон —
   // из листа годовой гонки (там их вводят руками), титулы и повышения — из достижений.
-  const [pointsBy, histBy] = await Promise.all([
+  const [pointsBy, histBy, achBy] = await Promise.all([
     getSeasonPoints().catch(() => new Map()),
-    getSeasonHistory().catch(() => new Map())
+    getSeasonHistory().catch(() => new Map()),
+    getLeagueAchievements().catch(() => new Map())
   ]);
   for (const p of out) {
     const pts = pointsBy.get(String(p.id)) || {};
     const hist = histBy.get(String(p.id)) || [];
+    // Ручные достижения приоритетнее: у них есть тип, дата и сезон.
+    const manual = achBy.get(String(p.id)) || [];
+    if (manual.length) p.achievements = manual;
+    else p.achievements = (p.titles || []).map(t => ({
+      type: String(t.type || t.title || ''), title: String(t.type || t.title || ''),
+      date: '', season: '', priority: 99, notes: ''
+    })).filter(x => x.title);
     const numbers = new Set([...hist.map(h => h.number), ...Object.keys(pts).map(Number)]);
     const seasons = [...numbers].filter(Boolean).sort((a, b) => b - a).map(n => {
       const h = hist.find(x => x.number === n) || {};
@@ -489,6 +498,33 @@ export async function getLeagueProfiles() {
   out.sort((a, b) => (a.position || 9999) - (b.position || 9999) || b.points - a.points);
   profilesCache = { t: Date.now(), v: out };
   return out;
+}
+
+// Достижения: отдельный лист, который заполняется руками. Тип достижения
+// определяет иконку на фронте, дата и сезон идут подписью.
+let achCache = { t: 0, v: null };
+export async function getLeagueAchievements() {
+  if (achCache.v && Date.now() - achCache.t < PROFILES_CACHE_MS) return achCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Achievements', 'player_id')
+    .catch(() => ({ rows: [] }));
+  const byPlayer = new Map();
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    const title = String(r.title || r.achievement_type || '').trim();
+    if (!pid || !title) continue;
+    if (!byPlayer.has(pid)) byPlayer.set(pid, []);
+    byPlayer.get(pid).push({
+      type: String(r.achievement_type || '').trim(),
+      title,
+      date: String(r.date || '').trim(),
+      season: String(r.season_id || '').trim(),
+      priority: pickNumber(r.display_priority || ''),
+      notes: String(r.notes || '').trim()
+    });
+  }
+  for (const list of byPlayer.values()) list.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+  achCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
 }
 
 // Турниры и события: реестр в таблице профилей. Пока пустой — раздел покажет

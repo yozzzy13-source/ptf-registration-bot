@@ -6,133 +6,314 @@
 <title>PTF League</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#141414;--card:#202020;--card2:#292929;--text:#f6f4ef;--muted:#a9a49b;--accent:#ef5f00;--accent2:#ff8a2a;--border:#3a3a3a;--win:#19c37d;--lose:#ff6b6b;--gold:#e8b93a}
-*{box-sizing:border-box}
-body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#0f0f0f,#1b1b1b);color:var(--text);min-height:100vh;padding:0 14px 40px}
-.wrap{max-width:620px;margin:0 auto}
-h1{font-size:22px;margin:14px 0 2px}
-.sub{color:var(--muted);font-size:13px;margin:0 0 12px}
-.tabs{position:sticky;top:0;z-index:5;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 0 8px;background:linear-gradient(180deg,#101010 78%,rgba(16,16,16,0));margin-bottom:4px}
-.tab{text-align:center;padding:9px 4px;border-radius:11px;background:var(--card2);border:1.5px solid var(--border);font-size:11.5px;font-weight:800;cursor:pointer;user-select:none;opacity:.55;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tab.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14)}
-.hidden{display:none}
-.empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
+/* Noir: тёплый чёрный, приглушённый янтарь, шампань для титулов.
+   Слои разделяются светлотой и тонкой кромкой, а не жирными рамками. */
+:root{
+  --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#1D1A17;--line2:#1A1714;
+  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;
+  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--gold:#C9A76A;
+  --win:#8FBF9A;--lose:#C2695E;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;min-height:100vh;position:relative}
+.grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+background-image:radial-gradient(rgba(255,255,255,.028) .5px,transparent .5px);background-size:3px 3px}
+.wrap{max-width:620px;margin:0 auto;padding:20px 16px 40px;position:relative;z-index:1}
+.hidden{display:none!important}
 
-/* поиск и фильтры */
-.search{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--card2);color:var(--text);font-size:15px;margin-bottom:10px}
-.chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
-.chip{padding:8px 13px;border-radius:11px;background:var(--card2);border:1.5px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;opacity:.6}
-.chip.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14);color:#ffd2a8}
+/* шапка и меню */
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.logo{width:40px;height:40px;border-radius:12px;flex:0 0 40px;background:linear-gradient(160deg,#2A2521,#171412);
+border:1px solid #322B24;color:var(--champ);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.eyebrow{font-size:9px;letter-spacing:2.6px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:3px}
+h1{font-size:22px;font-weight:800;letter-spacing:-.6px;line-height:1}
+.tabs{position:sticky;top:0;z-index:6;display:grid;grid-template-columns:repeat(4,1fr);gap:5px;
+padding:8px 0 10px;background:var(--bg);box-shadow:0 12px 14px -8px var(--bg);margin-bottom:14px}
+.tab{background:#141311;border:1px solid #201D19;color:var(--mute);border-radius:10px;padding:9px 3px;
+text-align:center;font-size:10.5px;font-weight:700;cursor:pointer;user-select:none;
+overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab.on{background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber);border-color:#4A3925}
+.tab.off{opacity:.35;cursor:default}
 
-/* годовая гонка */
-.rank{display:grid;grid-template-columns:30px 38px 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:14px;background:var(--card);border:1px solid var(--border);margin-bottom:8px;cursor:pointer}
-.rank.top{border-color:rgba(232,185,58,.5);background:linear-gradient(90deg,rgba(232,185,58,.10),var(--card) 60%)}
-.rank .pos{font-size:15px;font-weight:900;text-align:center;color:var(--muted)}
-.rank.top .pos{color:var(--gold)}
-.rank .nm{font-size:14.5px;font-weight:800;line-height:1.25;min-width:0}
-.rank .sub2{color:var(--muted);font-size:11.5px;margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.pts{text-align:right}
-.pts b{font-size:17px;font-weight:900;color:var(--accent2);display:block;line-height:1.1}
-.pts span{font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px}
-.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:#333;border:1px solid #444;flex:0 0 38px}
-.avph{width:38px;height:38px;border-radius:50%;background:#333;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#8f8a82}
+/* общее */
+.lab{font-size:9.5px;letter-spacing:2.2px;text-transform:uppercase;font-weight:800;color:var(--mute);
+margin:0 0 10px 2px;display:flex;align-items:center;gap:8px}
+.dot{width:3px;height:3px;border-radius:50%;background:var(--amber2);display:inline-block}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:12px;
+box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}
+.card h3{font-size:13.5px;font-weight:800;letter-spacing:.2px;margin-bottom:11px}
+.panel{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.empty{color:var(--mute);font-size:13.5px;text-align:center;padding:26px 10px;line-height:1.55}
+.hint{color:var(--mute);font-size:11.5px;line-height:1.5}
+.cnt{color:var(--mute2);font-size:10.5px;margin:0 0 10px 2px;font-weight:600}
+.search{width:100%;padding:11px 13px;border-radius:11px;border:1px solid #201D19;background:var(--surf);
+color:var(--text);font-size:14px;margin-bottom:10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{padding:7px 12px;border-radius:10px;background:#141311;border:1px solid #201D19;font-size:11px;
+font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
+.chip.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
+.chips.sm .chip{padding:5px 9px;font-size:10px;border-radius:8px}
+button{width:100%;border:1px solid var(--line);border-radius:13px;padding:13px;font-size:14px;font-weight:800;
+margin-top:12px;cursor:pointer;background:#141311;color:var(--text)}
+.more{width:100%;border:1px dashed #2A2521;background:transparent;color:var(--mute);border-radius:11px;
+padding:11px;font-size:11.5px;font-weight:700;margin-top:4px;cursor:pointer}
 
 /* бейджи */
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;border:1px solid var(--border);background:#303030;color:var(--muted);white-space:nowrap}
-.badge.div{background:rgba(239,95,0,.16);border-color:var(--accent);color:#ffd2a8}
-.badge.act{background:rgba(25,195,125,.15);border-color:#0f7a4f;color:#b7f3d8}
-.badge.gold{background:rgba(232,185,58,.15);border-color:var(--gold);color:#f4e2a8}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:800;
+border:1px solid #2A2521;background:#171512;color:var(--mute);letter-spacing:.3px;white-space:nowrap}
+.badge.g{border-color:#4A3C22;background:#1C1710;color:var(--gold)}
+.badge.ok{border-color:#2A3A2C;background:#131A15;color:var(--win)}
+/* цвета дивизионов */
+.dv{display:inline-block;padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:800;white-space:nowrap}
+.dv.d-a{background:rgba(232,164,92,.13);border:1px solid rgba(232,164,92,.42);color:#E8A45C}
+.dv.d-b{background:rgba(127,166,196,.12);border:1px solid rgba(127,166,196,.38);color:#8FB4CE}
+.dv.d-c{background:rgba(159,191,135,.12);border:1px solid rgba(159,191,135,.36);color:#A8C795}
+.dv.d-d{background:rgba(192,143,176,.12);border:1px solid rgba(192,143,176,.36);color:#C89CBA}
+.dv.d-p{background:rgba(217,199,163,.13);border:1px solid rgba(217,199,163,.4);color:#D9C7A3}
+.dv.d-x{background:#171512;border:1px solid #2A2521;color:var(--mute)}
 
 /* форма W/L */
-.form{display:flex;gap:4px}
-.fm{width:17px;height:17px;border-radius:5px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;color:#111}
-.fm.w{background:var(--win)}
-.fm.l{background:var(--lose)}
+.form{display:flex;gap:3px}
+.fm{width:16px;height:16px;border-radius:5px;font-size:9px;font-weight:800;display:flex;
+align-items:center;justify-content:center;color:#0A0A0B}
+.fm.w{background:var(--win)}.fm.l{background:var(--lose)}
 
-/* список игроков сеткой */
+/* аватарки */
+.avr{border-radius:50%;object-fit:cover;background:#1E1B18;border:1px solid #2A2521;display:block}
+.avph{border-radius:50%;background:linear-gradient(160deg,#2A2521,#1A1714);border:1px solid #2A2521;
+display:flex;align-items:center;justify-content:center;font-weight:800;color:#7C7365}
+
+/* --- гонка --- */
+.kpi{display:flex;gap:14px;margin:0 2px 13px;font-size:10px;color:var(--mute2);font-weight:600;flex-wrap:wrap}
+.kpi b{color:#C8C0B4;font-weight:800;font-size:12px}
+.kpi .a b{color:var(--amber)}
+.fbar{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:10px}
+.fbtn{display:flex;align-items:center;gap:6px;padding:11px 13px;border-radius:11px;background:#141311;
+border:1px solid #201D19;font-size:11px;font-weight:700;color:var(--mute);white-space:nowrap;cursor:pointer;user-select:none}
+.fbtn.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
+.fbtn .n{background:#4A3925;color:var(--amber);border-radius:6px;padding:1px 5px;font-size:9px}
+.fpanel{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+.flab{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin:0 0 7px 2px}
+.tb{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.thd,.trw{display:grid;grid-template-columns:20px 34px minmax(0,1fr) 26px 44px 48px;gap:6px;align-items:center;padding:0 11px}
+.thd{height:36px;background:var(--surf2);font-size:8px;letter-spacing:1.3px;text-transform:uppercase;
+color:var(--mute2);font-weight:800}
+.thd span,.trw span:not(.n){text-align:center}
+.thd .n,.trw .n{text-align:left;min-width:0;overflow:hidden}
+.thd span{cursor:pointer;user-select:none}
+.thd .s{color:var(--amber)}
+.trw{height:54px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--dim);position:relative;cursor:pointer}
+.trw:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.trw.top:before{background:linear-gradient(180deg,var(--champ),#8F7C55)}
+.trw .p{font-weight:800;color:#7C7365;font-size:12px}
+.trw.top .p{color:var(--champ)}
+.trw .avr,.trw .avph{width:34px;height:34px;flex:0 0 34px;font-size:11px}
+.trw.top .avr,.trw.top .avph{border-color:rgba(217,199,163,.45)}
+.trw .nm{font-size:12.5px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:3px;border-radius:2px;background:#221F1B;overflow:hidden;width:100%;max-width:44px;margin:4px auto 0}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#8F7C55,var(--amber))}
+.trw .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.4px}
+.tip{font-size:9.5px;color:var(--mute2);font-weight:600;margin:9px 2px 0}
+
+/* --- игроки --- */
+.view{display:flex;gap:6px;margin-bottom:12px}
+.vb{flex:1;padding:8px;border-radius:9px;background:#141311;border:1px solid #201D19;text-align:center;
+font-size:10.5px;font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
+.vb.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
+.pr{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:13px;margin-bottom:10px;
+box-shadow:inset 0 1px 0 rgba(255,255,255,.035);cursor:pointer}
+.pr .top{display:grid;grid-template-columns:84px minmax(0,1fr);gap:13px}
+.pr .ph{position:relative}
+.pr .ph .avr,.pr .ph .avph{width:84px;height:104px;border-radius:12px;font-size:24px}
+.rankb{position:absolute;top:6px;left:6px;background:rgba(10,10,11,.8);border:1px solid #33291D;
+color:var(--champ);border-radius:7px;padding:2px 7px;font-size:9.5px;font-weight:800}
+.ach{display:flex;gap:4px;margin-top:7px;justify-content:center;flex-wrap:wrap}
+.ach span{width:22px;height:22px;border-radius:7px;background:#171310;border:1px solid #33291D;
+display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
+.note{margin-top:10px;padding:8px 10px;border-radius:9px;background:var(--surf2);border:1px solid #241E16;
+font-size:10.5px;color:var(--gold);font-weight:700;display:flex;gap:8px;align-items:flex-start}
+.note b{color:var(--mute);font-weight:600;display:block;margin-top:2px}
+.pr .nm{font-size:15px;font-weight:800;letter-spacing:-.3px;line-height:1.2}
+.pr .rw{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px;align-items:center}
+.meta{display:flex;gap:11px;flex-wrap:wrap;margin-top:9px;font-size:10.5px;color:var(--mute);font-weight:600}
+.meta b{color:#C8C0B4;font-weight:800}
+.wrbar{margin-top:9px}
+.wrbar .t2{display:flex;justify-content:space-between;font-size:9px;letter-spacing:1.2px;
+text-transform:uppercase;color:var(--mute2);font-weight:800;margin-bottom:4px}
+.wrbar .bg{height:4px;border-radius:3px;background:#221F1B;overflow:hidden}
+.wrbar .bg i{display:block;height:100%;background:linear-gradient(90deg,#8F7C55,var(--amber))}
+.nums{display:flex;margin-top:11px;border-top:1px solid var(--line2);padding-top:9px}
+.nums>div{flex:1;text-align:center;border-right:1px solid var(--line2)}
+.nums>div:last-child{border-right:0}
+.nums .k{font-size:7.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute2);font-weight:800}
+.nums .v{font-size:14px;font-weight:800;margin-top:2px}
+.nums .v.a{color:var(--amber)}
+/* плитка */
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.pcard{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden;cursor:pointer}
-.pcard .ph{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#2a2a2a}
-.pcard .phh{width:100%;aspect-ratio:1/1;background:#2a2a2a;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#4d4a45}
-.pcard .body{padding:10px 11px 12px}
-.pcard .body .nm{font-size:13.5px;font-weight:800;line-height:1.25}
-.pcard .body .row{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.pc{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden;position:relative;
+box-shadow:inset 0 1px 0 rgba(255,255,255,.035);cursor:pointer}
+.pc .avr,.pc .avph{width:100%;aspect-ratio:4/5;border-radius:0;border:0;border-bottom:1px solid var(--line);font-size:30px}
+.pc .ach2{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:4px}
+.pc .ach2 span{width:22px;height:22px;border-radius:7px;background:rgba(10,10,11,.78);border:1px solid #33291D;
+display:flex;align-items:center;justify-content:center;font-size:11px}
+.pc .bd{padding:10px 11px 12px}
+.pc .nm{font-size:13px;font-weight:800;letter-spacing:-.2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc .rw{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.pc .mt2{font-size:10px;color:var(--mute);font-weight:600;margin-top:7px}
+.pc .mt2 b{color:#C8C0B4}
+.pc .bg{height:3px;border-radius:2px;background:#221F1B;overflow:hidden;margin-top:8px}
+.pc .bg i{display:block;height:100%;background:linear-gradient(90deg,#8F7C55,var(--amber))}
+.pc .st{display:flex;margin-top:9px;padding-top:8px;border-top:1px solid var(--line2)}
+.pc .st>div{flex:1;text-align:center;border-right:1px solid var(--line2)}
+.pc .st>div:last-child{border-right:0}
+.pc .st .k{font-size:7px;letter-spacing:1.1px;text-transform:uppercase;color:var(--mute2);font-weight:800}
+.pc .st .v{font-size:12.5px;font-weight:800;margin-top:2px}
+.pc .st .v.a{color:var(--amber)}
 
-/* карточка игрока */
-.hero{background:var(--card);border:1px solid var(--border);border-radius:20px;overflow:hidden;margin-bottom:12px}
-.hero img{width:100%;max-height:330px;object-fit:cover;display:block;background:#2a2a2a}
-.hero .heroph{width:100%;height:220px;background:#2a2a2a;display:flex;align-items:center;justify-content:center;font-size:52px;font-weight:900;color:#4d4a45}
-.hero .info{padding:14px 15px 16px}
-.hero h2{margin:0 0 8px;font-size:21px;line-height:1.2}
-.hero .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.stat{background:var(--card2);border:1px solid var(--border);border-radius:13px;padding:9px 11px}
-.stat .k{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
-.stat .v{font-size:16px;font-weight:900;margin-top:2px}
-.stat .v.acc{color:var(--accent2)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:15px;margin-bottom:12px}
-.card h3{margin:0 0 10px;font-size:16px}
-.line{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);font-size:13.5px}
-.line:last-child{border-bottom:0}
-.line .k{color:var(--muted)}
-button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:900;margin-top:12px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border)}
-.count{color:var(--muted);font-size:12px;margin:0 0 10px}
-/* карточка матча */
-.mt{background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:11px;margin-bottom:9px}
-.mt .top{text-align:center;color:var(--muted);font-size:11px;font-weight:700;margin-bottom:8px}
-.mt .body{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center}
-.mt .oav{width:44px;height:44px;border-radius:50%;object-fit:cover;background:#333;border:1px solid #444}
-.mt .oavh{width:44px;height:44px;border-radius:50%;background:#333;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#8f8a82}
-.mt .who{font-size:13.5px;font-weight:800;line-height:1.25}
-.mt .sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:900;color:var(--accent2);margin-top:3px}
-.mt .rs{font-size:10.5px;font-weight:900;padding:3px 9px;border-radius:999px;white-space:nowrap}
-.mt .rs.w{background:rgba(25,195,125,.16);color:#b7f3d8;border:1px solid #0f7a4f}
-.mt .rs.l{background:rgba(255,107,107,.14);color:#ffc9c9;border:1px solid #7a2f2f}
-.more{width:100%;border:1px dashed var(--border);background:transparent;color:var(--muted);border-radius:12px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;margin-top:2px}
-.season{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)}
-.season:last-child{border-bottom:0}
-.season .sh{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
-.season .sn{font-size:14px;font-weight:800}
-.season .sp{font-size:13px;font-weight:900;color:var(--accent2);white-space:nowrap}
-.season .sd{color:var(--muted);font-size:12px;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-/* турнирная таблица */
-.tbl{margin:0 -4px}
-.tbl .tr{display:grid;grid-template-columns:20px minmax(0,1fr) 24px 24px 32px 74px;gap:5px;align-items:center;padding:8px 4px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12.5px;cursor:pointer}
-.tbl.ext .tr{grid-template-columns:20px 1fr 22px 22px 22px 30px 30px 30px 36px;font-size:11.5px;cursor:default}
-.tbl .tr.th{color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;cursor:default;border-bottom:1px solid var(--border)}
-.tbl .tr>span{text-align:center;overflow:hidden}
-.tbl .tr .pl{font-weight:900}
-.tbl .tr .pn{text-align:left;font-weight:800;display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tbl .tr .b{font-weight:900;color:var(--accent2)}
-.tbl .tr .badge{font-size:9.5px;padding:2px 6px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.tbl .tr .pn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tbl .tav{width:22px;height:22px;border-radius:50%;object-fit:cover;flex:0 0 22px;background:#333}
-.tbl .z-playoff{background:rgba(25,195,125,.07)}
-.tbl .z-relegation{background:rgba(255,107,107,.07)}
-/* перекрёстная сетка */
+/* --- дивизион --- */
+.champ{border-radius:18px;padding:22px 18px 20px;text-align:center;margin-bottom:20px;
+background:linear-gradient(180deg,#1A1510,var(--surf));border:1px solid #33291D;position:relative;overflow:hidden;cursor:pointer}
+.champ:before{content:"";position:absolute;inset:-40% -20% auto;height:70%;
+background:radial-gradient(50% 60% at 50% 0%,rgba(217,199,163,.16),transparent 70%)}
+.champ .in{position:relative}
+.cl{font-size:9px;letter-spacing:2.8px;text-transform:uppercase;font-weight:800;color:var(--gold)}
+.champ .avr,.champ .avph{width:88px;height:88px;margin:13px auto 0;font-size:26px;
+border:2px solid rgba(217,199,163,.55);box-shadow:0 0 0 6px rgba(217,199,163,.07),0 12px 30px rgba(0,0,0,.5)}
+.cn{font-size:23px;font-weight:800;letter-spacing:-.5px;margin-top:11px}
+.cd{font-size:11.5px;color:var(--mute);margin-top:4px}
+.drow{display:grid;grid-template-columns:22px minmax(0,1fr) 24px 24px 40px 16px;gap:8px;align-items:center;
+padding:0 13px;height:50px;font-size:13px;color:var(--dim);border-top:1px solid var(--line2);position:relative;cursor:pointer}
+.drow span:not(.n){text-align:center}
+.drow .n{text-align:left;display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
+.drow .avr,.drow .avph{width:30px;height:30px;flex:0 0 30px;font-size:10px}
+.drow .n em{font-style:normal;font-weight:700;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.drow .p{font-weight:800;font-size:12.5px;color:#7C7365}
+.drow .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.3px}
+.drow .mk{font-size:9px;color:var(--mute2)}
+.drow.hd{height:32px;font-size:8.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:800;
+color:var(--mute2);border-top:0;background:var(--surf2);cursor:default}
+.drow.hd .n em{font-size:8.5px;letter-spacing:1.5px;font-weight:800;color:var(--mute2)}
+.drow:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.drow.hd:before{display:none}
+.z-up:before{background:linear-gradient(180deg,var(--champ),#8F7C55)}
+.z-up{background:linear-gradient(90deg,rgba(217,199,163,.05),transparent 60%)}
+.z-up .p{color:var(--champ)}
+.z-up.promo .mk{color:var(--gold)}
+.z-stay:before{background:#3A342C}
+.z-down:before{background:linear-gradient(180deg,#8C4A42,#5E312C)}
+.z-down{background:linear-gradient(90deg,rgba(194,105,94,.05),transparent 60%)}
+.z-down .n em{color:#A79E92}.z-down .mk{color:var(--lose)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin:11px 2px 0;font-size:9.5px;color:var(--mute2);font-weight:600}
+.legend i{font-style:normal;font-weight:800}
+.legend .u i{color:var(--gold)}.legend .d i{color:var(--lose)}
+.legend .zn{display:inline-block;width:3px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:4px;
+background:linear-gradient(180deg,var(--champ),#8F7C55)}
+/* сетка плей-офф */
+.tree{display:grid;grid-template-columns:1fr 26px 1fr;align-items:center;margin-bottom:22px}
+.col{display:flex;flex-direction:column;gap:14px}
+.mbox{background:var(--surf);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mbox.fin{border-color:#33291D}
+.mtitle{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;
+padding:7px 10px 5px;background:var(--surf2)}
+.mbox.fin .mtitle{color:var(--gold);background:#151009}
+.sl{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px 10px;
+font-size:11.5px;color:var(--mute);border-top:1px solid #17150F;cursor:pointer}
+.sl .avr,.sl .avph{width:22px;height:22px;flex:0 0 22px;font-size:8px}
+.sl span.nm2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.sl b{font-size:10.5px;font-weight:800;color:var(--mute2)}
+.sl.win{color:var(--text);background:linear-gradient(90deg,rgba(217,199,163,.06),transparent)}
+.sl.win b{color:var(--amber)}
+.sl.win .avr,.sl.win .avph{border-color:rgba(217,199,163,.5)}
+.conn{position:relative;height:100%;min-height:120px}
+.conn:before{content:"";position:absolute;left:0;right:50%;top:25%;height:1px;background:#2A2521}
+.conn:after{content:"";position:absolute;left:0;right:50%;bottom:25%;height:1px;background:#2A2521}
+.conn i{position:absolute;left:50%;top:25%;bottom:25%;width:1px;background:#2A2521}
+.conn u{position:absolute;left:50%;right:0;top:50%;height:1px;background:#2A2521}
+/* расширенная и матрица */
+.ext{margin-top:6px}
+.ext .er{display:grid;grid-template-columns:18px minmax(0,1fr) 22px 22px 22px 30px 32px 32px 36px;gap:5px;
+align-items:center;padding:9px 2px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--dim)}
+.ext .er span:not(.n){text-align:center}
+.ext .er .n{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;color:var(--text)}
+.ext .er.hd{font-size:7.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--mute2);font-weight:800;padding:0 2px 7px}
+.ext .er .b{font-weight:800;color:var(--amber)}
 .mx{overflow-x:auto;margin-top:8px;-webkit-overflow-scrolling:touch}
-.mx table{border-collapse:collapse;font-size:10.5px;white-space:nowrap}
-.mx th,.mx td{border:1px solid var(--border);padding:5px 7px;text-align:center;color:var(--muted)}
-.mx th{background:var(--card2);color:var(--text);font-weight:800;position:sticky;top:0}
-.mx td.rowh,.mx th:first-child{background:var(--card2);color:var(--text);font-weight:800;text-align:left;position:sticky;left:0;z-index:1}
-.mx td.self{background:#1c1c1c}
-.oav.win{border:2px solid var(--win)}
+.mx table{border-collapse:collapse;font-size:10px;white-space:nowrap}
+.mx th,.mx td{border:1px solid var(--line);padding:5px 7px;text-align:center;color:var(--mute)}
+.mx th{background:var(--surf2);color:var(--text);font-weight:800}
+.mx td.rowh,.mx th:first-child{background:var(--surf2);color:var(--text);font-weight:800;text-align:left;
+position:sticky;left:0;z-index:1}
+.mx td.self{background:#151312}
+
+/* --- матчи --- */
+.mt{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:11px;margin-bottom:8px;
+box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.mtop{text-align:center;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute2);
+font-weight:800;margin-bottom:9px}
+.fm2{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:9px;align-items:center}
+.fm2 .avr,.fm2 .avph{width:44px;height:44px;flex:0 0 44px;font-size:13px;cursor:pointer}
+.fm2 .avr.w,.fm2 .avph.w{border-color:rgba(217,199,163,.5);box-shadow:0 0 0 3px rgba(217,199,163,.07)}
+.fm2 .mid{text-align:center;min-width:0}
+.fm2 .nm3{font-size:12.5px;font-weight:700;line-height:1.35}
+.fm2 .nm3 b{color:var(--text);font-weight:800}
+.fm2 .nm3 s{text-decoration:none;color:#7C7365;font-weight:600}
+.fm2 .nm3 em{font-style:normal;color:#9A9186;font-weight:600}
+.sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--amber);margin-top:3px}
+/* строка матча в карточке игрока */
+.mrow{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center}
+.mrow .avr,.mrow .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px;cursor:pointer}
+.mrow .who{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res{font-size:9px;font-weight:800;padding:4px 9px;border-radius:999px;letter-spacing:.6px}
+.res.w{background:#131A15;border:1px solid #2A3A2C;color:var(--win)}
+.res.l{background:#1A1313;border:1px solid #3A2A2A;color:var(--lose)}
+
+/* --- страница игрока --- */
+.back{display:flex;align-items:center;gap:9px;margin-bottom:16px;color:var(--mute);font-size:12px;
+font-weight:700;cursor:pointer}
+.back i{width:30px;height:30px;border-radius:10px;background:#141311;border:1px solid #201D19;
+display:flex;align-items:center;justify-content:center;font-style:normal;font-size:15px;color:var(--champ)}
+.hero{border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--surf);margin-bottom:12px;position:relative}
+.hero .avr,.hero .avph{width:100%;height:210px;border-radius:0;border:0;object-fit:cover;font-size:56px}
+.hero .fade{position:absolute;left:0;right:0;top:70px;height:160px;
+background:linear-gradient(180deg,transparent,rgba(17,16,16,.75) 58%,var(--surf))}
+.hero .info{padding:0 16px 17px;position:relative;margin-top:-46px}
+.hero h2{font-size:24px;font-weight:800;letter-spacing:-.7px;line-height:1.15}
+.hero .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.fline{display:flex;gap:4px;align-items:center;margin-top:11px}
+.fline .lb{font-size:8.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin-right:5px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.stt{background:var(--surf2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stt .k{font-size:8.5px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800}
+.stt .v{font-size:18px;font-weight:800;margin-top:3px;letter-spacing:-.5px}
+.stt .v.a{color:var(--amber)}
+.sr{display:grid;grid-template-columns:minmax(0,1fr) 30px 30px 46px 52px;gap:7px;align-items:center;
+padding:11px 0;border-bottom:1px solid #17150F;font-size:12.5px;color:var(--dim)}
+.sr span:not(.sn){text-align:center}
+.sr:last-of-type{border-bottom:0}
+.sr.hd{padding:0 0 8px;font-size:8px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute2);
+font-weight:800;border-bottom:1px solid #221F1B}
+.sr .sn{font-size:13.5px;font-weight:800;color:var(--text);overflow:hidden}
+.sr .sd{font-size:10px;color:#7C7365;font-weight:600;margin-top:3px}
+.sr .pl{font-weight:800;color:var(--champ)}
+.sr .ptt{font-weight:800;color:var(--amber)}
+.sr.hd .sn{font-size:8px;font-weight:800;color:var(--mute2);letter-spacing:1.4px}
+.aline{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid #17150F}
+.aline:last-child{border-bottom:0}
+.aline .ic{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#2A2116,#171310);
+border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 30px}
+.aline .tx{font-size:13px;font-weight:700;line-height:1.35}
+.aline .dt{font-size:10px;color:#7C7365;font-weight:600;margin-top:3px}
 </style>
 </head>
 <body>
+<div class="grain"></div>
 <div class="wrap">
-  <h1 id="title">Лига</h1>
-  <p class="sub" id="sub">Загружаем…</p>
-  <div class="tabs" id="tabs">
-    <div class="tab on" data-t="home">Главная</div>
-    <div class="tab" data-t="div">Дивизионы</div>
-    <div class="tab" data-t="race">Гонка</div>
-    <div class="tab" data-t="players">Игроки</div>
-    <div class="tab" data-t="matches">Матчи</div>
-    <div class="tab" data-t="events">Турниры</div>
-    <div class="tab" data-t="about">О лиге</div>
-    <div class="tab" style="opacity:.25;cursor:default" data-t="">Партнёры</div>
+  <div class="hdr" id="hdr">
+    <div class="logo">PTF</div>
+    <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
   </div>
+  <div class="tabs" id="tabs"></div>
   <div id="viewHome"></div>
   <div id="viewDiv" class="hidden"></div>
   <div id="viewRace" class="hidden"></div>
@@ -146,87 +327,146 @@ button{width:100%;border:0;border-radius:14px;padding:14px;font-size:15px;font-w
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='';
-var mode='home',openId='',query='',divFilter='',statusFilter='',raceQuery='',raceBucket='',allMatches=false;
-var feedQuery='',feedDiv='',feedLimit=20;
-var divLetter='',divData=null,divLoading=false,divErr='',showExtended=false,showMatrix=false;
-var VIEWS=['home','div','race','players','matches','events','about'];
+var mode='home',openId='',backTo='players';
+var pQuery='',pDiv='',pStatus='',pView='detail',pOrder=[],openAch='';
+var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false;
+var fQuery='',fDiv='',fLimit=20;
+var divLetter='',divData=null,divLoading=false,divErr='',showExt=false,showMx=false;
+var allMatches=false;
 
 var T={
-  ru:{title:'Лига',race:'Годовая гонка',players:'Игроки',
-      sub:'Таблицы, матчи, игроки и годовая гонка PTF.',
-      search:'Поиск по имени…',all:'Все',
-      pts:'очков',pos:'место',found:'Найдено: ',nobody:'Никого не нашлось — попробуй другое имя.',
-      matches:'Матчи',wins:'Победы',losses:'Поражения',winrate:'Win rate',mShort:'матчей',wShort:'побед',
-      ntrp:'NTRP',exp:'Опыт',country:'Страна',seasons:'Сезонов',division:'Дивизион',
-      form:'Форма',record:'Рекорд',rank:'Место в гонке',points:'Очки гонки',
-      titles:'Достижения',history:'Сезоны',back:'⬅️ Назад',site:'🌐 Открыть на сайте',
-      mhistory:'История матчей',showAll:'Показать все матчи',showLess:'Свернуть',noMatches:'Матчей пока нет.',
-      total:'Все',upper:'Upper A+B',lower:'Lower C+D',prime:'PRIME',place:'место',
-      tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
-      champions:'Чемпионы сезона',yourSeason:'Твой сезон',yourDiv:'Твой дивизион',notInLeague:'Ты пока не в составе дивизиона. Подай заявку — и раздел оживёт.',
-      standings:'Турнирная таблица',extended:'Расширенная статистика',matrix:'Все против всех',playoff:'Плей-офф',champion:'Чемпион',
-      final:'Финал',sf1:'Полуфинал 1',sf2:'Полуфинал 2',seed:'Посев',
-      colP:'#',colPlayer:'Игрок',colM:'М',colW:'П',colL:'Пор',colPts:'Очки',colZone:'Статус',
-      zPlayoff:'Плей-офф',zExtra:'Добор',zRelegation:'Вылет',
-      colSW:'СВ',colSL:'СП',colSD:'±С',colGW:'ГВ',colGL:'ГП',colGD:'±Г',colWR:'WR',
-      noDiv:'Дивизион пока не сформирован.',pickDiv:'Выбери дивизион',
-      allMatchesT:'Все матчи лиги',noEvents:'Турниров пока нет. Появятся здесь, как только заведём первый.',
-      rules:'Как считается таблица',statusF:'Статус',anyStatus:'Любой',showMore:'Показать ещё',
-      noData:'Данных пока нет.',divpos:'в дивизионе'},
-  en:{title:'League',race:'Yearly Race',players:'Players',
-      sub:'Standings, matches, players and the yearly race.',
-      search:'Search by name…',all:'All',
-      pts:'points',pos:'place',found:'Found: ',nobody:'Nobody matched — try another name.',
-      matches:'Matches',wins:'Wins',losses:'Losses',winrate:'Win rate',mShort:'played',wShort:'won',
-      ntrp:'NTRP',exp:'Experience',country:'Country',seasons:'Seasons',division:'Division',
-      form:'Form',record:'Record',rank:'Race place',points:'Race points',
-      titles:'Achievements',history:'Seasons',back:'⬅️ Back',site:'🌐 Open on the website',
-      mhistory:'Match history',showAll:'Show all matches',showLess:'Collapse',noMatches:'No matches yet.',
-      total:'Total',upper:'Upper A+B',lower:'Lower C+D',prime:'PRIME',place:'place',
-      tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
-      champions:'Season champions',yourSeason:'Your season',yourDiv:'Your division',notInLeague:'You are not in a division yet. Apply and this section comes alive.',
-      standings:'Standings',extended:'Extended standings',matrix:'Head-to-head',playoff:'Playoffs',champion:'Champion',
-      final:'Final',sf1:'Semifinal 1',sf2:'Semifinal 2',seed:'Seed',
-      colP:'#',colPlayer:'Player',colM:'M',colW:'W',colL:'L',colPts:'Pts',colZone:'Status',
-      zPlayoff:'Playoff',zExtra:'Extra Draw',zRelegation:'Relegation',
-      colSW:'SW',colSL:'SL',colSD:'SD',colGW:'GW',colGL:'GL',colGD:'GD',colWR:'WR',
-      noDiv:'This division is not formed yet.',pickDiv:'Pick a division',
-      allMatchesT:'All league matches',noEvents:'No tournaments yet. They will appear here once we add the first one.',
-      rules:'How the table works',statusF:'Status',anyStatus:'Any',showMore:'Show more',
-      noData:'No data yet.',divpos:'in division'}
+ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годовая гонка PTF.',
+  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
+  search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
+  nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
+  filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',
+  players:'Игроков',matchesN:'Матчей',leader:'Лидер',
+  colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
+  sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
+  detail:'Подробно',tile:'Плитка',ntrp:'NTRP',exp:'Опыт',
+  standings:'Турнирная таблица',playoff:'Плей-офф',champion:'Чемпион дивизиона',
+  final:'Финал',sf:'Полуфинал',ext:'Расширенная статистика',mx:'Все против всех',
+  zPlayoff:'плей-офф',zPromo:'повышение',zStay:'остаётся в дивизионе',zDown:'вылет',
+  noDiv:'Дивизион пока не сформирован.',
+  seasons:'Сезоны',ach:'Достижения',history:'История матчей',
+  cSeason:'Сезон',cG:'И',cW:'П',cPlace:'Место',cPts:'Очки',
+  showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
+  yourSeason:'Твой сезон',notInLeague:'Ты пока не в составе дивизиона. Подай заявку — и раздел оживёт.',
+  champions:'Чемпионы сезона',rules:'Как считается таблица',site:'Открыть сайт',
+  noEvents:'Турниров пока нет. Появятся здесь, как только заведём первый.',
+  back:'Назад',showMore:'Показать ещё',matchesLeague:'Все матчи лиги',
+  active:'Active',inactive:'Inactive'},
+en:{title:'League',sub:'Standings, matches, players and the yearly race.',
+  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
+  search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
+  nobody:'Nobody matched — try another name.',noData:'No data yet.',
+  filters:'Filters',bucketsDiv:'Groups and divisions',
+  players:'Players',matchesN:'Matches',leader:'Leader',
+  colNo:'#',colPlayer:'Player',colM:'M',colW:'W',colWR:'WR',colPts:'Pts',
+  sortTip:'Tap a column header to sort',
+  detail:'Detailed',tile:'Tiles',ntrp:'NTRP',exp:'Experience',
+  standings:'Standings',playoff:'Playoffs',champion:'Division champion',
+  final:'Final',sf:'Semifinal',ext:'Extended standings',mx:'Head-to-head',
+  zPlayoff:'playoff',zPromo:'promotion',zStay:'stays in division',zDown:'relegation',
+  noDiv:'This division is not formed yet.',
+  seasons:'Seasons',ach:'Achievements',history:'Match history',
+  cSeason:'Season',cG:'P',cW:'W',cPlace:'Place',cPts:'Pts',
+  showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
+  yourSeason:'Your season',notInLeague:'You are not in a division yet. Apply and this section comes alive.',
+  champions:'Season champions',rules:'How the table works',site:'Open the website',
+  noEvents:'No tournaments yet. They will appear here once we add the first one.',
+  back:'Back',showMore:'Show more',matchesLeague:'All league matches',
+  active:'Active',inactive:'Inactive'}
 };
 var X=L?T.ru:T.en;
 var $=function(id){return document.getElementById(id)};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+function q(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
 function initials(n){return String(n||'?').trim().split(/\s+/).slice(0,2).map(function(w){return w[0]||''}).join('').toUpperCase()}
 function openLink(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}
 
-function avatar(p,cls){
-  return p.photo
-    ? '<img class="'+cls+'" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;'+cls+'h&quot;>'+esc(initials(p.name))+'</div>\'">'
-    : '<div class="'+cls+'h">'+esc(initials(p.name))+'</div>';
+// Аватарка: если фото нет или не загрузилось — инициалы в том же круге.
+function av(p,cls,extra){
+  var c=(cls||'')+(extra?' '+extra:'');
+  return p&&p.photo
+    ? '<img class="avr '+c+'" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="fallbackAv(this,\''+q(initials(p.name))+'\')">'
+    : '<div class="avph '+c+'">'+esc(initials(p&&p.name))+'</div>';
+}
+function fallbackAv(img,ini){
+  var d=document.createElement('div');
+  d.className=img.className.replace('avr','avph');
+  d.textContent=ini;
+  img.replaceWith(d);
+}
+// Дивизион всегда полным именем и своим цветом.
+function divLabel(d){
+  var v=String(d||'').trim();
+  if(!v)return '';
+  return /^(division|дивизион)/i.test(v)?v:('Division '+v);
+}
+function divClass(d){
+  var k=String(d||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+  if(k==='A')return 'd-a';if(k==='B')return 'd-b';if(k==='C')return 'd-c';if(k==='D')return 'd-d';
+  if(k==='PRIME'||k==='P')return 'd-p';return 'd-x';
+}
+function divChip(d){ return d?'<span class="dv '+divClass(d)+'">'+esc(divLabel(d))+'</span>':'' }
+// На фронт идут только два статуса: активен или нет.
+function isActive(p){ return String(p.status||'').trim().toLowerCase()==='active' }
+function statusBadge(p){
+  return isActive(p)?'<span class="badge ok">'+esc(X.active)+'</span>':'<span class="badge">'+esc(X.inactive)+'</span>';
 }
 function formRow(form){
   if(!form||!form.length)return '';
   return '<span class="form">'+form.map(function(f){return '<span class="fm '+(f==='W'?'w':'l')+'">'+f+'</span>'}).join('')+'</span>';
 }
-function playerDivisions(){
-  var seen={},out=[];
-  players.forEach(function(p){var d=(p.division||'').trim();if(d&&!seen[d]){seen[d]=1;out.push(d)}});
-  return out.sort();
+var FLAGS={'japan':'🇯🇵','russia':'🇷🇺','spain':'🇪🇸','thailand':'🇹🇭','china':'🇨🇳','india':'🇮🇳','ukraine':'🇺🇦',
+'netherlands':'🇳🇱','serbia':'🇷🇸','brazil':'🇧🇷','uk':'🇬🇧','great britain':'🇬🇧','united kingdom':'🇬🇧',
+'australia':'🇦🇺','new zealand':'🇳🇿','israel':'🇮🇱','usa':'🇺🇸','france':'🇫🇷','germany':'🇩🇪','italy':'🇮🇹',
+'korea':'🇰🇷','south korea':'🇰🇷','kazakhstan':'🇰🇿','belarus':'🇧🇾','poland':'🇵🇱','sweden':'🇸🇪','finland':'🇫🇮'};
+function flag(c){ return FLAGS[String(c||'').trim().toLowerCase()]||'🌍' }
+// Иконка достижения по его типу.
+function achIcon(a){
+  var t=String((a&&(a.type||a.title))||'').toLowerCase();
+  if(/champion|чемпион|winner/.test(t))return '🏆';
+  if(/runner|second|финал|2nd/.test(t))return '🥈';
+  if(/promotion|повышен|up/.test(t))return '⬆️';
+  if(/relegation|вылет|down/.test(t))return '⬇️';
+  if(/undefeated|streak|серия/.test(t))return '🔥';
+  if(/wild ?card/.test(t))return '🎟️';
+  if(/leader|лидер|race/.test(t))return '⭐';
+  return '🎖️';
 }
+function byId(id){ return players.filter(function(x){return String(x.id)===String(id)})[0]||null }
+function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('%',''));
+  if(Number.isFinite(n)&&n>0)return Math.round(n);
+  return p.matches?Math.round(p.wins/p.matches*100):0; }
 
-var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
+// ---------------------------------------------------------------- меню
+var VIEWS=['home','div','race','players','matches','events','about'];
+var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
+matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
+function buildTabs(){
+  var labels=[['home',X.tHome],['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],
+              ['matches',X.tMatches],['events',X.tEvents],['about',X.tAbout]];
+  $('tabs').innerHTML=labels.map(function(x){
+    return '<div class="tab" data-t="'+x[0]+'" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
+  }).join('')+'<div class="tab off">'+esc(X.tPartners)+'</div>';
+}
 function showTab(t){
   if(VIEWS.indexOf(t)<0)return;
-  mode=t;openId='';allMatches=false;syncBackButton();
+  mode=t;openId='';allMatches=false;openAch='';
+  syncBack();
   VIEWS.forEach(function(k){
     var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
     $(VIEW_ID[k]).classList.toggle('hidden',k!==t);
   });
   $('tabs').classList.remove('hidden');
+  $('hdr').classList.remove('hidden');
   $('viewCard').classList.add('hidden');
+  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
+  $('title').textContent=titles[t]||X.title;
   if(t==='home')renderHome();
   else if(t==='div')renderDiv();
   else if(t==='race')renderRace();
@@ -236,261 +476,298 @@ function showTab(t){
   else renderAbout();
   window.scrollTo(0,0);
 }
-
-// --- Годовая гонка -----------------------------------------------------------
-// Корзины сезона — те же, что на сайте: Все, Upper A+B, Lower C+D, PRIME.
-function inBucket(p,b){
-  var d=String(p.division||'').replace(/^division\s*/i,'').trim().toUpperCase();
-  if(!b)return true;
-  if(b==='upper')return d==='A'||d==='B';
-  if(b==='lower')return d==='C'||d==='D';
-  if(b==='prime')return d==='PRIME'||d==='P';
-  return true;
+function syncBack(){
+  if(!tg||!tg.BackButton)return;
+  if(openId)tg.BackButton.show();else tg.BackButton.hide();
 }
-function renderRace(){
-  var buckets=[['','total'],['upper','upper'],['lower','lower'],['prime','prime']];
-  var chips=buckets.map(function(b){
-    return '<div class="chip'+(raceBucket===b[0]?' on':'')+'" onclick="setBucket(\''+b[0]+'\')">'+esc(X[b[1]])+'</div>';
-  }).join('');
-  // отдельные чипы по дивизионам — появляются сами, когда дивизион есть в данных
-  var divChips=playerDivisions().map(function(d){
-    return '<div class="chip'+(divFilter===d?' on':'')+'" onclick="setRaceDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
-  }).join('');
-  var q=raceQuery.trim().toLowerCase();
-  var list=players.filter(function(p){return p.points>0||p.position>0})
-    .filter(function(p){return inBucket(p,raceBucket)})
-    .filter(function(p){return !divFilter||(p.division||'')===divFilter})
-    .filter(function(p){return !q||String(p.name||'').toLowerCase().indexOf(q)>=0})
-    .slice().sort(function(a,b){return (a.position||9999)-(b.position||9999)||b.points-a.points});
-  var head='<input class="search" id="rq" placeholder="'+esc(X.search)+'" value="'+esc(raceQuery)+'" oninput="setRaceQuery(this.value)">'
-    +'<div class="chips">'+chips+'</div>'
-    +(divChips?'<div class="chips">'+divChips+'</div>':'')
-    +'<div class="count">'+esc(X.found)+list.length+'</div>';
-  if(!list.length){$('viewRace').innerHTML=head+'<div class="empty">'+esc(X.nobody)+'</div>';return}
-  $('viewRace').innerHTML=head+list.map(function(p,i){
-    var place=p.position||i+1;   // место всегда из общей гонки, фильтр его не пересчитывает
-    return '<div class="rank'+(place<=3?' top':'')+'" onclick="openCard(\''+esc(p.id)+'\')">'
-      +'<div class="pos">'+place+'</div>'
-      +avatar(p,'av')
-      +'<div style="min-width:0"><div class="nm">'+esc(p.name)+'</div>'
-      +'<div class="sub2">'+(p.division?'<span class="badge div">'+esc(p.division)+'</span>':'')
-        +'<span>'+p.matches+' '+esc(X.mShort)+' · '+p.wins+' '+esc(X.wShort)+'</span>'
-        +(p.win_rate?'<span>'+esc(p.win_rate)+'</span>':'')+'</div></div>'
-      +'<div class="pts"><b>'+p.points+'</b><span>'+esc(X.pts)+'</span></div>'
-      +'</div>';
-  }).join('');
-  var el=$('rq');
-  if(el&&raceQuery&&document.activeElement!==el){el.focus();el.setSelectionRange(raceQuery.length,raceQuery.length)}
-}
-function setBucket(b){raceBucket=b;divFilter='';renderRace()}
-function setRaceDiv(d){divFilter=(divFilter===d?'':d);renderRace()}
-function setRaceQuery(v){raceQuery=v;renderRace()}
+if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(backTo) });
 
-// --- Игроки ------------------------------------------------------------------
-function renderPlayers(){
-  var chips='<div class="chip'+(divFilter===''?' on':'')+'" onclick="setDiv(\'\')">'+esc(X.all)+'</div>'
-    +playerDivisions().map(function(d){
-      return '<div class="chip'+(divFilter===d?' on':'')+'" onclick="setDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
-    }).join('');
-  // Статусы берём из данных, чтобы не хардкодить Active/Waitlist/Waiting.
-  var stats={},statList=[];
-  players.forEach(function(p){var st=(p.status||'').trim();if(st&&!stats[st]){stats[st]=1;statList.push(st)}});
-  var schips='<div class="chip'+(statusFilter===''?' on':'')+'" onclick="setStatus(\'\')">'+esc(X.anyStatus)+'</div>'
-    +statList.sort().map(function(st){
-      return '<div class="chip'+(statusFilter===st?' on':'')+'" onclick="setStatus(\''+esc(st)+'\')">'+esc(st)+'</div>';
-    }).join('');
-  var q=query.trim().toLowerCase();
-  var list=players.filter(function(p){
-    if(divFilter&&(p.division||'')!==divFilter)return false;
-    if(statusFilter&&(p.status||'')!==statusFilter)return false;
-    if(q&&String(p.name||'').toLowerCase().indexOf(q)<0)return false;
-    return true;
-  });
-  var head='<input class="search" id="q" placeholder="'+esc(X.search)+'" value="'+esc(query)+'" oninput="setQuery(this.value)">'
-    +'<div class="chips">'+chips+'</div>'
-    +'<div class="chips">'+schips+'</div>'
-    +'<div class="count">'+esc(X.found)+list.length+'</div>';
-  var body=list.length
-    ? '<div class="grid">'+list.map(function(p){
-        return '<div class="pcard" onclick="openCard(\''+esc(p.id)+'\')">'+avatar(p,'ph')
-          +'<div class="body"><div class="nm">'+esc(p.name)+'</div><div class="row">'
-          +(p.division?'<span class="badge div">'+esc(p.division)+'</span>':'')
-          +(String(p.status||'').toLowerCase()==='active'?'<span class="badge act">Active</span>':'')
-          +'</div><div class="row">'+formRow(p.form)+'</div></div></div>';
-      }).join('')+'</div>'
-    : '<div class="empty">'+esc(X.nobody)+'</div>';
-  $('viewPlayers').innerHTML=head+body;
-  var el=$('q');
-  if(el&&document.activeElement!==el&&query){el.focus();el.setSelectionRange(query.length,query.length)}
-}
-function setQuery(v){query=v;renderPlayers()}
-function setDiv(d){divFilter=d;renderPlayers()}
-function setStatus(v){statusFilter=v;renderPlayers()}
-
-// --- Карточка игрока ---------------------------------------------------------
-function openCardByName(name){
-  var p=players.filter(function(x){return String(x.name||'').toLowerCase()===String(name).toLowerCase()})[0];
-  if(p)openCard(p.id);
-}
-function openCard(id){
-  var p=players.filter(function(x){return String(x.id)===String(id)})[0];
-  if(!p)return;
-  openId=id;
-  var stat=function(k,v,acc){return v?'<div class="stat"><div class="k">'+esc(k)+'</div><div class="v'+(acc?' acc':'')+'">'+esc(v)+'</div></div>':''};
-  var badges='';
-  if(p.division)badges+='<span class="badge div">'+esc(X.division)+' '+esc(p.division)+'</span>';
-  if(p.position)badges+='<span class="badge gold">'+esc(X.rank)+' #'+p.position+'</span>';
-  if(p.division_position)badges+='<span class="badge">#'+esc(p.division_position)+' '+esc(X.divpos)+'</span>';
-  if(String(p.status||'').toLowerCase()==='active')badges+='<span class="badge act">Active</span>';
-  else if(p.status)badges+='<span class="badge">'+esc(p.status)+'</span>';
-
-  var h='<div class="hero">'
-    +(p.photo?'<img src="'+esc(p.photo)+'" alt="">':'<div class="heroph">'+esc(initials(p.name))+'</div>')
-    +'<div class="info"><h2>'+esc(p.name)+'</h2>'
-    +'<div class="row">'+badges+'</div>'
-    +(p.form&&p.form.length?'<div class="row"><span class="badge">'+esc(X.form)+'</span>'+formRow(p.form)+'</div>':'')
-    +'<div class="stats">'
-      +stat(X.points,p.points||'',true)
-      +stat(X.matches,p.matches||'')
-      +stat(X.record,(p.wins||0)+'–'+(p.losses||0))
-      +stat(X.winrate,p.win_rate||'')
-      +stat(X.ntrp,p.ntrp||'')
-      +stat(X.exp,p.experience||'')
-      +stat(X.country,p.nationality||'')
-      +stat(X.seasons,p.seasons||'')
-    +'</div></div></div>';
-
-  // История матчей: по умолчанию пять последних, ниже разворот на все.
-  var mine=matches[String(p.id)]||[];
-  h+='<div class="card"><h3>'+esc(X.mhistory)+(mine.length?' · '+mine.length:'')+'</h3>';
-  if(!mine.length)h+='<div class="empty" style="padding:10px 0">'+esc(X.noMatches)+'</div>';
-  else{
-    var shown=allMatches?mine:mine.slice(0,5);
-    h+=shown.map(matchCard).join('');
-    if(mine.length>5)h+='<button class="more" onclick="toggleMatches(\''+esc(p.id)+'\')">'+esc(allMatches?X.showLess:X.showAll+' ('+mine.length+')')+'</button>';
-  }
-  h+='</div>';
-
-  if(p.seasons_list&&p.seasons_list.length){
-    h+='<div class="card"><h3>'+esc(X.history)+'</h3>'
-      +p.seasons_list.map(function(s){
-        var meta=[];
-        if(s.division)meta.push('<span class="badge div">Div '+esc(s.division)+'</span>');
-        if(s.position)meta.push('<span class="badge gold">'+esc(s.position)+' '+esc(X.place)+'</span>');
-        else if(s.regular_finish)meta.push('<span class="badge">'+esc(s.regular_finish)+' '+esc(X.place)+'</span>');
-        if(s.playoff)meta.push('<span class="badge">'+esc(s.playoff)+'</span>');
-        if(s.promotion)meta.push('<span class="badge act">'+esc(s.promotion)+'</span>');
-        (s.titles||[]).forEach(function(t){meta.push('<span class="badge gold">🏆 '+esc(t)+'</span>')});
-        return '<div class="season"><div class="sh"><span class="sn">'+esc(s.name||('Season '+s.number))+'</span>'
-          +(s.points?'<span class="sp">'+s.points+' '+esc(X.pts)+'</span>':'')+'</div>'
-          +(meta.length?'<div class="sd">'+meta.join('')+'</div>':'')+'</div>';
-      }).join('')+'</div>';
-  }
-  // Достижения, уже показанные внутри сезонов, второй раз не повторяем.
-  var shownTitles={};
-  (p.seasons_list||[]).forEach(function(s){(s.titles||[]).forEach(function(t){shownTitles[t]=1})});
-  var rest=(p.titles||[]).map(function(t){return t.type||t.title||''}).filter(function(t){return t&&!shownTitles[t]});
-  if(rest.length){
-    h+='<div class="card"><h3>'+esc(X.titles)+'</h3>'
-      +rest.map(function(t){return '<div class="line"><span>🏆 '+esc(t)+'</span></div>'}).join('')+'</div>';
-  }
-  if(p.profile_url)h+='<button onclick="openLink(\''+esc(/^https?:/i.test(p.profile_url)?p.profile_url:'https://www.phukettennis.com'+p.profile_url)+'\')">'+esc(X.site)+'</button>';
-
-  $('viewCard').innerHTML=h;
-  $('tabs').classList.add('hidden');
-  $('viewRace').classList.add('hidden');
-  $('viewPlayers').classList.add('hidden');
-  $('viewCard').classList.remove('hidden');
-  syncBackButton();
-  window.scrollTo(0,0);
-}
-
-// --- Главная ---------------------------------------------------------------
-// На сайте это карточки чемпионов. Здесь добавляем то, чего сайт не умеет:
-// личный блок — бот знает, кто открыл приложение.
+// ---------------------------------------------------------------- главная
 function renderHome(){
   var h='';
-  var mine=players.filter(function(p){return String(p.name||'').toLowerCase()===String(me&&me.name||'').toLowerCase()})[0];
+  var mine=players.filter(function(p){
+    return String(p.name||'').toLowerCase()===String(me&&me.name||'').toLowerCase();
+  })[0];
   if(mine){
     h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3>'
-      +'<div class="rank" style="margin:0;cursor:pointer" onclick="openCard(\''+esc(mine.id)+'\')">'
-      +'<div class="pos">'+(mine.position||'—')+'</div>'+avatar(mine,'av')
-      +'<div style="min-width:0"><div class="nm">'+esc(mine.name)+'</div><div class="sub2">'
-      +(mine.division?'<span class="badge div">'+esc(mine.division)+'</span>':'')
-      +'<span>'+mine.matches+' '+esc(X.mShort)+' · '+mine.wins+' '+esc(X.wShort)+'</span></div></div>'
-      +'<div class="pts"><b>'+mine.points+'</b><span>'+esc(X.pts)+'</span></div></div></div>';
-  } else if(!meDivision){
+      +'<div class="tb"><div class="trw'+(mine.position&&mine.position<=3?' top':'')+'" onclick="openPlayer(\''+q(mine.id)+'\',\'home\')">'
+      +'<span class="p">'+(mine.position||'—')+'</span>'+av(mine)
+      +'<span class="n"><div class="nm">'+esc(mine.name)+'</div><div style="margin-top:3px">'+divChip(mine.division)+'</div></span>'
+      +'<span>'+mine.matches+'</span><span>'+pct(mine)+'%</span><span class="pt">'+mine.points+'</span></div></div></div>';
+  } else {
     h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3><div class="hint">'+esc(X.notInLeague)+'</div></div>';
   }
-  // Чемпионы: берём тех, у кого в достижениях есть титул чемпиона дивизиона.
   var champs=players.filter(function(p){
-    return (p.titles||[]).some(function(t){return /champion/i.test(String(t.type||t.title||''))});
-  });
+    return (p.achievements||[]).some(function(a){return /champion|чемпион/i.test(String(a.title||a.type||''))});
+  }).slice(0,4);
   if(champs.length){
     h+='<div class="card"><h3>'+esc(X.champions)+'</h3><div class="grid">'
       +champs.map(function(p){
-        var title=(p.titles||[]).map(function(t){return String(t.type||t.title||'')}).filter(function(t){return /champion/i.test(t)})[0]||'';
-        return '<div class="pcard" onclick="openCard(\''+esc(p.id)+'\')">'+avatar(p,'ph')
-          +'<div class="body"><div class="nm">'+esc(p.name)+'</div>'
-          +'<div class="row"><span class="badge gold">🏆 '+esc(title)+'</span></div></div></div>';
+        var t=(p.achievements||[]).filter(function(a){return /champion|чемпион/i.test(String(a.title||a.type||''))})[0];
+        return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'home\')">'+av(p)
+          +'<div class="bd"><div class="nm">'+esc(p.name)+'</div>'
+          +'<div class="rw"><span class="badge g">🏆 '+esc((t&&(t.title||t.type))||'')+'</span></div></div></div>';
       }).join('')+'</div></div>';
   }
   h+='<div class="card"><h3>'+esc(X.title)+'</h3><div class="hint">'+esc(X.sub)+'</div>'
-    +'<div class="chips" style="margin-top:10px">'
+    +'<div class="chips" style="margin-top:11px;margin-bottom:0">'
     +[['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],['matches',X.tMatches]].map(function(x){
       return '<div class="chip" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
     }).join('')+'</div></div>';
   $('viewHome').innerHTML=h;
 }
 
-// --- Дивизионы --------------------------------------------------------------
+// ---------------------------------------------------------------- гонка
+function raceList(){
+  var qq=rQuery.trim().toLowerCase();
+  var list=players.filter(function(p){return p.points>0||p.position>0});
+  if(rFilter){
+    var f=rFilter;
+    list=list.filter(function(p){
+      var d=String(p.division||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+      if(f==='ab')return d==='A'||d==='B';
+      if(f==='cd')return d==='C'||d==='D';
+      if(f==='prime')return d==='PRIME'||d==='P';
+      return d===f;
+    });
+  }
+  if(qq)list=list.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qq)>=0});
+  var key={pos:function(p){return -(p.position||9999)},name:function(p){return p.name||''},
+    m:function(p){return p.matches},wr:function(p){return pct(p)},points:function(p){return p.points}};
+  var k=key[rSort]||key.points;
+  return list.slice().sort(function(a,b){
+    var x=k(a),y=k(b),r;
+    if(typeof x==='string')r=String(y).localeCompare(String(x),'en');
+    else r=x-y;
+    if(!r)r=(a.position||9999)-(b.position||9999);
+    return rDesc?-r:r;
+  });
+}
+function renderRace(){
+  var list=raceList();
+  var totalM=Object.keys(matches).reduce(function(s,k){return s+(matches[k]||[]).length},0);
+  var top=players.slice().sort(function(a,b){return (b.points||0)-(a.points||0)})[0];
+  var lead=top?(top.name+' · '+(top.points||0)):'—';
+  var buckets=[['','' ,X.all],['ab','','A+B'],['cd','','C+D'],['prime','','PRIME']];
+  var chips=buckets.map(function(b){
+    return '<div class="chip'+(rFilter===b[0]?' on':'')+'" onclick="setRaceFilter(\''+b[0]+'\')">'+esc(b[2])+'</div>';
+  }).join('')+divisionsOfPlayers().map(function(d){
+    var k=String(d).replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    return '<div class="chip'+(rFilter===k?' on':'')+'" onclick="setRaceFilter(\''+q(k)+'\')">'+esc(divLabel(d))+'</div>';
+  }).join('');
+  var nfilters=(rFilter?1:0);
+  var h='<div class="kpi"><span>'+esc(X.players)+' <b>'+players.length+'</b></span>'
+    +'<span>'+esc(X.matchesN)+' <b>'+Math.round(totalM/2)+'</b></span>'
+    +'<span class="a">'+esc(X.leader)+' <b>'+lead+'</b></span></div>'
+    +'<div class="fbar"><input class="search" style="margin:0" id="rq" placeholder="'+esc(X.search)+'" value="'+esc(rQuery)+'" oninput="setRaceQuery(this.value)">'
+    +'<div class="fbtn'+(rFiltersOpen||nfilters?' on':'')+'" onclick="toggleFilters()">'+esc(X.filters)
+    +(nfilters?' <span class="n">'+nfilters+'</span>':'')+'</div></div>'
+    +(rFiltersOpen?'<div class="fpanel"><div class="flab">'+esc(X.bucketsDiv)+'</div><div class="chips sm" style="margin-bottom:0">'+chips+'</div></div>':'');
+  var col=function(k,t,cls){
+    return '<span class="'+(rSort===k?'s':'')+(cls?' '+cls:'')+'" onclick="setSort(\''+k+'\')">'+esc(t)+(rSort===k?(rDesc?' ▼':' ▲'):'')+'</span>';
+  };
+  h+='<div class="tb"><div class="thd">'+col('pos',X.colNo)+'<span></span>'
+    +col('name',X.colPlayer,'n')+col('m',X.colM)+col('wr',X.colWR)+col('points',X.colPts)+'</div>';
+  h+=list.length?list.map(function(p){
+    var w=pct(p);
+    return '<div class="trw'+(p.position&&p.position<=3?' top':'')+'" onclick="openPlayer(\''+q(p.id)+'\',\'race\')">'
+      +'<span class="p">'+(p.position||'—')+'</span>'+av(p)
+      +'<span class="n"><div class="nm">'+esc(p.name)+'</div><div style="margin-top:3px">'+divChip(p.division)+'</div></span>'
+      +'<span>'+p.matches+'</span>'
+      +'<span>'+w+'%<div class="bar"><i style="width:'+w+'%"></i></div></span>'
+      +'<span class="pt">'+p.points+'</span></div>';
+  }).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
+  h+='</div><div class="tip">'+esc(X.sortTip)+'</div>';
+  $('viewRace').innerHTML=h;
+  keepFocus('rq',rQuery);
+}
+function divisionsOfPlayers(){
+  var seen={},out=[];
+  players.forEach(function(p){var d=(p.division||'').trim();if(d&&!seen[d]){seen[d]=1;out.push(d)}});
+  return out.sort();
+}
+function setRaceFilter(f){rFilter=(rFilter===f?'':f);renderRace()}
+function setRaceQuery(v){rQuery=v;renderRace()}
+function toggleFilters(){rFiltersOpen=!rFiltersOpen;renderRace()}
+function setSort(k){ if(rSort===k)rDesc=!rDesc; else {rSort=k;rDesc=(k!=='name'&&k!=='pos')} renderRace() }
+function keepFocus(id,val){
+  var el=$(id);
+  if(el&&val&&document.activeElement!==el){el.focus();el.setSelectionRange(val.length,val.length)}
+}
+
+// ---------------------------------------------------------------- игроки
+// Порядок случайный при каждом открытии: так на первом экране каждый раз
+// новые лица. Как только выбран дивизион или идёт поиск — порядок осмысленный.
+function shuffledPlayers(){
+  if(!pOrder.length){
+    pOrder=players.map(function(p,i){return i});
+    for(var i=pOrder.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=pOrder[i];pOrder[i]=pOrder[j];pOrder[j]=t}
+  }
+  return pOrder.map(function(i){return players[i]}).filter(Boolean);
+}
+function playersList(){
+  var qq=pQuery.trim().toLowerCase();
+  var ordered=(pDiv||qq)?players.slice().sort(function(a,b){return (a.position||9999)-(b.position||9999)}):shuffledPlayers();
+  return ordered.filter(function(p){
+    if(pDiv&&String(p.division||'').trim()!==pDiv)return false;
+    if(pStatus==='active'&&!isActive(p))return false;
+    if(pStatus==='inactive'&&isActive(p))return false;
+    if(qq&&String(p.name||'').toLowerCase().indexOf(qq)<0)return false;
+    return true;
+  });
+}
+function renderPlayers(){
+  var list=playersList();
+  var chips='<div class="chip'+(pDiv===''?' on':'')+'" onclick="setPDiv(\'\')">'+esc(X.all)+'</div>'
+    +divisionsOfPlayers().map(function(d){
+      return '<div class="chip'+(pDiv===d?' on':'')+'" onclick="setPDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
+    }).join('');
+  var sch=[['',X.all],['active',X.active],['inactive',X.inactive]].map(function(x){
+    return '<div class="chip'+(pStatus===x[0]?' on':'')+'" onclick="setPStatus(\''+x[0]+'\')">'+esc(x[1])+'</div>';
+  }).join('');
+  var h='<input class="search" id="pq" placeholder="'+esc(X.search)+'" value="'+esc(pQuery)+'" oninput="setPQuery(this.value)">'
+    +'<div class="chips">'+chips+'</div><div class="chips">'+sch+'</div>'
+    +'<div class="view"><div class="vb'+(pView==='detail'?' on':'')+'" onclick="setPView(\'detail\')">'+esc(X.detail)+'</div>'
+    +'<div class="vb'+(pView==='tile'?' on':'')+'" onclick="setPView(\'tile\')">'+esc(X.tile)+'</div></div>'
+    +'<div class="cnt">'+esc(X.found)+list.length+((!pDiv&&!pQuery)?esc(X.random):'')+'</div>';
+  if(!list.length){$('viewPlayers').innerHTML=h+'<div class="empty">'+esc(X.nobody)+'</div>';keepFocus('pq',pQuery);return}
+  h+=pView==='tile'
+    ? '<div class="grid">'+list.map(playerTile).join('')+'</div>'
+    : list.map(playerRow).join('');
+  $('viewPlayers').innerHTML=h;
+  keepFocus('pq',pQuery);
+}
+function setPDiv(d){pDiv=d;renderPlayers()}
+function setPStatus(s){pStatus=s;renderPlayers()}
+function setPQuery(v){pQuery=v;renderPlayers()}
+function setPView(v){pView=v;openAch='';renderPlayers()}
+function achSub(a){
+  var s=a.season?(X.cSeason+' '+a.season):'';
+  return [s,a.date].filter(Boolean).join(' · ');
+}
+function achBadges(p,cls){
+  var list=(p.achievements||[]).slice(0,3);
+  if(!list.length)return '';
+  return '<div class="'+(cls||'ach')+'">'+list.map(function(a,i){
+    return '<span onclick="event.stopPropagation();toggleAch(\''+q(p.id)+'\',\''+i+'\')">'+achIcon(a)+'</span>';
+  }).join('')+'</div>';
+}
+function toggleAch(id,i){
+  var key=id+':'+i;
+  openAch=(openAch===key?'':key);
+  renderPlayers();
+}
+function achNote(p){
+  if(!openAch||openAch.indexOf(p.id+':')!==0)return '';
+  var a=(p.achievements||[])[Number(openAch.split(':')[1])];
+  if(!a)return '';
+  var sub=achSub(a);
+  return '<div class="note"><span>'+achIcon(a)+'</span><div>'+esc(a.title||a.type)
+    +(sub?'<b>'+esc(sub)+'</b>':'')+'</div></div>';
+}
+function playerRow(p){
+  var w=pct(p);
+  return '<div class="pr" onclick="openPlayer(\''+q(p.id)+'\',\'players\')"><div class="top">'
+    +'<div class="ph">'+av(p)+'<div class="rankb">#'+(p.position||'—')+'</div>'+achBadges(p)+'</div>'
+    +'<div><div class="nm">'+esc(p.name)+'</div>'
+    +'<div class="rw">'+divChip(p.division)+statusBadge(p)+'</div>'
+    +'<div class="meta">'+(p.ntrp?'<span>'+esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b></span>':'')
+      +(p.nationality?'<span>'+flag(p.nationality)+' <b>'+esc(p.nationality)+'</b></span>':'')
+      +(p.experience?'<span>'+esc(X.exp)+' <b>'+esc(p.experience)+'</b></span>':'')+'</div>'
+    +(p.form&&p.form.length?'<div class="rw" style="margin-top:9px">'+formRow(p.form)+'</div>':'')
+    +'<div class="wrbar"><div class="t2"><span>Win rate</span><span>'+w+'%</span></div>'
+    +'<div class="bg"><i style="width:'+w+'%"></i></div></div>'
+    +'</div></div>'
+    +'<div class="nums"><div><div class="k">'+esc(X.colM)+'</div><div class="v">'+p.matches+'</div></div>'
+    +'<div><div class="k">'+esc(X.colW)+'</div><div class="v">'+p.wins+'</div></div>'
+    +'<div><div class="k">'+esc(X.colPts)+'</div><div class="v a">'+p.points+'</div></div></div>'
+    +achNote(p)+'</div>';
+}
+function playerTile(p){
+  var w=pct(p);
+  return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'players\')">'+av(p)
+    +'<div class="rankb">#'+(p.position||'—')+'</div>'+achBadges(p,'ach2')
+    +'<div class="bd"><div class="nm">'+esc(p.name)+'</div>'
+    +'<div class="rw">'+divChip(p.division)+'</div>'
+    +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
+      +(p.ntrp?esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b> · ':'')+'WR <b>'+w+'%</b></div>'
+    +'<div class="bg"><i style="width:'+w+'%"></i></div>'
+    +'<div class="st"><div><div class="k">'+esc(X.colM)+'</div><div class="v">'+p.matches+'</div></div>'
+    +'<div><div class="k">'+esc(X.colW)+'</div><div class="v">'+p.wins+'</div></div>'
+    +'<div><div class="k">'+esc(X.colPts)+'</div><div class="v a">'+p.points+'</div></div></div>'
+    +'</div></div>';
+}
+
+// ---------------------------------------------------------------- дивизион
 function renderDiv(){
   if(!divisions.length){$('viewDiv').innerHTML='<div class="empty">'+esc(X.noDiv)+'</div>';return}
-  if(!divLetter)divLetter=(divisions.indexOf(divLetterOfMe())>=0?divLetterOfMe():divisions[0]);
+  if(!divLetter){
+    var mineD=String(meDivision||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    divLetter=divisions.indexOf(mineD)>=0?mineD:divisions[0];
+  }
   var chips='<div class="chips">'+divisions.map(function(d){
-    return '<div class="chip'+(divLetter===d?' on':'')+'" onclick="pickDiv(\''+esc(d)+'\')">'+esc(d)+'</div>';
+    return '<div class="chip'+(divLetter===d?' on':'')+'" onclick="pickDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
   }).join('')+'</div>';
   if(divLoading){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';return}
-  if(divErr){$('viewDiv').innerHTML=chips+'<div class="empty" style="color:#ff6b6b">'+esc(divErr)+'</div>';return}
-  if(!divData){$('viewDiv').innerHTML=chips+'<div class="empty">'+esc(X.pickDiv)+'</div>';loadDiv();return}
+  if(divErr){$('viewDiv').innerHTML=chips+'<div class="empty" style="color:#C2695E">'+esc(divErr)+'</div>';return}
+  if(!divData){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';loadDiv();return}
 
-  var d=divData,h=chips;
-  var po=d.playoff||{};
+  var d=divData,po=d.playoff||{},h=chips;
   if(po.champion){
-    h+='<div class="card" style="text-align:center;border-color:rgba(232,185,58,.45)">'
-      +'<div class="badge gold" style="margin-bottom:10px">'+esc(X.champion)+'</div>'
-      +'<div onclick="openCard(\''+esc(po.champion.id)+'\')" style="cursor:pointer">'
-      +(po.champion.photo?'<img src="'+esc(po.champion.photo)+'" style="width:96px;height:96px;border-radius:50%;object-fit:cover;border:3px solid rgba(232,185,58,.5)">':'')
-      +'<div style="font-size:18px;font-weight:900;margin-top:8px">'+esc(po.champion.name)+'</div>'
-      +'<div class="hint" style="margin-top:2px">Division '+esc(d.division)+'</div></div></div>';
+    h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in">'
+      +'<div class="cl">'+esc(X.champion)+'</div>'+av(po.champion)
+      +'<div class="cn">'+esc(po.champion.name)+'</div>'
+      +'<div class="cd">'+esc(divLabel(d.division))+(season?' · Season '+esc(season):'')+'</div></div></div>';
   }
-
-  h+='<div class="card"><h3>'+esc(X.standings)+' · '+esc(d.division)+'</h3><div class="tbl">'
-    +'<div class="tr th"><span>'+esc(X.colP)+'</span><span>'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span>'+esc(X.colZone)+'</span></div>'
+  // Сетка идёт сразу под чемпионом; если плей-офф ещё не игрался — блока нет.
+  var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played);
+  if(hasPo){
+    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(season?'Season '+esc(season):'')+'</div>'
+      +'<div class="tree"><div class="col">'
+      +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
+      +'</div><div class="conn"><i></i><u></u></div><div class="col">'
+      +poBox(X.final,po.final,true)+'</div></div>';
+  }
+  h+='<div class="lab">'+esc(X.standings)+'<span class="dot"></span>'+esc(divLabel(d.division))+'</div>'
+    +'<div class="panel"><div class="drow hd"><span class="p">#</span><span class="n"><em>'+esc(X.colPlayer)+'</em></span>'
+    +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span></span></div>'
     +d.players.map(function(p){
-      var zn=p.zone==='playoff'?X.zPlayoff:(p.zone==='extra'?X.zExtra:X.zRelegation);
-      return '<div class="tr z-'+esc(p.zone)+'" onclick="openCardByName(\''+esc(String(p.name).replace(/'/g,"\\'"))+'\')">'
-        +'<span class="pl">'+p.place+'</span>'
-        +'<span class="pn">'+(p.photo?'<img class="tav" src="'+esc(p.photo)+'">':'')+'<span>'+esc(p.name)+'</span></span>'
-        +'<span>'+p.matches+'</span><span>'+p.wins+'</span><span class="b">'+p.points+'</span>'
-        +'<span><span class="badge '+(p.zone==='playoff'?'act':(p.zone==='relegation'?'':'div'))+'">'+esc(zn)+'</span></span></div>';
+      // ▲ только у первых двух — они поднимаются. 3–6 остаются, 7–8 вылетают.
+      var mk=p.place<=2?'▲':(p.zone==='relegation'?'▼':'—');
+      var zone=p.zone==='playoff'?'z-up':(p.zone==='relegation'?'z-down':'z-stay');
+      var promo=p.place<=2?' promo':'';
+      return '<div class="drow '+zone+promo+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
+        +'<span class="p">'+p.place+'</span>'
+        +'<span class="n">'+av(p)+'<em>'+esc(p.name)+'</em></span>'
+        +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
+        +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
     }).join('')+'</div>'
-    +'<button class="more" onclick="toggleExtended()">'+esc(X.extended)+(showExtended?' ▲':' ▼')+'</button>'
-    +(showExtended?extendedTable(d):'')
-    +'<button class="more" onclick="toggleMatrix()">'+esc(X.matrix)+(showMatrix?' ▲':' ▼')+'</button>'
-    +(showMatrix?matrixTable(d):'')
-    +'</div>';
-
-  if(po.final||po.sf1||po.sf2){
-    h+='<div class="card"><h3>'+esc(X.playoff)+'</h3>'
-      +poCard(X.final,'',po.final)+poCard(X.sf1,X.seed+' #1 / #4',po.sf1)+poCard(X.sf2,X.seed+' #2 / #3',po.sf2)+'</div>';
-  }
+    +'<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
+    +'<span class="u"><i>▲</i> '+esc(X.zPromo)+'</span>'
+    +'<span><i>—</i> '+esc(X.zStay)+'</span>'
+    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>'
+    +'<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
+    +(showExt?extTable(d):'')
+    +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
+    +(showMx?mxTable(d):'');
   $('viewDiv').innerHTML=h;
 }
-function divLetterOfMe(){return String(meDivision||'').replace(/^division\s*/i,'').trim().toUpperCase()}
-function pickDiv(d){divLetter=d;divData=null;divErr='';renderDiv()}
-function toggleExtended(){showExtended=!showExtended;renderDiv()}
-function toggleMatrix(){showMatrix=!showMatrix;renderDiv()}
+function poBox(title,m,isFinal){
+  if(!m)return '';
+  var side=function(pl,other){
+    if(!pl)return '<div class="sl"><div class="avph">?</div><span class="nm2">—</span><b></b></div>';
+    var win=m.winner_id&&String(m.winner_id)===String(pl.id);
+    var sc=m.score||'';
+    return '<div class="sl'+(win?' win':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'div\')">'
+      +av(pl)+'<span class="nm2">'+esc(shortName(pl.name))+'</span><b>'+esc(win?sc:'')+'</b></div>';
+  };
+  return '<div class="mbox'+(isFinal?' fin':'')+'"><div class="mtitle">'+esc(title)+'</div>'
+    +side(m.first)+side(m.second)+'</div>';
+}
+function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
+function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv()}
+function toggleExt(){showExt=!showExt;renderDiv()}
+function toggleMx(){showMx=!showMx;renderDiv()}
 function loadDiv(){
   divLoading=true;divErr='';
   fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&initData='+encodeURIComponent(initData),{cache:'no-store'})
@@ -500,16 +777,19 @@ function loadDiv(){
       renderDiv();
     }).catch(function(e){divLoading=false;divErr=e.message;renderDiv()});
 }
-function extendedTable(d){
-  return '<div class="tbl ext"><div class="tr th"><span>#</span><span>'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colL)+'</span><span>'+esc(X.colPts)+'</span><span>'+esc(X.colSD)+'</span><span>'+esc(X.colGD)+'</span><span>'+esc(X.colWR)+'</span></div>'
+function extTable(d){
+  return '<div class="ext"><div class="er hd"><span>#</span><span class="n">'+esc(X.colPlayer)+'</span>'
+    +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>L</span><span>'+esc(X.colPts)+'</span>'
+    +'<span>±S</span><span>±G</span><span>WR</span></div>'
     +d.players.map(function(p){
       var sd=(p.setDiff>0?'+':'')+p.setDiff,gd=(p.gameDiff>0?'+':'')+p.gameDiff;
-      return '<div class="tr z-'+esc(p.zone)+'"><span class="pl">'+p.place+'</span><span class="pn">'+esc(shortName(p.name))+'</span>'
-        +'<span>'+p.matches+'</span><span>'+p.wins+'</span><span>'+p.losses+'</span><span class="b">'+p.points+'</span>'
-        +'<span>'+esc(sd)+'</span><span>'+esc(gd)+'</span><span>'+p.winRate+'%</span></div>';
+      return '<div class="er"><span>'+p.place+'</span><span class="n">'+esc(shortName(p.name))+'</span>'
+        +'<span>'+p.matches+'</span><span>'+p.wins+'</span><span>'+p.losses+'</span>'
+        +'<span class="b">'+p.points+'</span><span>'+esc(sd)+'</span><span>'+esc(gd)+'</span>'
+        +'<span>'+p.winRate+'%</span></div>';
     }).join('')+'</div>';
 }
-function matrixTable(d){
+function mxTable(d){
   var ps=d.players;
   var head='<tr><th>'+esc(X.colPlayer)+'</th>'+ps.map(function(p){return '<th>'+esc(shortName(p.name))+'</th>'}).join('')+'</tr>';
   var body=ps.map(function(a){
@@ -520,88 +800,66 @@ function matrixTable(d){
   }).join('');
   return '<div class="mx"><table>'+head+body+'</table></div>';
 }
-function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
-function poCard(title,sub,m){
-  if(!m)return '';
-  var side=function(pl){
-    if(!pl)return '<div class="oavh">?</div>';
-    var win=m.winner_id&&String(m.winner_id)===String(pl.id);
-    return '<div onclick="openCard(\''+esc(pl.id)+'\')" style="cursor:pointer;text-align:center">'
-      +(pl.photo?'<img class="oav'+(win?' win':'')+'" src="'+esc(pl.photo)+'">':'<div class="oavh">'+esc(initials(pl.name))+'</div>')
-      +'<div style="font-size:11px;font-weight:800;margin-top:4px;max-width:74px;line-height:1.2">'+esc(pl.name)+'</div></div>';
-  };
-  return '<div class="mt"><div class="top">'+esc(title)+(sub?' · '+esc(sub):'')+'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center">'
-    +side(m.first)+'<div class="sc" style="text-align:center;margin:0">'+esc(m.score||'—')+'</div>'+side(m.second)
-    +'</div></div>';
-}
 
-// --- Лента всех матчей ------------------------------------------------------
-// Собираем из той же истории, что и карточки: там по строке на игрока,
-// поэтому берём одну сторону пары, чтобы матч не задвоился.
+// ---------------------------------------------------------------- лента матчей
 function allMatchesList(){
   var out=[],seen={};
   Object.keys(matches).forEach(function(pid){
     (matches[pid]||[]).forEach(function(m){
       var key=(m.match_no||'')+'-'+[pid,m.opponent_id].sort().join('-');
       if(seen[key])return;seen[key]=1;
-      var p=players.filter(function(x){return String(x.id)===String(pid)})[0]||{name:'',photo:''};
+      var p=byId(pid)||{name:'',photo:''};
       var win=m.result==='WIN';
       out.push({no:m.match_no,date:m.date,competition:m.competition,
-        winner:win?{id:pid,name:p.name,photo:p.photo,div:m.division}:{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo,div:m.opponent_division},
-        loser:win?{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo,div:m.opponent_division}:{id:pid,name:p.name,photo:p.photo,div:m.division},
-        score:win?m.score:reverseScoreText(m.score),division:m.division||m.opponent_division});
+        winner:win?{id:pid,name:p.name,photo:p.photo}:{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo},
+        loser:win?{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo}:{id:pid,name:p.name,photo:p.photo},
+        score:win?m.score:reverseScore(m.score),division:m.division||m.opponent_division});
     });
   });
   return out.sort(function(a,b){return Number(b.no||0)-Number(a.no||0)});
 }
-function reverseScoreText(sc){
+function reverseScore(sc){
   return String(sc||'').split('/').map(function(part){
     return part.replace(/(\d+):(\d+)/g,function(_,a,b){return b+':'+a});
   }).join('/');
 }
 function renderFeed(){
   var list=allMatchesList();
-  var divs=['A','B','C','D','PRIME'].filter(function(d){
-    return list.some(function(m){return String(m.division||'').toUpperCase()===d});
-  });
-  var chips='<div class="chip'+(feedDiv===''?' on':'')+'" onclick="setFeedDiv(\'\')">'+esc(X.all)+'</div>'
-    +divs.map(function(d){return '<div class="chip'+(feedDiv===d?' on':'')+'" onclick="setFeedDiv(\''+d+'\')">'+esc(d)+'</div>'}).join('');
-  var q=feedQuery.trim().toLowerCase();
+  var divs=[];
+  list.forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
+  divs.sort();
+  var chips='<div class="chip'+(fDiv===''?' on':'')+'" onclick="setFDiv(\'\')">'+esc(X.all)+'</div>'
+    +divs.map(function(d){return '<div class="chip'+(fDiv===d?' on':'')+'" onclick="setFDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>'}).join('');
+  var qq=fQuery.trim().toLowerCase();
   var shown=list.filter(function(m){
-    if(feedDiv&&String(m.division||'').toUpperCase()!==feedDiv)return false;
-    if(q&&(String(m.winner.name).toLowerCase().indexOf(q)<0&&String(m.loser.name).toLowerCase().indexOf(q)<0))return false;
+    if(fDiv&&String(m.division||'').trim()!==fDiv)return false;
+    if(qq&&String(m.winner.name).toLowerCase().indexOf(qq)<0&&String(m.loser.name).toLowerCase().indexOf(qq)<0)return false;
     return true;
   });
-  var head='<input class="search" id="fq" placeholder="'+esc(X.search)+'" value="'+esc(feedQuery)+'" oninput="setFeedQuery(this.value)">'
-    +'<div class="chips">'+chips+'</div><div class="count">'+esc(X.found)+shown.length+'</div>';
-  var page=shown.slice(0,feedLimit);
-  $('viewMatches').innerHTML=head+(page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>')
-    +(shown.length>feedLimit?'<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>':'');
-  var el=$('fq');
-  if(el&&feedQuery&&document.activeElement!==el){el.focus();el.setSelectionRange(feedQuery.length,feedQuery.length)}
+  var h='<input class="search" id="fq" placeholder="'+esc(X.searchP)+'" value="'+esc(fQuery)+'" oninput="setFQuery(this.value)">'
+    +'<div class="chips">'+chips+'</div><div class="cnt">'+esc(X.found)+shown.length+'</div>';
+  var page=shown.slice(0,fLimit);
+  h+=page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
+  if(shown.length>fLimit)h+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
+  $('viewMatches').innerHTML=h;
+  keepFocus('fq',fQuery);
 }
-function setFeedDiv(d){feedDiv=d;feedLimit=20;renderFeed()}
-function setFeedQuery(v){feedQuery=v;feedLimit=20;renderFeed()}
-function moreFeed(){feedLimit+=20;renderFeed()}
+function setFDiv(d){fDiv=d;fLimit=20;renderFeed()}
+function setFQuery(v){fQuery=v;fLimit=20;renderFeed()}
+function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
-  var av=function(p){
-    return p.photo?'<img class="oav" src="'+esc(p.photo)+'" loading="lazy">':'<div class="oavh">'+esc(initials(p.name))+'</div>';
-  };
   var top=[m.no?'#'+m.no:'',m.date,m.competition].filter(Boolean).join(' · ');
-  return '<div class="mt">'+(top?'<div class="top">'+esc(top)+'</div>':'')
-    +'<div style="display:grid;grid-template-columns:44px 1fr 44px;gap:9px;align-items:center">'
-    +'<div onclick="openCard(\''+esc(m.winner.id)+'\')" style="cursor:pointer">'+av(m.winner)+'</div>'
-    +'<div style="min-width:0;text-align:center">'
-      +'<div class="who"><b>'+esc(m.winner.name)+'</b> <span style="color:var(--muted);font-weight:600">vs</span> '+esc(m.loser.name)+'</div>'
-      +'<div class="sc">'+esc(m.score||'—')+'</div>'
-      +(m.division?'<span class="badge div" style="margin-top:4px">'+esc(m.division)+'</span>':'')
-    +'</div>'
-    +'<div onclick="openCard(\''+esc(m.loser.id)+'\')" style="cursor:pointer">'+av(m.loser)+'</div>'
+  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="fm2">'
+    +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
+    +'<div class="mid"><div class="nm3"><b>'+esc(m.winner.name)+'</b> <s>vs</s> <em>'+esc(m.loser.name)+'</em></div>'
+    +'<div class="sc">'+esc(m.score||'—')+'</div>'
+    +(m.division?'<div style="margin-top:6px">'+divChip(m.division)+'</div>':'')+'</div>'
+    +'<div onclick="openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+av(m.loser)+'</div>'
     +'</div></div>';
 }
 
-// --- Турниры ----------------------------------------------------------------
+// ---------------------------------------------------------------- турниры и о лиге
 function renderEvents(){
   if(!events.length){$('viewEvents').innerHTML='<div class="empty">'+esc(X.noEvents)+'</div>';return}
   $('viewEvents').innerHTML=events.map(function(e){
@@ -609,76 +867,159 @@ function renderEvents(){
     var when=[e.start,e.end].filter(Boolean).join(' — ');
     return '<div class="card"><h3>'+esc(e.name)+'</h3>'
       +(when?'<div class="hint">'+esc(when)+'</div>':'')
-      +(meta?'<div class="row" style="margin-top:8px"><span class="badge">'+esc(meta)+'</span></div>':'')
-      +(e.players.length?'<div style="margin-top:10px">'+e.players.slice(0,10).map(function(p){
-          return '<div class="line"><span>'+esc(p.name)+'</span><span class="k">'+esc([p.standing,p.result].filter(Boolean).join(' · '))+'</span></div>';
-        }).join('')+'</div>':'')
-      +'</div>';
+      +(meta?'<div class="rw" style="margin-top:8px"><span class="badge">'+esc(meta)+'</span></div>':'')
+      +((e.players||[]).length?'<div style="margin-top:10px">'+e.players.slice(0,10).map(function(p){
+        return '<div class="sr"><span class="sn">'+esc(p.name)+'</span><span></span><span></span>'
+          +'<span class="pl">'+esc(p.standing||'')+'</span><span class="ptt">'+esc(p.points||'')+'</span></div>';
+      }).join('')+'</div>':'')+'</div>';
   }).join('');
 }
-
-// --- О лиге -----------------------------------------------------------------
 function renderAbout(){
-  var ru=L;
-  var rules=ru
-    ? ['Победа — <b>3</b> очка, поражение — <b>1</b>.',
-       'При равенстве очков места определяются так: очки → разница сетов → разница геймов → выигранные сеты.',
-       'Места <b>1–4</b> — плей-офф, <b>5–6</b> — добор, <b>7–8</b> — вылет.',
-       'Тай-брейк в сете отображается в счёте. Чемпионский тай-брейк считается сетом, но не влияет на разницу геймов.',
-       'Техническое поражение (W/O): сопернику 3 очка, сеты и геймы не начисляются.']
-    : ['A win is <b>3</b> points, a loss is <b>1</b>.',
-       'Ties are broken by: points → set difference → game difference → sets won.',
-       'Places <b>1–4</b> go to the playoff, <b>5–6</b> to the extra draw, <b>7–8</b> to relegation.',
-       'Set tie-breaks show in the score. A match tie-break counts as a set but not towards game difference.',
-       'A walkover (W/O) gives the opponent 3 points; no sets or games are added.'];
+  var rules=L?[
+    'Победа — <b>3</b> очка, поражение — <b>1</b>.',
+    'При равенстве: очки → разница сетов → разница геймов → выигранные сеты.',
+    'Места <b>1–2</b> — повышение, <b>1–4</b> — плей-офф, <b>5–6</b> остаются, <b>7–8</b> — вылет.',
+    'Тай-брейк в сете показан в счёте. Чемпионский тай-брейк считается сетом, но не влияет на разницу геймов.',
+    'Техническое поражение: сопернику 3 очка, сеты и геймы не начисляются.'
+  ]:[
+    'A win is <b>3</b> points, a loss is <b>1</b>.',
+    'Ties: points → set difference → game difference → sets won.',
+    'Places <b>1–2</b> promote, <b>1–4</b> reach the playoff, <b>5–6</b> stay, <b>7–8</b> relegate.',
+    'Set tie-breaks show in the score. A match tie-break counts as a set but not towards game difference.',
+    'A walkover gives the opponent 3 points; no sets or games are added.'
+  ];
   $('viewAbout').innerHTML='<div class="card"><h3>'+esc(X.rules)+'</h3>'
-    +rules.map(function(r){return '<div class="line"><span>'+r+'</span></div>'}).join('')+'</div>'
-    +'<div class="card"><h3>Phuket Tennis Family</h3><div class="hint">'+esc(X.sub)+'</div>'
-    +'<button onclick="openLink(\'https://www.phukettennis.com\')">'+esc(X.site)+'</button></div>';
+    +rules.map(function(r){return '<div class="sr" style="grid-template-columns:1fr"><span class="sn" style="font-weight:600;font-size:12.5px;color:var(--dim);line-height:1.5">'+r+'</span></div>'}).join('')
+    +'</div><div class="card"><h3>Phuket Tennis Family</h3><div class="hint">'+esc(X.sub)+'</div>'
+    +'<button onclick="openLink(\'https://www.phukettennis.com\')">🌐 '+esc(X.site)+'</button></div>';
 }
 
-function matchCard(m){
-  var av=m.opponent_photo
-    ? '<img class="oav" src="'+esc(m.opponent_photo)+'" alt="" loading="lazy" onerror="this.outerHTML=\'<div class=&quot;oavh&quot;>'+esc(initials(m.opponent))+'</div>\'">'
-    : '<div class="oavh">'+esc(initials(m.opponent))+'</div>';
+// ---------------------------------------------------------------- страница игрока
+function openPlayerByName(name,from){
+  var p=players.filter(function(x){return String(x.name||'').toLowerCase()===String(name).toLowerCase()})[0];
+  if(p)openPlayer(p.id,from);
+}
+function openPlayer(id,from){
+  var p=byId(id);
+  if(!p)return;
+  openId=String(id);
+  if(from)backTo=from;
+  allMatches=false;
+  renderPlayer(p);
+  VIEWS.forEach(function(k){$(VIEW_ID[k]).classList.add('hidden')});
+  $('tabs').classList.add('hidden');
+  $('hdr').classList.add('hidden');
+  $('viewCard').classList.remove('hidden');
+  syncBack();
+  window.scrollTo(0,0);
+}
+// Сезоны собираем из истории матчей: она знает, в каком сезоне сыгран каждый матч.
+function seasonRows(p){
+  var hist=matches[String(p.id)]||[];
+  var by={};
+  hist.forEach(function(m){
+    var s=String(m.competition||'').match(/(\d+)/);
+    var n=s?Number(s[1]):0;
+    if(!n)return;
+    if(!by[n])by[n]={n:n,g:0,w:0};
+    by[n].g++;
+    if(m.result==='WIN')by[n].w++;
+  });
+  var known={};
+  (p.seasons_list||[]).forEach(function(s){known[s.number]=s});
+  Object.keys(known).forEach(function(n){ if(!by[n])by[n]={n:Number(n),g:0,w:0} });
+  return Object.keys(by).map(Number).sort(function(a,b){return b-a}).map(function(n){
+    var k=known[n]||{};
+    var isLast=n===Math.max.apply(null,Object.keys(by).map(Number));
+    return {n:n,name:k.name||('Season '+n),division:k.division||(isLast?p.division:''),
+      g:by[n].g,w:by[n].w,
+      place:k.position||k.regular_finish||(isLast?p.division_position:'')||'',
+      points:k.points||0};
+  });
+}
+function renderPlayer(p){
+  var w=pct(p);
+  var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
+  var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>'
+    +'<div class="hero">'+av(p)+'<div class="fade"></div><div class="info">'
+    +'<h2>'+esc(p.name)+'</h2>'
+    +'<div class="row">'+divChip(p.division)
+      +(p.position?'<span class="badge g">'+esc(X.tRace)+' #'+p.position+'</span>':'')
+      +(p.division_position?'<span class="badge">#'+esc(p.division_position)+'</span>':'')
+      +statusBadge(p)+'</div>'
+    +(p.form&&p.form.length?'<div class="fline"><span class="lb">Form</span>'+formRow(p.form)+'</div>':'')
+    +'<div class="stats">'
+      +stt(X.colPts,p.points||'',true)+stt(X.colM,p.matches||'')
+      +stt('W–L',(p.wins||0)+'–'+(p.losses||0))+stt('Win rate',w+'%')
+      +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
+      +(p.nationality?stt('Country',flag(p.nationality)+' '+p.nationality):'')
+      +stt('Seasons',p.seasons||'')
+    +'</div></div></div>';
+
+  var srows=seasonRows(p);
+  h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
+  if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';
+  else{
+    h+='<div class="sr hd"><span class="sn">'+esc(X.cSeason)+'</span><span>'+esc(X.cG)+'</span>'
+      +'<span>'+esc(X.cW)+'</span><span>'+esc(X.cPlace)+'</span><span>'+esc(X.cPts)+'</span></div>'
+      +srows.map(function(s){
+        return '<div class="sr"><span class="sn">'+esc(s.name)
+          +(s.division?'<div class="sd">'+esc(divLabel(s.division))+'</div>':'')+'</span>'
+          +'<span>'+s.g+'</span><span>'+s.w+'</span>'
+          +'<span class="pl">'+esc(s.place||'—')+'</span>'
+          +'<span class="ptt">'+(s.points||'—')+'</span></div>';
+      }).join('');
+  }
+  h+='</div>';
+
+  var ach=p.achievements||[];
+  h+='<div class="card"><h3>'+esc(X.ach)+'</h3>';
+  h+=ach.length?ach.map(function(a){
+    var sub=achSub(a);
+    return '<div class="aline"><div class="ic">'+achIcon(a)+'</div><div><div class="tx">'+esc(a.title||a.type)+'</div>'
+      +(sub?'<div class="dt">'+esc(sub)+'</div>':'')+'</div></div>';
+  }).join(''):'<div class="hint">'+esc(X.noAch)+'</div>';
+  h+='</div>';
+
+  var mine=matches[String(p.id)]||[];
+  h+='<div class="card"><h3>'+esc(X.history)+(mine.length?' · '+mine.length:'')+'</h3>';
+  if(!mine.length)h+='<div class="hint">'+esc(X.noMatches)+'</div>';
+  else{
+    var shown=allMatches?mine:mine.slice(0,5);
+    h+=shown.map(matchRow).join('');
+    if(mine.length>5)h+='<button class="more" onclick="toggleMatches(\''+q(p.id)+'\')">'
+      +esc(allMatches?X.collapse:X.showAll+' ('+mine.length+')')+'</button>';
+  }
+  h+='</div>';
+  if(p.profile_url){
+    var u=/^https?:/i.test(p.profile_url)?p.profile_url:'https://www.phukettennis.com'+p.profile_url;
+    h+='<button onclick="openLink(\''+q(u)+'\')">🌐 '+esc(X.site)+'</button>';
+  }
+  $('viewCard').innerHTML=h;
+}
+function stt(k,v,acc){ return v?'<div class="stt"><div class="k">'+esc(k)+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>':'' }
+function matchRow(m){
+  var opp={name:m.opponent,photo:m.opponent_photo};
   var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition].filter(Boolean).join(' · ');
-  return '<div class="mt"'+(m.opponent_id?' onclick="openCard(\''+esc(m.opponent_id)+'\')" style="cursor:pointer"':'')+'>'
-    +(top?'<div class="top">'+esc(top)+'</div>':'')
-    +'<div class="body">'+av
-    +'<div style="min-width:0"><div class="who">'+esc(m.opponent)+(m.opponent_division?' <span class="badge div">'+esc(m.opponent_division)+'</span>':'')+'</div>'
-    +'<div class="sc">'+esc(m.score||'—')+'</div></div>'
-    +'<div class="rs '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div>'
-    +'</div></div>';
+  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="mrow"><div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
+    +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
+    +'<div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div></div></div>';
 }
-function toggleMatches(id){allMatches=!allMatches;openCard(id)}
+function toggleMatches(id){allMatches=!allMatches;openPlayer(id)}
 
-// Штатная стрелка «Назад» в шапке Telegram: на Android на неё же приходит
-// аппаратная кнопка. Отдельная кнопка внизу страницы больше не нужна.
-function syncBackButton(){
-  if(!tg||!tg.BackButton)return;
-  if(openId)tg.BackButton.show();else tg.BackButton.hide();
-}
-if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(mode); });
-
-document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){if(b.dataset.t)showTab(b.dataset.t)}});
-
+// ---------------------------------------------------------------- старт
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
+    buildTabs();
     $('title').textContent=X.title;
-    $('sub').textContent=X.sub+(season?' Season '+season+'.':'');
-    var labels={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
-    Object.keys(labels).forEach(function(k){
-      var el=document.querySelector('.tab[data-t="'+k+'"]');if(el)el.textContent=labels[k];
-    });
-    var pt=document.querySelector('.tab[data-t=""]');if(pt)pt.textContent=X.tPartners;
     showTab('home');
   }).catch(function(e){
-    $('sub').textContent='';
-    $('viewHome').innerHTML='<div class="empty" style="color:#ff6b6b">'+esc(e.message)+'</div>';
+    $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(e.message)+'</div>';
   });
 </script>
 </body>
