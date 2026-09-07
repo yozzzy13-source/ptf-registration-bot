@@ -35,23 +35,52 @@ export function divisionLetter(division = '') {
   return String(division || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
 }
 
-// ID таблицы дивизиона: сначала Settings (меняется без деплоя при новом сезоне),
-// потом переменные окружения.
-async function divisionSheetId(letter) {
+// Сезоны лиги. Список правится в Settings без деплоя:
+//   league_seasons = 1:finished,2:upcoming
+// Порядок в строке — порядок вкладок. Если строки нет, берём значение по умолчанию.
+const DEFAULT_SEASONS = '1:finished,2:upcoming';
+// Какому сезону принадлежат таблицы из division_*_sheet_id и переменных окружения.
+const DEFAULT_SHEETS_SEASON = '1';
+
+export async function getSeasons() {
+  const raw = txt(await getSetting('league_seasons').catch(() => '')) || DEFAULT_SEASONS;
+  const out = [];
+  for (const part of raw.split(',')) {
+    const [num, status] = part.split(':').map(x => txt(x));
+    if (!num) continue;
+    out.push({ number: num, label: `Season ${num}`, status: (status || 'upcoming').toLowerCase() });
+  }
+  return out.length ? out : [{ number: '1', label: 'Season 1', status: 'finished' }];
+}
+
+async function sheetsSeason() {
+  return txt(await getSetting('division_sheets_season').catch(() => '')) || DEFAULT_SHEETS_SEASON;
+}
+
+// ID таблицы дивизиона. Сначала пробуем таблицу конкретного сезона
+// (division_a_s2_sheet_id), затем общую — но только для того сезона, которому
+// эти общие таблицы принадлежат, иначе новый сезон показал бы данные старого.
+async function divisionSheetId(letter, season = '') {
   const key = divisionLetter(letter);
-  const fromSettings = await getSetting(`division_${key.toLowerCase()}_sheet_id`).catch(() => '');
+  const low = key.toLowerCase();
+  if (season) {
+    const perSeason = await getSetting(`division_${low}_s${season}_sheet_id`).catch(() => '');
+    if (txt(perSeason)) return txt(perSeason);
+    if (String(season) !== String(await sheetsSeason())) return '';
+  }
+  const fromSettings = await getSetting(`division_${low}_sheet_id`).catch(() => '');
   return txt(fromSettings) || DIVISION_SPREADSHEETS[key] || '';
 }
 
-export async function availableDivisions() {
+export async function availableDivisions(season = '') {
   const out = [];
   for (const letter of Object.keys(DIVISION_SPREADSHEETS)) {
-    if (await divisionSheetId(letter)) out.push(letter);
+    if (await divisionSheetId(letter, season)) out.push(letter);
   }
   // Дивизионы, добавленные только через Settings (женские, PRIME).
   for (const extra of ['PRIME', 'BW', 'CW', 'DW']) {
     if (out.includes(extra)) continue;
-    if (await divisionSheetId(extra)) out.push(extra);
+    if (await divisionSheetId(extra, season)) out.push(extra);
   }
   return out;
 }
@@ -70,13 +99,14 @@ async function readMatchLog(spreadsheetId) {
   return { headers, rows };
 }
 
-export async function getDivisionTable(letter) {
+export async function getDivisionTable(letter, season = '') {
   const key = divisionLetter(letter);
-  const hit = cache.get(key);
+  const cacheId = `${season || '-'}:${key}`;
+  const hit = cache.get(cacheId);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
 
-  const spreadsheetId = await divisionSheetId(key);
-  if (!spreadsheetId) return { ok: false, reason: 'not_configured', division: key };
+  const spreadsheetId = await divisionSheetId(key, season);
+  if (!spreadsheetId) return { ok: false, reason: 'not_configured', division: key, season };
 
   let rows = [];
   try { ({ rows } = await readMatchLog(spreadsheetId)); }
@@ -201,10 +231,10 @@ export async function getDivisionTable(letter) {
   }
 
   const value = {
-    ok: true, division: key, players: table, matrix,
+    ok: true, division: key, season, players: table, matrix,
     playoff: { sf1, sf2, final, champion },
     regular_matches: regularMax
   };
-  cache.set(key, { t: Date.now(), v: value });
+  cache.set(cacheId, { t: Date.now(), v: value });
   return value;
 }

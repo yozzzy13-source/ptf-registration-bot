@@ -20,7 +20,7 @@ import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlot
   listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
-import { getDivisionTable, availableDivisions, invalidateDivisionCache } from './division.js';
+import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache } from './division.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -666,12 +666,20 @@ app.get('/api/league/bootstrap', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const [players, history, events, divisions] = await Promise.all([
+    const [players, history, events, seasonList] = await Promise.all([
       getLeagueProfiles(),
       getLeagueMatchHistory().catch(() => new Map()),
       getLeagueEvents().catch(() => []),
-      availableDivisions().catch(() => [])
+      getSeasons().catch(() => [])
     ]);
+    // У каждого сезона свой набор дивизионов: у прошедших таблицы есть,
+    // у будущего пока пусто — фронт покажет заглушку вместо таблицы.
+    const seasons = [];
+    for (const s of seasonList) {
+      seasons.push({ ...s, divisions: await availableDivisions(s.number).catch(() => []) });
+    }
+    const current = seasons.filter(s => s.divisions.length).pop() || seasons[seasons.length - 1] || null;
+    const divisions = current ? current.divisions : [];
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
     // игрока открывается мгновенно, без второго запроса на сервер.
     const matches = {};
@@ -680,7 +688,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
       ok: true,
       lang: v.lang,
       user: { id: v.user.id, name: v.profile.name || [v.user.first_name, v.user.last_name].filter(Boolean).join(' ') },
-      season: await getSetting('season_number').catch(() => ''),
+      season: current ? current.number : (await getSetting('season_number').catch(() => '')),
+      seasons,
       me_division: v.division || '',
       players,
       matches,
@@ -699,7 +708,7 @@ app.get('/api/league/division', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const data = await getDivisionTable(String(req.query.letter || ''));
+    const data = await getDivisionTable(String(req.query.letter || ''), String(req.query.season || ''));
     if (!data.ok) {
       const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };
       return res.status(404).json({ ok:false, error: messages[data.reason] || 'Дивизион недоступен' });

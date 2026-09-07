@@ -261,10 +261,10 @@ font-weight:800;margin-bottom:9px}
 .fm2 .nm3 em{font-style:normal;color:#9A9186;font-weight:600}
 .sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--amber);margin-top:3px}
 /* строка матча в карточке игрока */
-.mrow{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center}
+.mrow{display:grid;grid-template-columns:46px 38px minmax(0,1fr);gap:10px;align-items:center}
 .mrow .avr,.mrow .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px;cursor:pointer}
 .mrow .who{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.res{font-size:9px;font-weight:800;padding:4px 9px;border-radius:999px;letter-spacing:.6px}
+.res{font-size:9px;font-weight:800;padding:4px 6px;border-radius:8px;letter-spacing:.4px;text-align:center}
 .res.w{background:#131A15;border:1px solid #2A3A2C;color:var(--win)}
 .res.l{background:#1A1313;border:1px solid #3A2A2A;color:var(--lose)}
 
@@ -323,6 +323,13 @@ min-width:0;transition:border-color .18s ease,color .18s ease}
 .navbot button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .navbot button i{font-style:normal;color:var(--mute2);font-size:15px;line-height:1;flex:none}
 .navbot button:active i{color:var(--amber)}
+
+.soon{background:var(--surf);border:1px solid var(--line);border-radius:18px;
+padding:34px 22px;text-align:center;margin-top:4px}
+.soon .ic{font-size:26px;opacity:.55;margin-bottom:12px}
+.soon .t{font-size:15px;font-weight:800;color:var(--text);letter-spacing:-.2px}
+.soon .d{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.6;max-width:280px;
+margin-left:auto;margin-right:auto}
 .aline{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid #17150F}
 .aline:last-child{border-bottom:0}
 .aline .ic{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#2A2116,#171310);
@@ -362,6 +369,7 @@ var pQuery='',pDiv='',pStatus='',pView='detail',pOrder=[],openAch='';
 var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false;
 var fQuery='',fDiv='',fLimit=20;
 var divLetter='',divData=null,divLoading=false,divErr='',showExt=false,showMx=false;
+var seasons=[],divSeason='';
 var allMatches=false;
 
 var T={
@@ -378,6 +386,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   final:'Финал',sf:'Полуфинал',ext:'Расширенная статистика',mx:'Все против всех',
   zPlayoff:'плей-офф',zPromo:'повышение',zStay:'остаётся в дивизионе',zDown:'вылет',
   noDiv:'Дивизион пока не сформирован.',
+  seasonSoon:'Составы дивизионов ещё формируются. Таблица появится здесь, как только сезон стартует.',
   seasons:'Сезоны',ach:'Достижения',history:'История матчей',
   cSeason:'Сезон',cG:'И',cW:'П',cPlace:'Место',cPts:'Очки',
   showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
@@ -399,6 +408,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   final:'Final',sf:'Semifinal',ext:'Extended standings',mx:'Head-to-head',
   zPlayoff:'playoff',zPromo:'promotion',zStay:'stays in division',zDown:'relegation',
   noDiv:'This division is not formed yet.',
+  seasonSoon:'Division line-ups are still being formed. The table will appear here once the season starts.',
   seasons:'Seasons',ach:'Achievements',history:'Match history',
   cSeason:'Season',cG:'P',cW:'W',cPlace:'Place',cPts:'Pts',
   showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
@@ -761,13 +771,32 @@ function playerTile(p){
 }
 
 // ---------------------------------------------------------------- дивизион
+// Сезоны разведены: у прошедших есть таблицы, у будущего пока только заглушка.
+function seasonOf(n){ return seasons.filter(function(s){return String(s.number)===String(n)})[0]||null }
+function seasonDivisions(n){ var s=seasonOf(n); return (s&&s.divisions)||[] }
+function pickSeason(n){
+  if(String(divSeason)===String(n))return;
+  divSeason=String(n);divLetter='';divData=null;divErr='';showExt=false;showMx=false;renderDiv();
+}
 function renderDiv(){
-  if(!divisions.length){$('viewDiv').innerHTML='<div class="empty">'+esc(X.noDiv)+'</div>';return}
-  if(!divLetter){
-    var mineD=String(meDivision||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
-    divLetter=divisions.indexOf(mineD)>=0?mineD:divisions[0];
+  if(!divSeason)divSeason=String(season||(seasons.length?seasons[seasons.length-1].number:''))||'';
+  var list=seasons.length?seasonDivisions(divSeason):divisions;
+  var seasonChips=seasons.length>1?'<div class="chips sm">'+seasons.map(function(s){
+    var doneMark=s.status==='finished'?'':(s.status==='upcoming'?' ○':'');
+    return '<div class="chip'+(String(divSeason)===String(s.number)?' on':'')+'" onclick="pickSeason(\''+q(s.number)+'\')">'+esc(s.label)+doneMark+'</div>';
+  }).join('')+'</div>':'';
+  if(!list.length){
+    var st=seasonOf(divSeason);
+    $('viewDiv').innerHTML=seasonChips+'<div class="soon"><div class="ic">🎾</div>'
+      +'<div class="t">'+esc(st?st.label:X.tDiv)+'</div>'
+      +'<div class="d">'+esc(st&&st.status==='upcoming'?X.seasonSoon:X.noDiv)+'</div></div>';
+    return;
   }
-  var chips='<div class="chips">'+divisions.map(function(d){
+  if(!divLetter||list.indexOf(divLetter)<0){
+    var mineD=String(meDivision||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    divLetter=list.indexOf(mineD)>=0?mineD:list[0];
+  }
+  var chips=seasonChips+'<div class="chips">'+list.map(function(d){
     return '<div class="chip'+(divLetter===d?' on':'')+'" onclick="pickDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
   }).join('')+'</div>';
   if(divLoading){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';return}
@@ -779,12 +808,12 @@ function renderDiv(){
     h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in">'
       +'<div class="cl">'+esc(X.champion)+'</div>'+av(po.champion)
       +'<div class="cn">'+esc(po.champion.name)+'</div>'
-      +'<div class="cd">'+esc(divLabel(d.division))+(season?' · Season '+esc(season):'')+'</div></div></div>';
+      +'<div class="cd">'+esc(divLabel(d.division))+(divSeason?' · Season '+esc(divSeason):'')+'</div></div></div>';
   }
   // Сетка идёт сразу под чемпионом; если плей-офф ещё не игрался — блока нет.
   var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played);
   if(hasPo){
-    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(season?'Season '+esc(season):'')+'</div>'
+    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?'Season '+esc(divSeason):'')+'</div>'
       +'<div class="tree"><div class="col">'
       +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
       +'</div><div class="conn"><i></i><u></u></div><div class="col">'
@@ -832,7 +861,7 @@ function toggleExt(){showExt=!showExt;renderDiv()}
 function toggleMx(){showMx=!showMx;renderDiv()}
 function loadDiv(){
   divLoading=true;divErr='';
-  fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&initData='+encodeURIComponent(initData),{cache:'no-store'})
+  fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&season='+encodeURIComponent(divSeason)+'&initData='+encodeURIComponent(initData),{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
       divLoading=false;
       if(!j.ok){divErr=j.error||'Error';divData=null}else divData=j;
@@ -998,6 +1027,11 @@ function seasonRows(p){
       g:by[n].g,w:by[n].w,
       place:k.position||k.regular_finish||(isLast?p.division_position:'')||'',
       points:k.points||0};
+  }).map(function(r,i,arr){
+    // Очки за сезон приходят из таблицы. Пока их там нет и сезон всего один,
+    // очки игрока целиком заработаны в нём — показываем их, а не прочерк.
+    if(!r.points&&arr.length===1)r.points=p.points||0;
+    return r;
   });
 }
 function renderPlayer(p){
@@ -1023,7 +1057,7 @@ function renderPlayer(p){
   h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
   if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';
   else{
-    h+='<div class="sr hd"><span class="sn">'+esc(X.cSeason)+'</span><span>'+esc(X.cG)+'</span>'
+    h+='<div class="sr hd"><span class="sn"></span><span>'+esc(X.cG)+'</span>'
       +'<span>'+esc(X.cW)+'</span><span>'+esc(X.cPlace)+'</span><span>'+esc(X.cPts)+'</span></div>'
       +srows.map(function(s){
         return '<div class="sr"><span class="sn">'+esc(s.name)
@@ -1065,9 +1099,10 @@ function matchRow(m){
   var opp={name:m.opponent,photo:m.opponent_photo};
   var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition].filter(Boolean).join(' · ');
   return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
-    +'<div class="mrow"><div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
+    +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div>'
+    +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
-    +'<div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div></div></div>';
+    +'</div></div>';
 }
 function toggleMatches(id){allMatches=!allMatches;openPlayer(id)}
 
@@ -1078,6 +1113,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData),{cache:'no-
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
+    seasons=j.seasons||[];
     buildTabs();
     $('title').textContent=X.title;
     // ?tab=race / ?division=B — чтобы кнопка из меню или рассылки открывала
