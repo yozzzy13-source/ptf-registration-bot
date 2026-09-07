@@ -34,7 +34,9 @@ async function sendMain(chatId, lang, from=null) {
     if (profile) showMatches = await isActiveLeaguePlayer({ ...profile, id: from?.id ?? chatId });
   } catch(e) { console.error('main menu league check failed:', e.message); }
   await syncUserCommands(chatId, l, { active: showMatches, admin: isAdminUser(from?.id ?? chatId) });
-  await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l,{matches:showMatches})});
+  // Отрицательный chat_id — это группа: там кнопки мини-приложения запрещены.
+  const noWebApp = Number(chatId) < 0;
+  await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l,{matches:showMatches, noWebApp})});
 }
 
 // Подсказка команд в личке. Общий список короткий; команды матчей добавляются
@@ -221,7 +223,7 @@ async function sendResultsSettings(chatId, lang, telegramId, event = '') {
 }
 
 
-async function sendTextSection(chatId, lang, key, editMsgId=null) { const txt=await getBotText(key,lang); const body=txt?.html_text || `<b>${escapeHtml(key)}</b>`; let opts={reply_markup:textKeyboard(lang,key)}; if(key==='yearly_race'){ opts={reply_markup:{inline_keyboard:[[webAppButton(lang==='ru'?'📊 Посмотреть рейтинг':'📊 View Ranking','/league?tab=race')],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]}}; } if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
+async function sendTextSection(chatId, lang, key, editMsgId=null) { const txt=await getBotText(key,lang); const body=txt?.html_text || `<b>${escapeHtml(key)}</b>`; let opts={reply_markup:textKeyboard(lang,key,{noWebApp:Number(chatId)<0})}; if(key==='yearly_race'){ opts={reply_markup:{inline_keyboard:[[webAppButton(lang==='ru'?'📊 Посмотреть рейтинг':'📊 View Ranking','/league?tab=race')],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]}}; } if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
 function cleanPaymentAmount(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -883,7 +885,12 @@ export async function handleCallback(q) {
       return attachMediaToPayment({ chatId, telegramId });
     }
     if (data.startsWith('admin_payment:')) {
-      const [, applicationId, paymentId, status] = data.split(':');
+      // Новый формат admin_payment:<заявка>:<решение>; старые кнопки из истории
+      // приходят в виде admin_payment:<заявка>:<платёж>:<решение> — принимаем оба.
+      const parts = data.split(':');
+      const applicationId = parts[1] || '';
+      const status = parts[parts.length - 1] || '';
+      const paymentId = parts.length > 3 ? parts[2] : '';
       return setPaymentStatus({ chatId, applicationId, paymentId, status });
     }
     if (data.startsWith('bcseg:')) return handleBroadcastSegment(q, data.split(':')[1]);

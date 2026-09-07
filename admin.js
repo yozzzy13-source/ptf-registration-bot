@@ -1044,8 +1044,16 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
   await replyInPlayerTopic(chatId, app.telegram_id, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
 }
 
-export async function setPaymentStatus({ chatId, applicationId, paymentId, status }) {
-  await updatePayment(paymentId, { status: status === 'approved' ? 'approved' : 'rejected', admin_checked_at: nowISO() });
+export async function setPaymentStatus({ chatId, applicationId, paymentId = '', status }) {
+  // Кнопка передаёт только заявку — платёж берём из её строки (в callback_data
+  // оба идентификатора не помещаются, лимит Telegram 64 байта).
+  let pid = String(paymentId || '').trim();
+  if (!pid) {
+    const current = await findApplication(applicationId).catch(() => null);
+    pid = String(current?.payment_id || '').trim();
+  }
+  if (pid) await updatePayment(pid, { status: status === 'approved' ? 'approved' : 'rejected', admin_checked_at: nowISO() });
+  else console.error(`setPaymentStatus: payment_id not found for ${applicationId}`);
   const appStatus = status === 'approved' ? 'payment_approved' : 'waiting_payment';
   const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: status === 'approved' ? 'approved' : 'rejected', payment_proof_status: status, payment_reviewed_at: nowISO() });
   if (app) await updateApplicantStatusByTelegramId(app.telegram_id, appStatus);
