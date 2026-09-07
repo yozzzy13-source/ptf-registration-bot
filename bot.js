@@ -735,6 +735,8 @@ export async function handleMessage(msg) {
     if (text === '/events') return adminEvents(chatId);
     if (text === '/pending') return adminPending(chatId);
     if (text === '/messages') return adminMessages(chatId);
+    // Рассылка «уточните свой уровень»: показывает два охвата и ждёт выбора.
+    if (text === '/rating' || text === '/rating_broadcast') return startMissingRatingBroadcast(chatId, from.id);
     if (text.startsWith('/profile')) return adminProfile(chatId, text);
 
     if ((msg.chat.type === 'group' || msg.chat.type === 'supergroup') && msg.message_thread_id && !text.startsWith('/')) {
