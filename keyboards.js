@@ -25,7 +25,7 @@ export function mainKeyboard(lang, opts={}) {
   ...(opts.matches ? [[app(t(lang,'matches'),'/match')]] : []),
   [app(t(lang,'participants'),'/participants')],
   [app(t(lang,'league'),'/league')],
-  [{text:t(lang,'how'),callback_data:'text:how_league_works'}],
+  [{text:t(lang,'about'),callback_data:'text:about_ptf'},{text:t(lang,'how'),callback_data:'text:how_league_works'}],
   [{text:t(lang,'yearly'),callback_data:'text:yearly_race'},{text:t(lang,'pass'),callback_data:'payment_entry'}],
   [{text:t(lang,'contact'),callback_data:'contact'}]
 ]); }
@@ -55,3 +55,51 @@ export function clubKeyboard(lang, url) { return inlineKeyboard([[clubChatButton
 export function challengeKeyboard(lang, challengeId, profileUrl) { return inlineKeyboard([[{text:t(lang,'challenge_accept'),callback_data:`challenge_accept:${challengeId}`},{text:t(lang,'challenge_decline'),callback_data:`challenge_decline:${challengeId}`}],[{text:t(lang,'challenge_profile'),url:profileUrl}]]); }
 export function directChatKeyboard(lang, username) { return inlineKeyboard([[urlButton(t(lang,'write_player'),`https://t.me/${String(username).replace(/^@/,'')}`)]]); }
 export function adminPanelKeyboard(lang) { return inlineKeyboard([[{ text:'🛠 Open Admin Panel', web_app:{ url:`${PUBLIC_URL}/admin` } }]]); }
+
+// ------------------------------------------------------------------ постоянное меню
+// Обычная клавиатура (не inline) — она не привязана к сообщению и не уезжает
+// вверх вместе с историей. is_persistent держит её раскрытой.
+// Набор кнопок зависит от состояния игрока: новичку не нужен «Результат»,
+// активному — «Оплатить».
+export const MENU_LABELS = {
+  ru: { matches:'🎾 Матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига',
+        pay:'💳 Оплатить', apply:'🎾 Заявка', squad:'👥 Состав',
+        menu:'🏠 Меню', contact:'💬 Связаться' },
+  en: { matches:'🎾 Matches', result:'📊 Result', court:'📅 Court', league:'🏆 League',
+        pay:'💳 Pay', apply:'🎾 Apply', squad:'👥 Line-up',
+        menu:'🏠 Menu', contact:'💬 Contact' }
+};
+
+// Какие кнопки открывают мини-приложение, а какие обрабатывает сам бот.
+const MENU_PATHS = {
+  matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
+  league:'/league', apply:'/apply?mode=event', squad:'/participants'
+};
+
+const MENU_LAYOUTS = {
+  active: [['matches','result'], ['court','league'], ['menu','contact']],
+  unpaid: [['pay','league'], ['squad','contact'], ['menu']],
+  lead:   [['apply','league'], ['squad','contact']]
+};
+
+export function persistentKeyboard(lang, kind='lead') {
+  const l = lang === 'ru' ? 'ru' : 'en';
+  const labels = MENU_LABELS[l];
+  const rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(key => {
+    const text = labels[key];
+    return MENU_PATHS[key] ? { text, web_app: { url: `${PUBLIC_URL}${MENU_PATHS[key]}` } } : { text };
+  }));
+  return { keyboard: rows, resize_keyboard: true, is_persistent: true };
+}
+
+// Текст кнопки → действие. Собираем на обоих языках сразу: человек мог
+// переключить язык, а клавиатура у него осталась со старыми подписями.
+const ACTION_BY_LABEL = new Map();
+for (const l of ['ru','en']) {
+  for (const [key, text] of Object.entries(MENU_LABELS[l])) {
+    if (!MENU_PATHS[key]) ACTION_BY_LABEL.set(text.toLowerCase(), key);
+  }
+}
+export function menuAction(text='') {
+  return ACTION_BY_LABEL.get(String(text).trim().toLowerCase()) || '';
+}

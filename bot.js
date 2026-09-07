@@ -1,11 +1,11 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS } from './telegram.js';
-import { mainKeyboard, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
+import { mainKeyboard, persistentKeyboard, menuAction, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
 import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
-import { findSlot as findMatchSlot, acceptProposal, rejectProposal, confirmCourt, confirmResult, disputeResult, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
+import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, confirmCourt, confirmResult, disputeResult, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
 import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
   notifyResultConfirmed, notifyResultDisputed, broadcastResult,
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
@@ -22,21 +22,90 @@ function fallbackLang(lang) { return lang === 'ru' ? 'ru' : 'en'; }
 async function sendLanguageChoice(chatId) {
   return sendMessage(chatId, t('en','choose_language'), { reply_markup: languageKeyboard() });
 }
+// Состояние игрока определяет и набор кнопок, и то, показывать ли рассказ про
+// PTF. Активному он не нужен — он уже всё знает, и повтор выглядит как спам.
+async function playerState(userId) {
+  const out = { kind:'lead', active:false, profile:null, app:null };
+  try {
+    out.profile = await findApplicantByTelegramId(userId);
+    if (out.profile) out.active = await isActiveLeaguePlayer({ ...out.profile, id: userId });
+  } catch (e) { console.error('player state failed:', e.message); }
+  if (out.active) { out.kind = 'active'; return out; }
+  try {
+    out.app = await findLatestPayableApplicationByTelegramId(userId);
+  } catch (e) { console.error('player state application failed:', e.message); }
+  const pay = String(out.app?.payment_status || '').toLowerCase();
+  if (out.app?.application_id && !['approved'].includes(pay)) out.kind = 'unpaid';
+  return out;
+}
+
+// Постоянная клавиатура не привязана к сообщению, поэтому её достаточно
+// поставить один раз и обновлять только при смене состояния. Сигнатуру держим
+// в памяти: лишняя перестановка на каждое сообщение мигает у человека экраном.
+const menuSignature = new Map();
+function keyboardFor(chatId, lang, kind) {
+  const key = String(chatId);
+  const sig = `${lang}:${kind}`;
+  if (menuSignature.get(key) === sig) return null;
+  menuSignature.set(key, sig);
+  return persistentKeyboard(lang, kind);
+}
+
+// Короткая сводка для активного игрока: ближайший матч и то, чего от него ждут.
+// Если сказать нечего — возвращаем пустую строку, и меню остаётся коротким.
+async function playerDigest(userId, lang) {
+  const ru = lang === 'ru';
+  const lines = [];
+  try {
+    const [slots, tasks] = await Promise.all([
+      listMySlots(userId).catch(() => []),
+      listResultTasks(userId).catch(() => [])
+    ]);
+    const next = slots.find(sl => sl.agreed_date && String(sl.status || '').toLowerCase() === 'accepted');
+    if (next) {
+      const me = String(userId);
+      const opp = String(next.from_telegram_id) === me ? next.to_name : next.from_name;
+      const when = [next.agreed_date, next.agreed_time].filter(Boolean).join(', ');
+      const where = next.agreed_court ? ` · ${next.agreed_court}` : '';
+      lines.push(`${ru ? '🎾 Ближайший матч' : '🎾 Next match'}: <b>${escapeHtml(opp || '')}</b> — ${escapeHtml(when)}${escapeHtml(where)}`);
+    }
+    const waiting = slots.filter(sl => String(sl.status || '').toLowerCase() === 'pending'
+      && String(awaitingSide(sl).id) === String(userId));
+    if (waiting.length) lines.push(ru ? `⏳ Ждут твоего ответа: <b>${waiting.length}</b>` : `⏳ Waiting for your answer: <b>${waiting.length}</b>`);
+    if (tasks.length) lines.push(ru ? `📊 Не внесён счёт: <b>${tasks.length}</b>` : `📊 Result not submitted: <b>${tasks.length}</b>`);
+  } catch (e) { console.error('player digest failed:', e.message); }
+  return lines.join('\n');
+}
+
 async function sendMain(chatId, lang, from=null) {
   closeContactSession(chatId); userState.delete(String(chatId));
   const l=fallbackLang(lang);
-  const txt=await getBotText('welcome_main',l);
-  // Кнопка матчей показывается только активным игрокам состава — остальным она
-  // всё равно ничего не откроет, а в меню создаёт лишний шум.
-  let showMatches=false;
-  try {
-    const profile = await findApplicantByTelegramId(from?.id ?? chatId);
-    if (profile) showMatches = await isActiveLeaguePlayer({ ...profile, id: from?.id ?? chatId });
-  } catch(e) { console.error('main menu league check failed:', e.message); }
-  await syncUserCommands(chatId, l, { active: showMatches, admin: isAdminUser(from?.id ?? chatId) });
+  const userId = from?.id ?? chatId;
+  const st = await playerState(userId);
+  await syncUserCommands(chatId, l, { active: st.active, admin: isAdminUser(userId) });
   // Отрицательный chat_id — это группа: там кнопки мини-приложения запрещены.
   const noWebApp = Number(chatId) < 0;
-  await sendMessage(chatId, txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾', {reply_markup:mainKeyboard(l,{matches:showMatches, noWebApp})});
+  const isPrivateChat = !noWebApp;
+
+  // Активному игроку вместо рассказа про PTF — сводка по его матчам.
+  let body;
+  if (st.active) {
+    const digest = await playerDigest(userId, l);
+    const hello = l === 'ru' ? `<b>${escapeHtml(st.profile?.name || '')}</b>, ты в составе сезона 🎾`.trim() : `<b>${escapeHtml(st.profile?.name || '')}</b>, you are in the season line-up 🎾`.trim();
+    body = digest ? `${hello}\n\n${digest}` : hello;
+  } else {
+    const txt = await getBotText('welcome_main', l);
+    body = txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾';
+  }
+
+  const opts = { reply_markup: mainKeyboard(l, { matches: st.active, noWebApp }) };
+  await sendMessage(chatId, body, opts);
+  // Постоянное меню ставим отдельным коротким сообщением — двух reply_markup
+  // в одном сообщении Telegram не принимает.
+  if (isPrivateChat) {
+    const kb = keyboardFor(chatId, l, st.kind);
+    if (kb) await sendMessage(chatId, l === 'ru' ? '⌨️ Быстрые кнопки внизу — они всегда под рукой.' : '⌨️ Quick buttons below — always at hand.', { reply_markup: kb }).catch(e => console.error('persistent keyboard failed:', e.message));
+  }
 }
 
 // Подсказка команд в личке. Общий список короткий; команды матчей добавляются
@@ -223,7 +292,7 @@ async function sendResultsSettings(chatId, lang, telegramId, event = '') {
 }
 
 
-async function sendTextSection(chatId, lang, key, editMsgId=null) { const txt=await getBotText(key,lang); const body=txt?.html_text || `<b>${escapeHtml(key)}</b>`; let opts={reply_markup:textKeyboard(lang,key,{noWebApp:Number(chatId)<0})}; if(key==='yearly_race'){ opts={reply_markup:{inline_keyboard:[[webAppButton(lang==='ru'?'📊 Посмотреть рейтинг':'📊 View Ranking','/league?tab=race')],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]}}; } if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
+async function sendTextSection(chatId, lang, key, editMsgId=null) { let txt=await getBotText(key,lang); if(key==='about_ptf' && !txt?.html_text) txt=await getBotText('welcome_main',lang); const body=txt?.html_text || `<b>${escapeHtml(key)}</b>`; let opts={reply_markup:textKeyboard(lang,key,{noWebApp:Number(chatId)<0})}; if(key==='yearly_race'){ opts={reply_markup:{inline_keyboard:[[webAppButton(lang==='ru'?'📊 Посмотреть рейтинг':'📊 View Ranking','/league?tab=race')],[{text:t(lang,'how'),callback_data:'text:how_league_works'}],[{text:t(lang,'back'),callback_data:'main'}]]}}; } if(editMsgId) await editMessageText(chatId,editMsgId,body,opts); else await sendMessage(chatId,body,opts); }
 function cleanPaymentAmount(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -623,6 +692,18 @@ export async function handleMessage(msg) {
         await logMessage({ message_id:uid('msg'), telegram_id:match[1], direction:'outgoing', message_type:'text', message_text:text, timestamp:nowISO(), admin_id:from.id, admin_name:from.username || from.first_name || '', status:'sent' });
         return null;
       }
+    }
+  }
+
+  // Кнопки постоянного меню приходят обычным текстом. Разбираем их ДО режимов
+  // «связаться» и «чат с соперником» — иначе нажатие уйдёт собеседнику текстом.
+  if (isPrivate && text) {
+    const act = menuAction(text);
+    if (act === 'menu') return sendMain(chatId, lang, from);
+    if (act === 'pay') return sendPaymentEntry(chatId, from, lang);
+    if (act === 'contact') {
+      openContactSession(chatId, lang);
+      return sendMessage(chatId, t(lang, 'contact_prompt'), { reply_markup: contactOpenKeyboard(lang) });
     }
   }
 
