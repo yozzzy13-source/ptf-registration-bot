@@ -27,17 +27,6 @@ async function valuesUpdate(range, values) {
     requestBody: { values }
   });
 }
-async function valuesAppend(range, values) {
-  const res = await sheetsClient().spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
-    range,
-    valueInputOption: 'USER_ENTERED',
-    insertDataOption: 'INSERT_ROWS',
-    requestBody: { values }
-  });
-  return res.data;
-}
-
 async function spreadsheetMeta() {
   const res = await sheetsClient().spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
   return res.data;
@@ -652,11 +641,49 @@ export async function getRows(sheetName, { useCache=true } = {}) {
   return out;
 }
 
-export async function appendObject(sheetName, obj) {
-  const { headers } = await getRows(sheetName, { useCache:false });
-  const row = headers.map(h => obj[h] ?? '');
-  await valuesAppend(`'${sheetName}'!A:BZ`, [row]);
-  cache.clear();
+// values.append сам ищет «таблицу» в диапазоне и дописывает ПОСЛЕ неё. Когда в
+// лист попадает почти пустая строка (лид, у которого заполнено одно поле),
+// Google определяет границы таблицы по ней и следующую строку начинает правее —
+// новые анкеты уехали в колонки BT..CD, и дальше сдвиг только рос. Поэтому
+// адрес строки считаем сами и пишем строго от колонки A.
+// Записи выстраиваем в очередь на лист: два одновременных сохранения иначе
+// вычислят один и тот же номер строки и затрут друг друга.
+// uniqueBy — последняя защита от дублей: проверяем «такой уже есть» не до
+// постановки в очередь, а прямо перед записью. Иначе два сохранения подряд оба
+// видят лист без нужной строки и заводят по анкете на одного человека.
+const appendQueue = new Map();
+export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
+  const prev = appendQueue.get(sheetName) || Promise.resolve();
+  const task = prev.catch(() => {}).then(async () => {
+    const { headers, rows, values } = await getRows(sheetName, { useCache:false });
+    if (!headers.length) throw new Error(`Sheet "${sheetName}" has no header row`);
+    const write = (rowNumber, data) => valuesUpdate(
+      `'${sheetName}'!A${rowNumber}:${colToA1(headers.length)}${rowNumber}`,
+      [headers.map(h => data[h] ?? '')]
+    );
+    const wanted = uniqueBy ? String(obj[uniqueBy] ?? '').trim() : '';
+    if (wanted) {
+      const twin = rows.find(r => String(r[uniqueBy] ?? '').trim() === wanted);
+      if (twin?._rowNumber) {
+        // Дозаполняем только пустые поля. Иначе строка лида (status: lead,
+        // profile_completed: no) откатила бы назад полноценную анкету игрока,
+        // который просто ещё раз нажал «старт».
+        const merged = { ...twin };
+        for (const [k, v] of Object.entries(obj)) {
+          if (String(merged[k] ?? '').trim() === '' && String(v ?? '').trim() !== '') merged[k] = v;
+        }
+        await write(twin._rowNumber, merged);
+        cache.clear();
+        return { ...merged, _rowNumber: twin._rowNumber, isNew: false };
+      }
+    }
+    const target = values.length + 1;
+    await write(target, obj);
+    cache.clear();
+    return { ...obj, _rowNumber: target, isNew: true };
+  });
+  appendQueue.set(sheetName, task);
+  return task;
 }
 
 export async function updateObjectByRow(sheetName, rowNumber, patch) {
@@ -858,7 +885,7 @@ export async function ensureApplicantLead(user={}) {
     language: ['ru','en'].includes(String(user.language || '').toLowerCase()) ? String(user.language).toLowerCase() : '',
     source: 'telegram_lead', crm_tags: 'lead', profile_completed: 'no', selfie_status: 'optional_missing'
   };
-  await appendObject(SHEETS.applicants, newRow);
+  await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
   return { ...newRow, _rowNumber: null };
 }
 
@@ -926,7 +953,7 @@ export async function setUserLanguage(user={}, language='en') {
     profile_completed: 'no',
     selfie_status: 'optional_missing'
   };
-  await appendObject(SHEETS.applicants, newRow);
+  await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
   return newRow;
 }
 
@@ -965,8 +992,8 @@ export async function upsertApplicant(profile) {
     return { ...existing, ...patch, _rowNumber: existing._rowNumber, isNew:false };
   }
   const newRow = { division:'pending', date: nowISO(), created_at: nowISO(), ...patch };
-  await appendObject(SHEETS.applicants, newRow);
-  return { ...newRow, isNew:true };
+  const saved = await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
+  return { ...newRow, _rowNumber: saved?._rowNumber ?? null, isNew: saved?.isNew !== false };
 }
 
 export async function createApplication(app) {
