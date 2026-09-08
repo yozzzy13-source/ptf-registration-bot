@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureRatingSourceColumn, ensureAvatarColumns, publishedAvatars } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, withRatingSourceTag, ratingSourceOf } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant } from './admin.js';
@@ -176,9 +176,6 @@ function ratingSource(value, fallback = 'player') {
   const v = String(value || '').trim().toLowerCase();
   return ['test', 'player', 'admin'].includes(v) ? v : fallback;
 }
-// Колонку заводим лениво и молча: если Sheets ответил ошибкой, рейтинг всё
-// равно должен сохраниться — источник это справочная информация.
-function noteRatingColumn() { return ensureRatingSourceColumn().catch(e => console.error('ntrp_source column failed:', e.message)); }
 
 app.post('/api/update-rating', async (req, res) => {
   try {
@@ -189,11 +186,11 @@ app.post('/api/update-rating', async (req, res) => {
     const existing = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
     if (!existing) return res.status(404).json({ ok:false, error:'Player profile not found. Please complete the profile first.' });
     const racketRating = requireRacketRating({ ntrp: rating, racket_rating: rating });
-    await noteRatingColumn();
     const src = ratingSource(ntrp_source);
-    let updated = await updateApplicantByTelegramId(user.id, { ntrp: racketRating, ntrp_source: src, telegram_id: user.id, telegram_username: user.username || existing.telegram_username || '', telegram: user.username ? `t.me/${user.username}` : existing.telegram || '', profile_completed: 'yes', source: existing.source || 'telegram_webapp' });
+    const tags = withRatingSourceTag(existing.crm_tags, src);
+    let updated = await updateApplicantByTelegramId(user.id, { ntrp: racketRating, crm_tags: tags, telegram_id: user.id, telegram_username: user.username || existing.telegram_username || '', telegram: user.username ? `t.me/${user.username}` : existing.telegram || '', profile_completed: 'yes', source: existing.source || 'telegram_webapp' });
     if (!updated && existing?._rowNumber) {
-      const patch = { ntrp: racketRating, ntrp_source: src, telegram_id: user.id, telegram_username: user.username || existing.telegram_username || '', telegram: user.username ? `t.me/${user.username}` : existing.telegram || '', profile_completed: 'yes', updated_at: nowISO() };
+      const patch = { ntrp: racketRating, crm_tags: tags, telegram_id: user.id, telegram_username: user.username || existing.telegram_username || '', telegram: user.username ? `t.me/${user.username}` : existing.telegram || '', profile_completed: 'yes', updated_at: nowISO() };
       await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
       updated = { ...existing, ...patch };
     }
@@ -214,8 +211,7 @@ app.post('/api/save-profile'
     const existingProfile = await findApplicantByTelegramIdentity(user);
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en'; const username = user.username || '';
     const racketRating = requireRacketRating(profile);
-    await noteRatingColumn();
-    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, ntrp_source:ratingSource(profile.ntrp_source), status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:'ptf_waitlist,profile_completed', increment_application_count:false });
+    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:withRatingSourceTag('ptf_waitlist,profile_completed', ratingSource(profile.ntrp_source)), increment_application_count:false });
     res.json({ok:true,applicant,profileCompleted:true});
   } catch(e){ console.error(e); res.status(500).json({ok:false,error:e.message}); }
 });
@@ -278,11 +274,9 @@ app.post('/api/submit-application', async (req, res) => {
     const applicationStatus = event ? (paymentRequired ? 'waiting_payment' : 'application_received') : 'waitlist';
     const paymentStatus = paymentRequired ? 'payment_required' : 'not_required';
 
-    await noteRatingColumn();
     const applicant = await upsertApplicant({
       name: fullName,
       ntrp: racketRating,
-      ntrp_source: ratingSource(effectiveProfile.ntrp_source, eventOnlyWithProfile ? (existingProfile?.ntrp_source || 'player') : 'player'),
       status: applicationStatus,
       experience: safe(effectiveProfile.experience),
       gender: safe(effectiveProfile.gender),
@@ -297,7 +291,12 @@ app.post('/api/submit-application', async (req, res) => {
       source: 'telegram_webapp',
       last_application_event: eventName,
       selfie_status: 'optional_missing',
-      crm_tags: isEventApplication ? `event_application,${finalEventId}` : 'ptf_waitlist,profile_completed',
+      // Метку источника рейтинга подмешиваем сюда же: отдельной колонки нет
+      // намеренно — вставка колонки сдвигает лист и ломает формулы витрины.
+      crm_tags: withRatingSourceTag(
+        isEventApplication ? `event_application,${finalEventId}` : 'ptf_waitlist,profile_completed',
+        ratingSource(effectiveProfile.ntrp_source, eventOnlyWithProfile ? (ratingSourceOf(existingProfile) || 'player') : 'player')
+      ),
       increment_application_count: true
     });
 
