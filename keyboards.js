@@ -53,6 +53,19 @@ export function adminApplicationKeyboard(applicationId, telegramId) { return inl
 // General. Теперь передаём только заявку, а платёж находим по ней на сервере.
 export function adminPaymentKeyboard(applicationId, paymentId, telegramId) { return inlineKeyboard([[{text:'✅ Approve payment',callback_data:cb(`admin_payment:${applicationId}:approved`)}],[{text:'❌ Reject payment',callback_data:cb(`admin_payment:${applicationId}:rejected`)}],[{text:'💬 Message player',callback_data:cb(`admin_reply:${telegramId}`)}]]); }
 export function clubKeyboard(lang, url) { return inlineKeyboard([[clubChatButton(lang==='ru'?'💬 Вступить в клубный чат':'💬 Join Club Chat')]]); }
+
+// Приветствие после подтверждения оплаты: разделы сразу кнопками, чтобы человек
+// потрогал бота в первую же минуту, и приглашение в клубный чат последней строкой.
+// В личке inline-кнопки мини-приложения разрешены, поэтому открываются в один тап.
+export function welcomeKeyboard(lang) {
+  const ru = lang === 'ru';
+  return inlineKeyboard([
+    [webAppButton(ru?'🎾 Матчи':'🎾 Matches','/match'), webAppButton(ru?'📅 Корт':'📅 Court','/match?tab=book')],
+    [webAppButton(ru?'📊 Результат':'📊 Result','/match?tab=res'), webAppButton(ru?'🏆 Лига':'🏆 League','/league')],
+    [webAppButton(ru?'👥 Состав':'👥 Line-up','/participants')],
+    [clubChatButton(ru?'💬 Вступить в клубный чат':'💬 Join the club chat')]
+  ]);
+}
 export function challengeKeyboard(lang, challengeId, profileUrl) { return inlineKeyboard([[{text:t(lang,'challenge_accept'),callback_data:`challenge_accept:${challengeId}`},{text:t(lang,'challenge_decline'),callback_data:`challenge_decline:${challengeId}`}],[{text:t(lang,'challenge_profile'),url:profileUrl}]]); }
 export function directChatKeyboard(lang, username) { return inlineKeyboard([[urlButton(t(lang,'write_player'),`https://t.me/${String(username).replace(/^@/,'')}`)]]); }
 export function adminPanelKeyboard(lang) { return inlineKeyboard([[{ text:'🛠 Open Admin Panel', web_app:{ url:`${PUBLIC_URL}/admin` } }]]); }

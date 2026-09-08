@@ -3,7 +3,7 @@ import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingCo
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
-import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard } from './keyboards.js';
+import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard, welcomeKeyboard } from './keyboards.js';
 import { parseTemplate, renderText, renderButtons, destinationLabel, getBotUsername, linksCheatSheet } from './links.js';
 
 export const adminState = new Map();
@@ -1065,17 +1065,58 @@ Amount: <b>${escapeHtml(app.payment_amount || '')} ${escapeHtml(app.payment_curr
   return replyInPlayerTopic(chatId, telegramId, text, { reply_markup: adminPaymentKeyboard(app.application_id, paymentId, telegramId) });
 }
 
+// Приветствие после подтверждения участия. Один текст на оба пути — и когда
+// организатор подтверждает оплату кнопкой, и когда ставит статус вручную:
+// раньше это были два разных сообщения, и они разъезжались.
+export function welcomeMessage(lang = 'en') {
+  return lang === 'ru' ? `<b>Добро пожаловать в Phuket Tennis Family</b> 🎾
+
+Оплата подтверждена, место в сезоне за тобой. Спасибо за доверие — сделаем этот сезон классным.
+
+<b>Что умеет бот</b>
+
+🎾 <b>Матчи</b> — вызвать соперника, принять вызов, согласовать дату и корт
+📅 <b>Корт</b> — забронировать площадку прямо в интерфейсе
+📊 <b>Результат</b> — внести счёт после игры
+🏆 <b>Лига</b> — таблицы дивизионов, годовая гонка, история матчей
+👥 <b>Состав</b> — кто играет в сезоне
+
+Кнопки ниже открывают эти разделы, и они же всегда под рукой внизу экрана.
+
+<b>Клубный чат</b>
+
+Заходи — там живое общение: ищем партнёров на корт, делимся впечатлениями, шутим. Отзывы и идеи по боту тоже пиши туда, они реально идут в работу.
+
+⚠️ Только не блокируй бота — через него приходят вызовы на матч, согласование времени, напоминания и результаты. Без него легко пропустить свою игру.` : `<b>Welcome to Phuket Tennis Family</b> 🎾
+
+Your payment is confirmed and your place in the season is secured. Thank you for trusting us — let's make this season a great one.
+
+<b>What the bot can do</b>
+
+🎾 <b>Matches</b> — challenge an opponent, accept a challenge, agree on a date and court
+📅 <b>Court</b> — book a court right inside the app
+📊 <b>Result</b> — submit the score after your match
+🏆 <b>League</b> — division tables, Yearly Race, match history
+👥 <b>Line-up</b> — who is playing this season
+
+The buttons below open these sections, and the same ones stay at the bottom of your screen.
+
+<b>Club chat</b>
+
+Come join us — that is where it all happens: finding hitting partners, sharing impressions, having a laugh. Feedback and ideas about the bot go there too, and they really do get acted on.
+
+⚠️ Just please don't block the bot — match challenges, time coordination, reminders and results all come through it. Without it, it is easy to miss your own match.`;
+}
+
 export async function setApplicationStatus({ chatId, applicationId, status }) {
   const app = await updateApplication(applicationId, { application_status: status, reviewed_at: nowISO() });
   if (!app) return sendMessage(chatId, 'Application not found.');
   await updateApplicantStatusByTelegramId(app.telegram_id, status === 'confirmed' ? 'active' : status);
   const lang = (await findApplicantByTelegramId(app.telegram_id))?.language || 'en';
   if (status === 'active' || status === 'confirmed') {
-    const text = lang === 'ru'
-      ? '<b>Поздравляем!</b> 🎾\n\nТы стал частью <b>Phuket Tennis Family</b>, и твоё участие в сезоне подтверждено.\n\nТеперь ты можешь присоединиться к нашему клубному чату, где начнётся твоя дорога внутри нашей теннисной семьи.'
-      : '<b>Congratulations!</b> 🎾\n\nYou are now part of <b>Phuket Tennis Family</b>, and your participation in the season has been confirmed.\n\nYou can now join our club chat and start your journey inside our tennis family.';
+    const l = lang === 'ru' ? 'ru' : 'en';
     if (!app.confirmed_message_sent_at) {
-      await sendMessage(app.telegram_id, text, { reply_markup: clubKeyboard(lang, CLUB_CHAT_URL) });
+      await sendMessage(app.telegram_id, welcomeMessage(l), { reply_markup: welcomeKeyboard(l) });
       await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() });
     }
   } else if (status === 'waitlist') {
@@ -1103,10 +1144,7 @@ export async function setPaymentStatus({ chatId, applicationId, paymentId = '', 
   // Дальше обычная ветка подтверждения: поздравление и приглашение в клубный чат.
   if (status === 'approved' && app?.telegram_id && !app.confirmed_message_sent_at) {
     const lang = (await findApplicantByTelegramId(app.telegram_id))?.language === 'ru' ? 'ru' : 'en';
-    const text = lang === 'ru'
-      ? '<b>Поздравляем!</b> 🎾\n\nОплата подтверждена, твоё участие в сезоне тоже. Добро пожаловать в <b>Phuket Tennis Family</b>.\n\nЗаглядывай в клубный чат — там всё самое живое.'
-      : '<b>Congratulations!</b> 🎾\n\nYour payment is confirmed and so is your place in the season. Welcome to <b>Phuket Tennis Family</b>.\n\nJoin the club chat — that is where everything happens.';
-    await sendMessage(app.telegram_id, text, { reply_markup: clubKeyboard(lang, CLUB_CHAT_URL) })
+    await sendMessage(app.telegram_id, welcomeMessage(lang), { reply_markup: welcomeKeyboard(lang) })
       .catch(e => console.error('confirm message failed:', e.message));
     await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() }).catch(() => {});
   }
