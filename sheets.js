@@ -651,6 +651,28 @@ export async function getRows(sheetName, { useCache=true } = {}) {
 // uniqueBy — последняя защита от дублей: проверяем «такой уже есть» не до
 // постановки в очередь, а прямо перед записью. Иначе два сохранения подряд оба
 // видят лист без нужной строки и заводят по анкете на одного человека.
+// Лист имеет фиксированный размер сетки. values.append дорисовывал строки сам,
+// а прямая запись — нет: как только анкеты доходят до последней строки листа,
+// Google отвечает «Range exceeds grid limits». Поэтому перед записью
+// добавляем строки, причём с запасом, чтобы не дёргать API на каждой анкете.
+const gridInfo = new Map();
+async function ensureRowCapacity(sheetName, rowNumber) {
+  let info = gridInfo.get(sheetName);
+  if (!info || rowNumber > info.rowCount) {
+    const meta = await spreadsheetMeta();
+    const props = meta.sheets?.find(s => s.properties?.title === sheetName)?.properties;
+    if (!props) return;
+    info = { sheetId: props.sheetId, rowCount: Number(props.gridProperties?.rowCount || 0) };
+    gridInfo.set(sheetName, info);
+  }
+  if (rowNumber <= info.rowCount) return;
+  const add = Math.max(rowNumber - info.rowCount, 200);
+  await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [
+    { appendDimension: { sheetId: info.sheetId, dimension: 'ROWS', length: add } }
+  ] } });
+  gridInfo.set(sheetName, { ...info, rowCount: info.rowCount + add });
+}
+
 const appendQueue = new Map();
 export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
   const prev = appendQueue.get(sheetName) || Promise.resolve();
@@ -678,6 +700,7 @@ export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
       }
     }
     const target = values.length + 1;
+    await ensureRowCapacity(sheetName, target);
     await write(target, obj);
     cache.clear();
     return { ...obj, _rowNumber: target, isNew: true };
