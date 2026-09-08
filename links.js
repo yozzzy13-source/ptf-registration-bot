@@ -16,6 +16,7 @@ import { getMe } from './telegram.js';
 export const DESTINATIONS = [
   { code:'pay',          aliases:['оплата','оплатить','взнос','payment'], ru:'💳 Оплатить взнос',      en:'💳 Pay the fee',        kind:'callback', action:'payment_entry' },
   { code:'apply',        aliases:['заявка','записаться','join'],          ru:'🎾 Заявка на сезон',     en:'🎾 Join the season',    kind:'webapp',   path:'/apply?mode=event' },
+  { code:'avatar',       aliases:['аватар','аватарка','селфи','photo'],     ru:'🖼 Сделать аватарку',    en:'🖼 Create my avatar',   kind:'webapp',   path:'/league?player=me' },
   { code:'rating',       aliases:['уровень','тест','ntrp','level'],        ru:'🎾 Указать уровень',     en:'🎾 Set my level',       kind:'webapp',   path:'/apply?mode=rating' },
   { code:'profile',      aliases:['анкета','профиль'],                    ru:'📝 Заполнить анкету',    en:'📝 Fill in the profile',kind:'webapp',   path:'/apply?mode=profile' },
   { code:'match',        aliases:['матчи','матч','matches'],              ru:'🎾 Матчи и вызовы',      en:'🎾 Matches & challenges',kind:'webapp',  path:'/match' },

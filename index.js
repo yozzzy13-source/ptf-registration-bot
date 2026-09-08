@@ -2,12 +2,12 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
-import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer } from './telegram.js';
+import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureRatingSourceColumn } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureRatingSourceColumn, ensureAvatarColumns, publishedAvatars } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
-import { notifyNewApplication, handlePollUpdate } from './admin.js';
+import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
@@ -22,6 +22,7 @@ import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlot
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache } from './division.js';
+import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -698,7 +699,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const [players, history, events, seasonList] = await Promise.all([
+    const [rawPlayers, history, events, seasonList] = await Promise.all([
       getLeagueProfiles(),
       getLeagueMatchHistory().catch(() => new Map()),
       getLeagueEvents().catch(() => []),
@@ -710,6 +711,14 @@ app.get('/api/league/bootstrap', async (req, res) => {
     for (const s of seasonList) {
       seasons.push({ ...s, divisions: await availableDivisions(s.number).catch(() => []) });
     }
+    // Аватарку, утверждённую организатором, подставляем поверх того, что стоит в
+    // таблице витрины: так мы не трогаем чужие формулы, а замена мгновенно
+    // откатывается сменой статуса в анкете.
+    const avatarOwners = await publishedAvatars().catch(() => new Map());
+    const players = rawPlayers.map(pl => {
+      const tg = avatarOwners.get(String(pl.name || '').trim().toLowerCase());
+      return tg ? { ...pl, photo: `${PUBLIC_URL}/avatar/${tg}.png` } : pl;
+    });
     const current = seasons.filter(s => s.divisions.length).pop() || seasons[seasons.length - 1] || null;
     const divisions = current ? current.divisions : [];
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
@@ -754,6 +763,97 @@ app.get('/api/league/bootstrap', async (req, res) => {
     console.error('league bootstrap failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
+});
+
+// Готовый вариант очередь показывает самому игроку — он и выбирает.
+setAvatarHandler(notifyAvatarVariant);
+
+// ------------------------------------------------------------------ аватарки
+// Селфи приходит из мини-приложения картинкой в base64 — тем же способом, что
+// и фото результата матча. Отдаём его Telegram, а file_id кладём в анкету:
+// Telegram и есть наше хранилище картинок.
+const AVATAR_MAX_BYTES = 8 * 1024 * 1024;
+function decodeDataUrl(value = '') {
+  const m = String(value).match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+  if (!m) throw new Error('Ожидается изображение');
+  const buffer = Buffer.from(m[2], 'base64');
+  if (!buffer.length) throw new Error('Пустой файл');
+  if (buffer.length > AVATAR_MAX_BYTES) throw new Error('Фото больше 8 МБ — сожми его или сними заново');
+  return { buffer, mime: m[1] };
+}
+
+// Что показывать игроку на экране аватарки.
+function avatarView(profile = {}) {
+  const status = String(profile.avatar_status || '').toLowerCase();
+  const attempts = Number(profile.avatar_attempts || 0);
+  return {
+    status,
+    attempts,
+    attempts_left: Math.max(0, MAX_ATTEMPTS - attempts),
+    stub: String(profile.avatar_stub || '') === 'yes',
+    error: profile.avatar_error || '',
+    has_selfie: Boolean(profile.selfie_file_id),
+    url: profile.avatar_file_id ? `${PUBLIC_URL}/avatar/${encodeURIComponent(profile.telegram_id)}.png` : '',
+    generator_ready: avatarReady(),
+    queue: queueLength()
+  };
+}
+
+app.get('/api/avatar/status', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    res.json({ ok:true, ...avatarView({ ...v.profile, telegram_id: v.profile.telegram_id || v.user.id }) });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/avatar/upload', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const v = await leagueViewer(b.initData || '', String(b.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.profile?.telegram_id && !v.user?.id) return res.status(404).json({ ok:false, error:'Профиль не найден' });
+    const telegramId = String(v.profile.telegram_id || v.user.id);
+    const attempts = Number(v.profile.avatar_attempts || 0);
+    // Лимит попыток считаем ДО генерации: иначе один человек может крутить
+    // платный генератор сколько угодно.
+    if (attempts >= MAX_ATTEMPTS && !v.isAdmin) {
+      return res.status(429).json({ ok:false, error:`Попытки закончились (${MAX_ATTEMPTS}). Напиши организатору, он откроет ещё.` });
+    }
+    const { buffer, mime } = decodeDataUrl(b.photo);
+    await ensureAvatarColumns().catch(() => {});
+    const sent = await sendPhotoBuffer(telegramId, buffer, mime, { caption: '📸 Селфи принято. Пришлю аватарку, как будет готова.' });
+    const fileId = (sent?.photo || []).slice(-1)[0]?.file_id || '';
+    if (!fileId) throw new Error('Telegram не принял фото');
+    await updateApplicantByTelegramId(telegramId, {
+      selfie_status: 'received', selfie_file_id: fileId, selfie_received_at: nowISO(),
+      avatar_status: AVATAR_STATUS.queued, avatar_error: '', avatar_updated_at: nowISO()
+    });
+    const job = await enqueueAvatar(telegramId);
+    res.json({ ok:true, queued:true, position: job.position || 1 });
+  } catch (e) { console.error('avatar upload failed:', e.message); res.status(400).json({ ok:false, error:e.message }); }
+});
+
+// Картинка для витрины. Постоянный адрес: при перегенерации меняется
+// содержимое, а ссылка остаётся прежней.
+const avatarCache = new Map();
+app.get('/avatar/:id.png', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').replace(/\.png$/, '');
+    const profile = await findApplicantByTelegramId(id);
+    const fileId = profile?.avatar_file_id || '';
+    if (!fileId) return res.status(404).send('no avatar');
+    let hit = avatarCache.get(fileId);
+    if (!hit) {
+      const file = await getFileBuffer(fileId);
+      hit = { buffer: file.buffer, mime: file.mime };
+      avatarCache.set(fileId, hit);
+      if (avatarCache.size > 200) avatarCache.delete(avatarCache.keys().next().value);
+    }
+    res.set('Content-Type', hit.mime);
+    res.set('Cache-Control', 'public, max-age=300');
+    res.send(hit.buffer);
+  } catch (e) { console.error('avatar serve failed:', e.message); res.status(404).send('no avatar'); }
 });
 
 // Расписание согласованных матчей. Открыто всем, кто видит лигу: игроки

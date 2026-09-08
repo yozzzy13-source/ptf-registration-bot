@@ -883,6 +883,32 @@ export async function ensureRatingSourceColumn() {
   return ratingSourceColumnReady;
 }
 
+// Колонки аватарки. Дописываем в конец листа: вставлять их между существующими
+// незачем — эти поля служебные и глазами их читать не нужно.
+let avatarColumnsReady = null;
+export async function ensureAvatarColumns() {
+  if (!avatarColumnsReady) {
+    avatarColumnsReady = ensureSheetWithHeaders(SHEETS.applicants,
+      ['avatar_status', 'avatar_file_id', 'avatar_options', 'avatar_attempts', 'avatar_stub', 'avatar_error', 'avatar_updated_at'])
+      .catch(e => { avatarColumnsReady = null; throw e; });
+  }
+  return avatarColumnsReady;
+}
+
+// Кто уже получил опубликованную аватарку. Ключ — имя игрока: витрина живёт в
+// другой таблице и знает игроков по именам, а не по telegram_id.
+export async function publishedAvatars() {
+  const { rows } = await getRows(SHEETS.applicants, { useCache: true });
+  const out = new Map();
+  for (const r of rows) {
+    if (String(r.avatar_status || '').toLowerCase() !== 'published') continue;
+    if (!r.telegram_id) continue;
+    const name = String(r.name || '').trim().toLowerCase();
+    if (name) out.set(name, String(r.telegram_id));
+  }
+  return out;
+}
+
 let applicantAdminColumnsReady = null;
 export async function ensureApplicantAdminColumns() {
   // Header check hits the Sheets metadata API; do it once per process.

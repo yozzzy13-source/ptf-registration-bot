@@ -392,6 +392,15 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Мои матчи',schPlayer:'Игрок',schCourt:'Корт',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
+  avTitle:'Аватарка',avSend:'📸 Загрузить селфи',avRedo:'📸 Заменить селфи',avSending:'Отправляю…',
+  avAccepted:'Селфи принято — пришлю результат в чат.',avQueued:'Селфи в очереди на обработку.',
+  avWorking:'Делаю аватарку — это занимает до минуты.',avReady:'Варианты готовы — выбери нужный кнопками в чате с ботом.',
+  avPublished:'Аватарка опубликована.',
+  avFailed:'Не получилось обработать фото',avStub:'Генерация ИИ ещё не подключена — пока возвращается исходное фото.',
+  avRules:'Лицо крупно, дневной свет, без кепки и тёмных очков, один человек в кадре.',
+  avLeft:'Осталось попыток',avNoTries:'Попытки закончились — напиши организатору.',
+  avTooBig:'Фото больше 8 МБ — сними заново или сожми.',
+  avPrivacy:'Фото используется только для аватарки в лиге. Напиши организатору, если хочешь его удалить.',
   players:'Игроков',matchesN:'Матчей',leader:'Лидер',
   colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
   sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
@@ -417,6 +426,15 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   schToday:'Today',schTomorrow:'Tomorrow',schMine:'My matches',schPlayer:'Player',schCourt:'Court',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
+  avTitle:'Avatar',avSend:'📸 Upload a selfie',avRedo:'📸 Replace the selfie',avSending:'Sending…',
+  avAccepted:'Selfie received — I will send the result in chat.',avQueued:'Your selfie is queued.',
+  avWorking:'Creating your avatar — this takes up to a minute.',avReady:'Your versions are ready — pick one with the buttons in the bot chat.',
+  avPublished:'Your avatar is published.',
+  avFailed:'Could not process the photo',avStub:'AI generation is not connected yet — your original photo comes back for now.',
+  avRules:'Face close up, daylight, no cap or sunglasses, one person in the frame.',
+  avLeft:'Attempts left',avNoTries:'No attempts left — message the organizer.',
+  avTooBig:'The photo is over 8 MB — retake or compress it.',
+  avPrivacy:'The photo is used only for your league avatar. Message the organizer if you want it deleted.',
   players:'Players',matchesN:'Matches',leader:'Leader',
   colNo:'#',colPlayer:'Player',colM:'M',colW:'W',colWR:'WR',colPts:'Pts',
   sortTip:'Tap a column header to sort',
@@ -665,6 +683,81 @@ function renderSched(){
   }
 
   box.innerHTML=h;
+}
+
+// ------------------------------------------------------------- аватарка
+// Блок появляется ТОЛЬКО в собственной карточке игрока: чужую аватарку менять
+// нельзя, и лишняя кнопка в чужом профиле только путает.
+var avState=null,avBusy=false,avPoll=null;
+function isMyCard(p){ return me && String(p.id)===String(me.id) || (me&&me.name&&String(p.name||'').trim().toLowerCase()===String(me.name).trim().toLowerCase()) }
+function loadAvatar(){
+  fetch('/api/avatar/status?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j.ok)return;
+      avState=j;
+      var box=$('avBox');if(box)box.innerHTML=avatarInner();
+      // Пока картинка в работе, тихо переспрашиваем: генерация идёт десятки секунд.
+      if(j.status==='queued'||j.status==='generating'){
+        clearTimeout(avPoll);avPoll=setTimeout(loadAvatar,4000);
+      }
+    }).catch(function(){});
+}
+function avatarBlock(p){
+  if(!isMyCard(p))return '';
+  if(!avState)loadAvatar();
+  return '<div class="card" id="avCard"><h3>'+esc(X.avTitle)+'</h3><div id="avBox">'+avatarInner()+'</div></div>';
+}
+function avatarInner(){
+  if(!avState)return '<div class="hint">…</div>';
+  var s=avState.status||'';
+  var h='';
+  if(s==='queued'||s==='generating'){
+    h+='<div class="hint">'+esc(s==='queued'?X.avQueued:X.avWorking)+'</div>';
+    return h;
+  }
+  if(s==='ready')h+='<div class="hint">'+esc(X.avReady)+'</div>';
+  if(s==='published')h+='<div class="hint">'+esc(X.avPublished)+'</div>';
+    if(s==='failed')h+='<div class="hint" style="color:#C2695E">'+esc(X.avFailed+(avState.error?': '+avState.error:''))+'</div>';
+  if(avState.stub)h+='<div class="hint" style="color:#C2695E">'+esc(X.avStub)+'</div>';
+  h+='<div class="hint">'+esc(X.avRules)+'</div>';
+  if(avState.attempts_left>0){
+    h+='<input type="file" accept="image/*" id="avFile" style="display:none" onchange="avPick(this)">'
+      +'<button class="chip" style="width:100%;margin-top:9px" onclick="document.getElementById(\'avFile\').click()">'
+      +esc(avBusy?X.avSending:(s==='published'||s==='ready'?X.avRedo:X.avSend))+'</button>'
+      +'<div class="hint" style="margin-top:6px">'+esc(X.avLeft)+': '+avState.attempts_left+'</div>';
+  } else {
+    h+='<div class="hint" style="margin-top:9px">'+esc(X.avNoTries)+'</div>';
+  }
+  h+='<div class="hint" style="margin-top:6px">'+esc(X.avPrivacy)+'</div>';
+  h+='<div id="avMsg" class="hint"></div>';
+  return h;
+}
+function avPick(input){
+  var f=input.files&&input.files[0];
+  input.value='';
+  if(!f)return;
+  // 8 МБ — предел, дальше Telegram и сервер начнут ругаться, лучше сказать сразу.
+  if(f.size>8*1024*1024){ avSay(X.avTooBig,true); return }
+  var fr=new FileReader();
+  fr.onload=function(){ avSend(String(fr.result)) };
+  fr.readAsDataURL(f);
+}
+function avSay(text,bad){
+  var m=$('avMsg');if(!m)return;
+  m.style.color=bad?'#C2695E':'';
+  m.textContent=text;
+}
+function avSend(dataUrl){
+  if(avBusy)return;
+  avBusy=true;avSay(X.avSending);
+  fetch('/api/avatar/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({initData:initData,t:linkToken,photo:dataUrl})})
+    .then(function(r){return r.json()}).then(function(j){
+      avBusy=false;
+      if(!j.ok)throw new Error(j.error||'Error');
+      avSay(X.avAccepted);
+      loadAvatar();
+    }).catch(function(e){avBusy=false;avSay('⛔ '+e.message,true)});
 }
 
 // ------------------------------------------------- навигация по разделам
@@ -1204,6 +1297,8 @@ function renderPlayer(p){
       +stt('Seasons',p.seasons||'')
     +'</div></div></div>';
 
+  h+=avatarBlock(p);
+
   var srows=seasonRows(p);
   h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
   if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';
@@ -1277,6 +1372,14 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     if(wantDiv&&!wantTab)wantTab='div';
     showTab(VIEWS.indexOf(wantTab)>=0?wantTab:'home');
     var wantPlayer=(qs.get('player')||'').trim();
+    // «me» в ссылке — это «моя карточка»: рассылка не знает id игрока в витрине,
+    // зато его знает само приложение после авторизации.
+    if(wantPlayer==='me'&&me){
+      var mine=byId(me.id)||players.filter(function(x){
+        return String(x.name||'').trim().toLowerCase()===String(me.name||'').trim().toLowerCase();
+      })[0];
+      wantPlayer=mine?String(mine.id):'';
+    }
     if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,VIEWS.indexOf(wantTab)>=0?wantTab:'home');
   }).catch(function(e){
     $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(e.message)+'</div>';

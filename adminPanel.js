@@ -254,10 +254,14 @@ export function registerAdminRoutes(app) {
       for (const c of contacts) {
         const lang = c.language === 'ru' ? 'ru' : 'en';
         const text = lang === 'ru'
-          ? '<b>📸 Пожалуйста, загрузите селфи</b>\n\nВы подтверждены как участник Phuket Tennis Family. Нам нужно одно селфи для вашей аватарки и карточки игрока на сайте PTF.\n\nНажмите кнопку ниже и отправьте фото в этот чат.'
-          : '<b>📸 Please upload your selfie</b>\n\nYou are confirmed as a Phuket Tennis Family player. We need one selfie for your avatar and player profile card on the PTF website.\n\nTap the button below and send the photo to this chat.';
+          ? '<b>🖼 Сделай себе аватарку PTF</b>\n\nЗагрузи одно селфи — и получишь аватарку для своей карточки игрока. Можно сделать до трёх вариантов и выбрать тот, что больше нравится.\n\nЧто нужно от фото: лицо крупно, дневной свет, без кепки и тёмных очков, один человек в кадре.'
+          : '<b>🖼 Create your PTF avatar</b>\n\nUpload one selfie and get an avatar for your player card. You can make up to three versions and pick the one you like best.\n\nWhat the photo needs: face close up, daylight, no cap or sunglasses, one person in the frame.';
         try {
-          await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '📸 Загрузить селфи' : '📸 Upload Selfie', callback_data:'upload_selfie' } ]] } });
+          // Кнопка ведёт сразу на экран аватарки в своей карточке — раньше она
+          // просто просила прислать фото в чат, и половина людей терялась.
+          await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[
+            [{ text: lang === 'ru' ? '🖼 Сделать аватарку' : '🖼 Create my avatar', web_app:{ url: `${PUBLIC_URL}/league?player=me` } }]
+          ] } });
           await markSelfieRequested(c.telegram_id);
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'selfie_request_panel' });
           sent++;

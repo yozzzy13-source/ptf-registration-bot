@@ -11,7 +11,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -692,6 +692,7 @@ export async function handleMessage(msg) {
 
   // Быстрые команды вместо похода через /start и меню.
   if (text === '/menu' && isPrivate) return sendMain(chatId, lang, from);
+  if (text === '/avatar' && isPrivate) return showAvatarGallery(chatId, from.id);
   if (text === '/results' && isPrivate) return sendResultsSettings(chatId, lang, from.id);
   if (text === '/match' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'open');
   if (text === '/result' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'res');
@@ -892,6 +893,20 @@ export async function handleCallback(q) {
     return sendLanguageChoice(chatId);
   }
 
+  // Аватарка: выбор варианта и запрос ещё одного. Действует сам игрок.
+  if (data.startsWith('avpick:')) {
+    const res = await pickAvatarVariant(from.id, data.split(':')[1]);
+    return sendMessage(chatId, res.ok
+      ? `✅ Вариант ${res.index} выбран — он уже стоит в твоём профиле лиги.`
+      : `Не получилось: ${res.error}`);
+  }
+  if (data === 'avmore') {
+    const { requestAnotherAvatar } = await import('./avatars.js');
+    const res = await requestAnotherAvatar(from.id);
+    return sendMessage(chatId, res.ok
+      ? '🔄 Делаю ещё вариант — пришлю через минуту.'
+      : res.error);
+  }
   if (data === 'main') return sendMain(chatId, lang, from);
   // Раздел «О PTF» убран — старые сообщения с этой кнопкой ведут в главное меню.
   if (data === 'website_menu') return sendMain(chatId, lang, from);

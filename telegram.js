@@ -109,7 +109,8 @@ export async function setWebhook() {
 // добавляет персонально тем, кто в активном составе (setChatCommands ниже).
 export const PLAYER_COMMANDS = {
   en: [
-    { command: 'menu', description: 'Main menu' },
+    { command: 'avatar', description: 'My avatar versions' },
+  { command: 'menu', description: 'Main menu' },
     { command: 'help', description: 'What the bot can do' },
     { command: 'results', description: 'Results feed on / off' },
     { command: 'language', description: 'Choose language' },
@@ -172,3 +173,19 @@ export function inlineKeyboard(rows) { return { inline_keyboard: rows }; }
 export function webAppButton(text, path='/apply') { return { text, web_app: { url: `${PUBLIC_URL}${path}` } }; }
 export function urlButton(text, url) { return { text, url }; }
 export const clubChatButton = (text) => urlButton(text, CLUB_CHAT_URL);
+
+// Скачивание файла, который игрок прислал боту. Нужно, чтобы отдать селфи
+// генератору, а готовую аватарку — витрине: file_id у Telegram вечный, поэтому
+// он же служит нам хранилищем картинок.
+export async function getFileBuffer(fileId) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  const meta = await call('getFile', { file_id: fileId });
+  const path = meta?.file_path || meta?.result?.file_path || '';
+  if (!path) throw new Error('Telegram не отдал путь к файлу');
+  const res = await globalThis.fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${path}`);
+  if (!res.ok) throw new Error(`Не удалось скачать файл: ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const ext = String(path).split('.').pop().toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  return { buffer, mime, path };
+}

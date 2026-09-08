@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -173,6 +173,55 @@ export async function notifyAdmin(text, opts={}) {
   const chatId = await getAdminChatId();
   if (!chatId) return null;
   return sendMessage(chatId, text, opts);
+}
+
+// ------------------------------------------------------------------ аватарки
+// Утверждение организатором убрано намеренно: игрок сам смотрит свои варианты
+// и выбирает. Кнопки уходят прямо под картинкой в его чате.
+export async function notifyAvatarVariant({ telegramId, index, left, stub }) {
+  const rows = [[{ text: '✅ Выбрать этот', callback_data: `avpick:${index}` }]];
+  if (left > 0) rows.push([{ text: `🔄 Ещё вариант (${left})`, callback_data: 'avmore' }]);
+  return sendMessage(telegramId, stub
+    ? 'Выбери вариант или сгенерируй ещё.'
+    : 'Выбери вариант или сгенерируй ещё — все сохранены.', { reply_markup: { inline_keyboard: rows } })
+    .catch(e => { console.error('notifyAvatarVariant failed:', e.message); return null; });
+}
+
+// Игрок выбрал вариант — публикуем сразу, без чьего-либо подтверждения.
+export async function pickAvatarVariant(telegramId, index) {
+  const { optionList } = await import('./avatars.js');
+  const profile = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const list = optionList(profile?.avatar_options);
+  const fileId = list[Number(index) - 1];
+  if (!fileId) return { ok: false, error: 'Вариант не найден' };
+  await updateApplicantByTelegramId(telegramId, {
+    avatar_file_id: fileId, avatar_status: 'published', avatar_updated_at: nowISO()
+  });
+  return { ok: true, fileId, index: Number(index) };
+}
+
+// Показать сохранённые варианты заново — по команде /avatar.
+export async function showAvatarGallery(chatId, telegramId) {
+  const { optionList, MAX_ATTEMPTS } = await import('./avatars.js');
+  const profile = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const list = optionList(profile?.avatar_options);
+  if (!list.length) {
+    return sendMessage(chatId, 'Пока нет ни одного варианта. Загрузи селфи в разделе «Лига» → своя карточка → «Аватарка».');
+  }
+  const chosen = String(profile?.avatar_file_id || '');
+  for (let i = 0; i < list.length; i++) {
+    const mark = list[i] === chosen ? ' · выбран сейчас' : '';
+    await sendPhoto(chatId, list[i], {
+      caption: `Вариант ${i + 1} из ${list.length}${mark}`,
+      reply_markup: { inline_keyboard: [[{ text: '✅ Выбрать этот', callback_data: `avpick:${i + 1}` }]] }
+    }).catch(e => console.error('gallery photo failed:', e.message));
+  }
+  const left = Math.max(0, MAX_ATTEMPTS - Number(profile?.avatar_attempts || 0));
+  if (left > 0) {
+    return sendMessage(chatId, `Можно сгенерировать ещё: осталось ${left}.`,
+      { reply_markup: { inline_keyboard: [[{ text: `🔄 Ещё вариант (${left})`, callback_data: 'avmore' }]] } });
+  }
+  return sendMessage(chatId, 'Попытки генерации закончились — выбери из того, что есть.');
 }
 
 // Служебное уведомление о конкретном игроке — тоже в его тему.
