@@ -817,7 +817,7 @@ export async function startMissingRatingBroadcast(chatId, adminId) {
 Без рейтинга вообще: <b>${missing.length}</b>
 Плюс те, чью цифру ты не подтверждал: <b>${recheck.length}</b>
 
-Подтверждённой считается строка, где в колонке <code>ntrp_source</code> стоит <code>admin</code>. Тексты одинаковые, отличается только охват.`, { reply_markup:{ inline_keyboard:[
+Подтверждённой считается анкета с меткой <code>ntrp:admin</code> в колонке <code>crm_tags</code>. Тексты одинаковые, отличается только охват.`, { reply_markup:{ inline_keyboard:[
     [{ text:`📨 Только без рейтинга (${missing.length})`, callback_data:'bcconfirm_missing_rating' }],
     [{ text:`📨 Все на перепрохождение (${recheck.length})`, callback_data:'bcconfirm_rating_recheck' }],
     [{ text:'❌ Отмена', callback_data:'bccancel' }]
