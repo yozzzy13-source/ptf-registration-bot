@@ -854,35 +854,6 @@ export async function enrichEventsWithStats(events=[]) {
 }
 
 
-// Колонка «откуда взялся рейтинг» должна стоять рядом с самим рейтингом —
-// иначе её никто не заметит. Поэтому не дописываем в конец, а вставляем сразу
-// после ntrp. Операция одноразовая: если колонка уже есть, ничего не делаем.
-let ratingSourceColumnReady = null;
-export async function ensureRatingSourceColumn() {
-  if (!ratingSourceColumnReady) {
-    ratingSourceColumnReady = (async () => {
-      const values = await valuesGet(`'${SHEETS.applicants}'!A1:BZ1`).catch(() => []);
-      const headers = values[0] || [];
-      if (headers.includes('ntrp_source')) return headers;
-      const at = headers.indexOf('ntrp');
-      if (at < 0) return ensureSheetWithHeaders(SHEETS.applicants, ['ntrp_source']);
-      const meta = await spreadsheetMeta();
-      const sheet = meta.sheets?.find(s => s.properties?.title === SHEETS.applicants);
-      const sheetId = sheet?.properties?.sheetId;
-      if (sheetId == null) return ensureSheetWithHeaders(SHEETS.applicants, ['ntrp_source']);
-      await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [
-        { insertDimension: { range: { sheetId, dimension: 'COLUMNS', startIndex: at + 1, endIndex: at + 2 }, inheritFromBefore: false } }
-      ] } });
-      await valuesUpdate(`'${SHEETS.applicants}'!${colToA1(at + 2)}1`, [['ntrp_source']]);
-      cache.clear();
-      const next = [...headers];
-      next.splice(at + 1, 0, 'ntrp_source');
-      return next;
-    })().catch(e => { ratingSourceColumnReady = null; throw e; });
-  }
-  return ratingSourceColumnReady;
-}
-
 // Колонки аватарки. Дописываем в конец листа: вставлять их между существующими
 // незачем — эти поля служебные и глазами их читать не нужно.
 let avatarColumnsReady = null;
@@ -1011,9 +982,6 @@ export async function upsertApplicant(profile) {
   const patch = {
     name: profile.name,
     ntrp: profile.ntrp,
-    // Откуда взялась цифра: player (вписал сам), test (короткий тест),
-    // admin (поставил организатор). Пустое значение не затирает старое.
-    ntrp_source: profile.ntrp_source || existing?.ntrp_source || '',
     status: profile.status || existing?.status || 'lead',
     experience: profile.experience,
     gender: profile.gender,
@@ -1141,12 +1109,26 @@ export function hasMissingRating(row={}) {
   return isMissingRatingValue(row.ntrp || row.racket_rating || '');
 }
 
+// Откуда взялась цифра рейтинга, помечаем меткой в crm_tags: ntrp:player —
+// вписал сам, ntrp:test — прошёл тест, ntrp:admin — поставил организатор.
+// Отдельную колонку не заводим: вставка колонки в лист сдвигает всё правее
+// неё и ломает формулы витрины, которые ссылаются на буквы столбцов.
+export function ratingSourceOf(row = {}) {
+  const m = String(row.crm_tags || '').match(/ntrp:(player|test|admin)/i);
+  return m ? m[1].toLowerCase() : '';
+}
+export function withRatingSourceTag(tags = '', source = '') {
+  const clean = String(tags || '').split(',').map(v => v.trim()).filter(v => v && !/^ntrp:/i.test(v));
+  if (source) clean.push(`ntrp:${source}`);
+  return clean.join(',');
+}
+
 // Рейтинг стоит перепройти, если его нет вовсе или если цифру никто не
 // подтверждал: старый тест сильно завышал середину, а поставленное
-// организатором значение (ntrp_source = admin) трогать не нужно.
+// организатором значение трогать не нужно.
 export function needsRatingCheck(row={}) {
   if (hasMissingRating(row)) return true;
-  return String(row.ntrp_source || '').trim().toLowerCase() !== 'admin';
+  return ratingSourceOf(row) !== 'admin';
 }
 
 // scope: 'missing' — только те, у кого рейтинга нет;
