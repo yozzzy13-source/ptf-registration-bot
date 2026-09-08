@@ -62,6 +62,12 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .spair{font-size:13px;font-weight:600;line-height:1.3}
 .spair .vs{color:var(--dim);font-weight:400}
 .smeta{font-size:10px;color:var(--dim)}
+.sr .live{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);font-weight:800}
+.avbtn{position:absolute;top:12px;right:12px;z-index:3;width:38px;height:38px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
+  background:rgba(12,11,10,.62);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(6px)}
+.avbtn:active{transform:scale(.93)}
+.avbtn.on{background:linear-gradient(180deg,#2C231A,#221B14);border-color:#4A3925}
 button{width:100%;border:1px solid var(--line);border-radius:13px;padding:13px;font-size:14px;font-weight:800;
 margin-top:12px;cursor:pointer;background:#141311;color:var(--text)}
 .more{width:100%;border:1px dashed #2A2521;background:transparent;color:var(--mute);border-radius:11px;
@@ -403,6 +409,8 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   avPrivacy:'Фото используется только для аватарки в лиге. Напиши организатору, если хочешь его удалить.',
   players:'Игроков',matchesN:'Матчей',leader:'Лидер',
   colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
+  sMatches:'Матчи',sWins:'Победы',sPoints:'Очки',sWL:'Победы — поражения',sWR:'Процент побед',
+  sDivPos:'в дивизионе',sSeasonNow:'идёт',avOpen:'Изменить аватарку',
   sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
   detail:'Подробно',tile:'Плитка',ntrp:'NTRP',exp:'Опыт',
   standings:'Турнирная таблица',playoff:'Плей-офф',champion:'Чемпион дивизиона',
@@ -437,6 +445,8 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   avPrivacy:'The photo is used only for your league avatar. Message the organizer if you want it deleted.',
   players:'Players',matchesN:'Matches',leader:'Leader',
   colNo:'#',colPlayer:'Player',colM:'M',colW:'W',colWR:'WR',colPts:'Pts',
+  sMatches:'Matches',sWins:'Wins',sPoints:'Points',sWL:'Wins — losses',sWR:'Win rate',
+  sDivPos:'in division',sSeasonNow:'live',avOpen:'Change avatar',
   sortTip:'Tap a column header to sort',
   detail:'Detailed',tile:'Tiles',ntrp:'NTRP',exp:'Experience',
   standings:'Standings',playoff:'Playoffs',champion:'Division champion',
@@ -484,7 +494,13 @@ function divClass(d){
   if(k==='A')return 'd-a';if(k==='B')return 'd-b';if(k==='C')return 'd-c';if(k==='D')return 'd-d';
   if(k==='PRIME'||k==='P')return 'd-p';return 'd-x';
 }
-function divChip(d){ return d?'<span class="dv '+divClass(d)+'">'+esc(divLabel(d))+'</span>':'' }
+// Второй аргумент — место в дивизионе. Отдельной плашкой «#1» было непонятно,
+// про что она: про гонку, про дивизион или про что-то ещё.
+function divChip(d,pos){
+  if(!d)return '';
+  var tail=pos?' <b>#'+esc(pos)+'</b>':'';
+  return '<span class="dv '+divClass(d)+'">'+esc(divLabel(d))+tail+'</span>';
+}
 // На фронт идут только два статуса: активен или нет.
 function isActive(p){ return String(p.status||'').trim().toLowerCase()==='active' }
 function statusBadge(p){
@@ -702,8 +718,26 @@ function loadAvatar(){
       }
     }).catch(function(){});
 }
-function avatarBlock(p){
+// Кнопка с камерой в углу самой фотографии. Панель под аватаркой раскрывается
+// по нажатию: нужна она раз в сезон, а место на экране занимала всегда.
+var avOpen=false;
+function avatarButton(p){
   if(!isMyCard(p))return '';
+  if(!avState)loadAvatar();
+  return '<div class="avbtn'+(avOpen?' on':'')+'" title="'+esc(X.avOpen)+'" onclick="toggleAvatar(event)">📸</div>';
+}
+function toggleAvatar(e){
+  if(e&&e.stopPropagation)e.stopPropagation();
+  avOpen=!avOpen;
+  var p=byId(openId);
+  if(p)renderPlayer(p);
+  if(avOpen){
+    var card=$('avCard');
+    if(card&&card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+}
+function avatarBlock(p){
+  if(!isMyCard(p)||!avOpen)return '';
   if(!avState)loadAvatar();
   return '<div class="card" id="avCard"><h3>'+esc(X.avTitle)+'</h3><div id="avBox">'+avatarInner()+'</div></div>';
 }
@@ -991,12 +1025,12 @@ function playerRow(p){
       +(p.nationality?'<span>'+flag(p.nationality)+' <b>'+esc(p.nationality)+'</b></span>':'')
       +(p.experience?'<span>'+esc(X.exp)+' <b>'+esc(p.experience)+'</b></span>':'')+'</div>'
     +(p.form&&p.form.length?'<div class="rw" style="margin-top:9px">'+formRow(p.form)+'</div>':'')
-    +'<div class="wrbar"><div class="t2"><span>Win rate</span><span>'+w+'%</span></div>'
+    +'<div class="wrbar"><div class="t2"><span>'+esc(X.sWR)+'</span><span>'+w+'%</span></div>'
     +'<div class="bg"><i style="width:'+w+'%"></i></div></div>'
     +'</div></div>'
-    +'<div class="nums"><div><div class="k">'+esc(X.colM)+'</div><div class="v">'+p.matches+'</div></div>'
-    +'<div><div class="k">'+esc(X.colW)+'</div><div class="v">'+p.wins+'</div></div>'
-    +'<div><div class="k">'+esc(X.colPts)+'</div><div class="v a">'+p.points+'</div></div></div>'
+    +'<div class="nums"><div><div class="k">'+esc(X.sMatches)+'</div><div class="v">'+p.matches+'</div></div>'
+    +'<div><div class="k">'+esc(X.sWins)+'</div><div class="v">'+p.wins+'</div></div>'
+    +'<div><div class="k">'+esc(X.sPoints)+'</div><div class="v a">'+p.points+'</div></div></div>'
     +achNote(p)+'</div>';
 }
 function playerTile(p){
@@ -1008,9 +1042,9 @@ function playerTile(p){
     +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
       +(p.ntrp?esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b> · ':'')+'WR <b>'+w+'%</b></div>'
     +'<div class="bg"><i style="width:'+w+'%"></i></div>'
-    +'<div class="st"><div><div class="k">'+esc(X.colM)+'</div><div class="v">'+p.matches+'</div></div>'
-    +'<div><div class="k">'+esc(X.colW)+'</div><div class="v">'+p.wins+'</div></div>'
-    +'<div><div class="k">'+esc(X.colPts)+'</div><div class="v a">'+p.points+'</div></div></div>'
+    +'<div class="st"><div><div class="k">'+esc(X.sMatches)+'</div><div class="v">'+p.matches+'</div></div>'
+    +'<div><div class="k">'+esc(X.sWins)+'</div><div class="v">'+p.wins+'</div></div>'
+    +'<div><div class="k">'+esc(X.sPoints)+'</div><div class="v a">'+p.points+'</div></div></div>'
     +'</div></div>';
 }
 
@@ -1278,28 +1312,41 @@ function seasonRows(p){
     return r;
   });
 }
+// Идущий сезон в список сам не попадает, пока в нём нет сыгранных матчей.
+// А человеку важно видеть, что сезон уже начался и он в нём есть.
+function seasonRowsWithLive(p){
+  var rows=seasonRows(p);
+  var live=(seasons||[]).filter(function(s){return String(s.status||'').toLowerCase()!=='finished'})
+    .map(function(s){return Number(s.number)}).filter(function(n){return n>0});
+  var now=live.length?Math.max.apply(null,live):Number(season||0);
+  if(!now)return rows;
+  var found=rows.filter(function(r){return r.n===now})[0];
+  if(found){ found.live=true; return rows }
+  var s=seasonOf(now);
+  rows.unshift({n:now,name:(s&&s.label)||('Season '+now),division:p.division||'',
+    g:0,w:0,place:p.division_position||'',points:0,live:true});
+  return rows;
+}
 function renderPlayer(p){
   var w=pct(p);
   var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
   var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>'
-    +'<div class="hero">'+av(p)+'<div class="fade"></div><div class="info">'
+    +'<div class="hero">'+av(p)+avatarButton(p)+'<div class="fade"></div><div class="info">'
     +'<h2>'+esc(p.name)+'</h2>'
-    +'<div class="row">'+divChip(p.division)
+    +'<div class="row">'+divChip(p.division, p.division_position)
       +(p.position?'<span class="badge g">'+esc(X.tRace)+' #'+p.position+'</span>':'')
-      +(p.division_position?'<span class="badge">#'+esc(p.division_position)+'</span>':'')
       +statusBadge(p)+'</div>'
     +(p.form&&p.form.length?'<div class="fline"><span class="lb">Form</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
-      +stt(X.colPts,p.points||'',true)+stt(X.colM,p.matches||'')
-      +stt('W–L',(p.wins||0)+'–'+(p.losses||0))+stt('Win rate',w+'%')
+      +stt(X.sPoints,p.points||'',true)+stt(X.sMatches,p.matches||'')
+      +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0))+stt(X.sWR,w+'%')
       +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
       +(p.nationality?stt('Country',flag(p.nationality)+' '+p.nationality):'')
-      +stt('Seasons',p.seasons||'')
     +'</div></div></div>';
 
   h+=avatarBlock(p);
 
-  var srows=seasonRows(p);
+  var srows=seasonRowsWithLive(p);
   h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
   if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';
   else{
@@ -1307,6 +1354,7 @@ function renderPlayer(p){
       +'<span>'+esc(X.cW)+'</span><span>'+esc(X.cPlace)+'</span><span>'+esc(X.cPts)+'</span></div>'
       +srows.map(function(s){
         return '<div class="sr"><span class="sn">'+esc(s.name)
+          +(s.live?' <b class="live">'+esc(X.sSeasonNow)+'</b>':'')
           +(s.division?'<div class="sd">'+esc(divLabel(s.division))+'</div>':'')+'</span>'
           +'<span>'+s.g+'</span><span>'+s.w+'</span>'
           +'<span class="pl">'+esc(s.place||'—')+'</span>'
@@ -1351,7 +1399,14 @@ function matchRow(m){
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
     +'</div></div>';
 }
-function toggleMatches(id){allMatches=!allMatches;openPlayer(id)}
+// Раньше здесь вызывался openPlayer, а он первым делом сбрасывает allMatches
+// обратно в false — список всегда оставался свёрнутым. Перерисовываем карточку
+// напрямую, не трогая состояние открытого игрока.
+function toggleMatches(id){
+  allMatches=!allMatches;
+  var p=byId(id);
+  if(p)renderPlayer(p);
+}
 
 // ---------------------------------------------------------------- старт
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
