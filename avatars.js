@@ -15,7 +15,7 @@ import { findApplicantByTelegramId, updateApplicantByTelegramId, ensureAvatarCol
 import { nowISO } from './util.js';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
 // Промпт держим в окружении, чтобы правки не требовали выкладки кода.
 const DEFAULT_PROMPT = 'Stylized tennis player avatar portrait, keep the face recognizable, clean background, square crop, shoulders up.';
 export function avatarPrompt() { return process.env.AVATAR_PROMPT || DEFAULT_PROMPT; }
