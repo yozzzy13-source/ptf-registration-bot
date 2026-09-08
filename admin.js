@@ -626,8 +626,27 @@ export async function adminMatchesOverview(msg) {
   };
 
   let body = '<b>🎾 Матчи — сводка</b>';
-  body += block('Ближайшие', data.upcoming, s =>
-    `• ${when(s)} · ${pair(s)}${s.agreed_court ? ` · ${escapeHtml(s.agreed_court)}` : ''}${s.court_confirmed_at ? ' ✅' : ' ⏳корт'}`);
+  // Ближайшие показываем по дням: сплошной список из пятнадцати строк глазами
+  // не разбирается, а расписание читают именно по дням.
+  if (data.upcoming.length) {
+    const byDay = new Map();
+    for (const s of data.upcoming) {
+      const key = s.agreed_date || '';
+      if (!byDay.has(key)) byDay.set(key, []);
+      byDay.get(key).push(s);
+    }
+    body += `\n\n<b>Ближайшие: ${data.upcoming.length}</b>`;
+    let shown = 0;
+    for (const [date, list] of byDay) {
+      if (shown >= 15) { body += `\n<i>…и ещё ${data.upcoming.length - shown}</i>`; break; }
+      body += `\n\n<u>${escapeHtml(formatDate(date))}</u>`;
+      for (const s of list) {
+        if (shown >= 15) break;
+        body += `\n• ${escapeHtml(s.agreed_time || '—')} · ${pair(s)}${s.agreed_court ? ` · ${escapeHtml(s.agreed_court)}` : ' · корт не выбран'}${s.court_confirmed_at ? ' ✅' : ' ⏳'}`;
+        shown++;
+      }
+    }
+  }
   body += block('Ждут подтверждения корта', data.awaitingCourt, s => `• ${when(s)} · ${pair(s)}`);
   body += block('Ждут ответа соперника', data.awaitingAnswer, s =>
     `• ${pair(s)}${s.division ? ` · ${escapeHtml(s.division)}` : ''}`);

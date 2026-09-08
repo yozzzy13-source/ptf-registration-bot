@@ -802,3 +802,90 @@ export async function disputeResult(challengeId, actor = {}) {
 }
 
 export { SLOT_HEADERS, LOG_HEADERS };
+
+// Расписание согласованных матчей: только то, что впереди. Прошедшее живёт в
+// истории лиги, поэтому сюда не попадает даже с внесённым счётом.
+// Корт берём отсюда же — это единственное место, где он вообще хранится.
+export async function agreedSchedule(now = Date.now()) {
+  const rows = await allSlots();
+  return rows
+    .filter(r => String(r.status || '').toLowerCase() === 'accepted')
+    .filter(r => {
+      const start = slotStartMs(r);
+      return start !== null && start >= now;
+    })
+    .map(r => ({
+      id: r.challenge_id || '',
+      date: r.agreed_date || '',
+      time: r.agreed_time || r.time_from || '',
+      start: slotStartMs(r),
+      end: slotEndMs(r),
+      court: r.agreed_court || '',
+      court_confirmed: Boolean(r.court_confirmed_at),
+      division: r.division || '',
+      round: r.round || '',
+      p1: { id: String(r.from_telegram_id || ''), name: r.from_name || '' },
+      p2: { id: String(r.to_telegram_id || ''), name: r.to_name || '' }
+    }))
+    .sort((a, b) => (a.start || 0) - (b.start || 0));
+}
+
+// Сколько матчей прошло на каждом корте. Считаем по сыгранным слотам, а не по
+// согласованным: назначенный, но отменённый матч корт не занимал.
+export async function courtUsage(now = Date.now()) {
+  const rows = await allSlots();
+  const tally = new Map();
+  for (const r of rows) {
+    if (String(r.status || '').toLowerCase() !== 'accepted') continue;
+    const court = String(r.agreed_court || '').trim();
+    if (!court) continue;
+    const start = slotStartMs(r);
+    const played = String(r.result_status || '').toLowerCase() === 'confirmed' || (start !== null && start < now);
+    if (!played) continue;
+    const cur = tally.get(court) || { court, played: 0, with_score: 0, last: '' };
+    cur.played += 1;
+    if (String(r.result_status || '').toLowerCase() === 'confirmed') cur.with_score += 1;
+    if (r.agreed_date && r.agreed_date > cur.last) cur.last = r.agreed_date;
+    tally.set(court, cur);
+  }
+  return [...tally.values()].sort((a, b) => b.played - a.played);
+}
+
+// Накладка: два матча на одном корте в пересекающееся время. Организатору это
+// важно увидеть заранее — игроки узнают об этом только приехав на корт.
+export function scheduleClashes(items = []) {
+  const clashes = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      const court = String(a.court || '').trim().toLowerCase();
+      if (!court || court !== String(b.court || '').trim().toLowerCase()) continue;
+      if (a.start === null || b.start === null) continue;
+      if (a.start < b.end && b.start < a.end) clashes.push([a.id, b.id]);
+    }
+  }
+  return clashes;
+}
+
+// Корт по сыгранным матчам, ключ — «дата + пара имён» в любом порядке.
+// В журнал результатов корт не пишется, поэтому история лиги его не знает;
+// здесь он есть, и этого достаточно, чтобы подставить его на фронте, не трогая
+// формулы в таблице результатов.
+export async function courtsByPlayedMatch() {
+  const rows = await allSlots();
+  const map = new Map();
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  for (const r of rows) {
+    const court = String(r.agreed_court || '').trim();
+    if (!court || !r.agreed_date) continue;
+    if (String(r.status || '').toLowerCase() !== 'accepted') continue;
+    const a = norm(r.from_name), b = norm(r.to_name);
+    if (!a || !b) continue;
+    map.set(`${r.agreed_date}|${[a, b].sort().join('|')}`, court);
+  }
+  return map;
+}
+export function courtKey(date, nameA, nameB) {
+  const norm = (v) => String(v || '').trim().toLowerCase();
+  return `${String(date || '').trim()}|${[norm(nameA), norm(nameB)].sort().join('|')}`;
+}

@@ -135,7 +135,7 @@ var T={
       photo:'Фото матча (необязательно)',note:'Комментарий (необязательно)',
       sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
       manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
-      manualHint:'Выберите соперника и дату — счёт так же уйдёт ему на подтверждение.',
+      manualHint:'Выберите соперника, дату и корт — счёт так же уйдёт ему на подтверждение.',courtManual:'Например, Rawai — можно не указывать',
       pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',needWinner:'Выберите победителя',
       vs:'против',back:'⬅️ Назад',
       tBook:'Бронь корта',bookTitle:'Забронировать корт',
@@ -177,7 +177,7 @@ var T={
       photo:'Match photo (optional)',note:'Comment (optional)',
       sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
       manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
-      manualHint:'Pick the opponent and date — the score goes to them for confirmation too.',
+      manualHint:'Pick the opponent, date and court — the score goes to them for confirmation too.',courtManual:'For example, Rawai — optional',
       pendingRes:'awaiting confirmation',yourRes:'confirm the score',needWinner:'Pick the winner',
       vs:'vs',back:'⬅️ Back',
       tBook:'Book a court',bookTitle:'Book a court',
@@ -632,6 +632,10 @@ function openManual(){
     +'<div class="hint">'+esc(X.manualHint)+'</div>'
     +'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>'
     +'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
+    // Корт можно выбрать из известных или вписать свой — площадок больше, чем в списке.
+    +'<label>'+esc(X.pickCourt)+'</label>'
+    +'<input id="mCourt" list="mCourtList" placeholder="'+esc(X.courtManual)+'">'
+    +'<datalist id="mCourtList">'+courts.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
     +'<label>'+esc(X.winner)+'</label>'
     +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
     +'<div class="seg" id="mWinSeg"></div>'
@@ -662,6 +666,7 @@ function submitManual(btn){
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,to_telegram_id:$('mOpp').value,date:$('mDate').value,
+    court:(($('mCourt')&&$('mCourt').value)||'').trim(),
     sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;

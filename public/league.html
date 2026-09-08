@@ -54,6 +54,14 @@ color:var(--text);font-size:14px;margin-bottom:10px}
 font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .chip.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
 .chips.sm .chip{padding:5px 9px;font-size:10px;border-radius:8px}
+.sday{margin:15px 0 7px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.srow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:6px;border:1px solid #201D19;border-radius:12px;background:#141311}
+.srow.me{border-color:#4A3925;background:linear-gradient(180deg,#1C1712,#161310)}
+.srow.clash{border-color:#5A2E2A}
+.stime{grid-row:1/3;font-size:13px;font-weight:700;color:var(--amber);align-self:center}
+.spair{font-size:13px;font-weight:600;line-height:1.3}
+.spair .vs{color:var(--dim);font-weight:400}
+.smeta{font-size:10px;color:var(--dim)}
 button{width:100%;border:1px solid var(--line);border-radius:13px;padding:13px;font-size:14px;font-weight:800;
 margin-top:12px;cursor:pointer;background:#141311;color:var(--text)}
 .more{width:100%;border:1px dashed #2A2521;background:transparent;color:var(--mute);border-radius:11px;
@@ -350,6 +358,7 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
   <div id="viewDiv" class="hidden"></div>
   <div id="viewRace" class="hidden"></div>
   <div id="viewPlayers" class="hidden"></div>
+  <div id="viewSched" class="hidden"></div>
   <div id="viewMatches" class="hidden"></div>
   <div id="viewEvents" class="hidden"></div>
   <div id="viewAbout" class="hidden"></div>
@@ -376,10 +385,13 @@ var allMatches=false;
 
 var T={
 ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годовая гонка PTF.',
-  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
+  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',
+  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Мои матчи',schPlayer:'Игрок',schCourt:'Корт',
+  schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
+  schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
   players:'Игроков',matchesN:'Матчей',leader:'Лидер',
   colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
   sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
@@ -398,10 +410,13 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   back:'Назад',showMore:'Показать ещё',matchesLeague:'Все матчи лиги',
   active:'Active',inactive:'Inactive'},
 en:{title:'League',sub:'Standings, matches, players and the yearly race.',
-  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
+  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',
+  schToday:'Today',schTomorrow:'Tomorrow',schMine:'My matches',schPlayer:'Player',schCourt:'Court',
+  schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
+  schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
   players:'Players',matchesN:'Matches',leader:'Leader',
   colNo:'#',colPlayer:'Player',colM:'M',colW:'W',colWR:'WR',colPts:'Pts',
   sortTip:'Tap a column header to sort',
@@ -484,12 +499,12 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
   return p.matches?Math.round(p.wins/p.matches*100):0; }
 
 // ---------------------------------------------------------------- меню
-var VIEWS=['home','div','race','players','matches','events','about'];
+var VIEWS=['home','div','race','players','sched','matches','events','about'];
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
-matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
+sched:'viewSched',matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
 function buildTabs(){
   var labels=[['home',X.tHome],['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],
-              ['matches',X.tMatches],['events',X.tEvents],['about',X.tAbout]];
+              ['sched',X.tSched],['matches',X.tMatches],['events',X.tEvents],['about',X.tAbout]];
   $('tabs').innerHTML=labels.map(function(x){
     return '<div class="tab" data-t="'+x[0]+'" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
   }).join('')+'<div class="tab off">'+esc(X.tPartners)+'</div>';
@@ -505,12 +520,13 @@ function showTab(t){
   $('tabs').classList.remove('hidden');
   $('hdr').classList.remove('hidden');
   $('viewCard').classList.add('hidden');
-  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
+  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,sched:X.tSched,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
   $('title').textContent=titles[t]||X.title;
   if(t==='home')renderHome();
   else if(t==='div')renderDiv();
   else if(t==='race')renderRace();
   else if(t==='players')renderPlayers();
+  else if(t==='sched')renderSched();
   else if(t==='matches')renderFeed();
   else if(t==='events')renderEvents();
   else renderAbout();
@@ -518,11 +534,144 @@ function showTab(t){
   window.scrollTo(0,0);
 }
 
+// -------------------------------------------------------- расписание
+// Только согласованные матчи и только те, что впереди: сыгранное живёт во
+// вкладке «Матчи». Игрок открывает раздел сразу на своём дивизионе — остальные
+// рядом, одним касанием. Метрика по кортам приходит только организатору.
+var schData=null,schLoading=false,schErr='';
+var schDiv=null,schPlayer='',schCourt='',schMine=false,schFiltersOpen=false;
+function loadSched(){
+  schLoading=true;schErr='';
+  fetch('/api/league/schedule?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      schLoading=false;
+      if(!j.ok){schErr=j.error||'Error';schData=null}
+      else{
+        schData=j;
+        // Первый вход: показываем свой дивизион, если в нём вообще есть матчи.
+        if(schDiv===null){
+          schDiv=(j.me_division&&j.divisions.indexOf(j.me_division)>=0)?j.me_division:'';
+        }
+      }
+      renderSched();
+    }).catch(function(e){schLoading=false;schErr=e.message;renderSched()});
+}
+function setSchDiv(v){schDiv=v;renderSched()}
+function setSchPlayer(v){schPlayer=v;renderSched()}
+function setSchCourt(v){schCourt=v;renderSched()}
+function toggleSchMine(){schMine=!schMine;renderSched()}
+function toggleSchFilters(){schFiltersOpen=!schFiltersOpen;renderSched()}
+function schVisible(){
+  if(!schData)return [];
+  return schData.items.filter(function(i){
+    if(schDiv&&i.division!==schDiv)return false;
+    if(schCourt&&i.court!==schCourt)return false;
+    if(schPlayer&&String(i.p1.id)!==schPlayer&&String(i.p2.id)!==schPlayer)return false;
+    if(schMine&&String(i.p1.id)!==schData.me&&String(i.p2.id)!==schData.me)return false;
+    return true;
+  });
+}
+// Заголовок дня: сегодня и завтра называем словами — так быстрее считывается.
+function schDayLabel(dateStr,nowMs){
+  var d=new Date(dateStr+'T00:00:00+07:00');
+  if(isNaN(d.getTime()))return dateStr;
+  var today=new Date(nowMs);
+  var t=new Date(today.toLocaleString('en-US',{timeZone:'Asia/Bangkok'}));
+  var base=new Date(t.getFullYear(),t.getMonth(),t.getDate());
+  var diff=Math.round((d-new Date(base.getTime()-base.getTimezoneOffset()*60000))/86400000);
+  if(diff===0)return X.schToday;
+  if(diff===1)return X.schTomorrow;
+  return d.toLocaleDateString(L?'ru-RU':'en-GB',{weekday:'short',day:'numeric',month:'short'});
+}
+function schName(p){return p.name||'—'}
+function renderSched(){
+  var box=$('viewSched');
+  if(schLoading&&!schData){box.innerHTML='<div class="empty">…</div>';return}
+  if(schErr){box.innerHTML='<div class="empty" style="color:#C2695E">'+esc(schErr)+'</div>';return}
+  if(!schData){box.innerHTML='<div class="empty">…</div>';loadSched();return}
+
+  var items=schVisible();
+  var h='';
+
+  // Организатору — короткая сводка и накладки. Игроку это лишний шум.
+  if(schData.admin){
+    var clashes=schData.clashes||[];
+    h+='<div class="chips" style="margin-bottom:9px"><div class="chip on">'+esc(X.schTotal)+': '+schData.items.length+'</div>'
+      +'<div class="chip">'+esc(X.schNoCourt)+': '+(schData.pending_court||0)+'</div>'
+      +(clashes.length?'<div class="chip" style="border-color:#5A2E2A;color:#C2695E">'+esc(X.schClash)+': '+clashes.length+'</div>':'')
+      +'</div>';
+  }
+
+  // Фильтры: дивизион всегда на виду, остальное прячем под «Фильтры» —
+  // список игроков и кортов длинный и забивает экран.
+  var divChips='<div class="chip'+(schDiv===''?' on':'')+'" onclick="setSchDiv(\'\')">'+esc(X.all)+'</div>'
+    +(schData.divisions||[]).map(function(d){
+      return '<div class="chip'+(schDiv===d?' on':'')+'" onclick="setSchDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
+    }).join('');
+  h+='<div class="chips">'+divChips+'</div>';
+
+  var extra='<div class="chip'+(schMine?' on':'')+'" onclick="toggleSchMine()">'+esc(X.schMine)+'</div>'
+    +'<div class="chip'+(schFiltersOpen?' on':'')+'" onclick="toggleSchFilters()">'+esc(X.filters)+'</div>';
+  h+='<div class="chips">'+extra+'</div>';
+
+  if(schFiltersOpen){
+    var pl='<div class="chip'+(schPlayer===''?' on':'')+'" onclick="setSchPlayer(\'\')">'+esc(X.all)+'</div>'
+      +(schData.players||[]).map(function(p){
+        return '<div class="chip'+(schPlayer===String(p.id)?' on':'')+'" onclick="setSchPlayer(\''+q(String(p.id))+'\')">'+esc(p.name)+'</div>';
+      }).join('');
+    var ct='<div class="chip'+(schCourt===''?' on':'')+'" onclick="setSchCourt(\'\')">'+esc(X.all)+'</div>'
+      +(schData.courts||[]).map(function(c){
+        return '<div class="chip'+(schCourt===c?' on':'')+'" onclick="setSchCourt(\''+q(c)+'\')">'+esc(c)+'</div>';
+      }).join('');
+    h+='<div class="fpanel"><div class="flab">'+esc(X.schPlayer)+'</div><div class="chips sm">'+pl+'</div>'
+      +'<div class="flab">'+esc(X.schCourt)+'</div><div class="chips sm" style="margin-bottom:0">'+ct+'</div></div>';
+  }
+
+  if(!items.length){
+    h+='<div class="empty">'+esc(X.schEmpty)+'</div>';
+    box.innerHTML=h;
+    return;
+  }
+
+  var clashIds={};
+  (schData.clashes||[]).forEach(function(pair){clashIds[pair[0]]=1;clashIds[pair[1]]=1});
+
+  var day='';
+  items.forEach(function(i){
+    if(i.date!==day){
+      day=i.date;
+      h+='<div class="sday">'+esc(schDayLabel(i.date,schData.now))+'</div>';
+    }
+    var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
+    var marks=[];
+    if(i.court)marks.push(esc(i.court)+(i.court_confirmed?' ✓':' ⏳'));
+    else marks.push(X.schCourtTbd);
+    if(i.division)marks.push(esc(divLabel(i.division)));
+    h+='<div class="srow'+(mine?' me':'')+(clashIds[i.id]?' clash':'')+'">'
+      +'<div class="stime">'+esc(i.time||'—')+'</div>'
+      +'<div class="spair">'+esc(schName(i.p1))+' <span class="vs">—</span> '+esc(schName(i.p2))+'</div>'
+      +'<div class="smeta">'+marks.join(' · ')+'</div>'
+      +'</div>';
+  });
+
+  // Корты — только организатору: это операционная метрика, не для ленты.
+  if(schData.admin&&(schData.court_usage||[]).length){
+    h+='<div class="sday">'+esc(X.schCourts)+'</div>';
+    h+=schData.court_usage.map(function(c){
+      return '<div class="srow"><div class="stime">'+c.played+'</div>'
+        +'<div class="spair">'+esc(c.court)+'</div>'
+        +'<div class="smeta">'+esc(X.schWithScore)+': '+c.with_score+'</div></div>';
+    }).join('');
+  }
+
+  box.innerHTML=h;
+}
+
 // ------------------------------------------------- навигация по разделам
 // Разделы идут по кругу в порядке верхнего меню. На странице игрока стрелки
 // работают как «назад к разделу», вперёд там некуда.
 function tabTitle(t){
-  var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
+  var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,sched:X.tSched,
               matches:X.tMatches,events:X.tEvents,about:X.tAbout};
   return titles[t]||X.title;
 }
@@ -906,7 +1055,7 @@ function allMatchesList(){
       out.push({no:m.match_no,date:m.date,competition:m.competition,
         winner:win?{id:pid,name:p.name,photo:p.photo}:{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo},
         loser:win?{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo}:{id:pid,name:p.name,photo:p.photo},
-        score:win?m.score:reverseScore(m.score),division:m.division||m.opponent_division});
+        score:win?m.score:reverseScore(m.score),division:m.division||m.opponent_division,court:m.court||''});
     });
   });
   return out.sort(function(a,b){return Number(b.no||0)-Number(a.no||0)});
@@ -941,7 +1090,7 @@ function setFDiv(d){fDiv=d;fLimit=20;renderFeed()}
 function setFQuery(v){fQuery=v;fLimit=20;renderFeed()}
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
-  var top=[m.no?'#'+m.no:'',m.date,m.competition].filter(Boolean).join(' · ');
+  var top=[m.no?'#'+m.no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
@@ -1099,7 +1248,8 @@ function renderPlayer(p){
 function stt(k,v,acc){ return v?'<div class="stt"><div class="k">'+esc(k)+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>':'' }
 function matchRow(m){
   var opp={name:m.opponent,photo:m.opponent_photo};
-  var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition].filter(Boolean).join(' · ');
+  // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
+  var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'

@@ -17,7 +17,8 @@ import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as 
 import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
-  listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange } from './matchesdb.js';
+  listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage, scheduleClashes,
+  courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache } from './division.js';
@@ -666,13 +667,17 @@ app.post('/api/match/manual', async (req, res) => {
     try { photo = await uploadResultPhoto(v.user.id, b.photo); }
     catch (e) { return res.status(400).json({ ok:false, error:e.message }); }
 
+    const manualCourt = safe(b.court).slice(0, 60);
+
     const row = {
       challenge_id: uid('match'),
       match_type: 'manual', status: 'accepted', division: v.division,
       from_telegram_id: String(v.user.id), from_name: v.profile.name, from_username: v.user.username || v.profile.telegram_username || '',
       to_telegram_id: String(opponent.telegram_id), to_name: opponent.name, to_username: opponent.username || '',
-      dates: date, time_from: '', time_to: '', duration_min: MATCH_DURATION_MIN, courts: '', comment: '',
-      agreed_date: date, agreed_time: '', agreed_court: '',
+      // Корт у матча вне бота указывает тот, кто вносит счёт: без него такие
+      // игры выпадали из статистики по кортам, а их немало.
+      dates: date, time_from: '', time_to: '', duration_min: MATCH_DURATION_MIN, courts: manualCourt, comment: '',
+      agreed_date: date, agreed_time: safe(b.time), agreed_court: manualCourt,
       pending_by: '', round: '',
       result_status: 'pending', result_by: String(v.user.id),
       result_winner: check.winner === 'p1' ? String(v.user.id) : String(opponent.telegram_id),
@@ -709,8 +714,30 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const divisions = current ? current.divisions : [];
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
     // игрока открывается мгновенно, без второго запроса на сервер.
+    // Корт в журнал результатов не пишется, поэтому история его не знает.
+    // Достаём его из листа матчей и подставляем по «дата + пара имён»; если
+    // даты записаны по-разному, спасает запасной ключ по одной только паре —
+    // дважды с одним соперником в один сезон играют редко.
+    const courtMap = await courtsByPlayedMatch().catch(() => new Map());
+    const byPair = new Map();
+    for (const [key, court] of courtMap.entries()) {
+      const pair = key.split('|').slice(1).join('|');
+      if (byPair.has(pair) && byPair.get(pair) !== court) byPair.set(pair, '');
+      else if (!byPair.has(pair)) byPair.set(pair, court);
+    }
+    const nameById = new Map(players.map(pl => [String(pl.id), pl.name]));
     const matches = {};
-    for (const [pid, list] of history.entries()) matches[pid] = list;
+    for (const [pid, list] of history.entries()) {
+      const me = nameById.get(String(pid)) || '';
+      matches[pid] = me
+        ? list.map(m => {
+            const exact = courtMap.get(courtKey(m.date, me, m.opponent));
+            const loose = exact ? '' : byPair.get(courtKey('', me, m.opponent).slice(1));
+            const court = exact || loose || '';
+            return court ? { ...m, court } : m;
+          })
+        : list;
+    }
     res.json({
       ok: true,
       lang: v.lang,
@@ -725,6 +752,38 @@ app.get('/api/league/bootstrap', async (req, res) => {
     });
   } catch (e) {
     console.error('league bootstrap failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Расписание согласованных матчей. Открыто всем, кто видит лигу: игроки
+// смотрят, кто с кем и когда играет, и приходят поболеть. Метрика по кортам —
+// вещь операционная, поэтому уезжает только организатору.
+app.get('/api/league/schedule', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const items = await agreedSchedule();
+    const payload = {
+      ok: true,
+      now: Date.now(),
+      me: String(v.user.id),
+      me_division: v.division || '',
+      divisions: [...new Set(items.map(i => i.division).filter(Boolean))].sort(),
+      courts: [...new Set(items.map(i => i.court).filter(Boolean))].sort(),
+      players: [...new Map(items.flatMap(i => [i.p1, i.p2]).filter(p => p.name).map(p => [p.id || p.name, p])).values()]
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      items
+    };
+    if (v.isAdmin) {
+      payload.admin = true;
+      payload.clashes = scheduleClashes(items);
+      payload.court_usage = await courtUsage().catch(() => []);
+      payload.pending_court = items.filter(i => !i.court_confirmed).length;
+    }
+    res.json(payload);
+  } catch (e) {
+    console.error('schedule api failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
 });
