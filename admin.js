@@ -205,8 +205,12 @@ export async function showAvatarGallery(chatId, telegramId) {
   const { optionList, MAX_ATTEMPTS } = await import('./avatars.js');
   const profile = await findApplicantByTelegramId(telegramId).catch(() => null);
   const list = optionList(profile?.avatar_options);
+  // Ни одного варианта — значит человек здесь впервые. Даём кнопку прямо на
+  // экран загрузки, а не отправляем его искать раздел руками.
   if (!list.length) {
-    return sendMessage(chatId, 'Пока нет ни одного варианта. Загрузи селфи в разделе «Лига» → своя карточка → «Аватарка».');
+    return sendMessage(chatId,
+      '🖼 <b>Аватарка PTF</b>\n\nЗагрузи одно селфи — сделаю до трёх вариантов, выберешь любой.\n\nЛицо крупно, дневной свет, без кепки и тёмных очков, один человек в кадре.',
+      { reply_markup: { inline_keyboard: [[{ text: '📸 Загрузить селфи', web_app: { url: `${PUBLIC_URL}/league?player=me` } }]] } });
   }
   const chosen = String(profile?.avatar_file_id || '');
   for (let i = 0; i < list.length; i++) {
