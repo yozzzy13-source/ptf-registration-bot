@@ -131,6 +131,53 @@ export async function getCourts() {
   }
 }
 
+// --- реестр таблиц дивизионов ------------------------------------------------
+// Лист Divisions в таблице матчей: одна строка — один дивизион одного сезона со
+// ссылкой на его таблицу. Раньше ссылки лежали россыпью в Settings и их надо было
+// заменять при смене сезона; здесь прошлые сезоны просто остаются строками, и
+// история матчей всегда знает, в каком дивизионе матч был сыгран.
+const REGISTRY_HEADERS = ['season', 'letter', 'title', 'title_en', 'sheet_url', 'status', 'order'];
+let registryCache = { t: 0, v: null };
+const REGISTRY_MS = 5 * 60 * 1000;
+
+export function invalidateDivisionRegistry() { registryCache = { t: 0, v: null }; }
+
+// Ссылку можно вставлять целиком — id вытащим сами. Голый id тоже принимаем.
+export function spreadsheetIdFromUrl(value = '') {
+  const v = safe(value);
+  if (!v) return '';
+  const m = v.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (m) return m[1];
+  return /^[a-zA-Z0-9-_]{20,}$/.test(v) ? v : '';
+}
+
+export async function divisionRegistry() {
+  if (registryCache.v && Date.now() - registryCache.t < REGISTRY_MS) return registryCache.v;
+  let rows = [];
+  try {
+    rows = await readObjects(MATCH_SHEETS.divisions, REGISTRY_HEADERS);
+  } catch (e) {
+    console.error('divisionRegistry failed:', e.message);
+    registryCache = { t: Date.now(), v: [] };
+    return [];
+  }
+  const out = rows
+    .map(r => ({
+      season: safe(r.season),
+      letter: safe(r.letter).toUpperCase(),
+      title: safe(r.title),
+      title_en: safe(r.title_en || r.title),
+      spreadsheet_id: spreadsheetIdFromUrl(r.sheet_url || r.url || r.link || r.sheet_id),
+      status: safe(r.status).toLowerCase(),
+      order: Number(safe(r.order)) || 0
+    }))
+    .filter(r => r.season && r.letter && r.spreadsheet_id)
+    .filter(r => r.status !== 'off' && r.status !== 'hidden');
+  out.sort((a, b) => (a.order - b.order) || a.letter.localeCompare(b.letter));
+  registryCache = { t: Date.now(), v: out };
+  return out;
+}
+
 // --- журнал -----------------------------------------------------------------
 export async function logMatchEvent(action, slot = {}, actor = {}, details = '') {
   try {

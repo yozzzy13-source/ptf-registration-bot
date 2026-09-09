@@ -12,6 +12,7 @@
 import { sheets as sheetsClient } from './google.js';
 import { DIVISION_SPREADSHEETS } from './config.js';
 import { getSetting } from './sheets.js';
+import { divisionRegistry } from './matchesdb.js';
 
 const WIN_POINTS = 3;
 const LOSS_POINTS = 1;
@@ -63,6 +64,13 @@ async function sheetsSeason() {
 async function divisionSheetId(letter, season = '') {
   const key = divisionLetter(letter);
   const low = key.toLowerCase();
+  // Сначала реестр — лист Divisions в таблице матчей. Он главный источник:
+  // там на каждый сезон своя строка со ссылкой, поэтому прошлые сезоны никуда
+  // не деваются, когда начинается новый.
+  const reg = await divisionRegistry().catch(() => []);
+  const hit = reg.find(r => r.letter === key && (!season || String(r.season) === String(season)));
+  if (hit) return hit.spreadsheet_id;
+  if (season && reg.some(r => String(r.season) === String(season))) return '';
   if (season) {
     const perSeason = await getSetting(`division_${low}_s${season}_sheet_id`).catch(() => '');
     if (txt(perSeason)) return txt(perSeason);
@@ -72,7 +80,24 @@ async function divisionSheetId(letter, season = '') {
   return txt(fromSettings) || DIVISION_SPREADSHEETS[key] || '';
 }
 
+// Как называть дивизион в интерфейсе. Берём из реестра, если там задано имя,
+// иначе обычное «Division X».
+export async function divisionTitles(season = '') {
+  const reg = await divisionRegistry().catch(() => []);
+  const out = {};
+  for (const r of reg) {
+    if (season && String(r.season) !== String(season)) continue;
+    if (r.title) out[r.letter] = r.title;
+  }
+  return out;
+}
+
 export async function availableDivisions(season = '') {
+  const reg = await divisionRegistry().catch(() => []);
+  const fromRegistry = reg
+    .filter(r => !season || String(r.season) === String(season))
+    .map(r => r.letter);
+  if (fromRegistry.length) return [...new Set(fromRegistry)];
   const out = [];
   for (const letter of Object.keys(DIVISION_SPREADSHEETS)) {
     if (await divisionSheetId(letter, season)) out.push(letter);

@@ -65,9 +65,9 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .smeta{font-size:10px;color:var(--dim)}
 /* Шапка карточки: показываем около 80% квадратной аватарки и гасим края
    градиентом, чтобы имя ложилось на затухание, а не на резкий срез. */
-.hero .vign{position:absolute;left:0;right:0;pointer-events:none;z-index:2}
+.hero .vign{position:absolute;left:0;right:0;pointer-events:none;z-index:2;max-height:280px}
 .hero .vign.t{top:0;height:74px;background:linear-gradient(180deg,rgba(11,10,9,.72),rgba(11,10,9,0))}
-.hero .vign.b{bottom:0;height:132px;background:linear-gradient(0deg,rgba(11,10,9,.92),rgba(11,10,9,0))}
+.hero .vign.b{top:66vw;margin-top:-132px;height:132px;background:linear-gradient(0deg,rgba(11,10,9,.92),rgba(11,10,9,0))}
 .avbtn{box-shadow:0 0 0 2px rgba(232,164,92,.55)}
 /* Полноэкранный просмотр аватарки. */
 .avfull{position:fixed;inset:0;z-index:60;background:rgba(8,7,6,.96);display:flex;
@@ -102,6 +102,55 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .chline .nm2{font-size:13px;font-weight:800;line-height:1.2}
 .chline.small .nm2{font-size:11.5px;font-weight:700}
 .chline .sub{font-size:9.5px;color:var(--dim);margin-top:2px}
+/* Логотип PTF в шапке вместо текстовой заглушки. */
+.hdr .logo img{width:100%;height:100%;object-fit:contain;display:block}
+.hdr .logo{overflow:hidden;background:transparent;border:0;padding:2px}
+/* Логотип площадки в блоке сезона. */
+.venue{display:flex;align-items:center;gap:11px;margin-top:11px}
+.venue img{width:46px;height:46px;border-radius:12px;object-fit:cover;flex:0 0 46px;border:1px solid var(--line2)}
+.venue .vt{font-size:12.5px;font-weight:800}
+.venue .vd{font-size:10px;color:var(--dim);margin-top:2px}
+/* Мигающая отметка идущего сезона. */
+@keyframes ptfblink{0%,100%{opacity:1}50%{opacity:.25}}
+.sr .live{animation:ptfblink 1.4s ease-in-out infinite}
+/* Ярлык дивизиона в карточке матча — справа, как WIN/LOST слева. */
+.mt{position:relative}
+.mt .mdiv{position:absolute;top:10px;right:11px;font-size:9.5px;font-weight:800;
+  padding:3px 8px;border-radius:999px;border:1px solid var(--line2);background:#141311;
+  color:var(--dim);cursor:pointer;z-index:2}
+.mt .mdiv:active{color:var(--amber);border-color:#4A3925}
+.mt .mtop{padding-right:86px}
+/* Чемпионы сезона крупно. */
+.chbig{border:1px solid var(--line2);border-radius:16px;background:#141311;padding:15px 13px 13px;
+  margin-bottom:10px;text-align:center;cursor:pointer}
+.chbig .avr,.chbig .avph{width:96px;height:96px;flex:0 0 96px;font-size:30px;margin:0 auto 10px}
+.chbig .nm2{font-size:16px;font-weight:800}
+.chbig .sub{font-size:10.5px;color:var(--champ);margin-top:4px;letter-spacing:.6px;text-transform:uppercase;font-weight:800}
+.chfin{margin-top:11px;border-top:1px solid var(--line2);padding-top:10px;
+  display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center}
+.chfin .sd{font-size:11.5px;font-weight:700;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chfin .sd.w{color:var(--text);font-weight:800}
+.chfin .sc2{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:800;color:var(--amber)}
+/* Переходы между дивизионами. */
+.mv{display:grid;grid-template-columns:52px minmax(0,1fr);gap:11px;align-items:center;
+  padding:9px 11px;border:1px solid var(--line2);border-radius:14px;background:#141311;margin-bottom:8px;cursor:pointer}
+.mv .avr,.mv .avph{width:52px;height:52px;flex:0 0 52px;font-size:16px}
+.mv .nm2{font-size:13.5px;font-weight:800}
+.mv .path{font-size:10.5px;margin-top:3px;color:var(--dim);font-weight:700}
+.mv .path i{font-style:normal;font-weight:900;font-size:13px;vertical-align:-1px;padding:0 2px}
+.mv.up .path i{color:#6FBF7F}
+.mv.down .path i{color:var(--lose)}
+.mv .wc{margin-left:6px;font-size:9px;padding:2px 6px;border-radius:999px;
+  border:1px solid #4A3925;color:var(--amber);text-transform:uppercase;letter-spacing:.5px}
+/* Правила под спойлером. */
+.spo .in ul{margin:7px 0 0;padding-left:17px}
+.spo .in li{margin-bottom:4px}
+.spo .in h4{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mute);margin:12px 0 4px}
+.spo .in h4:first-child{margin-top:0}
+.spo .in table{width:100%;border-collapse:collapse;margin-top:7px;font-size:10.5px}
+.spo .in th,.spo .in td{border-bottom:1px solid var(--line2);padding:4px 3px;text-align:center}
+.spo .in th{color:var(--mute);font-weight:800;font-size:9px;text-transform:uppercase}
+.spo .in td:first-child,.spo .in th:first-child{text-align:left}
 .sr .live{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);font-weight:800}
 .avbtn{position:absolute;top:12px;right:12px;z-index:3;width:38px;height:38px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
@@ -330,10 +379,10 @@ font-weight:700;cursor:pointer}
 .back i{width:30px;height:30px;border-radius:10px;background:#141311;border:1px solid #201D19;
 display:flex;align-items:center;justify-content:center;font-style:normal;font-size:15px;color:var(--champ)}
 .hero{border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--surf);margin-bottom:12px;position:relative}
-.hero .avr,.hero .avph{width:100%;height:78vw;max-height:330px;border-radius:0;border:0;object-fit:cover;font-size:56px;object-position:50% 30%}
-.hero .fade{pointer-events:none;position:absolute;left:0;right:0;bottom:0;height:190px;
+.hero .avr,.hero .avph{width:100%;height:66vw;max-height:280px;border-radius:0;border:0;object-fit:cover;font-size:56px;object-position:50% 30%}
+.hero .fade{pointer-events:none;position:absolute;left:0;right:0;top:66vw;margin-top:-150px;height:150px;
 background:linear-gradient(180deg,transparent,rgba(17,16,16,.75) 58%,var(--surf))}
-.hero .info{padding:0 16px 17px;position:relative;margin-top:-46px}
+.hero .info{padding:0 16px 17px;position:relative;z-index:3;margin-top:-46px}
 .hero h2{font-size:24px;font-weight:800;letter-spacing:-.7px;line-height:1.15}
 .hero .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
 .fline{display:flex;gap:4px;align-items:center;margin-top:11px}
@@ -357,14 +406,14 @@ font-weight:800;border-bottom:1px solid #221F1B}
 
 /* Навигация по разделам вместо свайпа: еле заметные полоски у краёв экрана
    и дубль внизу страницы, чтобы не тянуться к кнопке «назад» самого Telegram. */
-.edge{position:fixed;top:50%;transform:translateY(-50%);z-index:5;width:24px;height:68px;
+.edge{position:fixed;top:0;bottom:0;transform:none;z-index:5;width:26px;
 display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
 background:rgba(23,21,18,.55);border:1px solid #201D19;color:var(--mute2);
 opacity:.34;transition:opacity .18s ease,background .18s ease,color .18s ease;
 -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 .edge i{font-style:normal;font-size:19px;line-height:1;font-weight:700;margin-top:-2px}
-.edge.l{left:0;border-left:0;border-radius:0 12px 12px 0}
-.edge.r{right:0;border-right:0;border-radius:12px 0 0 12px}
+.edge.l{left:0;border-left:0;border-radius:0}
+.edge.r{right:0;border-right:0;border-radius:0}
 .edge:active{opacity:1;background:rgba(40,33,24,.92);color:var(--amber)}
 @media (hover:hover){.edge:hover{opacity:.85;color:var(--amber)}}
 .edge.off{display:none}
@@ -398,7 +447,7 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
 <div class="grain"></div>
 <div class="wrap">
   <div class="hdr" id="hdr">
-    <div class="logo">PTF</div>
+    <div class="logo"><img src="/public/img/ptf.png" alt="PTF"></div>
     <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
     <div id="mePlate"></div>
   </div>
@@ -452,7 +501,9 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   avPrivacy:'Фото используется только для аватарки в лиге. Напиши организатору, если хочешь его удалить.',
   avNotChat:'Не отправляй фото в чат — загрузи его здесь.',avFull:'Открыть аватарку',
   cWins:'Победы',divPts:'Очки в дивизионе',racePts:'Очки в гонке',divPlace:'Место',
-  promoted:'Поднялись дивизионом выше',achHolders:'Награды сезона',myCard:'Моя карточка',
+  promoted:'Повышения',relegated:'Понижения',achHolders:'Награды сезона',myCard:'Моя карточка',
+  finalLab:'Финал',champTag:'Чемпион дивизиона',howDivT:'Как работает дивизион',
+  howRaceT:'Как начисляются очки гонки',
   openDiv:'Открыть таблицу дивизиона',lastSeason:'Итоги прошлого сезона',runnerUp:'Финалист',
   howPoints:'Как начисляются очки',
   howRace:'Годовая гонка складывается из очков за все сезоны. Очки начисляются за место в дивизионе по итогам регулярной части и за результат в плей-офф. Чем выше дивизион, тем дороже каждое место.',
@@ -497,7 +548,9 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   avPrivacy:'The photo is used only for your league avatar. Message the organizer if you want it deleted.',
   avNotChat:'Do not send the photo to the chat — upload it here.',avFull:'Open the avatar',
   cWins:'Wins',divPts:'Division points',racePts:'Race points',divPlace:'Place',
-  promoted:'Moved up a division',achHolders:'Season awards',myCard:'My profile',
+  promoted:'Promotions',relegated:'Relegations',achHolders:'Season awards',myCard:'My profile',
+  finalLab:'Final',champTag:'Division champion',howDivT:'How the division works',
+  howRaceT:'How race points are awarded',
   openDiv:'Open the division table',lastSeason:'Last season results',runnerUp:'Runner-up',
   howPoints:'How points are awarded',
   howRace:'The Yearly Race adds up points from every season. Points come from your place in the division after the regular stage and from your play-off result. The higher the division, the more each place is worth.',
@@ -548,6 +601,8 @@ function fallbackAv(img,ini){
 function divLabel(d){
   var v=String(d||'').trim();
   if(!v)return '';
+  // Prime — имя собственное, «Division Prime» звучит нелепо.
+  if(/^prime$/i.test(v))return 'Prime';
   return /^(division|дивизион)/i.test(v)?v:('Division '+v);
 }
 function divClass(d){
@@ -954,49 +1009,56 @@ function chLine(pl,sub,small){
     +av(pl)+'<div><div class="nm2">'+esc(pl.name)+'</div>'
     +(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div><span></span></div>';
 }
+// Крупная карточка чемпиона: большая аватарка, под ней дивизион и титул, ниже —
+// сам финал со счётом, чтобы финалист был виден без отдельной строки.
+function champCard(d,seasonNumber){
+  if(!d.champion)return '';
+  var fin=d.final||null;
+  var h='<div class="chbig" onclick="openPlayerByName(\''+q(d.champion.name)+'\',\'home\')">'
+    +av(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div>'
+    +'<div class="sub">'+esc((d.title||divLabel(d.letter))+' · '+X.champTag)+'</div>';
+  if(fin&&fin.first&&fin.second){
+    var w1=fin.winner_id&&String(fin.winner_id)===String(fin.first.id);
+    h+='<div class="chfin"><div class="sd'+(w1?' w':'')+'">'+esc(shortName(fin.first.name))+'</div>'
+      +'<div class="sc2">'+esc(fin.score||'—')+'</div>'
+      +'<div class="sd'+(w1?'':' w')+'">'+esc(shortName(fin.second.name))+'</div></div>';
+  }
+  return h+'</div>';
+}
+// Переход между дивизионами: аватарка покрупнее и путь стрелкой.
+function mvLine(pl,cls,arrow){
+  return '<div class="mv '+cls+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
+    +av(pl)+'<div><div class="nm2">'+esc(pl.name)
+    +(pl.wildcard?'<span class="wc">wildcard</span>':'')+'</div>'
+    +'<div class="path">'+esc(divLabel(pl.from))+' <i>'+arrow+'</i> '+esc(divLabel(pl.to))+'</div></div></div>';
+}
 function championsBlock(){
   var s=lastFinishedSeason();
   if(!s)return '';
   var h='<div class="card"><h3>'+esc(X.lastSeason)+' · '+esc(s.label||('Season '+s.number))+'</h3>';
   var any='';
-  (s.divisions||[]).forEach(function(d){
-    if(d.champion)any+=chLine(d.champion,'🏆 '+divLabel(d.letter)+(d.final_score?' · '+d.final_score:''));
-    if(d.runner_up)any+=chLine(d.runner_up,X.runnerUp+' · '+divLabel(d.letter),true);
-  });
+  (s.divisions||[]).forEach(function(d){ any+=champCard(d,s.number) });
   h+=any||'<div class="hint">'+esc(X.noData)+'</div>';
-  // Подъём по дивизионам считается по регулярке: первые два места идут выше.
-  // Из самого верхнего дивизиона подниматься некуда — его пропускаем.
-  var letters=(s.divisions||[]).map(function(d){return String(d.letter||'')}).sort();
-  var top=letters[0]||'';
-  var up='';
+  // Кто поднимается и кто падает — считает сервер по местам в регулярке
+  // и по вайлдкартам из ачивок.
+  var up='',down='';
   (s.divisions||[]).forEach(function(d){
-    if(String(d.letter||'')===top)return;
-    (d.table||[]).forEach(function(pl){
-      if(pl.place&&pl.place<=2)up+=chLine(pl,'▲ '+divLabel(d.letter)+' · #'+pl.place,true);
-    });
+    (d.promoted||[]).forEach(function(pl){ up+=mvLine(pl,'up','→') });
+    (d.relegated||[]).forEach(function(pl){ down+=mvLine(pl,'down','→') });
   });
-  if(up)h+='<div class="lab" style="margin-top:12px">'+esc(X.promoted)+'</div>'+up;
+  if(up)h+='<div class="lab" style="margin-top:14px">'+esc(X.promoted)+'</div>'+up;
+  if(down)h+='<div class="lab" style="margin-top:14px">'+esc(X.relegated)+'</div>'+down;
   return h+'</div>';
 }
 function renderHome(){
   var h='';
-  var mine=players.filter(function(p){
-    return String(p.name||'').toLowerCase()===String(me&&me.name||'').toLowerCase();
-  })[0];
-  if(mine){
-    h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3>'
-      +'<div class="tb"><div class="trw'+(mine.position&&mine.position<=3?' top':'')+'" onclick="openPlayer(\''+q(mine.id)+'\',\'home\')">'
-      +'<span class="p">'+(mine.position||'—')+'</span>'+av(mine)
-      +'<span class="n"><div class="nm">'+esc(mine.name)+'</div><div style="margin-top:3px">'+divChip(mine.division)+'</div></span>'
-      +'<span>'+mine.matches+'</span><span>'+pct(mine)+'%</span><span class="pt">'+mine.points+'</span></div></div></div>';
-  } else {
-    h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3><div class="hint">'+esc(X.notInLeague)+'</div></div>';
-  }
+  // Блок «Твой сезон» убран: своя карточка открывается плашкой в шапке.
   // Когда и где играем — самое частое, что спрашивают в чате. Логотип площадки
   // добавим отдельно, когда Костас пришлёт файл.
   h+='<div class="card"><h3>'+esc(X.sInfo)+'</h3>'
-    +'<div class="stats">'+stt(X.sDates,X.sDatesV,true)+stt(X.sSemi,X.sSemiV)
-    +stt(X.sVenue,X.sVenueV)+'</div></div>';
+    +'<div class="stats">'+stt(X.sDates,X.sDatesV,true)+stt(X.sSemi,X.sSemiV)+'</div>'
+    +'<div class="venue"><img src="/public/img/peak.jpg" alt="">'
+    +'<div><div class="vt">'+esc(X.sVenueV)+'</div><div class="vd">'+esc(X.sVenue)+'</div></div></div></div>';
   loadSummary();
   h+=championsBlock();
   var champs=players.filter(function(p){
@@ -1046,8 +1108,96 @@ function raceList(){
     return rDesc?-r:r;
   });
 }
-function spoiler(title,text){
-  return '<details class="spo"><summary>? '+esc(title)+'</summary><div class="in">'+esc(text)+'</div></details>';
+var RULES_DIV = {
+  ru: '<h4>Регулярная часть</h4>'
+    +'<ul><li>Каждый игрок проводит 7 матчей регулярной части. Таблица строится по лиговым очкам.</li>'
+    +'<li>Победа — 3 очка, поражение — 1 очко.</li>'
+    +'<li>Техническая победа засчитывается как победа и даёт лиговые очки, но не добавляет сетов и геймов для тай-брейков таблицы.</li>'
+    +'<li>Для полноценного спортивного результата нужно сыграть все 7 матчей.</li></ul>'
+    +'<h4>Места в таблице</h4>'
+    +'<ul><li>Места 1–2 поднимаются дивизионом выше. Из дивизиона A наверх идёт только победитель — место в Prime одно.</li>'
+    +'<li>Обладатель wildcard поднимается независимо от места.</li>'
+    +'<li>Места 3–6 остаются в своём дивизионе.</li>'
+    +'<li>Места 7–8 опускаются дивизионом ниже. Из Prime и из дивизиона D не опускается никто.</li>'
+    +'<li>Места 1–4 выходят в плей-офф.</li>'
+    +'<li>За итоговое место начисляются очки годовой гонки (YRP).</li></ul>'
+    +'<h4>Тай-брейки</h4>'
+    +'<ul><li>При равенстве лиговых очков сравниваются: число побед, разница сетов, разница геймов, личная встреча.</li>'
+    +'<li>Если равны трое и больше — тот же порядок сравнения, без отдельной мини-таблицы.</li></ul>'
+    +'<h4>Плей-офф</h4>'
+    +'<ul><li>Плей-офф определяет итоговый спортивный результат дивизиона: победителя, призёров, финальные места и итоговые очки гонки.</li>'
+    +'<li>Регулярная часть расставляет игроков по позициям, плей-офф решает, кто заканчивает дивизион первым.</li></ul>',
+  en: '<h4>Regular season</h4>'
+    +'<ul><li>Each player plays 7 regular season matches. The table is ranked by League Points.</li>'
+    +'<li>Win = 3 points, loss = 1 point.</li>'
+    +'<li>A technical win counts as a win and gives League Points, but it does not add extra sets or games for tie-break statistics.</li>'
+    +'<li>For a full sporting result, a player should complete all 7 matches.</li></ul>'
+    +'<h4>Table positions</h4>'
+    +'<ul><li>Places 1-2 move up to a higher division. From Division A only the winner moves up, because Prime has a single spot.</li>'
+    +'<li>A wildcard holder moves up regardless of place.</li>'
+    +'<li>Places 3-6 stay in the same division.</li>'
+    +'<li>Places 7-8 move down to a lower division. Nobody drops out of Prime or Division D.</li>'
+    +'<li>Places 1-4 qualify for the playoffs.</li>'
+    +'<li>Players also receive YRP points based on their final position.</li></ul>'
+    +'<h4>Tie-breaks</h4>'
+    +'<ul><li>If players are tied on League Points: number of wins, set difference, game difference, head-to-head result.</li>'
+    +'<li>If 3 or more players are tied, the same general tie-break system is used, without a separate mini-table.</li></ul>'
+    +'<h4>Playoffs</h4>'
+    +'<ul><li>The playoffs decide the final sporting result of the division: the winner, prize winners, final season positions and final Year Ranking Points.</li>'
+    +'<li>The regular season gets players into position, and the playoffs decide who finishes the division on top.</li></ul>'
+};
+var YRP_BASE = [[1,160,130,106,86,70],[2,145,118,96,78,63],[3,132,107,87,71,57],[4,120,97,79,64,52],
+  [5,108,87,71,58,47],[6,96,78,63,51,42],[7,84,68,55,45,37],[8,72,59,48,39,32]];
+var YRP_BONUS = [['A','+12','+18','+30'],['B','+10','+15','+25'],['C','+8','+12','+20'],
+  ['D','+6','+9','+15'],['E','+5','+7','+12'],['Prime','+12','+18','+30']];
+function yrpTables(L){
+  var h1=L?['Место','Div A','Div B','Div C','Div D','E и ниже']:['Place','Div A','Div B','Div C','Div D','E / below'];
+  var t='<table><tr>'+h1.map(function(x){return '<th>'+esc(x)+'</th>'}).join('')+'</tr>'
+    +YRP_BASE.map(function(r){return '<tr>'+r.map(function(v){return '<td>'+v+'</td>'}).join('')+'</tr>'}).join('')+'</table>';
+  var h2=L?['Дивизион','Победа в полуфинале','Победа в финале','Максимум']:['Division','Win in semifinal','Win in final','Maximum bonus'];
+  t+='<h4>'+esc(L?'Бонусы плей-офф':'Playoff bonus points')+'</h4><table><tr>'
+    +h2.map(function(x){return '<th>'+esc(x)+'</th>'}).join('')+'</tr>'
+    +YRP_BONUS.map(function(r){return '<tr>'+r.map(function(v){return '<td>'+esc(v)+'</td>'}).join('')+'</tr>'}).join('')+'</table>';
+  return t;
+}
+var RULES_RACE = {
+  ru: '<h4>Что такое YRP</h4>'
+    +'<ul><li>Year Ranking Points — сезонные спортивные очки. Из них складывается годовой рейтинг игрока внутри Phuket Tennis Family.</li>'
+    +'<li>YRP это не деньги, не кредиты и не внутренняя валюта. Они показывают долгий спортивный результат за год.</li>'
+    +'<li>Базовые YRP игрок получает за результат сезона, участники плей-офф добавляют бонус сверху.</li></ul>'
+    +'<h4>Как начисляются</h4>'
+    +'<ul><li>Базовые YRP даются за итоговое место в таблице дивизиона или группы.</li>'
+    +'<li>Плей-офф добавляет очки поверх базовых очков регулярной части.</li>'
+    +'<li>Проигравший полуфинал бонуса не получает. Проигравший финал получает только бонус за победу в полуфинале. Победитель дивизиона получает оба бонуса.</li>'
+    +'<li>Prime считается по той же шкале, что и дивизион A.</li></ul>'
+    +'<h4>Базовые очки за место</h4>',
+  en: '<h4>What is YRP</h4>'
+    +'<ul><li>Year Ranking Points are seasonal sports ranking points. They form the annual ranking inside Phuket Tennis Family.</li>'
+    +'<li>YRP are not money, credits, or an internal currency. They show a long-term sporting result across the year.</li>'
+    +'<li>A player earns base YRP from the season result, and playoff players can add bonus points on top.</li></ul>'
+    +'<h4>How points are added</h4>'
+    +'<ul><li>Base YRP are awarded according to the final place in the division or group table.</li>'
+    +'<li>The playoff gives additional YRP on top of the base regular season points.</li>'
+    +'<li>A losing semifinalist gets no playoff bonus. A losing finalist gets only the semifinal win bonus. The division winner gets both bonuses.</li>'
+    +'<li>Prime uses the same YRP scale as Division A.</li></ul>'
+    +'<h4>Base YRP by place</h4>'
+};
+var RULES_GF = {
+  ru: '<h4>Отбор в Grand Final</h4>'
+    +'<ul><li>Grand Final — главный турнир года для лучших и самых стабильных игроков по накопленным очкам гонки.</li>'
+    +'<li>Отбор идёт двумя блоками: верхний — дивизионы A и B, нижний — дивизионы C и D.</li>'
+    +'<li>Игрок попадает в свой блок по дивизиону, в котором находится на дату отсечки.</li>'
+    +'<li>Если за год игрок играл в разных дивизионах, его очки сохраняются. Для отбора считаются три лучших сезона.</li></ul>',
+  en: '<h4>Grand Final selection</h4>'
+    +'<ul><li>The Grand Final is the biggest tournament of the year for the best and most consistent players based on accumulated Year Ranking Points.</li>'
+    +'<li>Selection is divided into two blocks: Upper (Division A + B) and Lower (Division C + D).</li>'
+    +'<li>A player qualifies for the block according to the division they are in at the qualification cutoff date.</li>'
+    +'<li>If a player played in different divisions during the year, their points are preserved. Only the best three season results count.</li></ul>'
+};
+function rulesDiv(){ return L?RULES_DIV.ru:RULES_DIV.en }
+function rulesRace(){ return (L?RULES_RACE.ru:RULES_RACE.en)+yrpTables(L)+(L?RULES_GF.ru:RULES_GF.en) }
+function spoiler(title,html){
+  return '<details class="spo"><summary>? '+esc(title)+'</summary><div class="in">'+html+'</div></details>';
 }
 function renderRace(){
   var list=raceList();
@@ -1084,7 +1234,7 @@ function renderRace(){
       +'<span>'+w+'%<div class="bar"><i style="width:'+w+'%"></i></div></span>'
       +'<span class="pt">'+p.points+'</span></div>';
   }).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
-  h+='</div><div class="tip">'+esc(X.sortTip)+'</div>'+spoiler(X.howPoints,X.howRace);
+  h+='</div><div class="tip">'+esc(X.sortTip)+'</div>'+spoiler(X.howRaceT,rulesRace());
   $('viewRace').innerHTML=h;
   keepFocus('rq',rQuery);
 }
@@ -1283,7 +1433,7 @@ function renderDiv(){
     +(showExt?extTable(d):'')
     +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
     +(showMx?mxTable(d):'')
-    +spoiler(X.howPoints,X.howDiv);
+    +spoiler(X.howDivT,rulesDiv());
   $('viewDiv').innerHTML=h;
 }
 function poBox(title,m,isFinal){
@@ -1383,12 +1533,12 @@ function setFQuery(v){fQuery=v;fLimit=20;renderFeed()}
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
   var top=[m.no?'#'+m.no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
-  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+  return '<div class="mt">'+divTag(m.division,m.season)+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
     +'<div class="mid"><div class="nm3"><b>'+esc(m.winner.name)+'</b> <s>vs</s> <em>'+esc(m.loser.name)+'</em></div>'
     +'<div class="sc">'+esc(m.score||'—')+'</div>'
-    +(m.division?'<div style="margin-top:6px">'+divChip(m.division)+'</div>':'')+'</div>'
+    +(m.division?'<div style="margin-top:6px" onclick="event.stopPropagation();openDivFrom(\''+q(m.season||'')+'\',\''+q(m.division)+'\')">'+divChip(m.division)+'</div>':'')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+av(m.loser)+'</div>'
     +'</div></div>';
 }
@@ -1557,11 +1707,21 @@ function renderPlayer(p){
   $('viewCard').innerHTML=h;
 }
 function stt(k,v,acc){ return v?'<div class="stt"><div class="k">'+esc(k)+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>':'' }
+// Ярлык дивизиона на карточке матча: показывает, в каком дивизионе матч игрался,
+// и открывает таблицу того самого сезона.
+function divTag(division,season){
+  if(!division)return '';
+  return '<div class="mdiv" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(division)+'\')">'
+    +esc(divLabel(division))+'</div>';
+}
 function matchRow(m){
   var opp={name:m.opponent,photo:m.opponent_photo};
+  // Дивизион берём из истории матчей — там записан тот, в котором матч реально
+  // игрался, а не текущий дивизион игрока. Клик ведёт в ту самую таблицу.
+  var dv=divTag(m.division,m.season);
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
   var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
-  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+  return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'

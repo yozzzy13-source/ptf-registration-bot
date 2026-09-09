@@ -21,7 +21,7 @@ export const WEBSITE_PLAYERS_SHEET_ID = process.env.WEBSITE_PLAYERS_SHEET_ID || 
 // Если не задана, окна уходят в админский чат (чтобы ничего не терялось на этапе настройки).
 // Отдельная таблица под матчи: заявки и журнал лиги живут вне основной таблицы PTF.
 export const MATCHES_SPREADSHEET_ID = process.env.MATCHES_SPREADSHEET_ID || '';
-export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log', courts:'Courts', results:'Match Results' };
+export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log', courts:'Courts', results:'Match Results', divisions:'Divisions' };
 // Таблицы лиги, куда зеркалим подтверждённый счёт (как это делал results-бот).
 // Если не заданы — результат просто остаётся в таблице матчей.
 // В Railway эта таблица называется RESULTS_SHEET_ID — принимаем оба имени,

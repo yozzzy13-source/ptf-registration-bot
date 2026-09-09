@@ -334,6 +334,10 @@ export async function getLeagueMatchHistory() {
       opponent_photo: r.opponent_photo_url || '',
       opponent_division: r.opponent_division || '',
       division: r.player_division || '',
+      // Сезон матча вытаскиваем из названия соревнования («Final S1», «Round 3 S2»).
+      // Он нужен, чтобы клик по ярлыку дивизиона вёл в таблицу того самого сезона.
+      season: (String(r.season_id || r.season || '').trim()
+        || (String(r.competition || '').match(/\bS\s*(\d+)\b/i) || [])[1] || ''),
       result: String(r.result || '').toUpperCase().startsWith('W') ? 'WIN' : 'LOST',
       score: r.score || ''
     };

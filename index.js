@@ -21,7 +21,7 @@ import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlot
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
-import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache } from './division.js';
+import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles } from './division.js';
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -905,11 +905,25 @@ app.get('/api/league/schedule', async (req, res) => {
 let seasonsSummaryCache = { t: 0, v: null };
 const SEASONS_SUMMARY_MS = 5 * 60 * 1000;
 
+// Лестница дивизионов. Женский дивизион (W) идёт отдельной веткой и в подъёмах
+// и вылетах не участвует — у него своя история.
+const DIVISION_LADDER = ['PRIME', 'A', 'B', 'C', 'D'];
+// Сколько мест поднимается из дивизиона. Из A наверх идёт только победитель,
+// потому что Prime один; из остальных — первые два места регулярки.
+function promoCount(letter) { return letter === 'A' ? 1 : 2; }
+// Вылетают 7–8 места. Из D падать некуда, Prime тоже никого не отпускает.
+function relegates(letter) { return letter !== 'D' && letter !== 'PRIME'; }
+function hasWildcard(list = []) {
+  return list.some(a => /wildcard|wild\s*card/i.test(String(a.title || a.type || '')));
+}
+
 async function buildSeasonsSummary() {
   const seasonList = await getSeasons().catch(() => []);
+  const achievements = await getLeagueAchievements().catch(() => new Map());
   const out = [];
   for (const season of seasonList) {
     const letters = await availableDivisions(season.number).catch(() => []);
+    const titles = await divisionTitles(season.number).catch(() => ({}));
     const divisions = [];
     for (const letter of letters) {
       const data = await getDivisionTable(letter, season.number).catch(() => null);
@@ -928,7 +942,29 @@ async function buildSeasonsSummary() {
         const other = String(final.first?.id) === String(champion.id) ? final.second : final.first;
         if (other?.id) runnerUp = { id: String(other.id), name: other.name, photo: other.photo || '' };
       }
-      divisions.push({ letter, champion, runner_up: runnerUp, final_score: final?.score || '', table });
+      // Кто поднимается и кто падает. Считаем по регулярке, а не по плей-офф:
+      // именно место в таблице решает судьбу дивизиона.
+      const idx = DIVISION_LADDER.indexOf(letter);
+      const upTo = idx > 0 ? DIVISION_LADDER[idx - 1] : '';
+      const downTo = idx >= 0 && idx < DIVISION_LADDER.length - 1 ? DIVISION_LADDER[idx + 1] : '';
+      const promoted = [];
+      const relegated = [];
+      if (upTo) {
+        const limit = promoCount(letter);
+        for (const pl of table) {
+          const wild = hasWildcard(achievements.get(String(pl.id)) || []);
+          if ((pl.place && pl.place <= limit) || wild) {
+            promoted.push({ ...pl, from: letter, to: upTo, wildcard: wild && pl.place > limit });
+          }
+        }
+      }
+      if (downTo && relegates(letter)) {
+        for (const pl of table) {
+          if (pl.place && pl.place >= 7) relegated.push({ ...pl, from: letter, to: downTo });
+        }
+      }
+      divisions.push({ letter, title: titles[letter] || '', champion, runner_up: runnerUp,
+        final_score: final?.score || '', final: final || null, table, promoted, relegated });
     }
     out.push({ number: season.number, label: season.label, status: season.status, divisions });
   }
