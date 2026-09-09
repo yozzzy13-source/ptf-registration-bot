@@ -921,8 +921,15 @@ const DIVISION_LADDER = ['PRIME', 'A', 'B', 'C', 'D'];
 function promoCount(letter) { return letter === 'A' ? 1 : 2; }
 // Вылетают 7–8 места. Из D падать некуда, Prime тоже никого не отпускает.
 function relegates(letter) { return letter !== 'D' && letter !== 'PRIME'; }
-function hasWildcard(list = []) {
-  return list.some(a => /wildcard|wild\s*card/i.test(String(a.title || a.type || '')));
+// Wildcard — ачивка, в названии которой встречается это слово. Считаем только
+// ачивку того сезона, который сейчас разбираем; если сезон в строке не указан,
+// принимаем как есть — руками его заполняют не всегда.
+function hasWildcard(list = [], season = '') {
+  return list.some(a => {
+    if (!/wildcard|wild\s*card/i.test(String(a.title || a.type || ''))) return false;
+    const s = String(a.season || '').trim();
+    return !s || !season || s === String(season);
+  });
 }
 
 async function buildSeasonsSummary() {
@@ -960,7 +967,7 @@ async function buildSeasonsSummary() {
       if (upTo) {
         const limit = promoCount(letter);
         for (const pl of table) {
-          const wild = hasWildcard(achievements.get(String(pl.id)) || []);
+          const wild = hasWildcard(achievements.get(String(pl.id)) || [], season.number);
           if ((pl.place && pl.place <= limit) || wild) {
             promoted.push({ ...pl, from: letter, to: upTo, wildcard: wild && pl.place > limit });
           }
