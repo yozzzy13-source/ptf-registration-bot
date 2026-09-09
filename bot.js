@@ -140,7 +140,9 @@ async function sendMain(chatId, lang, from=null) {
 const commandSignature = new Map();
 async function syncUserCommands(chatId, lang, { active=false, admin=false } = {}) {
   const l = lang === 'ru' ? 'ru' : 'en';
-  const sig = `${admin ? 'admin' : (active ? 'match' : 'base')}:${l}`;
+  // Версия в подписи: когда список команд меняется, Telegram должен получить
+  // новый — иначе у тех, кому уже выставляли команды, останется старое меню.
+  const sig = `v2:${admin ? 'admin' : (active ? 'match' : 'base')}:${l}`;
   if (commandSignature.get(String(chatId)) === sig) return;
   const list = admin ? [...ADMIN_COMMANDS, ...MATCH_COMMANDS[l]]
     : (active ? [...MATCH_COMMANDS[l], ...PLAYER_COMMANDS[l]] : PLAYER_COMMANDS[l]);
