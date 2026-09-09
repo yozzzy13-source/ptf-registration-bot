@@ -61,14 +61,17 @@ async function sheetsSeason() {
 // ID таблицы дивизиона. Сначала пробуем таблицу конкретного сезона
 // (division_a_s2_sheet_id), затем общую — но только для того сезона, которому
 // эти общие таблицы принадлежат, иначе новый сезон показал бы данные старого.
-async function divisionSheetId(letter, season = '') {
+async function divisionSheetId(letter, season = '', group = '') {
   const key = divisionLetter(letter);
   const low = key.toLowerCase();
   // Сначала реестр — лист Divisions в таблице матчей. Он главный источник:
   // там на каждый сезон своя строка со ссылкой, поэтому прошлые сезоны никуда
   // не деваются, когда начинается новый.
   const reg = await divisionRegistry().catch(() => []);
-  const hit = reg.find(r => r.letter === key && (!season || String(r.season) === String(season)));
+  const rows = reg.filter(r => r.letter === key && (!season || String(r.season) === String(season)));
+  const hit = group
+    ? rows.find(r => String(r.group) === String(group))
+    : rows[0];
   if (hit) return hit.spreadsheet_id;
   if (season && reg.some(r => String(r.season) === String(season))) return '';
   if (season) {
@@ -78,6 +81,15 @@ async function divisionSheetId(letter, season = '') {
   }
   const fromSettings = await getSetting(`division_${low}_sheet_id`).catch(() => '');
   return txt(fromSettings) || DIVISION_SPREADSHEETS[key] || '';
+}
+
+// Группы внутри дивизиона: две таблицы одного дивизиона в одном сезоне.
+// Пустой список — обычный дивизион с одной таблицей.
+export async function divisionGroups(letter, season = '') {
+  const key = divisionLetter(letter);
+  const reg = await divisionRegistry().catch(() => []);
+  const rows = reg.filter(r => r.letter === key && (!season || String(r.season) === String(season)) && r.group);
+  return rows.map(r => ({ group: r.group, title: r.group_title || `Группа ${r.group}` }));
 }
 
 // Как называть дивизион в интерфейсе. Берём из реестра, если там задано имя,
@@ -124,13 +136,13 @@ async function readMatchLog(spreadsheetId) {
   return { headers, rows };
 }
 
-export async function getDivisionTable(letter, season = '') {
+export async function getDivisionTable(letter, season = '', group = '') {
   const key = divisionLetter(letter);
-  const cacheId = `${season || '-'}:${key}`;
+  const cacheId = `${season || '-'}:${key}:${group || '-'}`;
   const hit = cache.get(cacheId);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
 
-  const spreadsheetId = await divisionSheetId(key, season);
+  const spreadsheetId = await divisionSheetId(key, season, group);
   if (!spreadsheetId) return { ok: false, reason: 'not_configured', division: key, season };
 
   let rows = [];

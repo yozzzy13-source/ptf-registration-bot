@@ -136,7 +136,7 @@ export async function getCourts() {
 // ссылкой на его таблицу. Раньше ссылки лежали россыпью в Settings и их надо было
 // заменять при смене сезона; здесь прошлые сезоны просто остаются строками, и
 // история матчей всегда знает, в каком дивизионе матч был сыгран.
-const REGISTRY_HEADERS = ['season', 'letter', 'title', 'title_en', 'sheet_url', 'status', 'order'];
+const REGISTRY_HEADERS = ['season', 'letter', 'group', 'group_title', 'title', 'title_en', 'sheet_url', 'status', 'order'];
 let registryCache = { t: 0, v: null };
 const REGISTRY_MS = 5 * 60 * 1000;
 
@@ -165,6 +165,10 @@ export async function divisionRegistry() {
     .map(r => ({
       season: safe(r.season),
       letter: safe(r.letter).toUpperCase(),
+      // Дивизион может идти двумя группами: две строки с одной буквой и разными
+      // номерами групп, у каждой своя таблица. Пустая группа — обычный дивизион.
+      group: safe(r.group),
+      group_title: safe(r.group_title),
       title: safe(r.title),
       title_en: safe(r.title_en || r.title),
       spreadsheet_id: spreadsheetIdFromUrl(r.sheet_url || r.url || r.link || r.sheet_id),
@@ -173,7 +177,7 @@ export async function divisionRegistry() {
     }))
     .filter(r => r.season && r.letter && r.spreadsheet_id)
     .filter(r => r.status !== 'off' && r.status !== 'hidden');
-  out.sort((a, b) => (a.order - b.order) || a.letter.localeCompare(b.letter));
+  out.sort((a, b) => (a.order - b.order) || a.letter.localeCompare(b.letter) || String(a.group).localeCompare(String(b.group)));
   registryCache = { t: Date.now(), v: out };
   return out;
 }

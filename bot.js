@@ -11,7 +11,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -302,6 +302,7 @@ function adminHelpText() {
     '/match_test — проверка таблиц матчей и таблиц лиги',
     '/topic_test — проверка вебхука и топиков игроков',
     '/topic_sync — привязать существующие темы к текущей админской группе',
+    '/payment_auto on|off — счёт на участие сразу или после вашего подтверждения',
     '/links — коды разделов для рассылок',
     '/profile telegram_id — карточка игрока',
     '',
@@ -718,6 +719,18 @@ export async function handleMessage(msg) {
 
   if (isAdminUser(from.id)) {
     if (text === '/stats') return adminStats(chatId);
+    // Рубильник автосчёта по сезону: /payment_auto — показать, /payment_auto off — выключить.
+    if (text === '/payment_auto' || text.startsWith('/payment_auto ')) {
+      const arg = text.replace('/payment_auto', '').trim().toLowerCase();
+      if (arg === 'on' || arg === 'off') {
+        await setPaymentAuto(arg === 'on');
+        return sendMessage(chatId, arg === 'on'
+          ? '💳 Автосчёт <b>включён</b>: заявка сразу открывает игроку оплату.'
+          : '🛑 Автосчёт <b>выключен</b>: игрок получает «проверяем места», а в его топике появляется кнопка «Выставить счёт».');
+      }
+      const on = await paymentAutoOn();
+      return sendMessage(chatId, `Автосчёт сейчас: <b>${on ? 'включён' : 'выключен'}</b>.\n\n/payment_auto on — включить\n/payment_auto off — выключить`);
+    }
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/topic_sync') return adminTopicSync(msg);
     if (text === '/match_test') return adminMatchTest(msg);
@@ -1089,6 +1102,10 @@ export async function handleCallback(q) {
       const targetTelegramId = data.split(':')[1];
       adminState.set(String(from.id), { mode:'reply_waiting', targetTelegramId });
       return sendMessage(chatId, `Write reply to TGID <code>${escapeHtml(targetTelegramId)}</code>.`);
+    }
+    if (data.startsWith('admin_invoice:')) {
+      const applicationId = data.split(':')[1];
+      return sendInvoiceToApplicant({ chatId, applicationId });
     }
     if (data.startsWith('admin_status:')) {
       const [, applicationId, status] = data.split(':');

@@ -7,7 +7,7 @@ import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, withRatingSourceTag, ratingSourceOf } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
-import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant } from './admin.js';
+import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
@@ -21,7 +21,7 @@ import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlot
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
-import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles } from './division.js';
+import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -333,7 +333,15 @@ app.post('/api/submit-application', async (req, res) => {
         console.error('notifyNewApplication failed:', notifyError.message);
       }
     }
-    if (isEventApplication && paymentRequired) {
+    // Рубильник автосчёта: когда он выключен, игрок не получает реквизиты сразу —
+    // сначала организатор смотрит, есть ли место, и жмёт «Выставить счёт» в топике.
+    // Саму ветку оплаты не трогаем: она запускается тем же sendPaymentStart, просто позже.
+    const autoInvoice = await paymentAutoOn().catch(() => true);
+    if (isEventApplication && paymentRequired && !autoInvoice) {
+      await sendMessage(user.id, lang === 'ru'
+        ? `✅ Заявка на «${eventName}» принята.\n\nОплата пока не открыта: проверяем свободные места в дивизионе. Как только место подтвердится, пришлю счёт сюда же — обычно в течение дня.\n\nМесто закрепляется только после оплаты.`
+        : `✅ Your application for “${eventName}” has been received.\n\nPayment is not open yet: we are checking free spots in the division. As soon as a spot is confirmed, I will send the invoice right here — usually within a day.\n\nThe spot is secured only after payment.`);
+    } else if (isEventApplication && paymentRequired) {
       await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.
 
 <b>Следующий шаг — оплата участия.</b>
@@ -993,9 +1001,23 @@ app.get('/api/league/division', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const data = await getDivisionTable(String(req.query.letter || ''), String(req.query.season || ''));
+    const letter = String(req.query.letter || '');
+    const season = String(req.query.season || '');
+    const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };
+    // Дивизион может идти двумя группами — тогда отдаём обе таблицы одним ответом,
+    // и витрина показывает их одну под другой.
+    const groups = await divisionGroups(letter, season).catch(() => []);
+    if (groups.length > 1) {
+      const parts = [];
+      for (const g of groups) {
+        const t = await getDivisionTable(letter, season, g.group).catch(() => null);
+        if (t?.ok) parts.push({ group: g.group, group_title: g.title, ...t });
+      }
+      if (!parts.length) return res.status(404).json({ ok:false, error: messages.not_configured });
+      return res.json({ ok:true, ...parts[0], groups: parts });
+    }
+    const data = await getDivisionTable(letter, season);
     if (!data.ok) {
-      const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };
       return res.status(404).json({ ok:false, error: messages[data.reason] || 'Дивизион недоступен' });
     }
     res.json({ ok:true, ...data });

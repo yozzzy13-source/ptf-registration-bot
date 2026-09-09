@@ -1411,7 +1411,28 @@ function renderDiv(){
       +'</div><div class="conn"><i></i><u></u></div><div class="col">'
       +poBox(X.final,po.final,true)+'</div></div>';
   }
-  h+='<div class="lab">'+esc(X.standings)+'<span class="dot"></span>'+esc(divLabel(d.division))+'</div>'
+  h+=standingsBlock(d,divLabel(d.division));
+  // Дивизион может идти двумя группами: показываем вторую таблицу сразу под первой,
+  // без переключателей — так проще сравнивать составы.
+  var groups=d.groups||[];
+  if(groups.length>1){
+    h=chips;
+    for(var gi=0;gi<groups.length;gi++){
+      var g=groups[gi];
+      h+=standingsBlock(g,divLabel(d.division)+' · '+(g.group_title||('Группа '+g.group)));
+    }
+  }
+  h+='<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
+    +(showExt?extTable(d):'')
+    +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
+    +(showMx?mxTable(d):'')
+    +spoiler(X.howDivT,rulesDiv());
+  $('viewDiv').innerHTML=h;
+}
+// Турнирная таблица одного состава: используется и для обычного дивизиона,
+// и для каждой группы, когда дивизион разбит на две.
+function standingsBlock(d,title){
+  return '<div class="lab">'+esc(X.standings)+'<span class="dot"></span>'+esc(title)+'</div>'
     +'<div class="panel"><div class="drow hd"><span class="p">#</span><span class="n"><em>'+esc(X.colPlayer)+'</em></span>'
     +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span></span></div>'
     +d.players.map(function(p){
@@ -1428,13 +1449,7 @@ function renderDiv(){
     +'<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
     +'<span class="u"><i>▲</i> '+esc(X.zPromo)+'</span>'
     +'<span><i>—</i> '+esc(X.zStay)+'</span>'
-    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>'
-    +'<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
-    +(showExt?extTable(d):'')
-    +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
-    +(showMx?mxTable(d):'')
-    +spoiler(X.howDivT,rulesDiv());
-  $('viewDiv').innerHTML=h;
+    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>';
 }
 function poBox(title,m,isFinal){
   if(!m)return '';

@@ -311,11 +311,41 @@ export async function adminProfile(chatId, query) {
   await sendMessage(chatId, `<b>Player profile</b>\n\nName: <b>${escapeHtml(r.name)}</b>\nTGID: <code>${escapeHtml(r.telegram_id)}</code>\nUsername: ${r.telegram_username ? '@'+escapeHtml(r.telegram_username) : '-'}\nStatus: <b>${escapeHtml(r.status)}</b>\nDivision: ${escapeHtml(r.division)}\nNTRP: ${escapeHtml(r.ntrp)}\nExperience: ${escapeHtml(r.experience)}\nCountry: ${escapeHtml(r.country_of_origin)}\nWhatsApp: ${escapeHtml(r.whatsapp)}\nLast event: ${escapeHtml(r.last_application_event)}\nNotes: ${escapeHtml(r.notes)}`);
 }
 
+// Рубильник автосчёта по сезону. Ключ payment_auto в листе Settings:
+//   on (или пусто) — заявка сразу открывает оплату, как было;
+//   off            — сначала организатор проверяет места и жмёт «Выставить счёт».
+// Отдельных статусов и колонок не заводим: состояние живёт одной строкой настроек.
+export async function paymentAutoOn() {
+  const v = String(await getSetting('payment_auto').catch(() => '')).trim().toLowerCase();
+  return v !== 'off' && v !== 'no' && v !== '0' && v !== 'false';
+}
+export async function setPaymentAuto(on) {
+  await setSetting('payment_auto', on ? 'on' : 'off',
+    'on — счёт на участие уходит игроку сразу; off — сначала подтверждение организатора');
+  return on;
+}
+// Организатор нажал «Выставить счёт»: открываем игроку ту же ветку оплаты,
+// что и раньше, ничего в ней не меняя.
+export async function sendInvoiceToApplicant({ chatId, applicationId }) {
+  const app = await findApplication(applicationId).catch(() => null);
+  if (!app) return sendMessage(chatId, 'Заявка не найдена.');
+  const applicant = await findApplicantByTelegramId(app.telegram_id).catch(() => null);
+  const lang = (applicant?.language || 'en') === 'ru' ? 'ru' : 'en';
+  const { sendPaymentStart } = await import('./bot.js');
+  await sendMessage(app.telegram_id, lang === 'ru'
+    ? '✅ Место в дивизионе есть — оплата открыта.\n\nВыбери способ ниже. Место закрепляется после подтверждения оплаты.'
+    : '✅ There is a spot in the division — payment is open now.\n\nChoose a method below. The spot is confirmed once the payment is approved.');
+  await sendPaymentStart(app.telegram_id, lang, app.application_id);
+  await updateApplication(app.application_id, { application_status: 'waiting_payment' }).catch(() => {});
+  return sendMessage(chatId, `Счёт отправлен: <b>${escapeHtml(app.player_name || app.telegram_id)}</b>.`);
+}
+
 export async function notifyNewApplication(app, profile) {
   if (rememberApplicationNotification(app?.application_id)) return null;
   const topic = await getOrCreatePlayerTopic({ ...profile, telegram_id: app.telegram_id });
   const chatId = topic?.chatId || await getAdminChatId();
   if (!chatId) return null;
+  const withInvoice = !(await paymentAutoOn().catch(() => true));
   await sendMessage(chatId, `<b>🎾 New application</b>
 
 Application: <code>${escapeHtml(app.application_id)}</code>
@@ -331,7 +361,7 @@ Age: ${escapeHtml(profile.age)}
 Country: ${escapeHtml(profile.country_of_origin)}
 WhatsApp: ${escapeHtml(profile.whatsapp)}
 Notes: ${escapeHtml(profile.notes)}`, withTopicOpts(topic, {
-    reply_markup: adminApplicationKeyboard(app.application_id, app.telegram_id)
+    reply_markup: adminApplicationKeyboard(app.application_id, app.telegram_id, withInvoice)
   }));
 }
 

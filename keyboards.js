@@ -46,7 +46,16 @@ export function paymentEntryKeyboard(lang, { hasProfile=false, applicationId='',
   if (applicationId && ['payment_required','waiting_payment',''].includes(String(status || '').toLowerCase())) return inlineKeyboard([[{text:t(lang,'pay_now'),callback_data:`payment_menu:${applicationId}`}],[{text:t(lang,'join_event'),web_app:{url:`${PUBLIC_URL}/apply?mode=event`}}],[{text:t(lang,'back'),callback_data:'main'}]]);
   return inlineKeyboard([[webAppButton(t(lang,'join_event'),'/apply?mode=event')],[{text:t(lang,'back'),callback_data:'main'}]]);
 }
-export function adminApplicationKeyboard(applicationId, telegramId) { return inlineKeyboard([[{text:'✅ Set Active',callback_data:`admin_status:${applicationId}:active`},{text:'⏳ Waitlist',callback_data:`admin_status:${applicationId}:waitlist`}],[{text:'❌ Reject',callback_data:`admin_status:${applicationId}:rejected`},{text:'💬 Message',callback_data:`admin_reply:${telegramId}`}]]); }
+// Карточка заявки в админском топике. Кнопка «Выставить счёт» нужна, когда
+// автовыставление выключено рубильником: организатор сначала смотрит, есть ли
+// место в дивизионе, и только потом открывает игроку оплату.
+export function adminApplicationKeyboard(applicationId, telegramId, withInvoice=false) {
+  const rows = [];
+  if (withInvoice) rows.push([{text:'💳 Выставить счёт',callback_data:`admin_invoice:${applicationId}`}]);
+  rows.push([{text:'✅ Set Active',callback_data:`admin_status:${applicationId}:active`},{text:'⏳ Waitlist',callback_data:`admin_status:${applicationId}:waitlist`}]);
+  rows.push([{text:'❌ Reject',callback_data:`admin_status:${applicationId}:rejected`},{text:'💬 Message',callback_data:`admin_reply:${telegramId}`}]);
+  return inlineKeyboard(rows);
+}
 // В callback_data Telegram пропускает не больше 64 БАЙТ. Раньше сюда клали и
 // application_id, и payment_id — вместе выходило 76 байт, и Telegram отвечал
 // BUTTON_DATA_INVALID: карточка с чеком не отправлялась вообще, ни в тему, ни в
