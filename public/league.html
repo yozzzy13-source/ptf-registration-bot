@@ -102,6 +102,16 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .chline .nm2{font-size:13px;font-weight:800;line-height:1.2}
 .chline.small .nm2{font-size:11.5px;font-weight:700}
 .chline .sub{font-size:9.5px;color:var(--dim);margin-top:2px}
+/* Индикатор идущего сезона на чипе. */
+.chip .ball{font-weight:400;animation:ptfblink 1.4s ease-in-out infinite}
+/* Чемпион — золотая рамка, финалист под счётом — серебряная и мельче. */
+.chbig .avr,.chbig .avph{box-shadow:0 0 0 3px var(--gold),0 0 0 5px rgba(201,167,106,.18)}
+.chbig .chru{margin-top:10px;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer}
+.chbig .chru .avr,.chbig .chru .avph{width:34px!important;height:34px!important;flex:0 0 34px!important;
+  font-size:11px!important;margin:0!important;box-shadow:0 0 0 2px #A9A6A0!important}
+.chbig .chru .nm3{font-size:12px;font-weight:700;color:var(--dim)}
+.chsc{margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;font-weight:800;color:var(--amber)}
 /* Логотип PTF в шапке вместо текстовой заглушки. */
 .hdr .logo img{width:100%;height:100%;object-fit:contain;display:block}
 .hdr .logo{overflow:hidden;background:transparent;border:0;padding:2px}
@@ -502,7 +512,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   avNotChat:'Не отправляй фото в чат — загрузи его здесь.',avFull:'Открыть аватарку',
   cWins:'Победы',divPts:'Очки в дивизионе',racePts:'Очки в гонке',divPlace:'Место',
   promoted:'Повышения',relegated:'Понижения',achHolders:'Награды сезона',myCard:'Моя карточка',
-  finalLab:'Финал',champTag:'Чемпион дивизиона',howDivT:'Как работает дивизион',
+  finalLab:'Финал',champTag:'champion',howDivT:'Как работает дивизион',
   howRaceT:'Как начисляются очки гонки',
   openDiv:'Открыть таблицу дивизиона',lastSeason:'Итоги прошлого сезона',runnerUp:'Финалист',
   howPoints:'Как начисляются очки',
@@ -549,7 +559,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   avNotChat:'Do not send the photo to the chat — upload it here.',avFull:'Open the avatar',
   cWins:'Wins',divPts:'Division points',racePts:'Race points',divPlace:'Place',
   promoted:'Promotions',relegated:'Relegations',achHolders:'Season awards',myCard:'My profile',
-  finalLab:'Final',champTag:'Division champion',howDivT:'How the division works',
+  finalLab:'Final',champTag:'champion',howDivT:'How the division works',
   howRaceT:'How race points are awarded',
   openDiv:'Open the division table',lastSeason:'Last season results',runnerUp:'Runner-up',
   howPoints:'How points are awarded',
@@ -1011,17 +1021,18 @@ function chLine(pl,sub,small){
 }
 // Крупная карточка чемпиона: большая аватарка, под ней дивизион и титул, ниже —
 // сам финал со счётом, чтобы финалист был виден без отдельной строки.
-function champCard(d,seasonNumber){
+// Чемпион сверху крупно и в золотой рамке, под ним счёт финала, под счётом —
+// финалист мелкой серебряной аватаркой. Видно с первого взгляда, кто выиграл.
+function champCard(d){
   if(!d.champion)return '';
-  var fin=d.final||null;
-  var h='<div class="chbig" onclick="openPlayerByName(\''+q(d.champion.name)+'\',\'home\')">'
-    +av(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div>'
-    +'<div class="sub">'+esc((d.title||divLabel(d.letter))+' · '+X.champTag)+'</div>';
-  if(fin&&fin.first&&fin.second){
-    var w1=fin.winner_id&&String(fin.winner_id)===String(fin.first.id);
-    h+='<div class="chfin"><div class="sd'+(w1?' w':'')+'">'+esc(shortName(fin.first.name))+'</div>'
-      +'<div class="sc2">'+esc(fin.score||'—')+'</div>'
-      +'<div class="sd'+(w1?'':' w')+'">'+esc(shortName(fin.second.name))+'</div></div>';
+  var h='<div class="chbig">'
+    +'<div onclick="openPlayerByName(\''+q(d.champion.name)+'\',\'home\')">'
+    +av(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div></div>'
+    +'<div class="sub">'+esc((d.title||divLabel(d.letter))+' '+X.champTag)+'</div>';
+  if(d.final_score)h+='<div class="chsc">'+esc(d.final_score)+'</div>';
+  if(d.runner_up&&d.runner_up.name){
+    h+='<div class="chru" onclick="openPlayerByName(\''+q(d.runner_up.name)+'\',\'home\')">'
+      +av(d.runner_up)+'<span class="nm3">'+esc(d.runner_up.name)+'</span></div>';
   }
   return h+'</div>';
 }
@@ -1035,19 +1046,19 @@ function mvLine(pl,cls,arrow){
 function championsBlock(){
   var s=lastFinishedSeason();
   if(!s)return '';
-  var h='<div class="card"><h3>'+esc(X.lastSeason)+' · '+esc(s.label||('Season '+s.number))+'</h3>';
+  var h='<div class="card"><h3>'+esc((s.label||('Season '+s.number))+' results')+'</h3>';
   var any='';
-  (s.divisions||[]).forEach(function(d){ any+=champCard(d,s.number) });
+  (s.divisions||[]).forEach(function(d){ any+=champCard(d) });
   h+=any||'<div class="hint">'+esc(X.noData)+'</div>';
   // Кто поднимается и кто падает — считает сервер по местам в регулярке
   // и по вайлдкартам из ачивок.
-  var up='',down='';
+  // Показываем только повышения: у вылетевших сезон часто недоигран, и ставить
+  // их рядом с чемпионами нечестно. Обладатели wildcard идут здесь же, с меткой.
+  var up='';
   (s.divisions||[]).forEach(function(d){
     (d.promoted||[]).forEach(function(pl){ up+=mvLine(pl,'up','→') });
-    (d.relegated||[]).forEach(function(pl){ down+=mvLine(pl,'down','→') });
   });
   if(up)h+='<div class="lab" style="margin-top:14px">'+esc(X.promoted)+'</div>'+up;
-  if(down)h+='<div class="lab" style="margin-top:14px">'+esc(X.relegated)+'</div>'+down;
   return h+'</div>';
 }
 function renderHome(){
@@ -1061,18 +1072,6 @@ function renderHome(){
     +'<div><div class="vt">'+esc(X.sVenueV)+'</div><div class="vd">'+esc(X.sVenue)+'</div></div></div></div>';
   loadSummary();
   h+=championsBlock();
-  var champs=players.filter(function(p){
-    return (p.achievements||[]).some(function(a){return /champion|чемпион/i.test(String(a.title||a.type||''))});
-  }).slice(0,4);
-  if(champs.length){
-    h+='<div class="card"><h3>'+esc(X.achHolders)+'</h3><div class="grid">'
-      +champs.map(function(p){
-        var t=(p.achievements||[]).filter(function(a){return /champion|чемпион/i.test(String(a.title||a.type||''))})[0];
-        return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'home\')">'+av(p)
-          +'<div class="bd"><div class="nm">'+esc(p.name)+'</div>'
-          +'<div class="rw"><span class="badge g">🏆 '+esc((t&&(t.title||t.type))||'')+'</span></div></div></div>';
-      }).join('')+'</div></div>';
-  }
   h+='<div class="card"><h3>'+esc(X.title)+'</h3><div class="hint">'+esc(X.sub)+'</div>'
     +'<div class="chips" style="margin-top:11px;margin-bottom:0">'
     +[['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],['matches',X.tMatches]].map(function(x){
@@ -1373,9 +1372,13 @@ function pickSeason(n){
 function renderDiv(){
   if(!divSeason)divSeason=String(season||(seasons.length?seasons[seasons.length-1].number:''))||'';
   var list=seasons.length?seasonDivisions(divSeason):divisions;
-  var seasonChips=seasons.length>1?'<div class="chips sm">'+seasons.map(function(s){
-    var doneMark=s.status==='finished'?'':(s.status==='upcoming'?' ○':'');
-    return '<div class="chip'+(String(divSeason)===String(s.number)?' on':'')+'" onclick="pickSeason(\''+q(s.number)+'\')">'+esc(s.label)+doneMark+'</div>';
+  // Сезоны идут от свежего к старому: нужный почти всегда последний.
+  // У идущего сезона мигает мячик — видно, где сейчас живая таблица.
+  var seasonsDesc=seasons.slice().sort(function(a,b){return Number(b.number)-Number(a.number)});
+  var seasonChips=seasons.length>1?'<div class="chips sm">'+seasonsDesc.map(function(s){
+    var live=String(s.status||'').toLowerCase()!=='finished'&&String(s.status||'').toLowerCase()!=='upcoming';
+    var mark=live?' <b class="ball">🎾</b>':(s.status==='upcoming'?' ○':'');
+    return '<div class="chip'+(String(divSeason)===String(s.number)?' on':'')+'" onclick="pickSeason(\''+q(s.number)+'\')">'+esc(s.label)+mark+'</div>';
   }).join('')+'</div>':'';
   if(!list.length){
     var st=seasonOf(divSeason);
