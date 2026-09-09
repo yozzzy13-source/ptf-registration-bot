@@ -209,7 +209,18 @@ export function registerAdminRoutes(app) {
       const telegramId = String(req.body.telegram_id || '').trim();
       const message = String(req.body.message || '').trim();
       if (!telegramId || !message) return res.status(400).json({ ok:false, error:'telegram_id and message are required' });
-      await sendMessage(telegramId, message);
+      // В персональное сообщение вешаем кнопки так же, как в рассылке: коды
+      // разделов прямо в тексте плюс кнопка из выпадающего списка.
+      const contact = (await getContacts()).find(c => String(c.telegram_id) === telegramId);
+      const lang = String(contact?.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
+      const parsed = parseTemplate(message);
+      const username = await getBotUsername();
+      const body = parsed.hasLinks ? renderText(parsed, lang, username) : message;
+      const rows = [
+        ...(renderButtons(parsed, lang)?.inline_keyboard || []),
+        ...(broadcastButtonMarkup(String(req.body.button || '').trim(), lang)?.inline_keyboard || [])
+      ];
+      await sendMessage(telegramId, body, rows.length ? { reply_markup: { inline_keyboard: rows } } : {});
       await logMessage({ message_id:uid('msg'), telegram_id:telegramId, direction:'outgoing', message_type:'text', message_text:message, timestamp:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', status:'sent' });
       res.json({ ok:true });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
