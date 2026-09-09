@@ -140,20 +140,31 @@ export const MATCH_COMMANDS = {
 
 // Рассылки (в том числе опросы и их статистика) живут в админской панели —
 // в подсказке команд их нет, чтобы не было двух путей к одному и тому же.
+// Полный список команд организатора: всё, что бот умеет, видно по слэшу и
+// только в его чате — обычным игрокам этот список не приходит.
 export const ADMIN_COMMANDS = [
-  { command: 'help', description: 'Admin commands' },
-  { command: 'overview', description: 'League overview: matches, courts, results' },
-  { command: 'league', description: 'League frontend (test)' },
-  { command: 'admin', description: 'Admin panel' },
-  { command: 'stats', description: 'Stats' },
-  { command: 'pending', description: 'Pending payments' },
-  { command: 'events', description: 'Events' },
-  { command: 'messages', description: 'Recent messages' },
-  { command: 'rating', description: 'Ask players to set their level' },
-  { command: 'rating_to', description: 'Ask one player to set their level' },
-  { command: 'results_here', description: 'Bind the results feed to this topic' },
-  { command: 'menu', description: 'Main menu' },
-  { command: 'cancel', description: 'Cancel current action' }
+  { command: 'admin', description: '🛠 Админ-панель' },
+  { command: 'stats', description: '📊 Статистика' },
+  { command: 'pending', description: '📥 Заявки и платежи в работе' },
+  { command: 'payment_auto', description: '💳 Счёт сразу или после подтверждения' },
+  { command: 'events', description: '🏆 События' },
+  { command: 'messages', description: '💬 Последние сообщения игроков' },
+  { command: 'profile', description: '👤 Карточка игрока по telegram_id' },
+  { command: 'rating', description: '📈 Рассылка «уточни свой уровень»' },
+  { command: 'rating_to', description: '📈 Запрос уровня одному игроку' },
+  { command: 'overview', description: '🎾 Обзор матчей и кортов' },
+  { command: 'matches', description: '🎾 То же, что overview' },
+  { command: 'league', description: '🏆 Витрина лиги' },
+  { command: 'match_test', description: '🔍 Проверка таблиц матчей' },
+  { command: 'topic_test', description: '🔍 Проверка вебхука и топиков' },
+  { command: 'topic_sync', description: '🔗 Привязать темы к этой группе' },
+  { command: 'results_here', description: '📣 Лента результатов в эту тему' },
+  { command: 'admin_init', description: '⚙️ Сделать этот чат админским' },
+  { command: 'links', description: '🔗 Коды разделов для рассылок' },
+  { command: 'help', description: '❔ Все команды' },
+  { command: 'avatar', description: '🖼 Мои варианты аватарки' },
+  { command: 'menu', description: '🏠 Главное меню' },
+  { command: 'cancel', description: '✖️ Отменить текущее действие' }
 ];
 
 // Персональный список для одного чата. commands:[] снимает переопределение,
