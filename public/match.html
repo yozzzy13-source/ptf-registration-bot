@@ -6,60 +6,72 @@
 <title>PTF Matches</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#141414;--card:#202020;--card2:#292929;--text:#f6f4ef;--muted:#a9a49b;--accent:#ef5f00;--accent2:#ff8a2a;--border:#3a3a3a;--danger:#ff6b6b;--green:#19c37d;--green2:#0f7a4f;--yellow:#e8b93a}
+/* Палитра лиги: та же, что в витрине, чтобы экраны матчей не выглядели
+   отдельным приложением. Старые имена переменных сохранены — так правка
+   не задевает разметку и логику. */
+:root{
+  --bg:#0A0A0B;--card:#111010;--card2:#0D0C0B;--text:#EFEBE4;--muted:#B9B1A5;
+  --accent:#E8A45C;--accent2:#C9873C;--border:#1D1A17;--line2:#1A1714;
+  --danger:#C2695E;--green:#8FBF9A;--green2:#2A3A2E;--yellow:#C9A76A;--champ:#D9C7A3;
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#0f0f0f,#1b1b1b);color:var(--text);min-height:100vh;padding:0 14px 40px}
+body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;
+background:var(--bg);color:var(--text);min-height:100vh;padding:0 14px 40px;position:relative}
+.grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+background-image:radial-gradient(rgba(255,255,255,.028) .5px,transparent .5px);background-size:3px 3px}
+.wrap{position:relative;z-index:1}
 .wrap{max-width:620px;margin:0 auto}
-h1{font-size:22px;margin:14px 0 4px}
+h1{font-size:22px;font-weight:800;letter-spacing:-.6px;margin:14px 0 4px}
 .sub{color:var(--muted);font-size:13px;line-height:1.45;margin:0 0 12px}
-.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,#101010 70%,rgba(16,16,16,0));margin-bottom:4px}
-.tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1.5px solid var(--border);font-size:13px;font-weight:800;cursor:pointer;user-select:none;opacity:.55}
-.tab.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14)}
+.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,var(--bg) 78%,rgba(10,10,11,0));margin-bottom:4px}
+.tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
+.tab.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--accent)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;margin:0 0 12px}
-label{display:block;font-size:12px;font-weight:800;color:#ddd;margin:12px 0 6px}
+label{display:block;font-size:10px;letter-spacing:1.1px;text-transform:uppercase;font-weight:800;color:var(--muted);margin:12px 0 6px}
 label:first-of-type{margin-top:0}
-select,input,textarea{width:100%;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:var(--card2);color:var(--text);font-size:15px}
+select,input,textarea{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:15px;font-family:inherit}
 textarea{min-height:60px;resize:vertical}
 .row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
-button{width:100%;border:0;border-radius:14px;padding:15px;font-size:16px;font-weight:900;margin-top:14px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border)}
-button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#111;border:0}
+button{width:100%;border:0;border-radius:14px;padding:15px;font-size:15px;font-weight:900;margin-top:14px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border);font-family:inherit}
+button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#191512;border:0;font-weight:900}
 button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11px}
 .dowhead,.datestrip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
 .dowhead{padding:0 0 4px}
 .dowlabel{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.3px;opacity:.5;font-weight:800}
-.daycell{padding:9px 4px 7px;border-radius:12px;background:var(--card2);text-align:center;cursor:pointer;border:1.5px solid rgba(128,128,128,.18);transition:.15s;user-select:none;min-width:0}
-.daycell.sel{background:var(--accent);color:#111;border-color:var(--accent)}
+.daycell{padding:9px 4px 7px;border-radius:12px;background:var(--card2);text-align:center;cursor:pointer;border:1px solid var(--border);transition:.15s;user-select:none;min-width:0}
+.daycell.sel{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#191512;border-color:var(--accent)}
 .daycell.past{opacity:.22;cursor:default;border-color:transparent}
 .daycell .dnum{font-size:17px;font-weight:800;line-height:1.15}
 .daycell .dmon{font-size:9px;opacity:.6;font-weight:700;margin-top:2px}
-.slot{background:var(--card);border:1px solid var(--border);border-left:5px solid var(--accent);border-radius:16px;padding:14px;margin:0 0 10px}
+.slot{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:16px;padding:14px;margin:0 0 10px}
 .slot.mine{border-left-color:var(--green)}
 .slot.agreed{border-left-color:var(--green)}
 .slot-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.av{width:34px;height:34px;border-radius:50%;flex:0 0 34px;background:#333;object-fit:cover;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:#bbb}
+.av{width:38px;height:38px;border-radius:50%;flex:0 0 38px;background:#1E1B18;object-fit:cover;object-position:50% 32%;border:1px solid #2A2521;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:var(--mute,#8A7F6F)}
 .who{font-weight:800;font-size:15px;line-height:1.25}
 .when{font-size:14px;margin:2px 0}
 .meta{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.5}
-.pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid var(--border);background:#303030;color:var(--muted);margin:2px 4px 2px 0}
-.pill.acc{background:var(--green2);border-color:var(--green);color:#dfffee}
-.pill.open{background:rgba(239,95,0,.16);border-color:var(--accent);color:#ffd2a8}
+.pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:800;border:1px solid var(--line2);background:var(--card2);color:var(--muted);margin:2px 4px 2px 0}
+.pill.acc{background:var(--green2);border-color:#3F5A46;color:var(--green)}
+.pill.open{background:#221B14;border-color:#4A3925;color:var(--accent)}
 .acts{display:flex;gap:8px;margin-top:10px}
-.opp{display:flex;align-items:center;gap:10px;padding:10px;border:1.5px solid var(--border);border-radius:14px;background:var(--card2);margin-bottom:8px;cursor:pointer}
-.opp.sel{border-color:var(--accent);background:rgba(239,95,0,.12)}
+.opp{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:14px;background:var(--card2);margin-bottom:8px;cursor:pointer}
+.opp.sel{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14)}
 .opp .who{font-size:14px}
 .hint{color:var(--muted);font-size:12px;line-height:1.5;margin-top:8px}
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
 .res{margin-top:12px;font-size:14px;line-height:1.5}
-.res.ok{background:rgba(25,195,125,.14);border:1px solid var(--green2);color:#dfffee;padding:12px;border-radius:12px}
+.res.ok{background:var(--green2);border:1px solid #3F5A46;color:var(--green);padding:12px;border-radius:12px}
 .res.err{color:var(--danger)}
 .hidden{display:none}
 .seg{display:flex;gap:8px;margin-bottom:4px}
-.seg .s{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1.5px solid var(--border);font-size:13px;font-weight:800;cursor:pointer;opacity:.55}
-.seg .s.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14)}
-.daycell.on{background:var(--accent);color:#111;border-color:var(--accent)}
+.seg .s{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;color:var(--muted)}
+.seg .s.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--accent)}
+.daycell.on{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#191512;border-color:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
-.chip{padding:10px 13px;border-radius:12px;background:var(--card2);border:1.5px solid var(--border);font-size:13px;font-weight:800;cursor:pointer;user-select:none;opacity:.6}
-.chip.on{opacity:1;border-color:var(--accent);background:rgba(239,95,0,.14);color:#ffd2a8}
+.chip{padding:9px 13px;border-radius:999px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
+.chip.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--accent)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-end;justify-content:center;z-index:50}
 .sheet{background:var(--card);border:1px solid var(--border);border-radius:20px 20px 0 0;padding:18px 16px 22px;width:100%;max-width:620px;max-height:88vh;overflow:auto}
 .sheet h3{margin:0 0 4px;font-size:17px}
@@ -73,11 +85,12 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .scorehead .nm{font-size:12px;font-weight:800;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scorehead .nm.win{color:var(--text)}
 .scorehead .dash{text-align:center;color:var(--muted);font-weight:800}
-.photo-btn{display:block;width:100%;padding:14px;border-radius:12px;border:1.5px dashed var(--border);background:var(--card2);color:var(--muted);text-align:center;font-size:13px;font-weight:800;cursor:pointer}
+.photo-btn{display:block;width:100%;padding:14px;border-radius:12px;border:1px dashed #4A3925;background:var(--card2);color:var(--accent);text-align:center;font-size:13px;font-weight:800;cursor:pointer}
 .photo-prev{width:100%;border-radius:12px;margin-top:8px;max-height:220px;object-fit:cover}
 </style>
 </head>
 <body>
+<div class="grain"></div>
 <div class="wrap">
   <h1 id="title">Матчи</h1>
   <p class="sub" id="sub"></p>
