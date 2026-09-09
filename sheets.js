@@ -629,6 +629,18 @@ async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
   return merged;
 }
 
+// Заводит вспомогательный лист (события, записи, деньги) и дописывает недостающие
+// заголовки. Существующие колонки не трогаем — только добавляем свои в конец.
+export async function ensureExtraSheet(sheetName, headers) {
+  const key = `extra:${sheetName}`;
+  if (!extraSheetsReady.has(key)) {
+    extraSheetsReady.set(key, ensureSheetWithHeaders(sheetName, headers)
+      .catch(e => { extraSheetsReady.delete(key); throw e; }));
+  }
+  return extraSheetsReady.get(key);
+}
+const extraSheetsReady = new Map();
+
 export async function getRows(sheetName, { useCache=true } = {}) {
   const key = `rows:${sheetName}`;
   const c = cache.get(key);

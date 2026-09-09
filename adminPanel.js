@@ -274,4 +274,84 @@ export function registerAdminRoutes(app) {
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
+
+  // --- события ---------------------------------------------------------------
+  // Карточка создаётся здесь, а подтверждение и рассылка идут в боте: так
+  // организатор видит событие ровно тем сообщением, которое получат игроки.
+  app.get('/api/admin/events', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { listEvents, listSignups } = await import('./events.js');
+      const events = await listEvents({ includeDrafts:true });
+      const signups = await listSignups();
+      res.json({ ok:true, events: events.map(e => ({
+        ...e,
+        signups: signups.filter(s => s.event_id === e.event_id && s.status !== 'cancelled').length,
+        seats: signups.filter(s => s.event_id === e.event_id && s.status !== 'cancelled')
+          .reduce((n, s) => n + 1 + (s.guests || 0), 0)
+      })) });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  app.post('/api/admin/event-save', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { createEvent, updateEvent } = await import('./events.js');
+      const body = req.body.event || {};
+      const event = body.event_id
+        ? await updateEvent(body.event_id, {
+            title_ru:body.title_ru, title_en:body.title_en,
+            description_ru:body.description_ru, description_en:body.description_en,
+            date:body.date, time:body.time, place:body.place,
+            price_thb:body.price_thb ?? '', guest_price_thb:body.guest_price_thb ?? '',
+            capacity:body.capacity ?? '', signup_deadline:body.signup_deadline || '',
+            payment_required: body.payment_required ? 'TRUE' : 'FALSE',
+            guests_allowed: body.guests_allowed ? 'TRUE' : 'FALSE',
+            max_guests: body.max_guests ?? '', refund_hours: body.refund_hours ?? '',
+            audience: body.audience || 'all'
+          })
+        : await createEvent(body, auth.user.id);
+      if (!event) return res.status(404).json({ ok:false, error:'Событие не найдено' });
+      res.json({ ok:true, event });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Отправляет организатору предпросмотр карточки с кнопками подтверждения.
+  app.post('/api/admin/event-preview', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { eventPreview } = await import('./admin.js');
+      await eventPreview(auth.user.id, String(req.body.event_id || ''));
+      res.json({ ok:true });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  app.get('/api/admin/balances', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { allBalances } = await import('./events.js');
+      res.json({ ok:true, balances: await allBalances() });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Начисление и списание руками: депозит игрока правится только отсюда.
+  app.post('/api/admin/balance-change', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { addTransaction } = await import('./events.js');
+      const amount = Number(req.body.amount || 0);
+      if (!req.body.telegram_id || !amount) return res.status(400).json({ ok:false, error:'Нужны игрок и сумма' });
+      const left = await addTransaction({
+        telegramId: String(req.body.telegram_id), name: String(req.body.name || ''),
+        type: amount > 0 ? 'пополнение' : 'списание', amount,
+        description: String(req.body.comment || 'правка организатора')
+      });
+      res.json({ ok:true, balance:left });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
 }

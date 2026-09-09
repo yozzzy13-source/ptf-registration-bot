@@ -702,6 +702,28 @@ app.post('/api/match/manual', async (req, res) => {
 
 // Витрина лиги: годовая гонка, список игроков, карточка игрока.
 // Пока открыта только админу — включим всем, когда утвердим вид.
+// События лиги для витрины: список карточек со свободными местами и статусом
+// самого игрока. Записываться и платить он будет в боте — там кнопки и оплата.
+app.get('/api/league/events', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const { eventsForViewer } = await import('./eventflow.js');
+    const { getBalance } = await import('./events.js');
+    const tg = v.user?.id || '';
+    const applicant = tg ? await findApplicantByTelegramId(tg).catch(() => null) : null;
+    const isActive = String(applicant?.status || '').toLowerCase() === 'active';
+    const [events, balance] = await Promise.all([
+      eventsForViewer(tg, isActive).catch(() => []),
+      tg ? getBalance(tg).catch(() => 0) : 0
+    ]);
+    res.json({ ok:true, events, balance });
+  } catch (e) {
+    console.error('league events failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
 app.get('/api/league/bootstrap', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));

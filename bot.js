@@ -11,7 +11,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, eventPreview, eventPublish, eventDrop, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -1094,6 +1094,14 @@ export async function handleCallback(q) {
     return sendMessage(chatId, lang === 'ru' ? 'Вызов отклонён.' : 'Challenge declined.').catch(() => {});
   }
 
+  // События: запись, оплата с депозита, отмена. Кнопки видит любой игрок.
+  if (data.startsWith('ev_join:')) return eventJoin({ chatId, from, lang, eventId: data.split(':')[1] });
+  if (data.startsWith('ev_dep:')) return eventPayFromDeposit({ chatId, from, lang, signupId: data.split(':')[1] });
+  if (data.startsWith('ev_cxl:')) return eventCancelAsk({ chatId, lang, signupId: data.split(':')[1] });
+  if (data.startsWith('ev_cyes:')) return eventCancelDo({ chatId, from, lang, signupId: data.split(':')[1], keepGuests: true });
+  if (data.startsWith('ev_cno:')) return eventCancelDo({ chatId, from, lang, signupId: data.split(':')[1], keepGuests: false });
+  if (data.startsWith('ev_keep:')) return sendMessage(chatId, lang === 'ru' ? '👍 Участие сохранено.' : '👍 Your spot is kept.');
+
   if (data.startsWith('challenge_accept:')) return acceptChallenge(chatId, from, lang, data.split(':')[1]);
   if (data.startsWith('challenge_decline:')) return declineChallenge(chatId, from, lang, data.split(':')[1]);
 
@@ -1103,6 +1111,9 @@ export async function handleCallback(q) {
       adminState.set(String(from.id), { mode:'reply_waiting', targetTelegramId });
       return sendMessage(chatId, `Write reply to TGID <code>${escapeHtml(targetTelegramId)}</code>.`);
     }
+    if (data.startsWith('ev_pub:')) return eventPublish(chatId, data.split(':')[1]);
+    if (data.startsWith('ev_drop:')) return eventDrop(chatId, data.split(':')[1]);
+    if (data.startsWith('ev_edit:')) return sendMessage(chatId, 'Открой админ-панель и поправь карточку — потом нажми «Предпросмотр» ещё раз.');
     if (data.startsWith('admin_invoice:')) {
       const applicationId = data.split(':')[1];
       return sendInvoiceToApplicant({ chatId, applicationId });

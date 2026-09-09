@@ -125,10 +125,8 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .sr .live{animation:ptfblink 1.4s ease-in-out infinite}
 /* Ярлык дивизиона в карточке матча — справа, как WIN/LOST слева. */
 .mt{position:relative}
-.mt .mdiv{position:absolute;top:10px;right:11px;font-size:9.5px;font-weight:800;
-  padding:3px 8px;border-radius:999px;border:1px solid var(--line2);background:#141311;
-  color:var(--dim);cursor:pointer;z-index:2}
-.mt .mdiv:active{color:var(--amber);border-color:#4A3925}
+.mt .mdiv{position:absolute;top:10px;right:11px;cursor:pointer;z-index:2}
+.mt .mdiv:active{filter:brightness(1.35)}
 .mt .mtop{padding-right:86px}
 /* Чемпионы сезона крупно. */
 .chbig{border:1px solid var(--line2);border-radius:16px;background:#141311;padding:15px 13px 13px;
@@ -211,7 +209,8 @@ border:1px solid #201D19;font-size:11px;font-weight:700;color:var(--mute);white-
 .tb{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .thd,.trw{display:grid;grid-template-columns:20px 34px minmax(0,1fr) 26px 44px 48px;gap:6px;align-items:center;padding:0 11px}
 /* В гонке между матчами и процентом добавилась колонка побед. */
-.tb.race .thd,.tb.race .trw{grid-template-columns:18px 32px minmax(0,1fr) 24px 24px 40px 44px;gap:5px;padding:0 9px}
+.tb.race .thd,.tb.race .trw{grid-template-columns:18px 40px minmax(0,1fr) 22px 22px 38px 42px;gap:5px;padding:0 8px}
+.tb.race .trw .avr,.tb.race .trw .avph{width:40px;height:40px;flex:0 0 40px;font-size:12px;object-position:50% 26%}
 .thd{height:36px;background:var(--surf2);font-size:8px;letter-spacing:1.3px;text-transform:uppercase;
 color:var(--mute2);font-weight:800}
 .thd span,.trw span:not(.n){text-align:center}
@@ -493,7 +492,10 @@ var allMatches=false;
 
 var T={
 ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годовая гонка PTF.',
-  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
+  evSignUp:'Записаться',evOpenBot:'Записаться в боте',evFull:'Мест нет',evSpots:'Свободно мест',
+  evPrice:'Участие',evGuest:'Гость',evYouIn:'Ты записан',evWait:'Лист ожидания',
+  evPay:'Ждём оплату',evPaid:'Оплачено',evDeposit:'Депозит',evPast:'Событие прошло',
+  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Статус',
@@ -521,7 +523,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   players:'Игроков',matchesN:'Матчей',leader:'Лидер',
   colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
   sMatches:'Матчи',sWins:'Победы',sPoints:'Очки',sWL:'Победы — поражения',sWR:'Процент побед',
-  sDivPos:'в дивизионе',sSeasonNow:'идёт',avOpen:'Изменить аватарку',
+  sDivPos:'в дивизионе',sSeasonNow:'LIVE',avOpen:'Изменить аватарку',
   sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
   detail:'Подробно',tile:'Плитка',ntrp:'NTRP',exp:'Опыт',
   standings:'Турнирная таблица',playoff:'Плей-офф',champion:'Чемпион дивизиона',
@@ -540,6 +542,9 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   back:'Назад',showMore:'Показать ещё',matchesLeague:'Все матчи лиги',
   active:'Active',inactive:'Inactive'},
 en:{title:'League',sub:'Standings, matches, players and the yearly race.',
+  evSignUp:'Sign up',evOpenBot:'Sign up in the bot',evFull:'No spots left',evSpots:'Spots left',
+  evPrice:'Entry',evGuest:'Guest',evYouIn:'You are in',evWait:'Waitlist',
+  evPay:'Awaiting payment',evPaid:'Paid',evDeposit:'Deposit',evPast:'Event has passed',
   tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
@@ -1004,8 +1009,29 @@ function loadSummary(){
   if(summaryLoaded)return;summaryLoaded=true;
   fetch('/api/league/seasons-summary?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
-      if(j&&j.ok){summary=j.seasons||[];if(mode==='home')renderHome()}
+      if(!j||!j.ok)return;
+      summary=j.seasons||[];
+      if(openId){ var pl=byId(openId); if(pl)renderPlayer(pl); }
+      else if(mode==='home')renderHome();
     }).catch(function(){});
+}
+// Где игрок играл в каждом сезоне — по таблицам дивизионов, а не по текущему
+// дивизиону из профиля. Иначе переход между дивизионами задним числом
+// переписывает всю историю: у человека оба сезона показываются в новом дивизионе.
+function seasonPlacesOf(name,id){
+  var out={};
+  (summary||[]).forEach(function(s){
+    (s.divisions||[]).forEach(function(d){
+      (d.table||[]).forEach(function(p){
+        var same=(id&&String(p.id)===String(id))
+          ||String(p.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase();
+        // Игрок за сезон играет в одном дивизионе — берём первое совпадение
+        // и не перетираем его следующими таблицами.
+        if(same&&!out[String(s.number)])out[String(s.number)]={division:d.letter,place:p.place||''};
+      });
+    });
+  });
+  return out;
 }
 function lastFinishedSeason(){
   var list=(summary||[]).filter(function(x){
@@ -1562,19 +1588,55 @@ function feedCard(m){
 }
 
 // ---------------------------------------------------------------- турниры и о лиге
+// События: карточки со свободными местами, ценой и статусом самого игрока.
+// Записываться уходим в бот — там кнопки, счёт и оплата с депозита.
+var evList=null,evBalance=0,evLoaded=false;
+function loadEvents(){
+  if(evLoaded)return;evLoaded=true;
+  fetch('/api/league/events?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j||!j.ok)return;
+      evList=j.events||[];evBalance=j.balance||0;
+      if(mode==='events')renderEvents();
+    }).catch(function(){});
+}
+function evStatusBadge(e){
+  if(!e.my_status)return '';
+  var map={waitlist:X.evWait,invoiced:X.evPay,paid:X.evPaid,confirmed:X.evYouIn,pending:X.evPay};
+  var text=map[e.my_status]||e.my_status;
+  var cls=(e.my_status==='paid'||e.my_status==='confirmed')?' ok':'';
+  return '<span class="badge'+cls+'">'+esc(text)+'</span>';
+}
+function eventCard(e){
+  var title=L?(e.title_ru||e.title_en):(e.title_en||e.title_ru);
+  var desc=L?(e.description_ru||e.description_en):(e.description_en||e.description_ru);
+  var when=[e.date,e.time].filter(Boolean).join(' · ');
+  var rows='';
+  if(e.place)rows+='<div class="hint">📍 '+esc(e.place)+'</div>';
+  if(when)rows+='<div class="hint">📅 '+esc(when)+'</div>';
+  if(e.capacity)rows+='<div class="hint">👥 '+esc(X.evSpots)+': <b>'+(e.seats_left)+' / '+e.capacity+'</b></div>';
+  if(e.payment_required&&e.price_thb)rows+='<div class="hint">💳 '+esc(X.evPrice)+': <b>'+e.price_thb+' ฿</b>'
+    +(e.guests_allowed?' · '+esc(X.evGuest)+': <b>'+((e.guest_price_thb===null||e.guest_price_thb==='')?e.price_thb:e.guest_price_thb)+' ฿</b>':'')+'</div>';
+  var badges=evStatusBadge(e);
+  var canJoin=!e.my_status&&(!e.capacity||e.seats_left>0);
+  var full=!e.my_status&&e.capacity&&e.seats_left<=0;
+  return '<div class="card"><h3>'+esc(title)+'</h3>'
+    +(badges?'<div class="rw" style="margin-bottom:8px">'+badges+'</div>':'')
+    +rows
+    +(desc?'<div class="hint" style="margin-top:9px">'+esc(desc)+'</div>':'')
+    +(canJoin?'<button class="chip" style="width:100%;margin-top:11px" onclick="openBot()">'+esc(X.evOpenBot)+'</button>':'')
+    +(full?'<div class="hint" style="margin-top:11px;color:var(--lose)">'+esc(X.evFull)+'</div>':'')
+    +'</div>';
+}
+function openBot(){ if(tg&&tg.close)tg.close(); }
 function renderEvents(){
-  if(!events.length){$('viewEvents').innerHTML='<div class="empty">'+esc(X.noEvents)+'</div>';return}
-  $('viewEvents').innerHTML=events.map(function(e){
-    var meta=[e.type,e.format,e.category].filter(Boolean).join(' · ');
-    var when=[e.start,e.end].filter(Boolean).join(' — ');
-    return '<div class="card"><h3>'+esc(e.name)+'</h3>'
-      +(when?'<div class="hint">'+esc(when)+'</div>':'')
-      +(meta?'<div class="rw" style="margin-top:8px"><span class="badge">'+esc(meta)+'</span></div>':'')
-      +((e.players||[]).length?'<div style="margin-top:10px">'+e.players.slice(0,10).map(function(p){
-        return '<div class="sr"><span class="sn">'+esc(p.name)+'</span><span></span><span></span>'
-          +'<span class="pl">'+esc(p.standing||'')+'</span><span class="ptt">'+esc(p.points||'')+'</span></div>';
-      }).join('')+'</div>':'')+'</div>';
-  }).join('');
+  loadEvents();
+  if(evList===null){$('viewEvents').innerHTML='<div class="empty">…</div>';return}
+  var h='';
+  if(evBalance>0)h+='<div class="card"><h3>'+esc(X.evDeposit)+'</h3><div class="stats">'
+    +stt(X.evDeposit,evBalance+' ฿',true)+'</div></div>';
+  h+=evList.length?evList.map(eventCard).join(''):'<div class="empty">'+esc(X.noEvents)+'</div>';
+  $('viewEvents').innerHTML=h;
 }
 function renderAbout(){
   var rules=L?[
@@ -1683,6 +1745,13 @@ function renderPlayer(p){
   h+=avatarBlock(p);
 
   var srows=seasonRowsWithLive(p);
+  var byTable=seasonPlacesOf(p.name,p.id);
+  srows.forEach(function(r){
+    var hit=byTable[String(r.n)];
+    if(!hit)return;
+    if(hit.division)r.division=hit.division;
+    if(hit.place)r.place=hit.place;
+  });
   h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
   if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';
   else{
@@ -1729,7 +1798,8 @@ function stt(k,v,acc){ return v?'<div class="stt"><div class="k">'+esc(k)+'</div
 // и открывает таблицу того самого сезона.
 function divTag(division,season){
   if(!division)return '';
-  return '<div class="mdiv" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(division)+'\')">'
+  // Цвет тот же, что и везде: дивизион узнаётся по цвету, не читая текст.
+  return '<div class="mdiv dv '+divClass(division)+'" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(division)+'\')">'
     +esc(divLabel(division))+'</div>';
 }
 function matchRow(m){
@@ -1772,6 +1842,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     var wantTab=(qs.get('tab')||'').trim().toLowerCase();
     if(wantDiv&&!wantTab)wantTab='div';
     renderMePlate();
+    loadSummary();
     showTab(VIEWS.indexOf(wantTab)>=0?wantTab:'home');
     var wantPlayer=(qs.get('player')||'').trim();
     // «me» в ссылке — это «моя карточка»: рассылка не знает id игрока в витрине,

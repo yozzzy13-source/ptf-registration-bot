@@ -311,6 +311,68 @@ export async function adminProfile(chatId, query) {
   await sendMessage(chatId, `<b>Player profile</b>\n\nName: <b>${escapeHtml(r.name)}</b>\nTGID: <code>${escapeHtml(r.telegram_id)}</code>\nUsername: ${r.telegram_username ? '@'+escapeHtml(r.telegram_username) : '-'}\nStatus: <b>${escapeHtml(r.status)}</b>\nDivision: ${escapeHtml(r.division)}\nNTRP: ${escapeHtml(r.ntrp)}\nExperience: ${escapeHtml(r.experience)}\nCountry: ${escapeHtml(r.country_of_origin)}\nWhatsApp: ${escapeHtml(r.whatsapp)}\nLast event: ${escapeHtml(r.last_application_event)}\nNotes: ${escapeHtml(r.notes)}`);
 }
 
+// --- события ---------------------------------------------------------------
+// Организатор создаёт событие в админ-панели, потом бот показывает ему карточку
+// такой, какой её увидят игроки, и только после подтверждения идёт рассылка.
+export async function eventPreview(chatId, eventId) {
+  const { previewEventForAdmin } = await import('./eventflow.js');
+  return previewEventForAdmin(chatId, eventId);
+}
+export async function eventPublish(chatId, eventId) {
+  const { broadcastEvent } = await import('./eventflow.js');
+  const { findEvent } = await import('./events.js');
+  const event = await findEvent(eventId);
+  if (!event) return sendMessage(chatId, 'Событие не найдено.');
+  const segment = event.audience === 'active' ? 'active' : 'all';
+  const contacts = await getSegmentContacts(segment).catch(() => []);
+  return broadcastEvent(chatId, eventId, contacts);
+}
+export async function eventDrop(chatId, eventId) {
+  const { updateEvent } = await import('./events.js');
+  await updateEvent(eventId, { status: 'cancelled' });
+  return sendMessage(chatId, 'Событие убрано из списка.');
+}
+// Игрок нажал «Записаться» под карточкой.
+export async function eventJoin({ chatId, from, lang, eventId }) {
+  const { joinEvent, invoiceText, invoiceKeyboard } = await import('./eventflow.js');
+  const { getBalance } = await import('./events.js');
+  const applicant = await findApplicantByTelegramId(from.id).catch(() => null);
+  const name = applicant?.name || [from.first_name, from.last_name].filter(Boolean).join(' ') || String(from.id);
+  const adminChatId = await getAdminChatId().catch(() => '');
+  const r = await joinEvent({ telegramId: from.id, name, lang, eventId, adminChatId });
+  if (!r.ok) return sendMessage(chatId, r.error || r.message);
+  if (r.message) return sendMessage(chatId, r.message);
+  const balance = await getBalance(from.id).catch(() => 0);
+  return sendMessage(chatId, await invoiceText(r.event, r.signup, lang, balance), {
+    reply_markup: invoiceKeyboard(r.event, r.signup, lang, balance)
+  });
+}
+export async function eventPayFromDeposit({ chatId, from, lang, signupId }) {
+  const { payFromDeposit } = await import('./eventflow.js');
+  const applicant = await findApplicantByTelegramId(from.id).catch(() => null);
+  const name = applicant?.name || String(from.id);
+  const adminChatId = await getAdminChatId().catch(() => '');
+  const r = await payFromDeposit({ signupId, telegramId: from.id, name, lang, adminChatId });
+  return sendMessage(chatId, r.message);
+}
+// Отмена в два шага: сначала предупреждение по правилу 12 часов, потом кнопки.
+export async function eventCancelAsk({ chatId, lang, signupId }) {
+  const { cancelWarning, cancelKeyboard } = await import('./eventflow.js');
+  const { listSignups, findEvent } = await import('./events.js');
+  const signup = (await listSignups()).find(s => s.signup_id === String(signupId));
+  if (!signup) return sendMessage(chatId, 'Запись не найдена.');
+  const event = await findEvent(signup.event_id);
+  return sendMessage(chatId, cancelWarning(event, signup, lang), { reply_markup: cancelKeyboard(signup, event, lang) });
+}
+export async function eventCancelDo({ chatId, from, lang, signupId, keepGuests }) {
+  const { cancelSignup } = await import('./eventflow.js');
+  const applicant = await findApplicantByTelegramId(from.id).catch(() => null);
+  const name = applicant?.name || String(from.id);
+  const adminChatId = await getAdminChatId().catch(() => '');
+  const r = await cancelSignup({ signupId, keepGuests, telegramId: from.id, name, lang, adminChatId });
+  return sendMessage(chatId, r.message);
+}
+
 // Рубильник автосчёта по сезону. Ключ payment_auto в листе Settings:
 //   on (или пусто) — заявка сразу открывает оплату, как было;
 //   off            — сначала организатор проверяет места и жмёт «Выставить счёт».

@@ -16,7 +16,7 @@
   <div class="top"><div><h1>PTF Admin Panel</h1><div class="muted">Broadcasts, player filters, direct messages and selfie requests.</div></div><button class="btn secondary" onclick="reload()">Refresh</button></div>
   <div id="status" class="muted"></div>
   <div class="grid" id="stats"></div>
-  <div class="tabs"><button class="tab active" data-tab="players">Players</button><button class="tab" data-tab="broadcast">Broadcast</button><button class="tab" data-tab="direct">Direct Message</button><button class="tab" data-tab="selfie">Missing Selfies</button><button class="tab" data-tab="rating">Missing Rating</button><button class="tab" data-tab="history">History</button></div>
+  <div class="tabs"><button class="tab active" data-tab="players">Players</button><button class="tab" data-tab="broadcast">Broadcast</button><button class="tab" data-tab="direct">Direct Message</button><button class="tab" data-tab="selfie">Missing Selfies</button><button class="tab" data-tab="rating">Missing Rating</button><button class="tab" data-tab="events">Events</button><button class="tab" data-tab="balances">Balances</button><button class="tab" data-tab="history">History</button></div>
   <div class="card" id="filtersCard">
     <h3>Filters</h3>
     <div class="filters">
@@ -36,6 +36,44 @@
   <div id="tabDirect" class="card hidden"><h3>Direct Message</h3><p class="muted">Select one player in the table or paste Telegram ID.</p><input id="directId" placeholder="telegram_id"/><textarea id="directText" placeholder="Message to player"></textarea><div class="actions"><button class="btn" onclick="sendDirect()">Send direct message</button></div><div id="directResult" class="muted"></div></div>
   <div id="tabSelfie" class="card hidden"><h3>Missing Selfies</h3><p class="muted">Request selfies from active players who do not have selfie_status = received. Uses selected players or current filters.</p><div class="actions"><button class="btn" onclick="requestSelfies()">Request selfies</button></div><div id="selfieResult" class="muted"></div></div>
   <div id="tabHistory" class="card hidden"><h3>Broadcast History</h3><div class="toolbar"><input id="hSearch" placeholder="search text / segment / admin" oninput="renderHistory()"/><label><input type="checkbox" id="hFailedOnly" onchange="renderHistory()"> only with failures</label><button class="btn secondary" onclick="loadHistory()">Reload</button><span class="muted" id="hCount"></span></div><div class="tableWrap"><table id="historyTable" class="hist"></table></div></div>
+  <div id="tabEvents" class="card hidden"><h3>Events</h3>
+    <p class="muted">Создай карточку, потом нажми «Предпросмотр» — бот пришлёт её тебе в чат такой, какой её увидят игроки, с кнопками подтверждения и рассылки.</p>
+    <div class="filters" style="grid-template-columns:repeat(3,1fr)">
+      <div><label>Название RU</label><input id="evTitleRu" placeholder="Вечеринка PTF"/></div>
+      <div><label>Название EN</label><input id="evTitleEn" placeholder="PTF Party"/></div>
+      <div><label>Место</label><input id="evPlace" placeholder="The Peak Racket Park"/></div>
+      <div><label>Дата (дд.мм.гггг)</label><input id="evDate" placeholder="20.09.2026"/></div>
+      <div><label>Время</label><input id="evTime" placeholder="18:00"/></div>
+      <div><label>Запись до</label><input id="evDeadline" placeholder="19.09.2026"/></div>
+      <div><label>Цена, ฿</label><input id="evPrice" type="number" placeholder="500"/></div>
+      <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = та же"/></div>
+      <div><label>Вместимость</label><input id="evCapacity" type="number" placeholder="16"/></div>
+      <div><label>Максимум гостей</label><input id="evMaxGuests" type="number" placeholder="1"/></div>
+      <div><label>Возврат, часов до</label><input id="evRefund" type="number" placeholder="12"/></div>
+      <div><label>Кому</label><select id="evAudience"><option value="all">Всем в боте</option><option value="active">Только активным игрокам</option></select></div>
+    </div>
+    <label>Описание RU</label><textarea id="evDescRu" placeholder="Что за событие, что взять с собой"></textarea>
+    <label>Описание EN</label><textarea id="evDescEn"></textarea>
+    <div class="actions" style="margin-top:8px">
+      <label><input type="checkbox" id="evPaid" checked> нужна оплата</label>
+      <label><input type="checkbox" id="evGuests"> можно с собой</label>
+    </div>
+    <div class="actions"><button class="btn" onclick="saveEvent()">Сохранить</button><button class="btn secondary" onclick="previewEvent()">Предпросмотр в боте</button><button class="btn secondary" onclick="newEvent()">Новое событие</button></div>
+    <div id="evResult" class="muted"></div>
+    <div class="tableWrap" style="margin-top:12px"><table id="eventsTable"></table></div>
+  </div>
+  <div id="tabBalances" class="card hidden"><h3>Balances</h3>
+    <p class="muted">Депозиты игроков. Считаются по журналу «Transactions» — правки руками сразу видны здесь.</p>
+    <div class="filters" style="grid-template-columns:repeat(4,1fr)">
+      <div><label>Telegram ID</label><input id="balId" placeholder="309678431"/></div>
+      <div><label>Имя</label><input id="balName" placeholder="Kostas"/></div>
+      <div><label>Сумма (минус — списание)</label><input id="balAmount" type="number" placeholder="500"/></div>
+      <div><label>Комментарий</label><input id="balComment" placeholder="возврат за событие"/></div>
+    </div>
+    <div class="actions"><button class="btn" onclick="changeBalance()">Провести</button><button class="btn secondary" onclick="loadBalances()">Обновить</button></div>
+    <div id="balResult" class="muted"></div>
+    <div class="tableWrap" style="margin-top:12px"><table id="balancesTable"></table></div>
+  </div>
   <div id="tabRating" class="card hidden"><h3>Missing NTRP (Raketo)</h3><p class="muted">Send the rating update/test button to selected players, or to everyone matching current filters whose NTRP (Raketo) is empty.</p><div class="actions"><button class="btn" onclick="requestRatings()">Request missing ratings</button></div><div id="ratingResult" class="muted"></div></div>
 </div>
 <script>
@@ -65,5 +103,71 @@ async function loadHistory(){try{$('hCount').textContent='Loading...';const j=aw
 function renderHistory(){const q=$('hSearch').value.trim().toLowerCase();const fo=$('hFailedOnly').checked;const rows=history.filter(b=>(!fo||b.failed>0)&&(!q||[b.message_text,b.segment_filter,b.admin_name,b.broadcast_id].join(' ').toLowerCase().includes(q)));$('hCount').textContent=`${rows.length} of ${history.length}`;let html='<thead><tr><th>Date</th><th>Admin</th><th>Segment</th><th>Message</th><th class="num">Sent</th><th class="num">Failed</th></tr></thead><tbody>';for(const b of rows){const open=openId===b.broadcast_id;html+=`<tr class="row ${open?'open':''}" onclick="toggleLogs('${esc(b.broadcast_id)}')"><td>${esc(fmtDate(b.created_at))}</td><td>${esc(b.admin_name)}</td><td><span class="chip">${esc(segLabel(b.segment_filter))}</span>${b.media_type&&b.media_type!=='text'?`<span class="chip">${esc(b.media_type)}</span>`:''}</td><td><div class="msg" title="${esc(b.message_text)}">${esc(b.message_text.replace(/<[^>]+>/g,''))}</div></td><td class="num ok-n">${b.sent}/${b.recipients}</td><td class="num ${b.failed?'fail-n':'muted'}">${b.failed}</td></tr>`;if(open)html+=`<tr class="logs"><td colspan="6" id="logs-${esc(b.broadcast_id)}">${renderLogs(b.broadcast_id)}</td></tr>`}html+='</tbody>';$('historyTable').innerHTML=html}
 function renderLogs(id){const l=logsCache[id];if(!l)return '<span class="muted">Loading recipients...</span>';if(!l.length)return '<span class="muted">No per-recipient log rows.</span>';return `<table><tbody>${l.map(r=>`<tr class="${r.status==='failed'?'fail':''}"><td>${r.status==='failed'?'❌':'✅'}</td><td><b>${esc(r.name||'')}</b> ${r.telegram_username?'@'+esc(r.telegram_username):''} <span class="muted">${esc(r.telegram_id)}</span></td><td>${esc(r.language)}</td><td>${esc(fmtDate(r.sent_at))}</td><td>${esc(r.error||'')}</td></tr>`).join('')}</tbody></table>`}
 async function toggleLogs(id){openId=openId===id?'':id;renderHistory();if(openId&&!logsCache[id]){try{const j=await api('/api/admin/broadcast-logs?broadcast_id='+encodeURIComponent(id));logsCache[id]=j.logs||[];}catch(e){logsCache[id]=[{status:'failed',name:'Load error',error:e.message}]}if(openId===id)renderHistory()}}
-document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');['Players','Broadcast','Direct','Selfie','Rating','History'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',b.dataset.tab==='history');if(b.dataset.tab==='history'&&!history.length)loadHistory()});reload();
+
+// --- события -----------------------------------------------------------------
+// Карточка живёт как черновик, пока организатор не подтвердит её в боте.
+let evEditing='';
+function evForm(){return{
+  event_id:evEditing,
+  title_ru:$('evTitleRu').value.trim(),title_en:$('evTitleEn').value.trim(),
+  description_ru:$('evDescRu').value.trim(),description_en:$('evDescEn').value.trim(),
+  date:$('evDate').value.trim(),time:$('evTime').value.trim(),place:$('evPlace').value.trim(),
+  price_thb:$('evPrice').value||'',guest_price_thb:$('evGuestPrice').value||'',
+  capacity:$('evCapacity').value||'',signup_deadline:$('evDeadline').value.trim(),
+  payment_required:$('evPaid').checked,guests_allowed:$('evGuests').checked,
+  max_guests:$('evMaxGuests').value||'',refund_hours:$('evRefund').value||'',
+  audience:$('evAudience').value
+}}
+function newEvent(){evEditing='';['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evPlace','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');$('evResult').textContent='Новая карточка'}
+async function saveEvent(){
+  try{const j=await api('/api/admin/event-save',{event:evForm()});evEditing=j.event.event_id;
+    $('evResult').innerHTML='<span class="ok">Сохранено: '+j.event.event_id+'</span>';loadEvents()}
+  catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+async function previewEvent(){
+  try{if(!evEditing)await saveEvent();
+    await api('/api/admin/event-preview',{event_id:evEditing});
+    $('evResult').innerHTML='<span class="ok">Карточка ушла тебе в бот — подтверди там.</span>'}
+  catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+function editEvent(id){
+  const e=(evData||[]).find(x=>x.event_id===id);if(!e)return;
+  evEditing=id;
+  $('evTitleRu').value=e.title_ru||'';$('evTitleEn').value=e.title_en||'';
+  $('evDescRu').value=e.description_ru||'';$('evDescEn').value=e.description_en||'';
+  $('evDate').value=e.date||'';$('evTime').value=e.time||'';$('evPlace').value=e.place||'';
+  $('evPrice').value=e.price_thb||'';$('evGuestPrice').value=e.guest_price_thb==null?'':e.guest_price_thb;
+  $('evCapacity').value=e.capacity||'';$('evDeadline').value=e.signup_deadline||'';
+  $('evMaxGuests').value=e.max_guests||'';$('evRefund').value=e.refund_hours||'';
+  $('evPaid').checked=!!e.payment_required;$('evGuests').checked=!!e.guests_allowed;
+  $('evAudience').value=e.audience||'all';
+  $('evResult').textContent='Правим: '+(e.title_ru||e.event_id);
+  window.scrollTo(0,0);
+}
+let evData=[];
+async function loadEvents(){
+  try{const j=await api('/api/admin/events');evData=j.events||[];
+    $('eventsTable').innerHTML='<tr><th>Событие</th><th>Когда</th><th>Статус</th><th>Мест</th><th>Записей</th><th></th></tr>'
+      +evData.map(e=>'<tr><td>'+esc(e.title_ru||e.title_en||e.event_id)+'</td><td>'+esc([e.date,e.time].filter(Boolean).join(' '))+'</td>'
+        +'<td><span class="pill">'+esc(e.status)+'</span></td><td class="num">'+(e.capacity?e.seats+' / '+e.capacity:e.seats)+'</td>'
+        +'<td class="num">'+e.signups+'</td>'
+        +'<td><button class="btn secondary" onclick="editEvent(\''+e.event_id+'\')">Править</button></td></tr>').join('')}
+  catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// --- балансы -----------------------------------------------------------------
+async function loadBalances(){
+  try{const j=await api('/api/admin/balances');
+    $('balancesTable').innerHTML='<tr><th>Игрок</th><th>Telegram ID</th><th>Депозит, ฿</th></tr>'
+      +(j.balances||[]).map(b=>'<tr><td>'+esc(b.name||'')+'</td><td>'+esc(b.telegram_id)+'</td><td class="num">'+b.balance+'</td></tr>').join('')}
+  catch(e){$('balResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+async function changeBalance(){
+  try{const j=await api('/api/admin/balance-change',{telegram_id:$('balId').value.trim(),name:$('balName').value.trim(),amount:Number($('balAmount').value||0),comment:$('balComment').value.trim()});
+    $('balResult').innerHTML='<span class="ok">Готово. Новый баланс: '+j.balance+' ฿</span>';loadBalances()}
+  catch(e){$('balResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');['Players','Broadcast','Direct','Selfie','Rating','History','Events','Balances'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',['history','events','balances'].includes(b.dataset.tab));
+  if(b.dataset.tab==='history'&&!history.length)loadHistory();
+  if(b.dataset.tab==='events')loadEvents();
+  if(b.dataset.tab==='balances')loadBalances()});reload();
 </script></body></html>
