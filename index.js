@@ -734,17 +734,28 @@ app.get('/api/league/bootstrap', async (req, res) => {
       else if (!byPair.has(pair)) byPair.set(pair, court);
     }
     const nameById = new Map(players.map(pl => [String(pl.id), pl.name]));
+    // Фотография соперника в истории приходит из таблицы и остаётся старой даже
+    // после того, как человек сделал новую аватарку. Подменяем её тем же
+    // адресом, что и в списке игроков, — иначе аватарка обновляется не везде.
+    const avatarUrlFor = (name) => {
+      const tg = avatarOwners.get(String(name || '').trim().toLowerCase());
+      return tg ? `${PUBLIC_URL}/avatar/${tg}.png` : '';
+    };
     const matches = {};
     for (const [pid, list] of history.entries()) {
       const me = nameById.get(String(pid)) || '';
-      matches[pid] = me
-        ? list.map(m => {
-            const exact = courtMap.get(courtKey(m.date, me, m.opponent));
-            const loose = exact ? '' : byPair.get(courtKey('', me, m.opponent).slice(1));
-            const court = exact || loose || '';
-            return court ? { ...m, court } : m;
-          })
-        : list;
+      matches[pid] = list.map(m => {
+        const patch = {};
+        if (me) {
+          const exact = courtMap.get(courtKey(m.date, me, m.opponent));
+          const loose = exact ? '' : byPair.get(courtKey('', me, m.opponent).slice(1));
+          const court = exact || loose || '';
+          if (court) patch.court = court;
+        }
+        const photo = avatarUrlFor(m.opponent);
+        if (photo) patch.opponent_photo = photo;
+        return Object.keys(patch).length ? { ...m, ...patch } : m;
+      });
     }
     res.json({
       ok: true,
@@ -883,6 +894,59 @@ app.get('/api/league/schedule', async (req, res) => {
     res.json(payload);
   } catch (e) {
     console.error('schedule api failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Сводка по сезонам: кто выиграл дивизион, кто был вторым и как игрок прошёл
+// свой дивизион. Один запрос вместо десятка — витрина берёт отсюда и чемпионов
+// на главной, и цифры в карточке игрока. Таблицы дивизионов кэшируются, поэтому
+// повторные обращения дешёвые.
+let seasonsSummaryCache = { t: 0, v: null };
+const SEASONS_SUMMARY_MS = 5 * 60 * 1000;
+
+async function buildSeasonsSummary() {
+  const seasonList = await getSeasons().catch(() => []);
+  const out = [];
+  for (const season of seasonList) {
+    const letters = await availableDivisions(season.number).catch(() => []);
+    const divisions = [];
+    for (const letter of letters) {
+      const data = await getDivisionTable(letter, season.number).catch(() => null);
+      if (!data?.ok) continue;
+      const table = (data.players || []).map(pl => ({
+        id: String(pl.id || ''), name: pl.name || '', photo: pl.photo || '',
+        place: pl.place || 0, matches: pl.matches || 0, wins: pl.wins || 0,
+        points: pl.points || 0, zone: pl.zone || ''
+      }));
+      // Второе место — проигравший финал, а не второй в регулярке: в плей-офф
+      // порядок может перевернуться, и это как раз то, что стоит показать.
+      const final = data.playoff?.final || null;
+      const champion = data.playoff?.champion || null;
+      let runnerUp = null;
+      if (final && champion) {
+        const other = String(final.first?.id) === String(champion.id) ? final.second : final.first;
+        if (other?.id) runnerUp = { id: String(other.id), name: other.name, photo: other.photo || '' };
+      }
+      divisions.push({ letter, champion, runner_up: runnerUp, final_score: final?.score || '', table });
+    }
+    out.push({ number: season.number, label: season.label, status: season.status, divisions });
+  }
+  return out;
+}
+
+app.get('/api/league/seasons-summary', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (seasonsSummaryCache.v && Date.now() - seasonsSummaryCache.t < SEASONS_SUMMARY_MS) {
+      return res.json({ ok:true, seasons: seasonsSummaryCache.v });
+    }
+    const seasons = await buildSeasonsSummary();
+    seasonsSummaryCache = { t: Date.now(), v: seasons };
+    res.json({ ok:true, seasons });
+  } catch (e) {
+    console.error('seasons summary failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
 });
