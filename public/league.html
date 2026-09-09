@@ -23,7 +23,8 @@ background-image:radial-gradient(rgba(255,255,255,.028) .5px,transparent .5px);b
 .hidden{display:none!important}
 
 /* шапка и меню */
-.hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;position:sticky;top:0;z-index:30;
+  padding:10px 0 9px;background:linear-gradient(180deg,var(--bg) 78%,rgba(11,10,9,0))}
 .logo{width:40px;height:40px;border-radius:12px;flex:0 0 40px;background:linear-gradient(160deg,#2A2521,#171412);
 border:1px solid #322B24;color:var(--champ);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
 .eyebrow{font-size:9px;letter-spacing:2.6px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:3px}
@@ -62,6 +63,45 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .spair{font-size:13px;font-weight:600;line-height:1.3}
 .spair .vs{color:var(--dim);font-weight:400}
 .smeta{font-size:10px;color:var(--dim)}
+/* Шапка карточки: показываем около 80% квадратной аватарки и гасим края
+   градиентом, чтобы имя ложилось на затухание, а не на резкий срез. */
+.hero .vign{position:absolute;left:0;right:0;pointer-events:none;z-index:2}
+.hero .vign.t{top:0;height:74px;background:linear-gradient(180deg,rgba(11,10,9,.72),rgba(11,10,9,0))}
+.hero .vign.b{bottom:0;height:132px;background:linear-gradient(0deg,rgba(11,10,9,.92),rgba(11,10,9,0))}
+.avbtn{box-shadow:0 0 0 2px rgba(232,164,92,.55)}
+/* Полноэкранный просмотр аватарки. */
+.avfull{position:fixed;inset:0;z-index:60;background:rgba(8,7,6,.96);display:flex;
+  align-items:center;justify-content:center;padding:18px}
+.avfull img{max-width:100%;max-height:88vh;border-radius:18px;display:block}
+.avfull .x{position:absolute;top:16px;right:18px;font-size:26px;color:#EDE6DB;cursor:pointer;line-height:1}
+/* Панель загрузки — заметная рамка, размер шрифта не трогаем. */
+#avCard{border-color:#4A3925;box-shadow:0 0 0 1px rgba(232,164,92,.18) inset}
+#avCard h3{color:var(--amber)}
+.avwarn{color:var(--amber);font-weight:700}
+.avup{background:linear-gradient(180deg,#2C231A,#221B14);border-color:#4A3925;color:var(--amber);font-weight:800}
+/* Спойлер «как это считается». */
+.spo{margin:10px 0 0;border:1px solid var(--line2);border-radius:12px;background:#141311}
+.spo summary{cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700;color:var(--dim);list-style:none}
+.spo summary::-webkit-details-marker{display:none}
+.spo[open] summary{color:var(--amber)}
+.spo .in{padding:0 12px 12px;font-size:11.5px;line-height:1.55;color:var(--dim)}
+/* Блок игрока в шапке. */
+.hdr{position:relative}
+.hdr .meplate{margin-left:auto;display:flex;align-items:center;gap:9px;cursor:pointer;
+  padding:5px 9px 5px 5px;border:1px solid var(--line2);border-radius:999px;background:#141311}
+.hdr .meplate .avr,.hdr .meplate .avph{width:30px;height:30px;flex:0 0 30px;font-size:11px}
+.hdr .meplate .t1{font-size:11.5px;font-weight:800;line-height:1.15;max-width:104px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr .meplate .t2{font-size:9.5px;color:var(--dim);margin-top:2px}
+/* Итоги сезона на главной. */
+.chline{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;
+  padding:9px 11px;border:1px solid var(--line2);border-radius:12px;background:#141311;margin-bottom:7px}
+.chline.small{grid-template-columns:28px minmax(0,1fr) auto;padding:6px 10px;opacity:.82}
+.chline.small .avr,.chline.small .avph{width:28px;height:28px;flex:0 0 28px;font-size:10px}
+.chline .avr,.chline .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px}
+.chline .nm2{font-size:13px;font-weight:800;line-height:1.2}
+.chline.small .nm2{font-size:11.5px;font-weight:700}
+.chline .sub{font-size:9.5px;color:var(--dim);margin-top:2px}
 .sr .live{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);font-weight:800}
 .avbtn{position:absolute;top:12px;right:12px;z-index:3;width:38px;height:38px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
@@ -94,7 +134,7 @@ align-items:center;justify-content:center;color:#0A0A0B}
 .fm.w{background:var(--win)}.fm.l{background:var(--lose)}
 
 /* аватарки */
-.avr{border-radius:50%;object-fit:cover;background:#1E1B18;border:1px solid #2A2521;display:block}
+.avr{border-radius:50%;object-fit:cover;object-position:50% 32%;background:#1E1B18;border:1px solid #2A2521;display:block}
 .avph{border-radius:50%;background:linear-gradient(160deg,#2A2521,#1A1714);border:1px solid #2A2521;
 display:flex;align-items:center;justify-content:center;font-weight:800;color:#7C7365}
 
@@ -111,6 +151,8 @@ border:1px solid #201D19;font-size:11px;font-weight:700;color:var(--mute);white-
 .flab{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin:0 0 7px 2px}
 .tb{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .thd,.trw{display:grid;grid-template-columns:20px 34px minmax(0,1fr) 26px 44px 48px;gap:6px;align-items:center;padding:0 11px}
+/* В гонке между матчами и процентом добавилась колонка побед. */
+.tb.race .thd,.tb.race .trw{grid-template-columns:18px 32px minmax(0,1fr) 24px 24px 40px 44px;gap:5px;padding:0 9px}
 .thd{height:36px;background:var(--surf2);font-size:8px;letter-spacing:1.3px;text-transform:uppercase;
 color:var(--mute2);font-weight:800}
 .thd span,.trw span:not(.n){text-align:center}
@@ -275,8 +317,8 @@ font-weight:800;margin-bottom:9px}
 .fm2 .nm3 em{font-style:normal;color:#9A9186;font-weight:600}
 .sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--amber);margin-top:3px}
 /* строка матча в карточке игрока */
-.mrow{display:grid;grid-template-columns:46px 38px minmax(0,1fr);gap:10px;align-items:center}
-.mrow .avr,.mrow .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px;cursor:pointer}
+.mrow{display:grid;grid-template-columns:46px 46px minmax(0,1fr);gap:10px;align-items:center}
+.mrow .avr,.mrow .avph{width:46px;height:46px;flex:0 0 46px;font-size:13px;cursor:pointer}
 .mrow .who{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .res{font-size:9px;font-weight:800;padding:4px 6px;border-radius:8px;letter-spacing:.4px;text-align:center}
 .res.w{background:#131A15;border:1px solid #2A3A2C;color:var(--win)}
@@ -288,8 +330,8 @@ font-weight:700;cursor:pointer}
 .back i{width:30px;height:30px;border-radius:10px;background:#141311;border:1px solid #201D19;
 display:flex;align-items:center;justify-content:center;font-style:normal;font-size:15px;color:var(--champ)}
 .hero{border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--surf);margin-bottom:12px;position:relative}
-.hero .avr,.hero .avph{width:100%;height:210px;border-radius:0;border:0;object-fit:cover;font-size:56px}
-.hero .fade{position:absolute;left:0;right:0;top:70px;height:160px;
+.hero .avr,.hero .avph{width:100%;height:78vw;max-height:330px;border-radius:0;border:0;object-fit:cover;font-size:56px;object-position:50% 30%}
+.hero .fade{pointer-events:none;position:absolute;left:0;right:0;bottom:0;height:190px;
 background:linear-gradient(180deg,transparent,rgba(17,16,16,.75) 58%,var(--surf))}
 .hero .info{padding:0 16px 17px;position:relative;margin-top:-46px}
 .hero h2{font-size:24px;font-weight:800;letter-spacing:-.7px;line-height:1.15}
@@ -358,6 +400,7 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
   <div class="hdr" id="hdr">
     <div class="logo">PTF</div>
     <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
+    <div id="mePlate"></div>
   </div>
   <div class="tabs" id="tabs"></div>
   <div id="viewHome"></div>
@@ -382,7 +425,7 @@ var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.la
 
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='';
 var mode='home',openId='',backTo='players';
-var pQuery='',pDiv='',pStatus='',pView='detail',pOrder=[],openAch='';
+var pQuery='',pDiv='',pStatus='',pView='detail',pOrder=[],openAch='',pFiltersOpen=false;
 var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false;
 var fQuery='',fDiv='',fLimit=20;
 var divLetter='',divData=null,divLoading=false,divErr='',showExt=false,showMx=false;
@@ -394,7 +437,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'Турниры',tAbout:'О лиге',tPartners:'Партнёры',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
-  filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',
+  filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Статус',
   schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Мои матчи',schPlayer:'Игрок',schCourt:'Корт',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
@@ -407,6 +450,13 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   avLeft:'Осталось попыток',avNoTries:'Попытки закончились — напиши организатору.',
   avTooBig:'Фото больше 8 МБ — сними заново или сожми.',
   avPrivacy:'Фото используется только для аватарки в лиге. Напиши организатору, если хочешь его удалить.',
+  avNotChat:'Не отправляй фото в чат — загрузи его здесь.',avFull:'Открыть аватарку',
+  cWins:'Победы',divPts:'Очки в дивизионе',racePts:'Очки в гонке',divPlace:'Место',
+  promoted:'Поднялись дивизионом выше',achHolders:'Награды сезона',myCard:'Моя карточка',
+  openDiv:'Открыть таблицу дивизиона',lastSeason:'Итоги прошлого сезона',runnerUp:'Финалист',
+  howPoints:'Как начисляются очки',
+  howRace:'Годовая гонка складывается из очков за все сезоны. Очки начисляются за место в дивизионе по итогам регулярной части и за результат в плей-офф. Чем выше дивизион, тем дороже каждое место.',
+  howDiv:'В дивизионе играют круговой турнир: каждый с каждым. За победу даются очки, места распределяются по очкам, при равенстве — по разнице сетов и геймов. Первые места выходят в плей-офф, последние опускаются дивизионом ниже.',
   players:'Игроков',matchesN:'Матчей',leader:'Лидер',
   colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
   sMatches:'Матчи',sWins:'Победы',sPoints:'Очки',sWL:'Победы — поражения',sWR:'Процент побед',
@@ -421,6 +471,8 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   seasons:'Сезоны',ach:'Достижения',history:'История матчей',
   cSeason:'Сезон',cG:'И',cW:'П',cPlace:'Место',cPts:'Очки',
   showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
+  sInfo:'Сезон 2',sDates:'Матчи регулярной части',sDatesV:'14 сентября — 5 ноября',
+  sSemi:'Полуфиналы и финал',sSemiV:'7–8 ноября',sVenue:'Площадка',sVenueV:'The Peak Racket Park',
   yourSeason:'Твой сезон',notInLeague:'Ты пока не в составе дивизиона. Подай заявку — и раздел оживёт.',
   champions:'Чемпионы сезона',rules:'Как считается таблица',site:'Открыть сайт',
   noEvents:'Турниров пока нет. Появятся здесь, как только заведём первый.',
@@ -430,7 +482,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
-  filters:'Filters',bucketsDiv:'Groups and divisions',
+  filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Status',
   schToday:'Today',schTomorrow:'Tomorrow',schMine:'My matches',schPlayer:'Player',schCourt:'Court',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
@@ -443,6 +495,13 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   avLeft:'Attempts left',avNoTries:'No attempts left — message the organizer.',
   avTooBig:'The photo is over 8 MB — retake or compress it.',
   avPrivacy:'The photo is used only for your league avatar. Message the organizer if you want it deleted.',
+  avNotChat:'Do not send the photo to the chat — upload it here.',avFull:'Open the avatar',
+  cWins:'Wins',divPts:'Division points',racePts:'Race points',divPlace:'Place',
+  promoted:'Moved up a division',achHolders:'Season awards',myCard:'My profile',
+  openDiv:'Open the division table',lastSeason:'Last season results',runnerUp:'Runner-up',
+  howPoints:'How points are awarded',
+  howRace:'The Yearly Race adds up points from every season. Points come from your place in the division after the regular stage and from your play-off result. The higher the division, the more each place is worth.',
+  howDiv:'A division plays a round robin: everyone against everyone. Wins bring points, places are decided by points and then by set and game difference. The top places go to the play-offs, the bottom ones drop a division.',
   players:'Players',matchesN:'Matches',leader:'Leader',
   colNo:'#',colPlayer:'Player',colM:'M',colW:'W',colWR:'WR',colPts:'Pts',
   sMatches:'Matches',sWins:'Wins',sPoints:'Points',sWL:'Wins — losses',sWR:'Win rate',
@@ -457,6 +516,8 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   seasons:'Seasons',ach:'Achievements',history:'Match history',
   cSeason:'Season',cG:'P',cW:'W',cPlace:'Place',cPts:'Pts',
   showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
+  sInfo:'Season 2',sDates:'Regular season matches',sDatesV:'14 September — 5 November',
+  sSemi:'Semifinals and final',sSemiV:'7–8 November',sVenue:'Venue',sVenueV:'The Peak Racket Park',
   yourSeason:'Your season',notInLeague:'You are not in a division yet. Apply and this section comes alive.',
   champions:'Season champions',rules:'How the table works',site:'Open the website',
   noEvents:'No tournaments yet. They will appear here once we add the first one.',
@@ -542,6 +603,32 @@ function buildTabs(){
   $('tabs').innerHTML=labels.map(function(x){
     return '<div class="tab" data-t="'+x[0]+'" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
   }).join('')+'<div class="tab off">'+esc(X.tPartners)+'</div>';
+}
+// Свой игрок в витрине ищется по id, а если витрина его не знает — по имени.
+function mePlayer(){
+  if(!me)return null;
+  return byId(me.id)||players.filter(function(x){
+    return String(x.name||'').trim().toLowerCase()===String(me.name||'').trim().toLowerCase();
+  })[0]||null;
+}
+// Плашка «это я» в шапке: аватарка, имя и дивизион с местом. Клик — своя карточка.
+function renderMePlate(){
+  var el=$('mePlate');if(!el)return;
+  var p=mePlayer();
+  if(!p){el.innerHTML='';return}
+  var sub=[divLabel(p.division),p.division_position?('#'+p.division_position):'']
+    .filter(Boolean).join(' · ');
+  el.innerHTML='<div class="meplate" onclick="openPlayer(\''+q(p.id)+'\',mode)">'
+    +av(p)+'<div><div class="t1">'+esc(p.name)+'</div>'
+    +(sub?'<div class="t2">'+esc(sub)+'</div>':'')+'</div></div>';
+}
+// Переход из карточки/главной сразу в нужную таблицу дивизиона.
+function openDivFrom(n,d){
+  if(n)divSeason=String(n);
+  var letter=String(d||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+  if(letter)divLetter=letter;
+  divData=null;divErr='';
+  showTab('div');
 }
 function showTab(t){
   if(VIEWS.indexOf(t)<0)return;
@@ -753,10 +840,11 @@ function avatarInner(){
   if(s==='published')h+='<div class="hint">'+esc(X.avPublished)+'</div>';
     if(s==='failed')h+='<div class="hint" style="color:#C2695E">'+esc(X.avFailed+(avState.error?': '+avState.error:''))+'</div>';
   if(avState.stub)h+='<div class="hint" style="color:#C2695E">'+esc(X.avStub)+'</div>';
+  h+='<div class="hint avwarn">'+esc(X.avNotChat)+'</div>';
   h+='<div class="hint">'+esc(X.avRules)+'</div>';
   if(avState.attempts_left>0){
     h+='<input type="file" accept="image/*" id="avFile" style="display:none" onchange="avPick(this)">'
-      +'<button class="chip" style="width:100%;margin-top:9px" onclick="document.getElementById(\'avFile\').click()">'
+      +'<button class="chip avup" style="width:100%;margin-top:9px" onclick="document.getElementById(\'avFile\').click()">'
       +esc(avBusy?X.avSending:(s==='published'||s==='ready'?X.avRedo:X.avSend))+'</button>'
       +'<div class="hint" style="margin-top:6px">'+esc(X.avLeft)+': '+avState.attempts_left+'</div>';
   } else {
@@ -792,6 +880,17 @@ function avSend(dataUrl){
       avSay(X.avAccepted);
       loadAvatar();
     }).catch(function(e){avBusy=false;avSay('⛔ '+e.message,true)});
+}
+
+// Полноэкранный просмотр аватарки: в шапке она обрезана, а посмотреть целиком
+// иногда хочется — особенно свою, только что сгенерированную.
+function openAvatarFull(src){
+  if(!src)return;
+  var w=document.createElement('div');
+  w.className='avfull';
+  w.innerHTML='<div class="x">✕</div><img src="'+esc(src)+'" alt="">';
+  w.onclick=function(){ document.body.removeChild(w) };
+  document.body.appendChild(w);
 }
 
 // ------------------------------------------------- навигация по разделам
@@ -833,6 +932,52 @@ function syncBack(){
 if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(backTo) });
 
 // ---------------------------------------------------------------- главная
+// Итоги последнего завершённого сезона: чемпионы из плей-офф, финалисты помельче
+// и те, кто поднялся дивизионом выше по итогам регулярки.
+var summary=null,summaryLoaded=false;
+function loadSummary(){
+  if(summaryLoaded)return;summaryLoaded=true;
+  fetch('/api/league/seasons-summary?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(j&&j.ok){summary=j.seasons||[];if(mode==='home')renderHome()}
+    }).catch(function(){});
+}
+function lastFinishedSeason(){
+  var list=(summary||[]).filter(function(x){
+    return String(x.status||'').toLowerCase()==='finished'&&(x.divisions||[]).length;
+  });
+  return list.length?list[list.length-1]:null;
+}
+function chLine(pl,sub,small){
+  if(!pl||!pl.name)return '';
+  return '<div class="chline'+(small?' small':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
+    +av(pl)+'<div><div class="nm2">'+esc(pl.name)+'</div>'
+    +(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div><span></span></div>';
+}
+function championsBlock(){
+  var s=lastFinishedSeason();
+  if(!s)return '';
+  var h='<div class="card"><h3>'+esc(X.lastSeason)+' · '+esc(s.label||('Season '+s.number))+'</h3>';
+  var any='';
+  (s.divisions||[]).forEach(function(d){
+    if(d.champion)any+=chLine(d.champion,'🏆 '+divLabel(d.letter)+(d.final_score?' · '+d.final_score:''));
+    if(d.runner_up)any+=chLine(d.runner_up,X.runnerUp+' · '+divLabel(d.letter),true);
+  });
+  h+=any||'<div class="hint">'+esc(X.noData)+'</div>';
+  // Подъём по дивизионам считается по регулярке: первые два места идут выше.
+  // Из самого верхнего дивизиона подниматься некуда — его пропускаем.
+  var letters=(s.divisions||[]).map(function(d){return String(d.letter||'')}).sort();
+  var top=letters[0]||'';
+  var up='';
+  (s.divisions||[]).forEach(function(d){
+    if(String(d.letter||'')===top)return;
+    (d.table||[]).forEach(function(pl){
+      if(pl.place&&pl.place<=2)up+=chLine(pl,'▲ '+divLabel(d.letter)+' · #'+pl.place,true);
+    });
+  });
+  if(up)h+='<div class="lab" style="margin-top:12px">'+esc(X.promoted)+'</div>'+up;
+  return h+'</div>';
+}
 function renderHome(){
   var h='';
   var mine=players.filter(function(p){
@@ -847,11 +992,18 @@ function renderHome(){
   } else {
     h+='<div class="card"><h3>'+esc(X.yourSeason)+'</h3><div class="hint">'+esc(X.notInLeague)+'</div></div>';
   }
+  // Когда и где играем — самое частое, что спрашивают в чате. Логотип площадки
+  // добавим отдельно, когда Костас пришлёт файл.
+  h+='<div class="card"><h3>'+esc(X.sInfo)+'</h3>'
+    +'<div class="stats">'+stt(X.sDates,X.sDatesV,true)+stt(X.sSemi,X.sSemiV)
+    +stt(X.sVenue,X.sVenueV)+'</div></div>';
+  loadSummary();
+  h+=championsBlock();
   var champs=players.filter(function(p){
     return (p.achievements||[]).some(function(a){return /champion|чемпион/i.test(String(a.title||a.type||''))});
   }).slice(0,4);
   if(champs.length){
-    h+='<div class="card"><h3>'+esc(X.champions)+'</h3><div class="grid">'
+    h+='<div class="card"><h3>'+esc(X.achHolders)+'</h3><div class="grid">'
       +champs.map(function(p){
         var t=(p.achievements||[]).filter(function(a){return /champion|чемпион/i.test(String(a.title||a.type||''))})[0];
         return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'home\')">'+av(p)
@@ -883,7 +1035,8 @@ function raceList(){
   }
   if(qq)list=list.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qq)>=0});
   var key={pos:function(p){return -(p.position||9999)},name:function(p){return p.name||''},
-    m:function(p){return p.matches},wr:function(p){return pct(p)},points:function(p){return p.points}};
+    m:function(p){return p.matches},w:function(p){return p.wins||0},
+    wr:function(p){return pct(p)},points:function(p){return p.points}};
   var k=key[rSort]||key.points;
   return list.slice().sort(function(a,b){
     var x=k(a),y=k(b),r;
@@ -892,6 +1045,9 @@ function raceList(){
     if(!r)r=(a.position||9999)-(b.position||9999);
     return rDesc?-r:r;
   });
+}
+function spoiler(title,text){
+  return '<details class="spo"><summary>? '+esc(title)+'</summary><div class="in">'+esc(text)+'</div></details>';
 }
 function renderRace(){
   var list=raceList();
@@ -916,18 +1072,19 @@ function renderRace(){
   var col=function(k,t,cls){
     return '<span class="'+(rSort===k?'s':'')+(cls?' '+cls:'')+'" onclick="setSort(\''+k+'\')">'+esc(t)+(rSort===k?(rDesc?' ▼':' ▲'):'')+'</span>';
   };
-  h+='<div class="tb"><div class="thd">'+col('pos',X.colNo)+'<span></span>'
-    +col('name',X.colPlayer,'n')+col('m',X.colM)+col('wr',X.colWR)+col('points',X.colPts)+'</div>';
+  h+='<div class="tb race"><div class="thd">'+col('pos',X.colNo)+'<span></span>'
+    +col('name',X.colPlayer,'n')+col('m',X.colM)+col('w',X.colW)+col('wr',X.colWR)+col('points',X.colPts)+'</div>';
   h+=list.length?list.map(function(p){
     var w=pct(p);
     return '<div class="trw'+(p.position&&p.position<=3?' top':'')+'" onclick="openPlayer(\''+q(p.id)+'\',\'race\')">'
       +'<span class="p">'+(p.position||'—')+'</span>'+av(p)
       +'<span class="n"><div class="nm">'+esc(p.name)+'</div><div style="margin-top:3px">'+divChip(p.division)+'</div></span>'
       +'<span>'+p.matches+'</span>'
+      +'<span>'+(p.wins||0)+'</span>'
       +'<span>'+w+'%<div class="bar"><i style="width:'+w+'%"></i></div></span>'
       +'<span class="pt">'+p.points+'</span></div>';
   }).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
-  h+='</div><div class="tip">'+esc(X.sortTip)+'</div>';
+  h+='</div><div class="tip">'+esc(X.sortTip)+'</div>'+spoiler(X.howPoints,X.howRace);
   $('viewRace').innerHTML=h;
   keepFocus('rq',rQuery);
 }
@@ -975,8 +1132,14 @@ function renderPlayers(){
   var sch=[['',X.all],['active',X.active],['inactive',X.inactive]].map(function(x){
     return '<div class="chip'+(pStatus===x[0]?' on':'')+'" onclick="setPStatus(\''+x[0]+'\')">'+esc(x[1])+'</div>';
   }).join('');
-  var h='<input class="search" id="pq" placeholder="'+esc(X.search)+'" value="'+esc(pQuery)+'" oninput="setPQuery(this.value)">'
-    +'<div class="chips">'+chips+'</div><div class="chips">'+sch+'</div>'
+  var nf=(pDiv?1:0)+(pStatus?1:0);
+  var h='<div class="fbar"><input class="search" style="margin:0" id="pq" placeholder="'+esc(X.search)+'" value="'+esc(pQuery)+'" oninput="setPQuery(this.value)">'
+    +'<div class="fbtn'+(pFiltersOpen||nf?' on':'')+'" onclick="togglePFilters()">'+esc(X.filters)
+    +(nf?' <span class="n">'+nf+'</span>':'')+'</div></div>'
+    +(pFiltersOpen?'<div class="fpanel"><div class="flab">'+esc(X.bucketsDiv)+'</div>'
+      +'<div class="chips sm">'+chips+'</div>'
+      +'<div class="flab">'+esc(X.statusLab)+'</div>'
+      +'<div class="chips sm" style="margin-bottom:0">'+sch+'</div></div>':'')
     +'<div class="view"><div class="vb'+(pView==='detail'?' on':'')+'" onclick="setPView(\'detail\')">'+esc(X.detail)+'</div>'
     +'<div class="vb'+(pView==='tile'?' on':'')+'" onclick="setPView(\'tile\')">'+esc(X.tile)+'</div></div>'
     +'<div class="cnt">'+esc(X.found)+list.length+((!pDiv&&!pQuery)?esc(X.random):'')+'</div>';
@@ -987,6 +1150,7 @@ function renderPlayers(){
   $('viewPlayers').innerHTML=h;
   keepFocus('pq',pQuery);
 }
+function togglePFilters(){pFiltersOpen=!pFiltersOpen;renderPlayers()}
 function setPDiv(d){pDiv=d;renderPlayers()}
 function setPStatus(s){pStatus=s;renderPlayers()}
 function setPQuery(v){pQuery=v;renderPlayers()}
@@ -1118,7 +1282,8 @@ function renderDiv(){
     +'<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
     +(showExt?extTable(d):'')
     +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
-    +(showMx?mxTable(d):'');
+    +(showMx?mxTable(d):'')
+    +spoiler(X.howPoints,X.howDiv);
   $('viewDiv').innerHTML=h;
 }
 function poBox(title,m,isFinal){
@@ -1277,7 +1442,6 @@ function openPlayer(id,from){
   renderPlayer(p);
   VIEWS.forEach(function(k){$(VIEW_ID[k]).classList.add('hidden')});
   $('tabs').classList.add('hidden');
-  $('hdr').classList.add('hidden');
   $('viewCard').classList.remove('hidden');
   syncBack();
   renderNav();
@@ -1331,9 +1495,13 @@ function renderPlayer(p){
   var w=pct(p);
   var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
   var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>'
-    +'<div class="hero">'+av(p)+avatarButton(p)+'<div class="fade"></div><div class="info">'
+    +'<div class="hero">'
+    +'<div onclick="openAvatarFull(\''+q(p.photo||'')+'\')">'+av(p)+'</div>'
+    +'<div class="vign t"></div><div class="vign b"></div>'
+    +avatarButton(p)+'<div class="fade"></div><div class="info">'
     +'<h2>'+esc(p.name)+'</h2>'
-    +'<div class="row">'+divChip(p.division, p.division_position)
+    +'<div class="row"><span onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')">'
+      +divChip(p.division, p.division_position)+'</span>'
       +(p.position?'<span class="badge g">'+esc(X.tRace)+' #'+p.position+'</span>':'')
       +statusBadge(p)+'</div>'
     +(p.form&&p.form.length?'<div class="fline"><span class="lb">Form</span>'+formRow(p.form)+'</div>':'')
@@ -1341,7 +1509,7 @@ function renderPlayer(p){
       +stt(X.sPoints,p.points||'',true)+stt(X.sMatches,p.matches||'')
       +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0))+stt(X.sWR,w+'%')
       +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
-      +(p.nationality?stt('Country',flag(p.nationality)+' '+p.nationality):'')
+      +stt('Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''))
     +'</div></div></div>';
 
   h+=avatarBlock(p);
@@ -1353,7 +1521,7 @@ function renderPlayer(p){
     h+='<div class="sr hd"><span class="sn"></span><span>'+esc(X.cG)+'</span>'
       +'<span>'+esc(X.cW)+'</span><span>'+esc(X.cPlace)+'</span><span>'+esc(X.cPts)+'</span></div>'
       +srows.map(function(s){
-        return '<div class="sr"><span class="sn">'+esc(s.name)
+        return '<div class="sr" onclick="openDivFrom(\''+q(s.n)+'\',\''+q(s.division||'')+'\')"><span class="sn">'+esc(s.name)
           +(s.live?' <b class="live">'+esc(X.sSeasonNow)+'</b>':'')
           +(s.division?'<div class="sd">'+esc(divLabel(s.division))+'</div>':'')+'</span>'
           +'<span>'+s.g+'</span><span>'+s.w+'</span>'
@@ -1425,6 +1593,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     if(wantDiv&&divisions.indexOf(wantDiv)>=0)divLetter=wantDiv;
     var wantTab=(qs.get('tab')||'').trim().toLowerCase();
     if(wantDiv&&!wantTab)wantTab='div';
+    renderMePlate();
     showTab(VIEWS.indexOf(wantTab)>=0?wantTab:'home');
     var wantPlayer=(qs.get('player')||'').trim();
     // «me» в ссылке — это «моя карточка»: рассылка не знает id игрока в витрине,
