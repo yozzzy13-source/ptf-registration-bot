@@ -8,33 +8,66 @@
 <style>
 /* Noir: тёплый чёрный, приглушённый янтарь, шампань для титулов.
    Слои разделяются светлотой и тонкой кромкой, а не жирными рамками. */
+/* Две темы на одном наборе токенов: тёмная Noir по умолчанию, светлая Court —
+   по атрибуту data-theme="light" на <html>. Ни одного цвета мимо переменной,
+   иначе при переключении часть экрана останется от другой темы. */
 :root{
-  --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#1D1A17;--line2:#1A1714;
-  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;
-  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--gold:#C9A76A;
-  --win:#8FBF9A;--lose:#C2695E;
+  --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#2A2521;--line2:#221F1B;
+  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;--mute3:var(--mute3);
+  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--champ2:var(--champ2);--gold:#C9A76A;
+  --win:#8FBF9A;--lose:#C2695E;--silver:var(--silver);--upArrow:var(--upArrow);
+  --card2:var(--card2);--line3:var(--line3);--line4:var(--line4);--line5:var(--line5);
+  --accBg:var(--accBg);--accBg2:var(--accBg2);--accLine:var(--accLine);--accLine2:var(--accLine2);
+  --onAcc:var(--onAcc);--winBg:var(--winBg);--winLine:var(--winLine);--loseBg:var(--loseBg);--loseLine:var(--loseLine);
+  --tile:var(--tile);--tile2:var(--tile2);--grain:var(--grain);
+  --edge:var(--edge);--edgeOn:var(--edgeOn);
+  --fadeTop:var(--fadeTop);--fadeMid:var(--fadeMid);--fadeNone:var(--fadeNone);
+  --avBg:var(--avBg);--sheet:var(--sheet);--hair:var(--hair);
+}
+/* Светлая тема Court: зелень корта как акцент, лимон на титулах. */
+html[data-theme="light"]{
+  --bg:#F2F5F1;--surf:#FFFFFF;--surf2:#EBF0EA;--line:#C7D3C5;--line2:#DDE5DB;
+  --text:#16211A;--dim:#4C5A50;--mute:#7E8B82;--mute2:#93A099;--mute3:#7E8B82;
+  --amber:#1F6B44;--amber2:#145236;--champ:#6E7A22;--champ2:#9AA45E;--gold:#8E9A2E;
+  --win:#1F6B44;--lose:#B04A2E;--silver:#9AA39C;--upArrow:#1F6B44;
+  --card2:#F5F8F4;--line3:#D5DED3;--line4:#E4EAE2;--line5:#EDF1EC;
+  --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--accLine2:#BFDECB;
+  --onAcc:#FFFFFF;--winBg:#E1F0E7;--winLine:#A6D2BB;--loseBg:#F9E7E0;--loseLine:#E5B7A4;
+  --tile:#F0F4EF;--tile2:#EFF4EE;--grain:rgba(0,0,0,.02);
+  --edge:rgba(22,33,26,.06);--edgeOn:rgba(31,107,68,.16);
+  --fadeTop:rgba(255,255,255,.55);--fadeMid:rgba(255,255,255,.92);--fadeNone:rgba(255,255,255,0);
+  --avBg:#E7EDE6;--sheet:rgba(242,245,241,.96);--hair:rgba(22,33,26,.05);
+  --dA:#1F6B44;--dABg:#E1F0E7;--dALine:#A6D2BB;
+  --dB:#2A5F94;--dBBg:#E2EAF5;--dBLine:#AAC3E1;
+  --dC:#6E7A22;--dCBg:#F0F2DC;--dCLine:#CBD495;
+  --dD:#93436F;--dDBg:#F6E3EF;--dDLine:#DFB2CE;
+  --dP:#B08414;--dPBg:#FAF0D9;--dPLine:#E5CE94;
+  --champBg:#EAF3EC;--champGlow:rgba(184,194,74,.22);--finBg:#F4F6E4;
+  --zStay:#C9D2C7;--zDown1:#D89A8B;--zDown2:#B4695C;
+  --zUpTint:rgba(184,194,74,.10);--zDownTint:rgba(176,74,46,.07);
+  --goldLine:#D5DB9A;--goldBg:#F4F6E4;--onForm:#FFFFFF;--goldRing:#B8C24A;--goldGlow:rgba(184,194,74,.22);
 }
 *{box-sizing:border-box;margin:0}
 body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
 font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;min-height:100vh;position:relative}
 .grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
-background-image:radial-gradient(rgba(255,255,255,.028) .5px,transparent .5px);background-size:3px 3px}
+background-image:radial-gradient(var(--grain) .5px,transparent .5px);background-size:3px 3px}
 .wrap{max-width:620px;margin:0 auto;padding:20px 16px 40px;position:relative;z-index:1}
 .hidden{display:none!important}
 
 /* шапка и меню */
 .hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;position:sticky;top:0;z-index:30;
-  padding:10px 0 9px;background:linear-gradient(180deg,var(--bg) 78%,rgba(11,10,9,0))}
-.logo{width:40px;height:40px;border-radius:12px;flex:0 0 40px;background:linear-gradient(160deg,#2A2521,#171412);
+  padding:10px 0 9px;background:linear-gradient(180deg,var(--bg) 78%,var(--fadeNone))}
+.logo{width:40px;height:40px;border-radius:12px;flex:0 0 40px;background:linear-gradient(160deg,var(--line3),#171412);
 border:1px solid #322B24;color:var(--champ);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
 .eyebrow{font-size:9px;letter-spacing:2.6px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:3px}
 h1{font-size:22px;font-weight:800;letter-spacing:-.6px;line-height:1}
 .tabs{position:sticky;top:0;z-index:6;display:grid;grid-template-columns:repeat(4,1fr);gap:5px;
 padding:8px 0 10px;background:var(--bg);box-shadow:0 12px 14px -8px var(--bg);margin-bottom:14px}
-.tab{background:#141311;border:1px solid #201D19;color:var(--mute);border-radius:10px;padding:9px 3px;
+.tab{background:var(--card2);border:1px solid var(--line4);color:var(--mute);border-radius:10px;padding:9px 3px;
 text-align:center;font-size:10.5px;font-weight:700;cursor:pointer;user-select:none;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tab.on{background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber);border-color:#4A3925}
+.tab.on{background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber);border-color:var(--accLine)}
 .tab.off{opacity:.35;cursor:default}
 
 /* общее */
@@ -42,23 +75,23 @@ overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 margin:0 0 10px 2px;display:flex;align-items:center;gap:8px}
 .dot{width:3px;height:3px;border-radius:50%;background:var(--amber2);display:inline-block}
 .card{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:12px;
-box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}
+box-shadow:inset 0 1px 0 var(--hair)}
 .card h3{font-size:13.5px;font-weight:800;letter-spacing:.2px;margin-bottom:11px}
 .panel{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .empty{color:var(--mute);font-size:13.5px;text-align:center;padding:26px 10px;line-height:1.55}
 .hint{color:var(--mute);font-size:11.5px;line-height:1.5}
 .cnt{color:var(--mute2);font-size:10.5px;margin:0 0 10px 2px;font-weight:600}
-.search{width:100%;padding:11px 13px;border-radius:11px;border:1px solid #201D19;background:var(--surf);
+.search{width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--line4);background:var(--surf);
 color:var(--text);font-size:14px;margin-bottom:10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-.chip{padding:7px 12px;border-radius:10px;background:#141311;border:1px solid #201D19;font-size:11px;
+.chip{padding:7px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);font-size:11px;
 font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
-.chip.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
+.chip.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
 .chips.sm .chip{padding:5px 9px;font-size:10px;border-radius:8px}
 .sday{margin:15px 0 7px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
-.srow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:6px;border:1px solid #201D19;border-radius:12px;background:#141311}
-.srow.me{border-color:#4A3925;background:linear-gradient(180deg,#1C1712,#161310)}
-.srow.clash{border-color:#5A2E2A}
+.srow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:6px;border:1px solid var(--line4);border-radius:12px;background:var(--card2)}
+.srow.me{border-color:var(--accLine);background:linear-gradient(180deg,#1C1712,#161310)}
+.srow.clash{border-color:var(--loseLine)}
 .stime{grid-row:1/3;font-size:13px;font-weight:700;color:var(--amber);align-self:center}
 .spair{font-size:13px;font-weight:600;line-height:1.3}
 .spair .vs{color:var(--dim);font-weight:400}
@@ -66,21 +99,21 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 /* Шапка карточки: показываем около 80% квадратной аватарки и гасим края
    градиентом, чтобы имя ложилось на затухание, а не на резкий срез. */
 .hero .vign{position:absolute;left:0;right:0;pointer-events:none;z-index:2;max-height:280px}
-.hero .vign.t{top:0;height:74px;background:linear-gradient(180deg,rgba(11,10,9,.72),rgba(11,10,9,0))}
-.hero .vign.b{top:66vw;margin-top:-132px;height:132px;background:linear-gradient(0deg,rgba(11,10,9,.92),rgba(11,10,9,0))}
+.hero .vign.t{top:0;height:74px;background:linear-gradient(180deg,var(--fadeTop),var(--fadeNone))}
+.hero .vign.b{top:66vw;margin-top:-132px;height:132px;background:linear-gradient(0deg,var(--fadeMid),var(--fadeNone))}
 .avbtn{box-shadow:0 0 0 2px rgba(232,164,92,.55)}
 /* Полноэкранный просмотр аватарки. */
-.avfull{position:fixed;inset:0;z-index:60;background:rgba(8,7,6,.96);display:flex;
+.avfull{position:fixed;inset:0;z-index:60;background:var(--sheet);display:flex;
   align-items:center;justify-content:center;padding:18px}
 .avfull img{max-width:100%;max-height:88vh;border-radius:18px;display:block}
-.avfull .x{position:absolute;top:16px;right:18px;font-size:26px;color:#EDE6DB;cursor:pointer;line-height:1}
+.avfull .x{position:absolute;top:16px;right:18px;font-size:26px;color:var(--text);cursor:pointer;line-height:1}
 /* Панель загрузки — заметная рамка, размер шрифта не трогаем. */
-#avCard{border-color:#4A3925;box-shadow:0 0 0 1px rgba(232,164,92,.18) inset}
+#avCard{border-color:var(--accLine);box-shadow:0 0 0 1px rgba(232,164,92,.18) inset}
 #avCard h3{color:var(--amber)}
 .avwarn{color:var(--amber);font-weight:700}
-.avup{background:linear-gradient(180deg,#2C231A,#221B14);border-color:#4A3925;color:var(--amber);font-weight:800}
+.avup{background:linear-gradient(180deg,var(--accBg2),var(--accBg));border-color:var(--accLine);color:var(--amber);font-weight:800}
 /* Спойлер «как это считается». */
-.spo{margin:10px 0 0;border:1px solid var(--line2);border-radius:12px;background:#141311}
+.spo{margin:10px 0 0;border:1px solid var(--line2);border-radius:12px;background:var(--card2)}
 .spo summary{cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700;color:var(--dim);list-style:none}
 .spo summary::-webkit-details-marker{display:none}
 .spo[open] summary{color:var(--amber)}
@@ -88,14 +121,14 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 /* Блок игрока в шапке. */
 .hdr{position:relative}
 .hdr .meplate{margin-left:auto;display:flex;align-items:center;gap:9px;cursor:pointer;
-  padding:5px 9px 5px 5px;border:1px solid var(--line2);border-radius:999px;background:#141311}
+  padding:5px 9px 5px 5px;border:1px solid var(--line2);border-radius:999px;background:var(--card2)}
 .hdr .meplate .avr,.hdr .meplate .avph{width:30px;height:30px;flex:0 0 30px;font-size:11px}
 .hdr .meplate .t1{font-size:11.5px;font-weight:800;line-height:1.15;max-width:104px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hdr .meplate .t2{font-size:9.5px;color:var(--dim);margin-top:2px}
 /* Итоги сезона на главной. */
 .chline{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;
-  padding:9px 11px;border:1px solid var(--line2);border-radius:12px;background:#141311;margin-bottom:7px}
+  padding:9px 11px;border:1px solid var(--line2);border-radius:12px;background:var(--card2);margin-bottom:7px}
 .chline.small{grid-template-columns:28px minmax(0,1fr) auto;padding:6px 10px;opacity:.82}
 .chline.small .avr,.chline.small .avph{width:28px;height:28px;flex:0 0 28px;font-size:10px}
 .chline .avr,.chline .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px}
@@ -105,10 +138,10 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 /* Индикатор идущего сезона на чипе. */
 .chip .ball{font-weight:400;animation:ptfblink 1.4s ease-in-out infinite}
 /* Чемпион — золотая рамка, финалист под счётом — серебряная и мельче. */
-.chbig .avr,.chbig .avph{box-shadow:0 0 0 3px var(--gold),0 0 0 5px rgba(201,167,106,.18)}
+.chbig .avr,.chbig .avph{box-shadow:0 0 0 3px var(--goldRing),0 0 0 5px var(--goldGlow)}
 .chbig .chru{margin-top:10px;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer}
 .chbig .chru .avr,.chbig .chru .avph{width:34px!important;height:34px!important;flex:0 0 34px!important;
-  font-size:11px!important;margin:0!important;box-shadow:0 0 0 2px #A9A6A0!important}
+  font-size:11px!important;margin:0!important;box-shadow:0 0 0 2px var(--silver)!important}
 .chbig .chru .nm3{font-size:12px;font-weight:700;color:var(--dim)}
 .chsc{margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-size:13px;font-weight:800;color:var(--amber)}
@@ -129,7 +162,7 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .mt .mdiv:active{filter:brightness(1.35)}
 .mt .mtop{padding-right:86px}
 /* Чемпионы сезона крупно. */
-.chbig{border:1px solid var(--line2);border-radius:16px;background:#141311;padding:15px 13px 13px;
+.chbig{border:1px solid var(--line2);border-radius:16px;background:var(--card2);padding:15px 13px 13px;
   margin-bottom:10px;text-align:center;cursor:pointer}
 .chbig .avr,.chbig .avph{width:96px;height:96px;flex:0 0 96px;font-size:30px;margin:0 auto 10px}
 .chbig .nm2{font-size:16px;font-weight:800}
@@ -141,15 +174,15 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .chfin .sc2{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:800;color:var(--amber)}
 /* Переходы между дивизионами. */
 .mv{display:grid;grid-template-columns:52px minmax(0,1fr);gap:11px;align-items:center;
-  padding:9px 11px;border:1px solid var(--line2);border-radius:14px;background:#141311;margin-bottom:8px;cursor:pointer}
+  padding:9px 11px;border:1px solid var(--line2);border-radius:14px;background:var(--card2);margin-bottom:8px;cursor:pointer}
 .mv .avr,.mv .avph{width:52px;height:52px;flex:0 0 52px;font-size:16px}
 .mv .nm2{font-size:13.5px;font-weight:800}
 .mv .path{font-size:10.5px;margin-top:3px;color:var(--dim);font-weight:700}
 .mv .path i{font-style:normal;font-weight:900;font-size:13px;vertical-align:-1px;padding:0 2px}
-.mv.up .path i{color:#6FBF7F}
+.mv.up .path i{color:var(--upArrow)}
 .mv.down .path i{color:var(--lose)}
 .mv .wc{margin-left:6px;font-size:9px;padding:2px 6px;border-radius:999px;
-  border:1px solid #4A3925;color:var(--amber);text-transform:uppercase;letter-spacing:.5px}
+  border:1px solid var(--accLine);color:var(--amber);text-transform:uppercase;letter-spacing:.5px}
 /* Правила под спойлером. */
 .spo .in ul{margin:7px 0 0;padding-left:17px}
 .spo .in li{margin-bottom:4px}
@@ -164,46 +197,46 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
   display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
   background:rgba(12,11,10,.62);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(6px)}
 .avbtn:active{transform:scale(.93)}
-.avbtn.on{background:linear-gradient(180deg,#2C231A,#221B14);border-color:#4A3925}
+.avbtn.on{background:linear-gradient(180deg,var(--accBg2),var(--accBg));border-color:var(--accLine)}
 button{width:100%;border:1px solid var(--line);border-radius:13px;padding:13px;font-size:14px;font-weight:800;
-margin-top:12px;cursor:pointer;background:#141311;color:var(--text)}
-.more{width:100%;border:1px dashed #2A2521;background:transparent;color:var(--mute);border-radius:11px;
+margin-top:12px;cursor:pointer;background:var(--card2);color:var(--text)}
+.more{width:100%;border:1px dashed var(--line3);background:transparent;color:var(--mute);border-radius:11px;
 padding:11px;font-size:11.5px;font-weight:700;margin-top:4px;cursor:pointer}
 
 /* бейджи */
 .badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:800;
-border:1px solid #2A2521;background:#171512;color:var(--mute);letter-spacing:.3px;white-space:nowrap}
-.badge.g{border-color:#4A3C22;background:#1C1710;color:var(--gold)}
-.badge.ok{border-color:#2A3A2C;background:#131A15;color:var(--win)}
+border:1px solid var(--line3);background:var(--tile2);color:var(--mute);letter-spacing:.3px;white-space:nowrap}
+.badge.g{border-color:var(--goldLine);background:var(--goldBg);color:var(--gold)}
+.badge.ok{border-color:var(--winLine);background:var(--winBg);color:var(--win)}
 /* цвета дивизионов */
 .dv{display:inline-block;padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:800;white-space:nowrap}
-.dv.d-a{background:rgba(232,164,92,.13);border:1px solid rgba(232,164,92,.42);color:#E8A45C}
-.dv.d-b{background:rgba(127,166,196,.12);border:1px solid rgba(127,166,196,.38);color:#8FB4CE}
-.dv.d-c{background:rgba(159,191,135,.12);border:1px solid rgba(159,191,135,.36);color:#A8C795}
-.dv.d-d{background:rgba(192,143,176,.12);border:1px solid rgba(192,143,176,.36);color:#C89CBA}
-.dv.d-p{background:rgba(217,199,163,.13);border:1px solid rgba(217,199,163,.4);color:#D9C7A3}
-.dv.d-x{background:#171512;border:1px solid #2A2521;color:var(--mute)}
+.dv.d-a{background:var(--dABg);border:1px solid var(--dALine);color:var(--dA)}
+.dv.d-b{background:var(--dBBg);border:1px solid var(--dBLine);color:var(--dB)}
+.dv.d-c{background:var(--dCBg);border:1px solid var(--dCLine);color:var(--dC)}
+.dv.d-d{background:var(--dDBg);border:1px solid var(--dDLine);color:var(--dD)}
+.dv.d-p{background:var(--dPBg);border:1px solid var(--dPLine);color:var(--dP)}
+.dv.d-x{background:var(--tile2);border:1px solid var(--line3);color:var(--mute)}
 
 /* форма W/L */
 .form{display:flex;gap:3px}
 .fm{width:16px;height:16px;border-radius:5px;font-size:9px;font-weight:800;display:flex;
-align-items:center;justify-content:center;color:#0A0A0B}
+align-items:center;justify-content:center;color:var(--onForm)}
 .fm.w{background:var(--win)}.fm.l{background:var(--lose)}
 
 /* аватарки */
-.avr{border-radius:50%;object-fit:cover;object-position:50% 32%;background:#1E1B18;border:1px solid #2A2521;display:block}
-.avph{border-radius:50%;background:linear-gradient(160deg,#2A2521,#1A1714);border:1px solid #2A2521;
-display:flex;align-items:center;justify-content:center;font-weight:800;color:#7C7365}
+.avr{border-radius:50%;object-fit:cover;object-position:50% 32%;background:var(--avBg);border:1px solid var(--line3);display:block}
+.avph{border-radius:50%;background:linear-gradient(160deg,var(--surf2),var(--avBg));border:1px solid var(--line3);
+display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--mute3)}
 
 /* --- гонка --- */
 .kpi{display:flex;gap:14px;margin:0 2px 13px;font-size:10px;color:var(--mute2);font-weight:600;flex-wrap:wrap}
-.kpi b{color:#C8C0B4;font-weight:800;font-size:12px}
+.kpi b{color:var(--dim);font-weight:800;font-size:12px}
 .kpi .a b{color:var(--amber)}
 .fbar{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:10px}
-.fbtn{display:flex;align-items:center;gap:6px;padding:11px 13px;border-radius:11px;background:#141311;
-border:1px solid #201D19;font-size:11px;font-weight:700;color:var(--mute);white-space:nowrap;cursor:pointer;user-select:none}
-.fbtn.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
-.fbtn .n{background:#4A3925;color:var(--amber);border-radius:6px;padding:1px 5px;font-size:9px}
+.fbtn{display:flex;align-items:center;gap:6px;padding:11px 13px;border-radius:11px;background:var(--card2);
+border:1px solid var(--line4);font-size:11px;font-weight:700;color:var(--mute);white-space:nowrap;cursor:pointer;user-select:none}
+.fbtn.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
+.fbtn .n{background:var(--accLine);color:var(--amber);border-radius:6px;padding:1px 5px;font-size:9px}
 .fpanel{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
 .flab{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin:0 0 7px 2px}
 .tb{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
@@ -219,31 +252,31 @@ color:var(--mute2);font-weight:800}
 .thd .s{color:var(--amber)}
 .trw{height:54px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--dim);position:relative;cursor:pointer}
 .trw:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
-.trw.top:before{background:linear-gradient(180deg,var(--champ),#8F7C55)}
-.trw .p{font-weight:800;color:#7C7365;font-size:12px}
+.trw.top:before{background:linear-gradient(180deg,var(--champ),var(--champ2))}
+.trw .p{font-weight:800;color:var(--mute3);font-size:12px}
 .trw.top .p{color:var(--champ)}
 .trw .avr,.trw .avph{width:34px;height:34px;flex:0 0 34px;font-size:11px}
 .trw.top .avr,.trw.top .avph{border-color:rgba(217,199,163,.45)}
 .trw .nm{font-size:12.5px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bar{height:3px;border-radius:2px;background:#221F1B;overflow:hidden;width:100%;max-width:44px;margin:4px auto 0}
-.bar i{display:block;height:100%;background:linear-gradient(90deg,#8F7C55,var(--amber))}
+.bar{height:3px;border-radius:2px;background:var(--line5);overflow:hidden;width:100%;max-width:44px;margin:4px auto 0}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
 .trw .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.4px}
 .tip{font-size:9.5px;color:var(--mute2);font-weight:600;margin:9px 2px 0}
 
 /* --- игроки --- */
 .view{display:flex;gap:6px;margin-bottom:12px}
-.vb{flex:1;padding:8px;border-radius:9px;background:#141311;border:1px solid #201D19;text-align:center;
+.vb{flex:1;padding:8px;border-radius:9px;background:var(--card2);border:1px solid var(--line4);text-align:center;
 font-size:10.5px;font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
-.vb.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--amber)}
+.vb.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
 .pr{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:13px;margin-bottom:10px;
-box-shadow:inset 0 1px 0 rgba(255,255,255,.035);cursor:pointer}
+box-shadow:inset 0 1px 0 var(--hair);cursor:pointer}
 .pr .top{display:grid;grid-template-columns:84px minmax(0,1fr);gap:13px}
 .pr .ph{position:relative}
 .pr .ph .avr,.pr .ph .avph{width:84px;height:104px;border-radius:12px;font-size:24px}
-.rankb{position:absolute;top:6px;left:6px;background:rgba(10,10,11,.8);border:1px solid #33291D;
+.rankb{position:absolute;top:6px;left:6px;background:rgba(10,10,11,.8);border:1px solid var(--accLine2);
 color:var(--champ);border-radius:7px;padding:2px 7px;font-size:9.5px;font-weight:800}
 .ach{display:flex;gap:4px;margin-top:7px;justify-content:center;flex-wrap:wrap}
-.ach span{width:22px;height:22px;border-radius:7px;background:#171310;border:1px solid #33291D;
+.ach span{width:22px;height:22px;border-radius:7px;background:var(--loseBg);border:1px solid var(--accLine2);
 display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
 .note{margin-top:10px;padding:8px 10px;border-radius:9px;background:var(--surf2);border:1px solid #241E16;
 font-size:10.5px;color:var(--gold);font-weight:700;display:flex;gap:8px;align-items:flex-start}
@@ -251,12 +284,12 @@ font-size:10.5px;color:var(--gold);font-weight:700;display:flex;gap:8px;align-it
 .pr .nm{font-size:15px;font-weight:800;letter-spacing:-.3px;line-height:1.2}
 .pr .rw{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px;align-items:center}
 .meta{display:flex;gap:11px;flex-wrap:wrap;margin-top:9px;font-size:10.5px;color:var(--mute);font-weight:600}
-.meta b{color:#C8C0B4;font-weight:800}
+.meta b{color:var(--dim);font-weight:800}
 .wrbar{margin-top:9px}
 .wrbar .t2{display:flex;justify-content:space-between;font-size:9px;letter-spacing:1.2px;
 text-transform:uppercase;color:var(--mute2);font-weight:800;margin-bottom:4px}
-.wrbar .bg{height:4px;border-radius:3px;background:#221F1B;overflow:hidden}
-.wrbar .bg i{display:block;height:100%;background:linear-gradient(90deg,#8F7C55,var(--amber))}
+.wrbar .bg{height:4px;border-radius:3px;background:var(--line5);overflow:hidden}
+.wrbar .bg i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
 .nums{display:flex;margin-top:11px;border-top:1px solid var(--line2);padding-top:9px}
 .nums>div{flex:1;text-align:center;border-right:1px solid var(--line2)}
 .nums>div:last-child{border-right:0}
@@ -266,18 +299,18 @@ text-transform:uppercase;color:var(--mute2);font-weight:800;margin-bottom:4px}
 /* плитка */
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .pc{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden;position:relative;
-box-shadow:inset 0 1px 0 rgba(255,255,255,.035);cursor:pointer}
+box-shadow:inset 0 1px 0 var(--hair);cursor:pointer}
 .pc .avr,.pc .avph{width:100%;aspect-ratio:4/5;border-radius:0;border:0;border-bottom:1px solid var(--line);font-size:30px}
 .pc .ach2{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:4px}
-.pc .ach2 span{width:22px;height:22px;border-radius:7px;background:rgba(10,10,11,.78);border:1px solid #33291D;
+.pc .ach2 span{width:22px;height:22px;border-radius:7px;background:rgba(10,10,11,.78);border:1px solid var(--accLine2);
 display:flex;align-items:center;justify-content:center;font-size:11px}
 .pc .bd{padding:10px 11px 12px}
 .pc .nm{font-size:13px;font-weight:800;letter-spacing:-.2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pc .rw{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
 .pc .mt2{font-size:10px;color:var(--mute);font-weight:600;margin-top:7px}
-.pc .mt2 b{color:#C8C0B4}
-.pc .bg{height:3px;border-radius:2px;background:#221F1B;overflow:hidden;margin-top:8px}
-.pc .bg i{display:block;height:100%;background:linear-gradient(90deg,#8F7C55,var(--amber))}
+.pc .mt2 b{color:var(--dim)}
+.pc .bg{height:3px;border-radius:2px;background:var(--line5);overflow:hidden;margin-top:8px}
+.pc .bg i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
 .pc .st{display:flex;margin-top:9px;padding-top:8px;border-top:1px solid var(--line2)}
 .pc .st>div{flex:1;text-align:center;border-right:1px solid var(--line2)}
 .pc .st>div:last-child{border-right:0}
@@ -287,9 +320,9 @@ display:flex;align-items:center;justify-content:center;font-size:11px}
 
 /* --- дивизион --- */
 .champ{border-radius:18px;padding:22px 18px 20px;text-align:center;margin-bottom:20px;
-background:linear-gradient(180deg,#1A1510,var(--surf));border:1px solid #33291D;position:relative;overflow:hidden;cursor:pointer}
+background:linear-gradient(180deg,var(--champBg),var(--surf));border:1px solid var(--accLine2);position:relative;overflow:hidden;cursor:pointer}
 .champ:before{content:"";position:absolute;inset:-40% -20% auto;height:70%;
-background:radial-gradient(50% 60% at 50% 0%,rgba(217,199,163,.16),transparent 70%)}
+background:radial-gradient(50% 60% at 50% 0%,var(--champGlow),transparent 70%)}
 .champ .in{position:relative}
 .cl{font-size:9px;letter-spacing:2.8px;text-transform:uppercase;font-weight:800;color:var(--gold)}
 .champ .avr,.champ .avph{width:88px;height:88px;margin:13px auto 0;font-size:26px;
@@ -302,7 +335,7 @@ padding:0 13px;height:50px;font-size:13px;color:var(--dim);border-top:1px solid 
 .drow .n{text-align:left;display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
 .drow .avr,.drow .avph{width:30px;height:30px;flex:0 0 30px;font-size:10px}
 .drow .n em{font-style:normal;font-weight:700;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
-.drow .p{font-weight:800;font-size:12.5px;color:#7C7365}
+.drow .p{font-weight:800;font-size:12.5px;color:var(--mute3)}
 .drow .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.3px}
 .drow .mk{font-size:9px;color:var(--mute2)}
 .drow.hd{height:32px;font-size:8.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:800;
@@ -310,29 +343,29 @@ color:var(--mute2);border-top:0;background:var(--surf2);cursor:default}
 .drow.hd .n em{font-size:8.5px;letter-spacing:1.5px;font-weight:800;color:var(--mute2)}
 .drow:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
 .drow.hd:before{display:none}
-.z-up:before{background:linear-gradient(180deg,var(--champ),#8F7C55)}
-.z-up{background:linear-gradient(90deg,rgba(217,199,163,.05),transparent 60%)}
+.z-up:before{background:linear-gradient(180deg,var(--champ),var(--champ2))}
+.z-up{background:linear-gradient(90deg,var(--zUpTint),transparent 60%)}
 .z-up .p{color:var(--champ)}
 .z-up.promo .mk{color:var(--gold)}
-.z-stay:before{background:#3A342C}
-.z-down:before{background:linear-gradient(180deg,#8C4A42,#5E312C)}
-.z-down{background:linear-gradient(90deg,rgba(194,105,94,.05),transparent 60%)}
-.z-down .n em{color:#A79E92}.z-down .mk{color:var(--lose)}
+.z-stay:before{background:var(--zStay)}
+.z-down:before{background:linear-gradient(180deg,var(--zDown1),var(--zDown2))}
+.z-down{background:linear-gradient(90deg,var(--zDownTint),transparent 60%)}
+.z-down .n em{color:var(--dim)}.z-down .mk{color:var(--lose)}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin:11px 2px 0;font-size:9.5px;color:var(--mute2);font-weight:600}
 .legend i{font-style:normal;font-weight:800}
 .legend .u i{color:var(--gold)}.legend .d i{color:var(--lose)}
 .legend .zn{display:inline-block;width:3px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:4px;
-background:linear-gradient(180deg,var(--champ),#8F7C55)}
+background:linear-gradient(180deg,var(--champ),var(--champ2))}
 /* сетка плей-офф */
 .tree{display:grid;grid-template-columns:1fr 26px 1fr;align-items:center;margin-bottom:22px}
 .col{display:flex;flex-direction:column;gap:14px}
 .mbox{background:var(--surf);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.mbox.fin{border-color:#33291D}
+.mbox.fin{border-color:var(--accLine2)}
 .mtitle{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;
 padding:7px 10px 5px;background:var(--surf2)}
-.mbox.fin .mtitle{color:var(--gold);background:#151009}
+.mbox.fin .mtitle{color:var(--gold);background:var(--finBg)}
 .sl{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px 10px;
-font-size:11.5px;color:var(--mute);border-top:1px solid #17150F;cursor:pointer}
+font-size:11.5px;color:var(--mute);border-top:1px solid var(--tile);cursor:pointer}
 .sl .avr,.sl .avph{width:22px;height:22px;flex:0 0 22px;font-size:8px}
 .sl span.nm2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
 .sl b{font-size:10.5px;font-weight:800;color:var(--mute2)}
@@ -340,10 +373,10 @@ font-size:11.5px;color:var(--mute);border-top:1px solid #17150F;cursor:pointer}
 .sl.win b{color:var(--amber)}
 .sl.win .avr,.sl.win .avph{border-color:rgba(217,199,163,.5)}
 .conn{position:relative;height:100%;min-height:120px}
-.conn:before{content:"";position:absolute;left:0;right:50%;top:25%;height:1px;background:#2A2521}
-.conn:after{content:"";position:absolute;left:0;right:50%;bottom:25%;height:1px;background:#2A2521}
-.conn i{position:absolute;left:50%;top:25%;bottom:25%;width:1px;background:#2A2521}
-.conn u{position:absolute;left:50%;right:0;top:50%;height:1px;background:#2A2521}
+.conn:before{content:"";position:absolute;left:0;right:50%;top:25%;height:1px;background:var(--line3)}
+.conn:after{content:"";position:absolute;left:0;right:50%;bottom:25%;height:1px;background:var(--line3)}
+.conn i{position:absolute;left:50%;top:25%;bottom:25%;width:1px;background:var(--line3)}
+.conn u{position:absolute;left:50%;right:0;top:50%;height:1px;background:var(--line3)}
 /* расширенная и матрица */
 .ext{margin-top:6px}
 .ext .er{display:grid;grid-template-columns:18px minmax(0,1fr) 22px 22px 22px 30px 32px 32px 36px;gap:5px;
@@ -371,7 +404,7 @@ font-weight:800;margin-bottom:9px}
 .fm2 .mid{text-align:center;min-width:0}
 .fm2 .nm3{font-size:12.5px;font-weight:700;line-height:1.35}
 .fm2 .nm3 b{color:var(--text);font-weight:800}
-.fm2 .nm3 s{text-decoration:none;color:#7C7365;font-weight:600}
+.fm2 .nm3 s{text-decoration:none;color:var(--mute3);font-weight:600}
 .fm2 .nm3 em{font-style:normal;color:#9A9186;font-weight:600}
 .sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--amber);margin-top:3px}
 /* строка матча в карточке игрока */
@@ -379,13 +412,13 @@ font-weight:800;margin-bottom:9px}
 .mrow .avr,.mrow .avph{width:46px;height:46px;flex:0 0 46px;font-size:13px;cursor:pointer}
 .mrow .who{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .res{font-size:9px;font-weight:800;padding:4px 6px;border-radius:8px;letter-spacing:.4px;text-align:center}
-.res.w{background:#131A15;border:1px solid #2A3A2C;color:var(--win)}
-.res.l{background:#1A1313;border:1px solid #3A2A2A;color:var(--lose)}
+.res.w{background:var(--winBg);border:1px solid var(--winLine);color:var(--win)}
+.res.l{background:var(--loseBg);border:1px solid var(--loseLine);color:var(--lose)}
 
 /* --- страница игрока --- */
 .back{display:flex;align-items:center;gap:9px;margin-bottom:16px;color:var(--mute);font-size:12px;
 font-weight:700;cursor:pointer}
-.back i{width:30px;height:30px;border-radius:10px;background:#141311;border:1px solid #201D19;
+.back i{width:30px;height:30px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);
 display:flex;align-items:center;justify-content:center;font-style:normal;font-size:15px;color:var(--champ)}
 .hero{border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--surf);margin-bottom:12px;position:relative}
 .hero .avr,.hero .avph{width:100%;height:66vw;max-height:280px;border-radius:0;border:0;object-fit:cover;font-size:56px;object-position:50% 30%}
@@ -402,13 +435,13 @@ background:linear-gradient(180deg,transparent,rgba(17,16,16,.75) 58%,var(--surf)
 .stt .v{font-size:18px;font-weight:800;margin-top:3px;letter-spacing:-.5px}
 .stt .v.a{color:var(--amber)}
 .sr{display:grid;grid-template-columns:minmax(0,1fr) 30px 30px 46px 52px;gap:7px;align-items:center;
-padding:11px 0;border-bottom:1px solid #17150F;font-size:12.5px;color:var(--dim)}
+padding:11px 0;border-bottom:1px solid var(--tile);font-size:12.5px;color:var(--dim)}
 .sr span:not(.sn){text-align:center}
 .sr:last-of-type{border-bottom:0}
 .sr.hd{padding:0 0 8px;font-size:8px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute2);
-font-weight:800;border-bottom:1px solid #221F1B}
+font-weight:800;border-bottom:1px solid var(--line5)}
 .sr .sn{font-size:13.5px;font-weight:800;color:var(--text);overflow:hidden}
-.sr .sd{font-size:10px;color:#7C7365;font-weight:600;margin-top:3px}
+.sr .sd{font-size:10px;color:var(--mute3);font-weight:600;margin-top:3px}
 .sr .pl{font-weight:800;color:var(--champ)}
 .sr .ptt{font-weight:800;color:var(--amber)}
 .sr.hd .sn{font-size:8px;font-weight:800;color:var(--mute2);letter-spacing:1.4px}
@@ -417,13 +450,13 @@ font-weight:800;border-bottom:1px solid #221F1B}
    и дубль внизу страницы, чтобы не тянуться к кнопке «назад» самого Telegram. */
 .edge{position:fixed;top:0;bottom:0;transform:none;z-index:5;width:26px;
 display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
-background:rgba(23,21,18,.55);border:1px solid #201D19;color:var(--mute2);
+background:var(--edge);border:1px solid var(--line4);color:var(--mute2);
 opacity:.34;transition:opacity .18s ease,background .18s ease,color .18s ease;
 -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 .edge i{font-style:normal;font-size:19px;line-height:1;font-weight:700;margin-top:-2px}
 .edge.l{left:0;border-left:0;border-radius:0}
 .edge.r{right:0;border-right:0;border-radius:0}
-.edge:active{opacity:1;background:rgba(40,33,24,.92);color:var(--amber)}
+.edge:active{opacity:1;background:var(--edgeOn);color:var(--amber)}
 @media (hover:hover){.edge:hover{opacity:.85;color:var(--amber)}}
 .edge.off{display:none}
 
@@ -444,12 +477,23 @@ padding:34px 22px;text-align:center;margin-top:4px}
 .soon .t{font-size:15px;font-weight:800;color:var(--text);letter-spacing:-.2px}
 .soon .d{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.6;max-width:280px;
 margin-left:auto;margin-right:auto}
-.aline{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid #17150F}
+.aline{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid var(--tile)}
 .aline:last-child{border-bottom:0}
-.aline .ic{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#2A2116,#171310);
+.aline .ic{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#2A2116,var(--loseBg));
 border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 30px}
 .aline .tx{font-size:13px;font-weight:700;line-height:1.35}
-.aline .dt{font-size:10px;color:#7C7365;font-weight:600;margin-top:3px}
+.aline .dt{font-size:10px;color:var(--mute3);font-weight:600;margin-top:3px}
+
+/* Переключатель темы: два ярлычка в шапке, выбор запоминается на устройстве. */
+.thsw{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:999px;
+  background:var(--surf);flex:0 0 auto}
+.thsw button{width:27px;height:24px;border:0;border-radius:999px;background:transparent;
+  color:var(--mute);font-size:13px;line-height:1;cursor:pointer;padding:0;display:flex;
+  align-items:center;justify-content:center;font-family:inherit}
+.thsw button.on{background:var(--accBg);color:var(--amber);box-shadow:0 0 0 1px var(--accLine) inset}
+.hdr .meplate .t1{max-width:88px}
+
+html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturate(.6)}
 </style>
 </head>
 <body>
@@ -458,6 +502,10 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
   <div class="hdr" id="hdr">
     <div class="logo"><img src="/public/img/ptf.png" alt="PTF"></div>
     <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
+    <div class="thsw" id="thSw">
+      <button type="button" data-th="dark" title="Тёмная тема">☾</button>
+      <button type="button" data-th="light" title="Светлая тема">☀</button>
+    </div>
     <div id="mePlate"></div>
   </div>
   <div class="tabs" id="tabs"></div>
@@ -475,6 +523,10 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
 <div class="edge l off" id="edgeL" onclick="navStep(-1)"><i>‹</i></div>
 <div class="edge r off" id="edgeR" onclick="navStep(1)"><i>›</i></div>
 <script>
+// Тему ставим первой строкой: если ждать загрузки данных, светлый экран успеет
+// мигнуть тёмным, и наоборот.
+try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
+  document.documentElement.setAttribute('data-theme',_th); }catch(e){}
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
@@ -675,6 +727,34 @@ function buildTabs(){
   }).join('')+'<div class="tab off">'+esc(X.tPartners)+'</div>';
 }
 // Свой игрок в витрине ищется по id, а если витрина его не знает — по имени.
+// Тема. Тёмная Noir по умолчанию; выбор храним на устройстве игрока, поэтому
+// на другом телефоне он выберет заново — это удобство, а не настройка аккаунта.
+var THEME_KEY='ptf_theme';
+function currentTheme(){
+  try{ var v=localStorage.getItem(THEME_KEY); if(v==='light'||v==='dark')return v }catch(e){}
+  return 'dark';
+}
+function applyTheme(name){
+  var th=name==='light'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',th);
+  try{ localStorage.setItem(THEME_KEY,th) }catch(e){}
+  // Шапку самого Telegram красим в тон, иначе сверху остаётся полоса чужого цвета.
+  var bg=th==='light'?'#F2F5F1':'#0A0A0B';
+  try{ if(tg&&tg.setHeaderColor)tg.setHeaderColor(bg) }catch(e){}
+  try{ if(tg&&tg.setBackgroundColor)tg.setBackgroundColor(bg) }catch(e){}
+  var box=$('thSw');
+  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
+    b.classList.toggle('on',b.getAttribute('data-th')===th);
+  });
+}
+function initTheme(){
+  var box=$('thSw');
+  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
+    b.onclick=function(){ applyTheme(b.getAttribute('data-th')) };
+  });
+  applyTheme(currentTheme());
+}
+
 function mePlayer(){
   if(!me)return null;
   return byId(me.id)||players.filter(function(x){
@@ -1841,6 +1921,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     if(wantDiv&&divisions.indexOf(wantDiv)>=0)divLetter=wantDiv;
     var wantTab=(qs.get('tab')||'').trim().toLowerCase();
     if(wantDiv&&!wantTab)wantTab='div';
+    initTheme();
     renderMePlate();
     loadSummary();
     showTab(VIEWS.indexOf(wantTab)>=0?wantTab:'home');
