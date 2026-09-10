@@ -370,6 +370,61 @@ export function registerAdminRoutes(app) {
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
+  // Удаление события. Способ возврата выбирается один раз на всё событие —
+  // панель присылает его вместе с запросом, второй раз бот не переспрашивает.
+  app.post('/api/admin/event-delete', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { deleteEvent } = await import('./eventflow.js');
+      const r = await deleteEvent({
+        eventId: String(req.body.event_id || ''),
+        refundMode: req.body.refund_mode === 'manual' ? 'manual' : 'balance',
+        adminChatId: ''
+      });
+      if (!r.ok) return res.status(404).json(r);
+      res.json({ ok:true, told:r.told, refunded:r.refunded, refund_sum:r.refundSum, owed:r.owed });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Сколько людей и денег заденет удаление — показываем до подтверждения.
+  app.get('/api/admin/event-impact', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { listSignups } = await import('./events.js');
+      const eventId = String(req.query.event_id || '');
+      const mine = (await listSignups()).filter(s => s.event_id === eventId && s.status !== 'cancelled');
+      res.json({ ok:true, people: mine.length, paid: mine.reduce((n, s) => n + (s.paid_thb || 0), 0) });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Список «ожидают ручного возврата» и отметка «отправил».
+  app.get('/api/admin/refunds', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { listRefunds } = await import('./events.js');
+      res.json({ ok:true, refunds: await listRefunds({ pendingOnly: req.query.all !== '1' }) });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  app.post('/api/admin/refund-sent', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { markRefundSent } = await import('./events.js');
+      const row = await markRefundSent(String(req.body.refund_id || ''), req.body.sent !== false);
+      if (!row) return res.status(404).json({ ok:false, error:'Возврат не найден' });
+      // Игрок узнаёт о переводе от бота, а не по факту прихода денег.
+      if (row.status === 'sent' && row.telegram_id) {
+        await sendMessage(row.telegram_id,
+          `↩️ Возврат <b>${row.amount_thb} ฿</b> отправлен переводом. Если не увидишь деньги — напиши.`).catch(() => {});
+      }
+      res.json({ ok:true, refund:row });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
   // Отправляет организатору предпросмотр карточки с кнопками подтверждения.
   app.post('/api/admin/event-preview', async (req, res) => {
     try {
@@ -378,6 +433,27 @@ export function registerAdminRoutes(app) {
       const { eventPreview } = await import('./admin.js');
       await eventPreview(auth.user.id, String(req.body.event_id || ''));
       res.json({ ok:true });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Нижнее меню мини-приложения по группам игроков.
+  app.get('/api/admin/tabs', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { allGroupTabs, MINIAPP_TABS, ALWAYS_TABS, PLAYER_GROUPS } = await import('./sheets.js');
+      res.json({ ok:true, tabs: await allGroupTabs(), all: MINIAPP_TABS, always: ALWAYS_TABS, groups: PLAYER_GROUPS });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  app.post('/api/admin/tabs', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { setGroupTabs, allGroupTabs } = await import('./sheets.js');
+      const map = req.body.tabs || {};
+      for (const [group, list] of Object.entries(map)) await setGroupTabs(group, list);
+      res.json({ ok:true, tabs: await allGroupTabs() });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

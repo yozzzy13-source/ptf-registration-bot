@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
@@ -739,9 +739,15 @@ app.post('/api/league/event-join', async (req, res) => {
     const applicant = await findApplicantByTelegramId(v.user.id).catch(() => null);
     const name = applicant?.name || v.profile?.name || String(v.user.id);
     const adminChatId = await getAdminChatId().catch(() => '');
+    const group = await playerGroup(v.user.id, applicant).catch(() => 'guest');
     const r = await joinEvent({ telegramId: v.user.id, name, lang,
-      eventId: String(req.body.event_id || ''), adminChatId });
-    if (!r.ok) return res.json({ ok:false, error: r.error || r.message });
+      eventId: String(req.body.event_id || ''), adminChatId, group });
+    // Отказ с кнопкой («Подать заявку») уходит в бот: web_app-кнопку в мини-апп
+    // не отдать, а в чате она откроет форму в один тап.
+    if (!r.ok) {
+      if (r.markup) await sendMessage(v.user.id, r.message, { reply_markup: r.markup }).catch(() => {});
+      return res.json({ ok:false, error: r.error || r.message });
+    }
     // Счёт и подтверждение уходят в бот — там оплата и скриншоты.
     if (r.message) await sendMessage(v.user.id, r.message, r.markup ? { reply_markup: r.markup } : {}).catch(() => {});
     else {
@@ -940,6 +946,10 @@ app.get('/api/league/bootstrap', async (req, res) => {
         return Object.keys(patch).length ? { ...m, ...patch } : m;
       });
     }
+    // Нижнее меню зависит от того, кто смотрит: у гостя нет смысла в матчах и
+    // расписании, у активного игрока — есть. Организатор видит всё.
+    const group = await playerGroup(v.user.id, v.profile).catch(() => 'guest');
+    const tabs = v.isAdmin ? MINIAPP_TABS.slice() : await getGroupTabs(group).catch(() => MINIAPP_TABS.slice());
     res.json({
       ok: true,
       lang: v.lang,
@@ -947,6 +957,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
       season: current ? current.number : (await getSetting('season_number').catch(() => '')),
       seasons,
       me_division: v.division || '',
+      group,
+      tabs,
       players,
       photos: photoByName,
       matches,

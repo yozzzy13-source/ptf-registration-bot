@@ -11,11 +11,11 @@
 import { sendMessage, editMessageText } from './telegram.js';
 import { escapeHtml, safe } from './util.js';
 import { PUBLIC_URL } from './config.js';
-import { getSetting, setSetting, getPaymentMethods } from './sheets.js';
+import { getSetting, setSetting, getPaymentMethods, playerGroup } from './sheets.js';
 import {
   findEvent, listEvents, listSignups, findSignup, createSignup, updateSignup,
   takenSeats, priceFor, seatsOf, refundForCancel, hoursUntil, eventStartMs,
-  addTransaction, getBalance, publishEvent, updateEvent,
+  addTransaction, getBalance, publishEvent, updateEvent, deleteEventRow, addRefund,
   SIGNUP_STATUS, CANCEL_LIMIT_HOURS
 } from './events.js';
 
@@ -161,9 +161,12 @@ export function isInvited(event, telegramId) {
   return (event?.invited_ids || []).map(String).includes(String(telegramId));
 }
 
-export function signupKeyboard(event, lang = 'ru') {
+export function signupKeyboard(event, lang = 'ru', { full = false } = {}) {
   const L = ru(lang);
-  return { inline_keyboard: [[{ text: L ? '✅ Записаться' : '✅ Sign up', callback_data: `ev_join:${event.event_id}` }]] };
+  const text = full
+    ? (L ? '⏳ В лист ожидания' : '⏳ Join the waitlist')
+    : (L ? '✅ Записаться' : '✅ Sign up');
+  return { inline_keyboard: [[{ text, callback_data: `ev_join:${event.event_id}` }]] };
 }
 
 // --- предпросмотр и публикация --------------------------------------------
@@ -199,15 +202,89 @@ export async function broadcastEvent(chatId, eventId, contacts = []) {
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
   await publishEvent(eventId);
   const taken = await takenSeats(eventId);
+  const full = event.capacity > 0 && taken >= event.capacity;
   let ok = 0, fail = 0;
+  // Запоминаем, куда именно ушла карточка: дальше она правится на месте, когда
+  // места разбирают, — иначе у всех навсегда остаётся снимок на момент рассылки.
+  const sent = [];
   for (const c of contacts) {
     const lang = (c.language || 'en') === 'ru' ? 'ru' : 'en';
     try {
-      await sendMessage(c.telegram_id, eventCard(event, lang, { taken, lead: true }), { reply_markup: signupKeyboard(event, lang) });
+      const res = await sendMessage(c.telegram_id, eventCard(event, lang, { taken, lead: true }), { reply_markup: signupKeyboard(event, lang, { full }) });
+      const mid = res?.result?.message_id || res?.message_id;
+      if (mid) sent.push(`${c.telegram_id}:${mid}:${lang}`);
       ok++;
     } catch { fail++; }
   }
+  await rememberCards(eventId, sent).catch(e => console.error('remember cards failed:', e.message));
   return sendMessage(chatId, `📣 Событие опубликовано.\nОтправлено: <b>${ok}</b>${fail ? `\nОшибок: <b>${fail}</b>` : ''}`);
+}
+
+// --- живая карточка --------------------------------------------------------
+//
+// Разосланная карточка правится на месте: строка «Свободно мест» и подпись
+// кнопки всегда показывают текущее состояние. Правки копятся полминуты и уходят
+// одной пачкой — иначе на сотне получателей Telegram начнёт резать по лимитам.
+const CARDS_KEY = (eventId) => `ev_msgs_${eventId}`;
+const CARD_REFRESH_MS = 30000;
+const EDIT_PAUSE_MS = 60;
+const dirtyCards = new Map();
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function rememberCards(eventId, list = []) {
+  if (!list.length) return;
+  const prev = await getSetting(CARDS_KEY(eventId)).catch(() => '');
+  const all = [...new Set([...String(prev || '').split(',').filter(Boolean), ...list])];
+  await setSetting(CARDS_KEY(eventId), all.join(','), 'служебное: разосланные карточки события');
+}
+
+// Пометить событие «изменилось». Сама правка — через полминуты, чтобы десяток
+// записей подряд стоил одной пачки правок, а не десяти.
+export function touchEventCards(eventId) {
+  if (!eventId || dirtyCards.has(eventId)) return;
+  const timer = setTimeout(() => {
+    dirtyCards.delete(eventId);
+    refreshEventCards(eventId).catch(e => console.error('card refresh failed:', e.message));
+  }, CARD_REFRESH_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  dirtyCards.set(eventId, timer);
+}
+
+// text = null — берём обычную карточку; иначе подставляем свой текст (например
+// «событие отменено») и снимаем кнопки.
+export async function refreshEventCards(eventId, { text = null, keyboard = undefined } = {}) {
+  const raw = await getSetting(CARDS_KEY(eventId)).catch(() => '');
+  if (!raw) return { edited: 0, gone: 0 };
+  const event = text ? await findEvent(eventId).catch(() => null) : await findEvent(eventId);
+  if (!event && !text) return { edited: 0, gone: 0 };
+  const taken = event ? await takenSeats(eventId).catch(() => 0) : 0;
+  const full = Boolean(event?.capacity) && taken >= event.capacity;
+  let edited = 0, gone = 0;
+  const keep = [];
+  for (const part of String(raw).split(',').filter(Boolean)) {
+    const [cid, mid, lg] = part.split(':');
+    if (!cid || !mid) continue;
+    const lang = lg === 'ru' ? 'ru' : 'en';
+    const body = text ? (typeof text === 'function' ? text(lang) : text) : eventCard(event, lang, { taken, lead: true });
+    const markup = text ? keyboard : signupKeyboard(event, lang, { full });
+    try {
+      await editMessageText(cid, Number(mid), body, markup ? { reply_markup: markup } : { reply_markup: { inline_keyboard: [] } });
+      edited++; keep.push(part);
+    } catch (e) {
+      // «not modified» значит, что карточка и так актуальна — сообщение живо.
+      if (/not modified/i.test(e?.message || '')) keep.push(part);
+      else gone++;
+    }
+    await sleep(EDIT_PAUSE_MS);
+  }
+  if (keep.length !== String(raw).split(',').filter(Boolean).length) {
+    await setSetting(CARDS_KEY(eventId), keep.join(','), 'служебное: разосланные карточки события').catch(() => {});
+  }
+  return { edited, gone };
+}
+
+export async function forgetEventCards(eventId) {
+  await setSetting(CARDS_KEY(eventId), '', 'служебное: разосланные карточки события').catch(() => {});
 }
 
 // --- сводное уведомление организатору --------------------------------------
@@ -250,7 +327,32 @@ export async function notifyOrganizer(signup, event, adminChatId, extra = '') {
 
 // --- запись ----------------------------------------------------------------
 
-export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests = 0, adminChatId = '' }) {
+// Кто может записаться. Решает поле «Кому» у самого события:
+//   «всем»            — активные и те, кто из листа ожидания уже оплатил;
+//   «только активным» — только активные;
+// все, кто вне лиги, получают приглашение подать заявку. Проверка стоит здесь,
+// а не только в интерфейсе: карточка уже разослана, и кнопку на ней жмут ещё
+// долго после того, как состав закрылся.
+export function eventAccessDenial(event, group, lang = 'ru') {
+  const L = ru(lang);
+  if (group === 'active') return null;
+  if (group === 'waitlist') {
+    if (event?.audience !== 'active') return null;
+    return {
+      message: L
+        ? 'Это событие только для активных участников лиги. Как только твоё участие подтвердят, запись откроется.'
+        : 'This event is for confirmed league members only. As soon as your participation is confirmed, sign-up will open.'
+    };
+  }
+  return {
+    message: L
+      ? 'Записаться на события могут только участники Лиги. Ты ещё можешь успеть подать заявку.'
+      : 'Only league members can sign up for events. You can still make it — send your application.',
+    markup: { inline_keyboard: [[{ text: L ? '🎾 Подать заявку' : '🎾 Apply', web_app: { url: `${PUBLIC_URL}/apply?mode=event` } }]] }
+  };
+}
+
+export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests = 0, adminChatId = '', group = '' }) {
   const L = ru(lang);
   const event = await findEvent(eventId);
   if (!event || event.status !== 'published') {
@@ -261,6 +363,9 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
   if (event.invite_only && !isInvited(event, telegramId)) {
     return { ok: false, message: L ? 'Это событие только по приглашению.' : 'This event is by invitation only.' };
   }
+  const who = group || await playerGroup(telegramId).catch(() => 'guest');
+  const denied = eventAccessDenial(event, who, lang);
+  if (denied) return { ok: false, ...denied };
   const existing = await findSignup(eventId, telegramId);
   if (existing) return { ok: false, message: L ? 'Ты уже записан на это событие.' : 'You are already signed up.' };
 
@@ -298,6 +403,7 @@ Do not pay yet.`;
     message = null; // счёт отправит invoiceSignup
   }
   if (adminChatId) await notifyOrganizer(signup, event, adminChatId).catch(() => {});
+  touchEventCards(event.event_id);
   return { ok: true, signup, event, message, markup, needsInvoice: status === SIGNUP_STATUS.invoiced, amount };
 }
 
@@ -472,6 +578,7 @@ export async function cancelSignup({ signupId, keepGuests = false, telegramId, n
   }
   // Место освободилось — сразу предлагаем первому в очереди.
   await runWaitlistOffers(now, adminChatId).catch(() => {});
+  touchEventCards(signup.event_id);
   return { ok: true, message, refund: decision.refund, burned: decision.burned };
 }
 
@@ -709,6 +816,7 @@ async function offerSeat(signup, event, adminChatId, now) {
   const until = Math.min(now + hours * 3600000, startMs(event) || Infinity);
   await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.pending, note: 'предложено место' });
   await setSetting(holdKey(signup.signup_id), String(until), 'До какого момента держим место').catch(() => {});
+  touchEventCards(event.event_id);
   const title = event.title_ru || event.title_en;
   await sendMessage(signup.telegram_id, `🎉 <b>Освободилось место — «${escapeHtml(title)}»</b>
 
@@ -742,6 +850,7 @@ export async function runWaitlistOffers(now = Date.now(), adminChatId = '') {
       if (Number(raw) > now) continue;
       await updateSignup(s.signup_id, { status: SIGNUP_STATUS.waitlist, note: MISSED_NOTE });
       await setSetting(holdKey(s.signup_id), '', 'Окно истекло').catch(() => {});
+      touchEventCards(event.event_id);
       expired++;
     }
 
@@ -803,6 +912,7 @@ export async function passOffer({ signupId, lang = 'ru', chatId, adminChatId = '
   const event = await findEvent(signup.event_id);
   await setSetting(holdKey(signup.signup_id), '', 'Отказался').catch(() => {});
   await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.cancelled, note: 'вышел из листа ожидания' });
+  touchEventCards(signup.event_id);
   if (adminChatId) {
     await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.cancelled }, event, adminChatId, '✖️ Отказался от места').catch(() => {});
   }
@@ -1090,6 +1200,7 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
       { reply_markup: calendarKeyboard(event, lang) }).catch(() => {});
   }
   if (adminChatId) await notifyOrganizer({ ...signup, status }, event, adminChatId, 'добавлен организатором').catch(() => {});
+  touchEventCards(event.event_id);
   const what = paying ? 'счёт отправлен'
     : (mode === 'dep' ? `оплачено с депозита, остаток ${depositLeft} ฿`
       : (mode === 'paid' ? 'засчитан оплаченным' : 'участие подтверждено'));
@@ -1111,6 +1222,7 @@ export async function removeFromEvent({ signupId, mode = 'rule', adminChatId = '
     else if (mode === 'rule') refund = refundForCancel(event, signup, false).refund;
   }
   await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.cancelled, note: 'снят организатором' });
+  touchEventCards(signup.event_id);
   let left = null;
   if (refund > 0) {
     left = await addTransaction({
@@ -1129,6 +1241,86 @@ export async function removeFromEvent({ signupId, mode = 'rule', adminChatId = '
   await runWaitlistOffers(Date.now(), adminChatId).catch(() => {});
   const tail = refund > 0 ? ` Возврат: <b>${refund} ฿</b>${left != null ? `, депозит: <b>${left} ฿</b>` : ''}.` : '';
   return { ok: true, message: `✅ <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b> снят с события.${tail}` };
+}
+
+// --- удаление события -------------------------------------------------------
+//
+// Событие уходит насовсем: строка стирается из реестра, разосланные карточки
+// превращаются в «событие отменено», записавшимся приходит уведомление, деньги
+// возвращаются. Способ возврата организатор выбирает один раз на всё событие:
+//   balance — сразу на депозит в боте;
+//   manual  — вернёт переводом сам, бот только ведёт список долгов.
+// Заметка в тему игрока в админском чате. Импорт ленивый: admin.js сам тянет
+// eventflow.js, и обычный import замкнул бы их друг на друга.
+async function topicNote(adminChatId, telegramId, text) {
+  const { replyInPlayerTopic, getAdminChatId } = await import('./admin.js');
+  const chat = adminChatId || await getAdminChatId().catch(() => '');
+  if (!chat) return null;
+  return replyInPlayerTopic(chat, telegramId, text);
+}
+
+export async function deleteEvent({ eventId, refundMode = 'balance', adminChatId = '' }) {
+  const event = await findEvent(eventId);
+  if (!event) return { ok: false, message: 'Событие не найдено.' };
+  const all = await listSignups().catch(() => []);
+  const mine = all.filter(s => s.event_id === eventId && s.status !== SIGNUP_STATUS.cancelled);
+  const title = event.title_ru || event.title_en || eventId;
+
+  let refunded = 0, refundSum = 0, owed = 0, told = 0;
+  for (const s of mine) {
+    const lang = 'ru';
+    const paid = s.paid_thb || 0;
+    const waiting = s.status === SIGNUP_STATUS.waitlist;
+    let tail = '';
+    if (paid > 0) {
+      if (refundMode === 'manual') {
+        await addRefund({
+          eventId, eventTitle: title, telegramId: s.telegram_id, name: s.player_name,
+          amount: paid, reason: 'событие отменено'
+        }).catch(e => console.error('refund note failed:', e.message));
+        owed += paid;
+        tail = `\n↩️ Возвращаем <b>${paid} ฿</b> переводом — напишу, как отправлю.`;
+        // Долг видно и в теме игрока: иначе он живёт только в списке в админке.
+        await topicNote(adminChatId, s.telegram_id,
+          `🏦 <b>Нужно вернуть ${paid} ฿ вручную</b>\nСобытие отменено: ${escapeHtml(title)}`).catch(() => {});
+      } else {
+        const left = await addTransaction({
+          telegramId: s.telegram_id, name: s.player_name, type: 'возврат', amount: paid,
+          description: `Событие отменено: ${title}`
+        }).catch(() => null);
+        refundSum += paid;
+        tail = left === null
+          ? `\n↩️ Возвращаем <b>${paid} ฿</b>.`
+          : `\n↩️ Возвращено на депозит: <b>${paid} ฿</b>. Остаток: <b>${left} ฿</b>`;
+      }
+      refunded++;
+    }
+    await updateSignup(s.signup_id, { status: SIGNUP_STATUS.cancelled, note: 'событие удалено' }).catch(() => {});
+    await setSetting(holdKey(s.signup_id), '', 'Событие удалено').catch(() => {});
+    const head = waiting
+      ? `❌ Событие «${escapeHtml(title)}» отменено — лист ожидания больше не нужен.`
+      : `❌ Событие «${escapeHtml(title)}» отменено организатором.`;
+    const sent = await sendMessage(s.telegram_id, `${head}${tail}`).catch(() => null);
+    if (sent) told++;
+  }
+
+  // Карточки в чатах: текст меняем, кнопку снимаем — жать больше нечего.
+  await refreshEventCards(eventId, {
+    text: (lang) => ru(lang)
+      ? `❌ <b>СОБЫТИЕ ОТМЕНЕНО</b>\n\n<b>${escapeHtml(title)}</b>`
+      : `❌ <b>EVENT CANCELLED</b>\n\n<b>${escapeHtml(event.title_en || title)}</b>`
+  }).catch(e => console.error('cancel cards failed:', e.message));
+  await forgetEventCards(eventId).catch(() => {});
+  await deleteEventRow(eventId).catch(e => console.error('event row delete failed:', e.message));
+
+  const parts = [`🗑 Событие «${escapeHtml(title)}» удалено.`];
+  if (mine.length) parts.push(`Оповещено: <b>${told}</b> из ${mine.length}.`);
+  if (refundMode === 'manual' && owed > 0) parts.push(`К возврату вручную: <b>${owed} ฿</b> (${refunded} чел.) — список в админке.`);
+  else if (refundSum > 0) parts.push(`Возвращено на депозиты: <b>${refundSum} ฿</b> (${refunded} чел.).`);
+  else parts.push('Возвращать было нечего.');
+  const message = parts.join('\n');
+  if (adminChatId) await sendMessage(adminChatId, message).catch(() => {});
+  return { ok: true, message, told, refunded, refundSum, owed };
 }
 
 // Кто уже записан. Состав виден всем участникам — это часть карточки, — но

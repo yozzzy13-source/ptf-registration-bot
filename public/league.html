@@ -874,12 +874,17 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
   return p.matches?Math.round(p.wins/p.matches*100):0; }
 
 // ---------------------------------------------------------------- меню
-var VIEWS=['home','div','race','players','sched','matches','events','about'];
+// Все экраны приложения. VIEWS — те, что реально показаны в нижнем меню:
+// набор приходит с сервера и зависит от группы игрока (активный, лист
+// ожидания, заявка без оплаты, остальные). Главная есть всегда.
+var ALL_VIEWS=['home','div','race','players','sched','matches','events','about'];
+var VIEWS=ALL_VIEWS.slice();
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
 sched:'viewSched',matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
 function buildTabs(){
-  var labels=[['home',X.tHome],['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],
-              ['sched',X.tSched],['matches',X.tMatches],['events',X.tEvents],['about',X.tAbout]];
+  var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
+              sched:X.tSched,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
+  var labels=VIEWS.map(function(k){return [k,byCode[k]||k]});
   $('tabs').innerHTML=labels.map(function(x){
     // У «Событий» — зелёная точка, когда есть открытая регистрация: иначе про
     // новое событие узнают только те, кто зашёл во вкладку сам.
@@ -949,10 +954,10 @@ function openDivFrom(n,d){
   showTab('div');
 }
 function showTab(t){
-  if(VIEWS.indexOf(t)<0)return;
+  if(ALL_VIEWS.indexOf(t)<0)return;
   mode=t;openId='';allMatches=false;openAch='';
   syncBack();
-  VIEWS.forEach(function(k){
+  ALL_VIEWS.forEach(function(k){
     var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
     $(VIEW_ID[k]).classList.toggle('hidden',k!==t);
   });
@@ -2151,7 +2156,7 @@ function openPlayer(id,from){
   if(from)backTo=from;
   allMatches=false;
   renderPlayer(p);
-  VIEWS.forEach(function(k){$(VIEW_ID[k]).classList.add('hidden')});
+  ALL_VIEWS.forEach(function(k){$(VIEW_ID[k]).classList.add('hidden')});
   $('tabs').classList.add('hidden');
   $('viewCard').classList.remove('hidden');
   syncBack();
@@ -2326,6 +2331,12 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     seasons=j.seasons||[];
+    // Нижнее меню приходит с сервера: какие вкладки и в каком порядке видит
+    // именно эта группа игроков.
+    if(j.tabs&&j.tabs.length){
+      VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
+      if(VIEWS.indexOf('home')<0)VIEWS.unshift('home');
+    }
     buildTabs();
     $('title').textContent=X.title;
     // ?tab=race / ?division=B — чтобы кнопка из меню или рассылки открывала
@@ -2338,7 +2349,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     initTheme();
     renderMePlate();
     loadSummary();
-    showTab(VIEWS.indexOf(wantTab)>=0?wantTab:'home');
+    showTab(VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home'));
     var wantPlayer=(qs.get('player')||'').trim();
     // «me» в ссылке — это «моя карточка»: рассылка не знает id игрока в витрине,
     // зато его знает само приложение после авторизации.
@@ -2348,7 +2359,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
       })[0];
       wantPlayer=mine?String(mine.id):'';
     }
-    if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,VIEWS.indexOf(wantTab)>=0?wantTab:'home');
+    if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home'));
   }).catch(function(e){
     $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(e.message)+'</div>';
   });

@@ -10,7 +10,7 @@
 //
 // Баланс считаем суммой по журналу, а не храним как единственную правду: строку
 // в таблице могут поправить руками, и тогда витрина разъедется, а журнал — нет.
-import { ensureExtraSheet, getRows, appendObject, updateObjectByRow } from './sheets.js';
+import { ensureExtraSheet, getRows, appendObject, updateObjectByRow, deleteRow } from './sheets.js';
 import { nowISO, safe } from './util.js';
 
 // Короткий идентификатор: в callback_data Telegram всего 64 байта.
@@ -20,7 +20,8 @@ export const EVENT_SHEETS = {
   registry: 'Event_Registry',
   signups: 'Event_Signups',
   transactions: 'Transactions',
-  balances: 'Balances'
+  balances: 'Balances',
+  refunds: 'Refunds'
 };
 
 export const REGISTRY_HEADERS = [
@@ -39,6 +40,7 @@ export const SIGNUP_HEADERS = [
 ];
 export const TX_HEADERS = ['date', 'telegram_id', 'name', 'type', 'amount', 'balance', 'description'];
 export const BALANCE_HEADERS = ['telegram_id', 'name', 'balance_thb', 'updated_at'];
+export const REFUND_HEADERS = ['refund_id', 'created_at', 'event_id', 'event_title', 'telegram_id', 'name', 'amount_thb', 'reason', 'status', 'sent_at'];
 
 // Статусы записи. Новых сущностей не плодим: их ровно столько, сколько шагов
 // проходит игрок.
@@ -147,6 +149,16 @@ export async function updateEvent(eventId, patch) {
 
 export async function publishEvent(eventId) {
   return updateEvent(eventId, { status: 'published', published_at: nowISO() });
+}
+
+// Удаление события — насовсем: строка уходит из реестра, серой пометки в
+// истории не остаётся. Записи игроков при этом сохраняются в своём листе: по
+// ним видно, кому и сколько вернули, а в интерфейсе они больше не показываются.
+export async function deleteEventRow(eventId) {
+  const { rows } = await getRows(EVENT_SHEETS.registry, { useCache: false });
+  const row = rows.find(r => safe(r.event_id) === String(eventId));
+  if (!row?._rowNumber) return false;
+  return deleteRow(EVENT_SHEETS.registry, row._rowNumber);
 }
 
 // --- записи ----------------------------------------------------------------
@@ -270,6 +282,49 @@ export async function addTransaction({ telegramId, name, type, amount, descripti
   });
   await refreshBalanceRow(String(telegramId), safe(name), after);
   return after;
+}
+
+// --- ручные возвраты --------------------------------------------------------
+//
+// Когда деньги возвращаются не на депозит, а переводом на карту, бот сам ничего
+// сделать не может — он только ведёт список «кому и сколько ещё должны», чтобы
+// это не потерялось между чатами. Отметку «отправил» ставит организатор.
+export async function listRefunds({ pendingOnly = false } = {}) {
+  await ensureExtraSheet(EVENT_SHEETS.refunds, REFUND_HEADERS);
+  const { rows } = await getRows(EVENT_SHEETS.refunds, { useCache: false });
+  return rows
+    .filter(r => safe(r.refund_id))
+    .filter(r => !pendingOnly || safe(r.status).toLowerCase() !== 'sent')
+    .map(r => ({
+      refund_id: safe(r.refund_id), created_at: safe(r.created_at),
+      event_id: safe(r.event_id), event_title: safe(r.event_title),
+      telegram_id: safe(r.telegram_id), name: safe(r.name),
+      amount_thb: num(r.amount_thb), reason: safe(r.reason),
+      status: safe(r.status).toLowerCase() || 'pending',
+      sent_at: safe(r.sent_at), _rowNumber: r._rowNumber
+    }));
+}
+
+export async function addRefund({ eventId = '', eventTitle = '', telegramId, name, amount, reason = '' }) {
+  await ensureExtraSheet(EVENT_SHEETS.refunds, REFUND_HEADERS);
+  const row = {
+    refund_id: `rf_${uid(6)}`, created_at: nowISO(),
+    event_id: safe(eventId), event_title: safe(eventTitle),
+    telegram_id: String(telegramId), name: safe(name),
+    amount_thb: Number(amount || 0), reason: safe(reason), status: 'pending', sent_at: ''
+  };
+  await appendObject(EVENT_SHEETS.refunds, row);
+  return row;
+}
+
+export async function markRefundSent(refundId, sent = true) {
+  await ensureExtraSheet(EVENT_SHEETS.refunds, REFUND_HEADERS);
+  const { rows } = await getRows(EVENT_SHEETS.refunds, { useCache: false });
+  const row = rows.find(r => safe(r.refund_id) === String(refundId));
+  if (!row?._rowNumber) return null;
+  const patch = { status: sent ? 'sent' : 'pending', sent_at: sent ? nowISO() : '' };
+  await updateObjectByRow(EVENT_SHEETS.refunds, row._rowNumber, patch);
+  return { ...row, ...patch };
 }
 
 // Витрина балансов: чтобы организатору не считать журнал глазами.

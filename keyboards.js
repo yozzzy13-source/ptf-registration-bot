@@ -60,7 +60,10 @@ export function adminApplicationKeyboard(applicationId, telegramId, withInvoice=
 // application_id, и payment_id — вместе выходило 76 байт, и Telegram отвечал
 // BUTTON_DATA_INVALID: карточка с чеком не отправлялась вообще, ни в тему, ни в
 // General. Теперь передаём только заявку, а платёж находим по ней на сервере.
-export function adminPaymentKeyboard(applicationId, paymentId, telegramId) { return inlineKeyboard([[{text:'✅ Approve payment',callback_data:cb(`admin_payment:${applicationId}:approved`)}],[{text:'❌ Reject payment',callback_data:cb(`admin_payment:${applicationId}:rejected`)}],[{text:'💬 Message player',callback_data:cb(`admin_reply:${telegramId}`)}]]); }
+// Третья кнопка нужна, когда состав уже укомплектован: оплату принимаем, но
+// участие подтвердить пока не можем — игрок уходит в лист ожидания с понятным
+// объяснением, а «Set Active» жмётся позже, когда место появится.
+export function adminPaymentKeyboard(applicationId, paymentId, telegramId) { return inlineKeyboard([[{text:'✅ Approve payment',callback_data:cb(`admin_payment:${applicationId}:approved`)}],[{text:'⏳ Оплата принята → Waitlist',callback_data:cb(`admin_payment:${applicationId}:waitlisted`)}],[{text:'❌ Reject payment',callback_data:cb(`admin_payment:${applicationId}:rejected`)}],[{text:'💬 Message player',callback_data:cb(`admin_reply:${telegramId}`)}]]); }
 export function clubKeyboard(lang, url) { return inlineKeyboard([[clubChatButton(lang==='ru'?'💬 Вступить в клубный чат':'💬 Join Club Chat')]]); }
 
 // Приветствие после подтверждения оплаты: разделы сразу кнопками, чтобы человек

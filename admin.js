@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, findLatestApplicationByTelegramId as _findLatestApp } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -490,10 +490,34 @@ export async function eventRemoveDo(chatId, signupId, mode) {
   return sendMessage(chatId, r.message);
 }
 
+// Удаление события: сначала спрашиваем, как возвращать деньги — один раз на всё
+// событие. Само удаление уже не переспрашивает: строка уходит насовсем.
 export async function eventDrop(chatId, eventId) {
-  const { updateEvent } = await import('./events.js');
-  await updateEvent(eventId, { status: 'cancelled' });
-  return sendMessage(chatId, 'Событие убрано из списка.');
+  const { findEvent, listSignups } = await import('./events.js');
+  const event = await findEvent(eventId);
+  if (!event) return sendMessage(chatId, 'Событие не найдено.');
+  const all = await listSignups().catch(() => []);
+  const mine = all.filter(s => s.event_id === eventId && s.status !== 'cancelled');
+  const paid = mine.reduce((sum, s) => sum + (s.paid_thb || 0), 0);
+  const who = mine.length
+    ? `Записано: <b>${mine.length}</b>${paid ? `, оплачено на <b>${paid} ฿</b>` : ', оплат не было'}.`
+    : 'Записавшихся нет.';
+  return sendMessage(chatId, `🗑 <b>Удалить «${escapeHtml(event.title_ru || event.title_en || eventId)}»?</b>
+
+${who}
+Событие исчезнет совсем, разосланные карточки станут «событие отменено».${paid ? '\n\nКак вернуть деньги?' : ''}`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: paid ? '💰 Вернуть на балансы' : '🗑 Удалить', callback_data: `evdel:${eventId}:balance` }],
+      ...(paid ? [[{ text: '🏦 Верну переводом сам', callback_data: `evdel:${eventId}:manual` }]] : []),
+      [{ text: '↩️ Не удалять', callback_data: `ev_pv:${eventId}` }]
+    ] }
+  });
+}
+
+export async function eventDeleteDo(chatId, eventId, refundMode) {
+  const { deleteEvent } = await import('./eventflow.js');
+  const r = await deleteEvent({ eventId, refundMode: refundMode === 'manual' ? 'manual' : 'balance' });
+  return sendMessage(chatId, r.message);
 }
 // Игрок нажал «Записаться» под карточкой.
 export async function eventJoin({ chatId, from, lang, eventId }) {
@@ -502,8 +526,10 @@ export async function eventJoin({ chatId, from, lang, eventId }) {
   const applicant = await findApplicantByTelegramId(from.id).catch(() => null);
   const name = applicant?.name || [from.first_name, from.last_name].filter(Boolean).join(' ') || String(from.id);
   const adminChatId = await getAdminChatId().catch(() => '');
-  const r = await joinEvent({ telegramId: from.id, name, lang, eventId, adminChatId });
-  if (!r.ok) return sendMessage(chatId, r.error || r.message);
+  const group = await playerGroup(from.id, applicant).catch(() => 'guest');
+  const r = await joinEvent({ telegramId: from.id, name, lang, eventId, adminChatId, group });
+  // Отказ тоже бывает с кнопкой — например «Подать заявку» для тех, кто вне лиги.
+  if (!r.ok) return sendMessage(chatId, r.error || r.message, r.markup ? { reply_markup: r.markup } : {});
   // Кнопки «добавить в календарь» приходят вместе с подтверждением участия.
   if (r.message) return sendMessage(chatId, r.message, r.markup ? { reply_markup: r.markup } : {});
   const balance = await getBalance(from.id).catch(() => 0);
@@ -1389,7 +1415,7 @@ export async function executeBroadcast(callbackQuery) {
 
 // Ответ админа должен лечь в тему игрока, а не в общую ленту: иначе скриншот
 // лежит в подтопике, а вердикт по нему — отдельно и без контекста.
-async function replyInPlayerTopic(chatId, telegramId, text, opts={}) {
+export async function replyInPlayerTopic(chatId, telegramId, text, opts={}) {
   let topic = null;
   if (telegramId) topic = await getOrCreatePlayerTopic({ id: telegramId, telegram_id: telegramId }).catch(() => null);
   const target = topic?.chatId || chatId;
@@ -1517,13 +1543,17 @@ export async function setPaymentStatus({ chatId, applicationId, paymentId = '', 
     const current = await findApplication(applicationId).catch(() => null);
     pid = String(current?.payment_id || '').trim();
   }
-  if (pid) await updatePayment(pid, { status: status === 'approved' ? 'approved' : 'rejected', admin_checked_at: nowISO() });
+  // waitlisted — оплату принимаем, но состав уже укомплектован: деньги в кассе,
+  // участие пока не подтверждено. Приветствие и клубный чат на этом шаге не
+  // уходят: их запустит «Set Active», когда место появится.
+  const paid = status === 'approved' || status === 'waitlisted';
+  if (pid) await updatePayment(pid, { status: paid ? 'approved' : 'rejected', admin_checked_at: nowISO() });
   else console.error(`setPaymentStatus: payment_id not found for ${applicationId}`);
   // Подтверждённая оплата — это и есть участие: игрок сразу становится активным,
   // иначе он застревал в payment_approved, а мини-приложение пускает только
   // активных. Отдельно жать «Set Active» больше не нужно.
-  const appStatus = status === 'approved' ? 'active' : 'waiting_payment';
-  const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: status === 'approved' ? 'approved' : 'rejected', payment_proof_status: status, payment_reviewed_at: nowISO() });
+  const appStatus = status === 'approved' ? 'active' : (status === 'waitlisted' ? 'waitlist' : 'waiting_payment');
+  const app = await updateApplication(applicationId, { application_status: appStatus, payment_status: paid ? 'approved' : 'rejected', payment_proof_status: status === 'waitlisted' ? 'approved' : status, payment_reviewed_at: nowISO() });
   if (app) await updateApplicantStatusByTelegramId(app.telegram_id, appStatus);
   // Дальше обычная ветка подтверждения: поздравление и приглашение в клубный чат.
   if (status === 'approved' && app?.telegram_id && !app.confirmed_message_sent_at) {
@@ -1532,6 +1562,14 @@ export async function setPaymentStatus({ chatId, applicationId, paymentId = '', 
       .catch(e => console.error('confirm message failed:', e.message));
     await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() }).catch(() => {});
   }
-  const icon = status === 'approved' ? '✅' : '❌';
-  await replyInPlayerTopic(chatId, app?.telegram_id, `<b>${icon} Payment ${escapeHtml(status)}</b>\n\nApplication: <code>${escapeHtml(applicationId)}</code>\nPlayer: <b>${escapeHtml(app?.player_name || '')}</b>\n\nParticipation status is still separate.`);
+  if (status === 'waitlisted' && app?.telegram_id) {
+    const lang = (await findApplicantByTelegramId(app.telegram_id))?.language === 'ru' ? 'ru' : 'en';
+    await sendMessage(app.telegram_id, t(lang, 'waitlist_paid'))
+      .catch(e => console.error('waitlist message failed:', e.message));
+  }
+  const icon = status === 'rejected' ? '❌' : (status === 'waitlisted' ? '⏳' : '✅');
+  const tail = status === 'waitlisted'
+    ? '\n\nОплата принята, участие пока не подтверждено. Когда появится место — «Set Active».'
+    : '\n\nParticipation status is still separate.';
+  await replyInPlayerTopic(chatId, app?.telegram_id, `<b>${icon} Payment ${escapeHtml(status)}</b>\n\nApplication: <code>${escapeHtml(applicationId)}</code>\nPlayer: <b>${escapeHtml(app?.player_name || '')}</b>${tail}`);
 }

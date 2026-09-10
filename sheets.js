@@ -747,6 +747,22 @@ export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
   return task;
 }
 
+// Физическое удаление строки. Нужно ровно там, где след не нужен вовсе —
+// удалённое событие не должно оставаться серой строкой в списке. Всё остальное
+// по-прежнему помечаем статусом, а не стираем.
+export async function deleteRow(sheetName, rowNumber) {
+  if (!rowNumber || rowNumber < 2) return false;
+  const meta = await spreadsheetMeta();
+  const props = meta.sheets?.find(s => s.properties?.title === sheetName)?.properties;
+  if (!props) return false;
+  await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [
+    { deleteDimension: { range: { sheetId: props.sheetId, dimension: 'ROWS', startIndex: rowNumber - 1, endIndex: rowNumber } } }
+  ] } });
+  gridInfo.delete(sheetName);
+  cache.clear();
+  return true;
+}
+
 export async function updateObjectByRow(sheetName, rowNumber, patch) {
   const { headers, rows } = await getRows(sheetName, { useCache:false });
   const current = rows.find(r => r._rowNumber === rowNumber) || {};
@@ -1392,6 +1408,56 @@ export async function getAllActiveLeaguePlayers() {
     if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
     out.push({ telegram_id: String(hit.telegram_id), name: p.name, division: p.division || '', language: hit.language || '' });
   }
+  return out;
+}
+
+// Группа игрока — одна на весь бот: по ней решается и доступ к событиям,
+// и набор вкладок в мини-приложении.
+//   active   — участие подтверждено;
+//   waitlist — оплата принята, место в дивизионе ждёт;
+//   applied  — заявка есть, оплаты нет;
+//   guest    — все остальные, включая тех, кто просто открыл бота.
+export const PLAYER_GROUPS = ['active', 'waitlist', 'applied', 'guest'];
+export async function playerGroup(telegramId, applicant = null) {
+  const who = applicant || await findApplicantByTelegramId(telegramId).catch(() => null);
+  const status = String(who?.status || '').toLowerCase();
+  if (status === 'active') return 'active';
+  const app = await findLatestApplicationByTelegramId(telegramId).catch(() => null);
+  const paid = ['approved', 'payment_approved'].includes(String(app?.payment_status || '').toLowerCase());
+  if (status === 'waitlist' && paid) return 'waitlist';
+  if (app || who?.telegram_id) return 'applied';
+  return 'guest';
+}
+
+// --- нижнее меню мини-приложения --------------------------------------------
+//
+// Какие вкладки видит группа игроков и в каком порядке. Настраивается из
+// админки, хранится в Settings одной строкой на группу. Пустая строка = набор по
+// умолчанию, то есть всё. «Лига» (главная) есть у всех всегда: без неё человек
+// открывает приложение в пустоту.
+export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'sched', 'matches', 'events', 'about'];
+export const ALWAYS_TABS = ['home'];
+const tabsKey = (group) => `tabs_${group}`;
+
+export async function getGroupTabs(group) {
+  const raw = await getSetting(tabsKey(group)).catch(() => '');
+  const picked = String(raw || '').split(',').map(s => s.trim()).filter(s => MINIAPP_TABS.includes(s));
+  const out = picked.length ? picked : MINIAPP_TABS.slice();
+  for (const t of ALWAYS_TABS) if (!out.includes(t)) out.unshift(t);
+  return out;
+}
+
+export async function setGroupTabs(group, tabs = []) {
+  if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
+  const picked = (Array.isArray(tabs) ? tabs : []).map(s => String(s).trim()).filter(s => MINIAPP_TABS.includes(s));
+  for (const t of ALWAYS_TABS) if (!picked.includes(t)) picked.unshift(t);
+  await setSetting(tabsKey(group), picked.join(','), 'Вкладки мини-приложения для группы');
+  return picked;
+}
+
+export async function allGroupTabs() {
+  const out = {};
+  for (const g of PLAYER_GROUPS) out[g] = await getGroupTabs(g);
   return out;
 }
 

@@ -11,7 +11,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -309,7 +309,12 @@ function adminHelpText() {
       lines.push(`/${c.cmd}${c.args ? ' ' + c.args : ''} — ${c.help || c.short}`);
     }
   }
-  lines.push('', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
+  lines.push('', '<b>Кнопки, а не команды</b>',
+    '• На чеке за лигу три решения: <b>Approve</b> — участие подтверждено, <b>⏳ Оплата принята → Waitlist</b> — деньги приняли, место ждём, <b>Reject</b>.',
+    '• Событие правится и удаляется в панели: удаление спрашивает, вернуть деньги на балансы или ты вернёшь переводом сам.',
+    '• Возвраты переводом копятся во вкладке «Возвраты» — там же отмечаешь «отправил».',
+    '• Вкладка «Кнопки» — какие разделы мини-приложения видит каждая группа игроков.',
+    '', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
     '<i>Ответ игроку: Reply под его сообщением в топике.</i>');
   return lines.join('\n');
 }
@@ -1215,6 +1220,11 @@ export async function handleCallback(q) {
     }
     if (data.startsWith('ev_pub:')) return eventPublish(chatId, data.split(':')[1]);
     if (data.startsWith('ev_drop:')) return eventDrop(chatId, data.split(':')[1]);
+    if (data.startsWith('evdel:')) {
+      const [, eventId, mode] = data.split(':');
+      return eventDeleteDo(chatId, eventId, mode);
+    }
+    if (data.startsWith('ev_pv:')) return eventPreview(chatId, data.split(':')[1]);
     if (data.startsWith('ev_edit:')) return sendMessage(chatId, 'Открой админ-панель и поправь карточку — потом нажми «Предпросмотр» ещё раз.');
     // Подтверждение участия руками: работает и без топика, и без заявки.
     if (data.startsWith('admin_activate:')) return activatePlayer({ chatId, telegramId: data.split(':')[1] });
