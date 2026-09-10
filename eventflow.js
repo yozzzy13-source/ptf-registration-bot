@@ -10,6 +10,7 @@
 //     редактируется, а не десяток новых.
 import { sendMessage, editMessageText } from './telegram.js';
 import { escapeHtml, safe } from './util.js';
+import { PUBLIC_URL } from './config.js';
 import { getSetting, setSetting, getPaymentMethods } from './sheets.js';
 import {
   findEvent, listEvents, listSignups, findSignup, createSignup, updateSignup,
@@ -19,6 +20,50 @@ import {
 } from './events.js';
 
 const ru = (lang) => lang === 'ru';
+
+// Дата в карточке: год не нужен — события ближние, а вот день недели важен,
+// по нему человек сразу понимает, попадает ли он.
+const DOW_RU = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+const DOW_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export function fmtDay(date, lang = 'ru') {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(safe(date));
+  if (!m) return safe(date);
+  const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+  const dow = (ru(lang) ? DOW_RU : DOW_EN)[d.getUTCDay()];
+  return `${dow}, ${m[1]}.${m[2]}`;
+}
+
+// Кнопки «добавить в календарь» — как в тренерском боте: Google открывается
+// ссылкой, Apple через маленькую страницу, которая отдаёт .ics в системный
+// календарь. Длительность события в таблице не хранится, берём два часа.
+const EVENT_HOURS = 2;
+function icsTimes(event) {
+  const start = eventStartMs(event);
+  if (!start) return null;
+  const f = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  return { start: f(start), end: f(start + EVENT_HOURS * 3600000), startMs: start };
+}
+export function calendarButtons(event, lang = 'ru') {
+  const t = icsTimes(event);
+  if (!t) return null;
+  const L = ru(lang);
+  const title = (L ? event.title_ru : event.title_en) || event.title_ru || '';
+  const details = (L ? event.description_ru : event.description_en) || '';
+  const google = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+    + '&text=' + encodeURIComponent(title)
+    + '&dates=' + t.start + '/' + t.end
+    + '&details=' + encodeURIComponent(details)
+    + '&location=' + encodeURIComponent(event.place || '');
+  const apple = `${PUBLIC_URL}/cal?e=${encodeURIComponent(event.event_id)}&l=${L ? 'ru' : 'en'}`;
+  return [
+    { text: L ? '📅 Google Календарь' : '📅 Google Calendar', url: google },
+    { text: L ? '🍎 Apple Календарь' : '🍎 Apple Calendar', web_app: { url: apple } }
+  ];
+}
+export function calendarKeyboard(event, lang = 'ru') {
+  const row = calendarButtons(event, lang);
+  return row ? { inline_keyboard: [row] } : undefined;
+}
 
 // Способы оплаты в батах из вкладки «Payment Methods». Крипта сюда не попадает:
 // в USDT принимаем только участие в лиге, события — всегда баты.
@@ -32,6 +77,43 @@ export async function thbPaymentDetails() {
       title: safe(m.display_name_ru) || safe(m.display_name_en) || 'Bank Transfer',
       recipient: safe(m.recipient)
     }));
+}
+
+// Страница, которая отдаёт .ics и сама нажимает на ссылку: системный календарь
+// открывается без лишних шагов. Файл кладём прямо в ссылку, чтобы не хранить
+// его на диске и не заботиться об уборке.
+export function icsForEvent(event, lang = 'ru') {
+  const L = ru(lang);
+  const t = icsTimes(event);
+  const title = (L ? event.title_ru : event.title_en) || event.title_ru || 'PTF';
+  const clean = (v) => String(v || '').replace(/[\r\n,;]/g, ' ');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//PTF//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${event.event_id || 'ptf'}@phukettennis`,
+    `DTSTAMP:${stamp}`,
+    t ? `DTSTART:${t.start}` : '',
+    t ? `DTEND:${t.end}` : '',
+    `SUMMARY:${clean(title)}`,
+    event.place ? `LOCATION:${clean(event.place)}` : '',
+    'END:VEVENT', 'END:VCALENDAR'
+  ].filter(Boolean).join('\r\n');
+  const href = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(ics);
+  const when = `${fmtDay(event.date, lang)} ${escapeHtml(event.time || '')}`;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="font-family:-apple-system,system-ui,sans-serif;text-align:center;padding:40px 20px;background:#0A0A0B;color:#EFEBE4">
+<h2 style="margin:0 0 6px">📅 ${L ? 'Добавить в календарь' : 'Add to calendar'}</h2>
+<p style="color:#B9B1A5;margin:0">${escapeHtml(title)}<br>${when}</p>
+<a id="dl" href="${href}" download="ptf-event.ics"
+  style="display:inline-block;margin-top:22px;padding:15px 26px;background:#E8A45C;color:#191512;
+  border-radius:12px;text-decoration:none;font-size:16px;font-weight:800">
+  ${L ? 'Открыть в Календаре' : 'Open in Calendar'}</a>
+<p style="margin-top:22px;color:#8A7F6F;font-size:13px">
+  ${L ? 'Если не открылось само — нажми кнопку.' : 'If it did not open automatically, tap the button.'}</p>
+<script>setTimeout(function(){try{document.getElementById('dl').click()}catch(e){}},400)</script>
+</body></html>`;
 }
 
 // --- карточка события ------------------------------------------------------
@@ -55,7 +137,7 @@ export function eventCard(event, lang = 'ru', { taken = 0, lead = false } = {}) 
       ? `📍 <a href="${escapeHtml(event.place_url)}">${escapeHtml(event.place)}</a>`
       : `📍 ${escapeHtml(event.place)}`);
   }
-  if (event.date) lines.push(`📅 <b>${escapeHtml(event.date)}</b>`);
+  if (event.date) lines.push(`📅 <b>${escapeHtml(fmtDay(event.date, lang))}</b>`);
   if (event.time) lines.push(`🕐 <b>${escapeHtml(event.time)}</b>`);
   if (event.capacity) {
     const left = Math.max(0, event.capacity - taken);
@@ -69,7 +151,7 @@ export function eventCard(event, lang = 'ru', { taken = 0, lead = false } = {}) 
   } else if (event.payment_required === false) {
     lines.push(L ? '💳 Участие бесплатное' : '💳 Free entry');
   }
-  if (event.signup_deadline) lines.push(L ? `⏳ Запись до ${escapeHtml(event.signup_deadline)}` : `⏳ Sign-up until ${escapeHtml(event.signup_deadline)}`);
+  if (event.signup_deadline) lines.push(L ? `⏳ Запись до ${escapeHtml(fmtDay(event.signup_deadline, lang))}` : `⏳ Sign-up until ${escapeHtml(fmtDay(event.signup_deadline, lang))}`);
   if (event.invite_only) lines.push(L ? '🔒 Только по приглашению' : '🔒 By invitation only');
   return lines.join('\n');
 }
@@ -193,7 +275,7 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
     event, telegramId, name, guests: wantSeats - 1, status, amount: noRoom ? 0 : amount
   });
 
-  let message;
+  let message, markup;
   if (noRoom) {
     // Сразу говорим номер в очереди и сколько будет времени на решение —
     // чтобы человек знал, чего ждать, и не пропустил окно.
@@ -208,14 +290,15 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
 If a spot frees up, I will write to you first. You will have <b>${window} h</b> to decide, then the spot goes to the next person.
 Do not pay yet.`;
   } else if (status === SIGNUP_STATUS.confirmed) {
+    markup = calendarKeyboard(event, lang);
     message = L
-      ? `Заявка на «${event.title_ru}» принята. Ты в списке участников.\n📅 ${event.date} ${event.time}\n📍 ${event.place}`
+      ? `Заявка на «${event.title_ru}» принята. Ты в списке участников.\n📅 ${fmtDay(event.date, lang)} ${event.time}\n📍 ${event.place}`
       : `You are in for “${event.title_en}”.\n📅 ${event.date} ${event.time}\n📍 ${event.place}`;
   } else {
     message = null; // счёт отправит invoiceSignup
   }
   if (adminChatId) await notifyOrganizer(signup, event, adminChatId).catch(() => {});
-  return { ok: true, signup, event, message, needsInvoice: status === SIGNUP_STATUS.invoiced, amount };
+  return { ok: true, signup, event, message, markup, needsInvoice: status === SIGNUP_STATUS.invoiced, amount };
 }
 
 // Счёт на участие. Если на депозите хватает — предлагаем списать одной кнопкой.
@@ -278,7 +361,7 @@ export async function payFromDeposit({ signupId, telegramId, name, lang = 'ru', 
     status: SIGNUP_STATUS.paid, paid_thb: signup.amount_thb, paid_from: 'депозит'
   });
   if (adminChatId) await notifyOrganizer({ ...signup, ...updated }, event, adminChatId).catch(() => {});
-  return { ok: true, message: L
+  return { ok: true, markup: calendarKeyboard(event, lang), message: L
     ? `✅ Оплачено с депозита: <b>${signup.amount_thb} ฿</b>. Остаток: <b>${left} ฿</b>\nТы в списке участников.`
     : `✅ Paid from deposit: <b>${signup.amount_thb} ฿</b>. Remaining: <b>${left} ฿</b>\nYou are on the list.` };
 }
@@ -706,8 +789,9 @@ export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adm
   await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.confirmed, note: 'принял место из листа ожидания' });
   if (adminChatId) await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.confirmed }, event, adminChatId, '✅ Принял место из листа ожидания').catch(() => {});
   return sendMessage(chatId, L
-    ? `✅ Место твоё — «${escapeHtml(event?.title_ru || '')}».\n📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}`
-    : `✅ The spot is yours — “${escapeHtml(event?.title_en || '')}”.\n📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}`);
+    ? `✅ Место твоё — «${escapeHtml(event?.title_ru || '')}».\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`
+    : `✅ The spot is yours — “${escapeHtml(event?.title_en || '')}”.\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`,
+    { reply_markup: calendarKeyboard(event, lang) });
 }
 
 // Игрок отказался или вышел из очереди — держать место больше не нужно.
@@ -841,7 +925,8 @@ export async function reviewEventProof({ signupId, approve, adminChatId = '' }) 
     status: SIGNUP_STATUS.paid, paid_thb: amount, paid_from: 'перевод', note: 'оплата подтверждена'
   });
   await sendMessage(signup.telegram_id, `✅ Оплата за «${escapeHtml(title)}» подтверждена. Ты в составе!
-📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}`).catch(() => {});
+📅 ${escapeHtml(fmtDay(event?.date, 'ru'))} ${escapeHtml(event?.time || '')}`,
+    { reply_markup: calendarKeyboard(event, 'ru') }).catch(() => {});
   if (adminChatId) {
     await notifyOrganizer({ ...signup, ...updated, status: SIGNUP_STATUS.paid, paid_thb: amount },
       event, adminChatId, '💰 Оплата подтверждена').catch(() => {});
@@ -864,7 +949,7 @@ function whenLine(event, lang) {
     ? `<a href="${escapeHtml(event.place_url)}">${escapeHtml(event.place)}</a>`
     : escapeHtml(event.place || '');
   return [
-    `📅 ${escapeHtml(event.date)} ${escapeHtml(event.time)}`,
+    `📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}`,
     place ? `📍 ${place}` : ''
   ].filter(Boolean).join('\n');
 }
@@ -1000,8 +1085,9 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
       ? `\n💳 Списано с депозита: <b>${amount} ฿</b>. Остаток: <b>${depositLeft} ฿</b>`
       : `\n💳 Charged to your deposit: <b>${amount} ฿</b>. Balance: <b>${depositLeft} ฿</b>`);
     await sendMessage(telegramId, L
-      ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n${escapeHtml(event.date)} ${escapeHtml(event.time)}${dep}`
-      : `✅ You are in for “${escapeHtml(event.title_en)}”.\n${escapeHtml(event.date)} ${escapeHtml(event.time)}${dep}`).catch(() => {});
+      ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}${dep}`
+      : `✅ You are in for “${escapeHtml(event.title_en)}”.\n📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}${dep}`,
+      { reply_markup: calendarKeyboard(event, lang) }).catch(() => {});
   }
   if (adminChatId) await notifyOrganizer({ ...signup, status }, event, adminChatId, 'добавлен организатором').catch(() => {});
   const what = paying ? 'счёт отправлен'

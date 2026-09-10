@@ -504,7 +504,8 @@ export async function eventJoin({ chatId, from, lang, eventId }) {
   const adminChatId = await getAdminChatId().catch(() => '');
   const r = await joinEvent({ telegramId: from.id, name, lang, eventId, adminChatId });
   if (!r.ok) return sendMessage(chatId, r.error || r.message);
-  if (r.message) return sendMessage(chatId, r.message);
+  // Кнопки «добавить в календарь» приходят вместе с подтверждением участия.
+  if (r.message) return sendMessage(chatId, r.message, r.markup ? { reply_markup: r.markup } : {});
   const balance = await getBalance(from.id).catch(() => 0);
   return sendMessage(chatId, await invoiceText(r.event, r.signup, lang, balance), {
     reply_markup: invoiceKeyboard(r.event, r.signup, lang, balance)
@@ -516,7 +517,7 @@ export async function eventPayFromDeposit({ chatId, from, lang, signupId }) {
   const name = applicant?.name || String(from.id);
   const adminChatId = await getAdminChatId().catch(() => '');
   const r = await payFromDeposit({ signupId, telegramId: from.id, name, lang, adminChatId });
-  return sendMessage(chatId, r.message);
+  return sendMessage(chatId, r.message, r.markup ? { reply_markup: r.markup } : {});
 }
 // Отмена в два шага: сначала предупреждение по правилу 12 часов, потом кнопки.
 export async function eventCancelAsk({ chatId, lang, signupId }) {

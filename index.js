@@ -743,7 +743,7 @@ app.post('/api/league/event-join', async (req, res) => {
       eventId: String(req.body.event_id || ''), adminChatId });
     if (!r.ok) return res.json({ ok:false, error: r.error || r.message });
     // Счёт и подтверждение уходят в бот — там оплата и скриншоты.
-    if (r.message) await sendMessage(v.user.id, r.message).catch(() => {});
+    if (r.message) await sendMessage(v.user.id, r.message, r.markup ? { reply_markup: r.markup } : {}).catch(() => {});
     else {
       const balance = await getBalance(v.user.id).catch(() => 0);
       await sendMessage(v.user.id, await invoiceText(r.event, r.signup, lang, balance),
@@ -811,6 +811,23 @@ app.post('/api/league/event-roster', async (req, res) => {
 
 // Касса игрока: баланс и история операций. Показывается, только когда деньги
 // на депозите уже появились — обычно после первого возврата.
+// Страница для Apple Calendar: отдаёт .ics и сама его открывает. Telegram не
+// умеет прикреплять файл к кнопке, поэтому идём через маленькую web_app-страницу —
+// ровно как в тренерском боте.
+app.get('/cal', async (req, res) => {
+  try {
+    const { findEvent } = await import('./events.js');
+    const { icsForEvent } = await import('./eventflow.js');
+    const event = await findEvent(String(req.query.e || ''));
+    if (!event) return res.status(404).send('Событие не найдено');
+    res.set('content-type', 'text/html; charset=utf-8');
+    res.send(icsForEvent(event, String(req.query.l || 'ru') === 'ru' ? 'ru' : 'en'));
+  } catch (e) {
+    console.error('cal page failed:', e.message);
+    res.status(500).send('Ошибка');
+  }
+});
+
 app.get('/api/league/wallet', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));

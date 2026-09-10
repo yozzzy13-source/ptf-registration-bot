@@ -2000,10 +2000,18 @@ function evStatusBadge(e){
   var cls=(e.my_status==='paid'||e.my_status==='confirmed')?' ok':'';
   return '<span class="badge'+cls+'">'+esc(text)+'</span>';
 }
+// Дата события: без года, зато с днём недели — так сразу видно, попадаешь ли.
+var DOW=[['вс','пн','вт','ср','чт','пт','сб'],['Sun','Mon','Tue','Wed','Thu','Fri','Sat']];
+function dayLabel(v){
+  var m=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(v||''));
+  if(!m)return String(v||'');
+  var d=new Date(Date.UTC(+m[3],+m[2]-1,+m[1]));
+  return DOW[L?0:1][d.getUTCDay()]+', '+m[1]+'.'+m[2];
+}
 function eventCard(e){
   var title=L?(e.title_ru||e.title_en):(e.title_en||e.title_ru);
   var desc=L?(e.description_ru||e.description_en):(e.description_en||e.description_ru);
-  var when=[e.date,e.time].filter(Boolean).join(' · ');
+  var when=[dayLabel(e.date),e.time].filter(Boolean).join(' · ');
   var rows='';
   // Место ссылкой, если она задана: адрес отдельной строкой не дублируем.
   if(e.place)rows+='<div class="hint">📍 '+(e.place_url
@@ -2013,7 +2021,7 @@ function eventCard(e){
   if(e.capacity)rows+='<div class="hint">👥 '+esc(X.evSpots)+': <b>'+(e.seats_left)+' / '+e.capacity+'</b></div>';
   if(e.payment_required&&e.price_thb)rows+='<div class="hint">💳 '+esc(X.evPrice)+': <b>'+e.price_thb+' ฿</b>'
     +(e.guests_allowed?' · '+esc(X.evGuest)+': <b>'+((e.guest_price_thb===null||e.guest_price_thb==='')?e.price_thb:e.guest_price_thb)+' ฿</b>':'')+'</div>';
-  if(e.signup_deadline)rows+='<div class="hint">⏳ '+esc(X.evUntil)+' '+esc(e.signup_deadline)+'</div>';
+  if(e.signup_deadline)rows+='<div class="hint">⏳ '+esc(X.evUntil)+' '+esc(dayLabel(e.signup_deadline))+'</div>';
   if(e.invite_only)rows+='<div class="hint">🔒 '+esc(X.evInviteOnly)+'</div>';
   var badges=evStatusBadge(e);
   var mine=!!e.my_status&&e.my_status!=='cancelled';
