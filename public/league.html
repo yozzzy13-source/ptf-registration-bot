@@ -160,7 +160,7 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .mt{position:relative}
 .mt .mdiv{position:absolute;top:10px;right:11px;cursor:pointer;z-index:2}
 .mt .mdiv:active{filter:brightness(1.35)}
-.mt .mtop{padding-right:86px}
+.mt .mdiv+.mtop{padding-right:86px}
 /* Чемпионы сезона крупно. */
 .chbig{border:1px solid var(--line2);border-radius:16px;background:var(--card2);padding:15px 13px 13px;
   margin-bottom:10px;text-align:center;cursor:pointer}
@@ -1091,13 +1091,47 @@ function loadSummary(){
     .then(function(r){return r.json()}).then(function(j){
       if(!j||!j.ok)return;
       summary=j.seasons||[];
+      divIndex=null;
+      // Итоги пришли позже первого рендера — перерисовываем то, что открыто:
+      // без них дивизионы матчей подписаны по старой таблице.
       if(openId){ var pl=byId(openId); if(pl)renderPlayer(pl); }
       else if(mode==='home')renderHome();
+      else if(mode==='matches')renderFeed();
+      else if(mode==='div')renderDiv();
     }).catch(function(){});
 }
 // Где игрок играл в каждом сезоне — по таблицам дивизионов, а не по текущему
 // дивизиону из профиля. Иначе переход между дивизионами задним числом
 // переписывает всю историю: у человека оба сезона показываются в новом дивизионе.
+var divIndex=null;
+function buildDivIndex(){
+  divIndex={};
+  (summary||[]).forEach(function(s){
+    var key=String(s.number);
+    divIndex[key]=divIndex[key]||{};
+    (s.divisions||[]).forEach(function(d){
+      (d.table||[]).forEach(function(p){
+        var nm=String(p.name||'').trim().toLowerCase();
+        if(nm&&!divIndex[key][nm])divIndex[key][nm]=d.letter;
+        var id='#'+String(p.id||'');
+        if(p.id&&!divIndex[key][id])divIndex[key][id]=d.letter;
+      });
+    });
+  });
+}
+// Дивизион матча: тот, в котором игрок ИГРАЛ в этом сезоне, а не тот, где он
+// сейчас. В витринной таблице лежит текущий дивизион, поэтому после перехода
+// вся прошлая история переезжала следом.
+function divisionAt(season,aName,aId,bName,bId,fallback){
+  if(!divIndex)buildDivIndex();
+  var box=divIndex[String(season||'')];
+  if(box){
+    var keys=['#'+String(aId||''),String(aName||'').trim().toLowerCase(),
+              '#'+String(bId||''),String(bName||'').trim().toLowerCase()];
+    for(var i=0;i<keys.length;i++){ if(keys[i]&&keys[i]!=='#'&&box[keys[i]])return box[keys[i]] }
+  }
+  return fallback||'';
+}
 function seasonPlacesOf(name,id){
   var out={};
   (summary||[]).forEach(function(s){
@@ -1621,7 +1655,9 @@ function allMatchesList(){
       out.push({no:m.match_no,date:m.date,competition:m.competition,
         winner:win?{id:pid,name:p.name,photo:p.photo}:{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo},
         loser:win?{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo}:{id:pid,name:p.name,photo:p.photo},
-        score:win?m.score:reverseScore(m.score),division:m.division||m.opponent_division,court:m.court||''});
+        score:win?m.score:reverseScore(m.score),season:m.season||'',
+        division:divisionAt(m.season,p.name,pid,m.opponent,m.opponent_id,m.division||m.opponent_division),
+        court:m.court||''});
     });
   });
   return out.sort(function(a,b){return Number(b.no||0)-Number(a.no||0)});
@@ -1657,7 +1693,9 @@ function setFQuery(v){fQuery=v;fLimit=20;renderFeed()}
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
   var top=[m.no?'#'+m.no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
-  return '<div class="mt">'+divTag(m.division,m.season)+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+  // В ленте ярлык дивизиона стоит по центру под счётом — второй, в углу,
+  // был дублем. Угловой остаётся только в карточке игрока.
+  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
     +'<div class="mid"><div class="nm3"><b>'+esc(m.winner.name)+'</b> <s>vs</s> <em>'+esc(m.loser.name)+'</em></div>'
@@ -1886,7 +1924,9 @@ function matchRow(m){
   var opp={name:m.opponent,photo:m.opponent_photo};
   // Дивизион берём из истории матчей — там записан тот, в котором матч реально
   // игрался, а не текущий дивизион игрока. Клик ведёт в ту самую таблицу.
-  var dv=divTag(m.division,m.season);
+  // Тот же индекс, что и в ленте: подписываем матч дивизионом того сезона.
+  var meName=(byId(openId)||{}).name||'';
+  var dv=divTag(divisionAt(m.season,meName,openId,m.opponent,m.opponent_id,m.division),m.season);
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
   var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
