@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, withRatingSourceTag, ratingSourceOf } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
@@ -714,12 +714,97 @@ app.get('/api/league/events', async (req, res) => {
     const applicant = tg ? await findApplicantByTelegramId(tg).catch(() => null) : null;
     const isActive = String(applicant?.status || '').toLowerCase() === 'active';
     const [events, balance] = await Promise.all([
-      eventsForViewer(tg, isActive).catch(() => []),
+      eventsForViewer(tg, isActive, !!v.isAdmin).catch(() => []),
       tg ? getBalance(tg).catch(() => 0) : 0
     ]);
-    res.json({ ok:true, events, balance });
+    res.json({ ok:true, events, balance, is_admin: !!v.isAdmin });
   } catch (e) {
     console.error('league events failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Запись и отмена прямо из мини-приложения. Сама логика — та же, что по кнопке
+// в боте: счёт, лист ожидания, возврат по правилу отмены. Меняется только точка
+// входа, поэтому ветку в боте не трогаем.
+app.post('/api/league/event-join', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const { joinEvent, invoiceText, invoiceKeyboard } = await import('./eventflow.js');
+    const { getBalance } = await import('./events.js');
+    const { getAdminChatId } = await import('./admin.js');
+    const { sendMessage } = await import('./telegram.js');
+    const lang = v.lang === 'ru' ? 'ru' : 'en';
+    const applicant = await findApplicantByTelegramId(v.user.id).catch(() => null);
+    const name = applicant?.name || v.profile?.name || String(v.user.id);
+    const adminChatId = await getAdminChatId().catch(() => '');
+    const r = await joinEvent({ telegramId: v.user.id, name, lang,
+      eventId: String(req.body.event_id || ''), adminChatId });
+    if (!r.ok) return res.json({ ok:false, error: r.error || r.message });
+    // Счёт и подтверждение уходят в бот — там оплата и скриншоты.
+    if (r.message) await sendMessage(v.user.id, r.message).catch(() => {});
+    else {
+      const balance = await getBalance(v.user.id).catch(() => 0);
+      await sendMessage(v.user.id, await invoiceText(r.event, r.signup, lang, balance),
+        { reply_markup: invoiceKeyboard(r.event, r.signup, lang, balance) }).catch(() => {});
+    }
+    res.json({ ok:true, status: r.signup?.status || '' });
+  } catch (e) {
+    console.error('event join failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+app.post('/api/league/event-cancel', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const { cancelSignup } = await import('./eventflow.js');
+    const { getAdminChatId } = await import('./admin.js');
+    const { sendMessage } = await import('./telegram.js');
+    const lang = v.lang === 'ru' ? 'ru' : 'en';
+    const applicant = await findApplicantByTelegramId(v.user.id).catch(() => null);
+    const adminChatId = await getAdminChatId().catch(() => '');
+    const r = await cancelSignup({ signupId: String(req.body.signup_id || ''),
+      telegramId: v.user.id, name: applicant?.name || String(v.user.id),
+      lang, keepGuests: false, adminChatId });
+    if (r?.message) await sendMessage(v.user.id, r.message).catch(() => {});
+    res.json({ ok: r?.ok !== false, error: r?.ok === false ? r.message : '' });
+  } catch (e) {
+    console.error('event cancel failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Организатор правит состав из карточки события. Сам бот спрашивает, что делать
+// с оплатой или возвратом, — здесь только отправляем ему вопрос.
+app.post('/api/league/event-roster', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'Только для организатора' });
+    const { askAddToEvent, askRemoveFromEvent } = await import('./admin.js');
+    const action = String(req.body.action || '');
+    const chatId = v.user.id;
+    if (action === 'add') {
+      // В витрине телеграм-id нет, поэтому из карточки приходит имя — ищем его
+      // среди игроков, у кого есть анкета.
+      let telegramId = String(req.body.telegram_id || '').trim();
+      if (!telegramId) {
+        const name = String(req.body.player_name || '').trim().toLowerCase();
+        const { rows } = await getRows(SHEETS.applicants, { useCache: false });
+        const hit = rows.find(r => String(r.name || '').trim().toLowerCase() === name);
+        if (!hit) return res.status(404).json({ ok:false, error:'Игрок не найден в анкетах' });
+        telegramId = String(hit.telegram_id || '');
+      }
+      await askAddToEvent(chatId, String(req.body.event_id || ''), telegramId);
+    }
+    else if (action === 'remove') await askRemoveFromEvent(chatId, String(req.body.signup_id || ''));
+    else return res.status(400).json({ ok:false, error:'Неизвестное действие' });
+    res.json({ ok:true });
+  } catch (e) {
+    console.error('event roster failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
 });
@@ -748,6 +833,20 @@ app.get('/api/league/bootstrap', async (req, res) => {
       const tg = avatarOwners.get(String(pl.name || '').trim().toLowerCase());
       return tg ? { ...pl, photo: `${PUBLIC_URL}/avatar/${tg}.png` } : pl;
     });
+    // Фото по имени для тех, кого нет в витрине: таблицы дивизионов собираются
+    // в начале сезона и новых игроков не знают. Основа — Players_Master, поверх —
+    // аватарка, которую игрок сделал сам и которую утвердил организатор.
+    const masterPhotos = await getMasterPhotos().catch(() => new Map());
+    const photoByName = {};
+    const nameKey = (v) => String(v || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    for (const [name, url] of masterPhotos.entries()) {
+      const key = nameKey(name);
+      if (key) photoByName[key] = url;
+    }
+    for (const pl of players) {
+      const key = nameKey(pl.name);
+      if (key && pl.photo) photoByName[key] = pl.photo;
+    }
     const current = seasons.filter(s => s.divisions.length).pop() || seasons[seasons.length - 1] || null;
     const divisions = current ? current.divisions : [];
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
@@ -795,6 +894,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
       seasons,
       me_division: v.division || '',
       players,
+      photos: photoByName,
       matches,
       events,
       divisions
@@ -1215,6 +1315,10 @@ app.listen(PORT, async () => {
       await expireStaleSlots().catch(e => console.error('expire slots failed:', e.message));
       await runStuckNudges().catch(e => console.error('stuck nudges failed:', e.message));
       await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));
+      // Напоминания по событиям идут тем же проходом: за сутки, за два часа и
+      // про неоплаченный счёт.
+      const { runEventReminders } = await import('./eventflow.js');
+      await runEventReminders().catch(e => console.error('event reminders failed:', e.message));
     } catch (e) {
       console.error('match sweep failed:', e.message);
     } finally { resultSweepBusy = false; }

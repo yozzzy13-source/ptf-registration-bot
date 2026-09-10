@@ -275,6 +275,7 @@ export function invalidateLeagueCache() {
   seasonPointsCache = { t: 0, v: null };
   seasonHistCache = { t: 0, v: null };
   websitePlayersCache = { t: 0, v: null };
+  masterPhotoCache = { t: 0, v: null };
 }
 
 function pickNumber(v) {
@@ -348,6 +349,27 @@ export async function getLeagueMatchHistory() {
   for (const list of byPlayer.values()) list.sort((a, b) => Number(b.match_no || 0) - Number(a.match_no || 0));
   historyCache = { t: Date.now(), v: byPlayer };
   return byPlayer;
+}
+
+// Фото игроков из Players_Master — это тот список, который организатор ведёт
+// руками и держит в актуальном состоянии. Он нужен там, где фото приходит из
+// таблиц дивизионов: те таблицы собираются в начале сезона и с тех пор не
+// обновляются, а новых игроков в них может не быть вовсе.
+// Ключ — имя: id в таблицах дивизионов свои и с общими не совпадают.
+let masterPhotoCache = { t: 0, v: null };
+export async function getMasterPhotos() {
+  if (masterPhotoCache.v && Date.now() - masterPhotoCache.t < PROFILES_CACHE_MS) return masterPhotoCache.v;
+  const out = new Map();
+  if (!LEAGUE_RESULTS_SHEET_ID) return out;
+  const { rows } = await readNamedSheet(LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
+    .catch(() => ({ rows: [] }));
+  for (const r of rows) {
+    const name = String(r.player_name || '').trim();
+    const url = String(r.player_photo || r.photo || r.photo_url || '').trim();
+    if (name && /^https?:\/\//i.test(url)) out.set(name, url);
+  }
+  masterPhotoCache = { t: Date.now(), v: out };
+  return out;
 }
 
 // Очки по сезонам: лист «Year ranking points» в главной таблице, колонки Season 1..10.

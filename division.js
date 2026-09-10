@@ -224,7 +224,9 @@ export async function getDivisionTable(letter, season = '', group = '') {
     if (txt(r.display_p2)) setCell(p2, p1, txt(r.display_p2));
   }
 
-  const table = [...players.values()].map(p => ({
+  // Строка без имени — незаполненное место в расписании дивизиона. Показывать
+  // её незачем: в таблице она выглядела как игрок «?» с нулями.
+  const table = [...players.values()].filter(p => txt(p.name)).map(p => ({
     ...p,
     setDiff: p.setsWon - p.setsLost,
     gameDiff: p.gamesWon - p.gamesLost,

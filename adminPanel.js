@@ -322,8 +322,11 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { createEvent, updateEvent } = await import('./events.js');
+      const { createEvent, updateEvent, findEvent } = await import('./events.js');
       const body = req.body.event || {};
+      // Что было до правки — чтобы сказать записавшимся, если поменялись дата,
+      // время, место или срок записи.
+      const before = body.event_id ? await findEvent(body.event_id).catch(() => null) : null;
       const event = body.event_id
         ? await updateEvent(body.event_id, {
             title_ru:body.title_ru, title_en:body.title_en,
@@ -341,7 +344,18 @@ export function registerAdminRoutes(app) {
           })
         : await createEvent(body, auth.user.id);
       if (!event) return res.status(404).json({ ok:false, error:'Событие не найдено' });
-      res.json({ ok:true, event });
+      let notified = 0;
+      if (before && before.status === 'published') {
+        const { describeEventChanges, notifyEventChanged } = await import('./eventflow.js');
+        const changes = describeEventChanges(before, event);
+        if (changes.length) {
+          const { getAdminChatId } = await import('./admin.js');
+          const adminChatId = await getAdminChatId().catch(() => '');
+          const r = await notifyEventChanged(event, changes, adminChatId).catch(() => ({ sent: 0 }));
+          notified = r.sent || 0;
+        }
+      }
+      res.json({ ok:true, event, notified });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

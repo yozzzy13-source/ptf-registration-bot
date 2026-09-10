@@ -10,7 +10,7 @@
 //     редактируется, а не десяток новых.
 import { sendMessage, editMessageText } from './telegram.js';
 import { escapeHtml, safe } from './util.js';
-import { getSetting, setSetting } from './sheets.js';
+import { getSetting, setSetting, getPaymentMethods } from './sheets.js';
 import {
   findEvent, listEvents, listSignups, findSignup, createSignup, updateSignup,
   takenSeats, priceFor, seatsOf, refundForCancel, hoursUntil,
@@ -19,6 +19,20 @@ import {
 } from './events.js';
 
 const ru = (lang) => lang === 'ru';
+
+// Способы оплаты в батах из вкладки «Payment Methods». Крипта сюда не попадает:
+// в USDT принимаем только участие в лиге, события — всегда баты.
+export async function thbPaymentDetails() {
+  const methods = await getPaymentMethods().catch(() => []);
+  return methods
+    .filter(m => String(m.method_type || '').toLowerCase() !== 'crypto')
+    .filter(m => !String(m.currency || 'THB').trim() || String(m.currency).trim().toUpperCase() === 'THB')
+    .filter(m => safe(m.recipient))
+    .map(m => ({
+      title: safe(m.display_name_ru) || safe(m.display_name_en) || 'Bank Transfer',
+      recipient: safe(m.recipient)
+    }));
+}
 
 // --- карточка события ------------------------------------------------------
 
@@ -201,6 +215,13 @@ export async function invoiceText(event, signup, lang = 'ru', balance = 0) {
   if (balance > 0) {
     lines.push(L ? `💰 На депозите: <b>${balance} ฿</b>` : `💰 Deposit: <b>${balance} ฿</b>`);
   }
+  // Реквизиты прямо в счёте: без них игроку некуда переводить. Для событий
+  // берём только батовые способы — крипта остаётся для участия в лиге.
+  const bank = await thbPaymentDetails().catch(() => []);
+  for (const b of bank) {
+    lines.push('', L ? `🏦 <b>${escapeHtml(b.title)}</b>` : `🏦 <b>${escapeHtml(b.title)}</b>`);
+    lines.push(`<code>${escapeHtml(b.recipient)}</code>`);
+  }
   lines.push('', L
     ? 'После перевода пришли сюда скриншот — я передам организатору, он подтвердит, и ты появишься в списке участников.'
     : 'After the transfer send the screenshot here — I will pass it to the organizer for confirmation.');
@@ -336,9 +357,203 @@ export async function cancelSignup({ signupId, keepGuests = false, telegramId, n
 // --- витрина ---------------------------------------------------------------
 
 // Что показать игроку во вкладке «События».
-export async function eventsForViewer(telegramId = '', isActivePlayer = false) {
+// --- напоминания ------------------------------------------------------------
+// Работают как напоминания о матчах: проход по расписанию раз в 15 минут, отметка
+// об отправке лежит в Settings, поэтому одно и то же письмо не уходит дважды.
+const REMINDERS = [
+  { key: 'd1', hours: 24, ru: 'Завтра', en: 'Tomorrow' },
+  { key: 'h2', hours: 2,  ru: 'Сегодня', en: 'Today' }
+];
+const sentKey = (signupId, key) => `ev_rem_${key}_${signupId}`;
+
+function whenLine(event, lang) {
+  const L = ru(lang);
+  const place = event.place_url
+    ? `<a href="${escapeHtml(event.place_url)}">${escapeHtml(event.place)}</a>`
+    : escapeHtml(event.place || '');
+  return [
+    `📅 ${escapeHtml(event.date)} ${escapeHtml(event.time)}`,
+    place ? `📍 ${place}` : ''
+  ].filter(Boolean).join('\n');
+}
+
+export async function runEventReminders(now = Date.now()) {
+  const events = await listEvents().catch(() => []);
+  if (!events.length) return { sent: 0 };
+  const signups = await listSignups().catch(() => []);
+  let sent = 0;
+  for (const event of events) {
+    const start = startMs(event);
+    if (!start || start < now) continue;
+    const hoursLeft = (start - now) / 3600000;
+    const mine = signups.filter(s => s.event_id === event.event_id
+      && s.status !== SIGNUP_STATUS.cancelled && s.status !== SIGNUP_STATUS.waitlist);
+
+    for (const rem of REMINDERS) {
+      // Окно в час: проход идёт раз в 15 минут, точное совпадение не поймать.
+      if (hoursLeft > rem.hours || hoursLeft < rem.hours - 1) continue;
+      for (const s of mine) {
+        const key = sentKey(s.signup_id, rem.key);
+        if (await getSetting(key).catch(() => '')) continue;
+        const L = true;
+        const title = event.title_ru || event.title_en;
+        await sendMessage(s.telegram_id, `⏰ <b>${escapeHtml(rem.ru)} — ${escapeHtml(title)}</b>
+
+${whenLine(event, 'ru')}${s.guests ? `\n👥 С тобой гостей: <b>${s.guests}</b>` : ''}`, {
+          reply_markup: { inline_keyboard: [[{ text: '❌ Отменить участие', callback_data: `ev_cxl:${s.signup_id}` }]] }
+        }).catch(() => {});
+        await setSetting(key, new Date(now).toISOString(), 'Напоминание о событии отправлено').catch(() => {});
+        sent++;
+      }
+    }
+
+    // Неоплаченным — одно напоминание за сутки до конца записи.
+    if (isSignupOpen(event, now) && hoursLeft <= 48) {
+      for (const s of mine) {
+        if (s.status !== SIGNUP_STATUS.invoiced && s.status !== SIGNUP_STATUS.pending) continue;
+        const key = sentKey(s.signup_id, 'pay');
+        if (await getSetting(key).catch(() => '')) continue;
+        const balance = await getBalance(s.telegram_id).catch(() => 0);
+        await sendMessage(s.telegram_id, await invoiceText(event, s, 'ru', balance),
+          { reply_markup: invoiceKeyboard(event, s, 'ru', balance) }).catch(() => {});
+        await setSetting(key, new Date(now).toISOString(), 'Напоминание об оплате события отправлено').catch(() => {});
+        sent++;
+      }
+    }
+  }
+  return { sent };
+}
+
+// Организатор поменял дату, время или место — записавшимся надо сказать.
+export async function notifyEventChanged(event, changes = [], adminChatId = '') {
+  if (!event || !changes.length) return { sent: 0 };
+  const signups = (await listSignups().catch(() => []))
+    .filter(s => s.event_id === event.event_id && s.status !== SIGNUP_STATUS.cancelled);
+  let sent = 0;
+  for (const s of signups) {
+    await sendMessage(s.telegram_id, `⚠️ <b>Изменение: ${escapeHtml(event.title_ru || event.title_en)}</b>
+
+${changes.map(c => `• ${escapeHtml(c)}`).join('\n')}
+
+${whenLine(event, 'ru')}`, {
+      reply_markup: { inline_keyboard: [[{ text: '❌ Отменить участие', callback_data: `ev_cxl:${s.signup_id}` }]] }
+    }).catch(() => {});
+    sent++;
+  }
+  if (adminChatId && sent) {
+    await sendMessage(adminChatId, `📣 Об изменении сообщил участникам: <b>${sent}</b>.`).catch(() => {});
+  }
+  return { sent };
+}
+
+// Что именно поменялось — человеческим языком, только то, что важно игроку.
+export function describeEventChanges(before = {}, after = {}) {
+  const out = [];
+  const pairs = [
+    ['date', 'Дата'], ['time', 'Время'], ['place', 'Место'], ['signup_deadline', 'Запись до']
+  ];
+  for (const [field, label] of pairs) {
+    const a = safe(before[field]), b = safe(after[field]);
+    if (a !== b && b) out.push(`${label}: ${a || '—'} → ${b}`);
+  }
+  return out;
+}
+
+// --- правка состава организатором ------------------------------------------
+// mode: 'inv' — выставить счёт, 'paid' — засчитать оплаченным, 'free' — событие
+// бесплатное, просто подтверждаем.
+export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode = 'inv', adminChatId = '' }) {
+  const event = await findEvent(eventId);
+  if (!event) return { ok: false, message: 'Событие не найдено.' };
+  const existing = await findSignup(eventId, telegramId);
+  if (existing) return { ok: false, message: `<b>${escapeHtml(name)}</b> уже в составе.` };
+
+  const amount = priceFor(event, 0);
+  const paying = mode === 'inv' && event.payment_required && amount > 0;
+  const status = paying ? SIGNUP_STATUS.invoiced
+    : (mode === 'paid' ? SIGNUP_STATUS.paid : SIGNUP_STATUS.confirmed);
+  const signup = await createSignup({
+    event, telegramId, name, guests: 0, status,
+    amount: paying ? amount : 0
+  });
+  if (mode === 'paid') {
+    await updateSignup(signup.signup_id, { paid_thb: amount, paid_from: 'добавлен организатором' });
+  }
+
+  const L = ru(lang);
+  if (paying) {
+    const balance = await getBalance(telegramId).catch(() => 0);
+    await sendMessage(telegramId, L
+      ? `Организатор добавил тебя на «${escapeHtml(event.title_ru)}». Осталось оплатить участие.`
+      : `The organizer added you to “${escapeHtml(event.title_en)}”. Please pay for your spot.`).catch(() => {});
+    await sendMessage(telegramId, await invoiceText(event, signup, lang, balance),
+      { reply_markup: invoiceKeyboard(event, signup, lang, balance) }).catch(() => {});
+  } else {
+    await sendMessage(telegramId, L
+      ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n${escapeHtml(event.date)} ${escapeHtml(event.time)}`
+      : `✅ You are in for “${escapeHtml(event.title_en)}”.\n${escapeHtml(event.date)} ${escapeHtml(event.time)}`).catch(() => {});
+  }
+  if (adminChatId) await notifyOrganizer({ ...signup, status }, event, adminChatId, 'добавлен организатором').catch(() => {});
+  const what = paying ? 'счёт отправлен' : (mode === 'paid' ? 'засчитан оплаченным' : 'участие подтверждено');
+  return { ok: true, message: `✅ <b>${escapeHtml(name)}</b> в составе — ${what}.` };
+}
+
+// mode: 'full' — вернуть всё, 'rule' — по правилу отмены, 'none' — без возврата.
+export async function removeFromEvent({ signupId, mode = 'rule', adminChatId = '' }) {
+  const all = await listSignups();
+  const signup = all.find(s => s.signup_id === String(signupId));
+  if (!signup) return { ok: false, message: 'Запись не найдена.' };
+  if (signup.status === SIGNUP_STATUS.cancelled) return { ok: false, message: 'Уже не в составе.' };
+  const event = await findEvent(signup.event_id);
+  const paid = signup.paid_thb || 0;
+
+  let refund = 0;
+  if (paid > 0) {
+    if (mode === 'full') refund = paid;
+    else if (mode === 'rule') refund = refundForCancel(event, signup, false).refund;
+  }
+  await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.cancelled, note: 'снят организатором' });
+  let left = null;
+  if (refund > 0) {
+    left = await addTransaction({
+      telegramId: signup.telegram_id, name: signup.player_name, type: 'возврат', amount: refund,
+      description: `Снят организатором: ${event?.title_ru || signup.event_id}`
+    });
+  }
+  await sendMessage(signup.telegram_id, refund > 0
+    ? `Организатор снял тебя с «${escapeHtml(event?.title_ru || '')}». Возврат на депозит: <b>${refund} ฿</b>.`
+    : `Организатор снял тебя с «${escapeHtml(event?.title_ru || '')}».`).catch(() => {});
+  if (adminChatId) {
+    await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.cancelled }, event, adminChatId,
+      refund > 0 ? `↩️ Возврат: <b>${refund} ฿</b>` : '🚫 Без возврата').catch(() => {});
+  }
+  const tail = refund > 0 ? ` Возврат: <b>${refund} ฿</b>${left != null ? `, депозит: <b>${left} ฿</b>` : ''}.` : '';
+  return { ok: true, message: `✅ <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b> снят с события.${tail}` };
+}
+
+// Кто уже записан. Состав виден всем участникам — это часть карточки, — но
+// telegram_id отдаём только организатору: он им правит состав.
+const LIVE_SIGNUP = new Set([
+  SIGNUP_STATUS.pending, SIGNUP_STATUS.invoiced, SIGNUP_STATUS.paid, SIGNUP_STATUS.confirmed
+]);
+function participantsOf(all, eventId, isAdmin) {
+  return all
+    .filter(s => s.event_id === eventId && s.status !== SIGNUP_STATUS.cancelled)
+    .map(s => ({
+      name: s.player_name || String(s.telegram_id),
+      status: s.status,
+      guests: s.guests || 0,
+      paid: s.status === SIGNUP_STATUS.paid || s.status === SIGNUP_STATUS.confirmed,
+      waitlist: s.status === SIGNUP_STATUS.waitlist,
+      signup_id: isAdmin ? s.signup_id : '',
+      telegram_id: isAdmin ? String(s.telegram_id) : ''
+    }))
+    .sort((a, b) => Number(a.waitlist) - Number(b.waitlist) || a.name.localeCompare(b.name, 'ru'));
+}
+
+export async function eventsForViewer(telegramId = '', isActivePlayer = false, isAdmin = false) {
   const events = await listEvents();
-  const mine = telegramId ? await listSignups() : [];
+  const mine = await listSignups();
   const out = [];
   for (const e of events) {
     if (e.audience === 'active' && !isActivePlayer) continue;
@@ -356,8 +571,32 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false) {
       my_status: signup?.status || '',
       my_signup_id: signup?.signup_id || '',
       my_guests: signup?.guests || 0,
-      my_paid: signup?.paid_thb || 0
+      my_paid: signup?.paid_thb || 0,
+      participants: participantsOf(mine, e.event_id, isAdmin),
+      // Открыта ли запись прямо сейчас: по этому признаку вкладка «События»
+      // подсвечивается, чтобы люди не пропускали новое.
+      open_now: isSignupOpen(e) && (!e.capacity || Math.max(0, e.capacity - taken) > 0) && !signup
     });
   }
-  return out;
+  // Ближайшее сверху: событие через неделю важнее того, что через месяц.
+  return out.sort((a, b) => (startMs(a) || Infinity) - (startMs(b) || Infinity));
+}
+
+// Дата и время события в миллисекундах. Формат в таблице — дд.мм.гггг и чч:мм.
+export function startMs(event) {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(safe(event?.date));
+  if (!m) return 0;
+  const t = /^(\d{1,2}):(\d{2})$/.exec(safe(event?.time)) || [, '12', '00'];
+  return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(t[1]) - 7, Number(t[2]));
+}
+
+// Запись открыта, пока не прошёл срок записи, а если он не задан — пока не
+// началось само событие.
+export function isSignupOpen(event, now = Date.now()) {
+  if (!event || event.status !== 'published') return false;
+  const d = safe(event.signup_deadline);
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(d);
+  if (m) return now <= Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 16, 59);
+  const start = startMs(event);
+  return !start || now <= start;
 }

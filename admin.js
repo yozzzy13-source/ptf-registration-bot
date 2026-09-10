@@ -409,6 +409,81 @@ export async function eventPublish(chatId, eventId) {
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
   return broadcastEvent(chatId, eventId, await eventRecipients(event));
 }
+// --- правка состава события -------------------------------------------------
+// Логика взята из тренерского бота: добавили игрока — запускается ветка оплаты,
+// убрали — ветка возврата. Решение каждый раз за организатором, потому что
+// случаи разные: кто-то уже заплатил налом, кого-то снимаем по своей вине.
+export async function askAddToEvent(chatId, eventId, telegramId) {
+  const { findEvent } = await import('./events.js');
+  const event = await findEvent(eventId);
+  if (!event) return sendMessage(chatId, 'Событие не найдено.');
+  const applicant = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const who = applicant?.name || String(telegramId);
+  const free = !event.payment_required || !event.price_thb;
+  if (free) {
+    const { addToEvent } = await import('./eventflow.js');
+    const r = await addToEvent({ eventId, telegramId, name: who, mode: 'free', adminChatId: await getAdminChatId().catch(() => '') });
+    return sendMessage(chatId, r.message);
+  }
+  return sendMessage(chatId, `<b>➕ Добавить в состав</b>
+
+Игрок: <b>${escapeHtml(who)}</b>
+Событие: <b>${escapeHtml(event.title_ru || event.event_id)}</b>
+Участие: <b>${event.price_thb} ฿</b>
+
+Что делаем с оплатой?`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: '💳 Выставить счёт', callback_data: `evadd:${eventId}:${telegramId}:inv` }],
+      [{ text: '✅ Засчитать оплаченным', callback_data: `evadd:${eventId}:${telegramId}:paid` }]
+    ] }
+  });
+}
+
+export async function askRemoveFromEvent(chatId, signupId) {
+  const { listSignups, findEvent, hoursUntil } = await import('./events.js');
+  const signup = (await listSignups()).find(s => s.signup_id === String(signupId));
+  if (!signup) return sendMessage(chatId, 'Запись не найдена.');
+  const event = await findEvent(signup.event_id);
+  const left = event ? hoursUntil(event) : null;
+  const paid = signup.paid_thb || 0;
+  if (!paid) {
+    const { removeFromEvent } = await import('./eventflow.js');
+    const r = await removeFromEvent({ signupId, mode: 'none', adminChatId: await getAdminChatId().catch(() => '') });
+    return sendMessage(chatId, r.message);
+  }
+  const hint = Number.isFinite(left)
+    ? `\nДо события: <b>${Math.round(left)} ч</b> (правило возврата: ${event.refund_hours} ч)`
+    : '';
+  return sendMessage(chatId, `<b>➖ Убрать из состава</b>
+
+Игрок: <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b>
+Событие: <b>${escapeHtml(event?.title_ru || signup.event_id)}</b>
+Оплачено: <b>${paid} ฿</b>${hint}
+
+Что делаем с деньгами?`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: `💰 Вернуть полностью (${paid} ฿)`, callback_data: `evrm:${signupId}:full` }],
+      [{ text: '⏱ По правилу отмены', callback_data: `evrm:${signupId}:rule` }],
+      [{ text: '🚫 Без возврата', callback_data: `evrm:${signupId}:none` }]
+    ] }
+  });
+}
+
+export async function eventAddDo(chatId, eventId, telegramId, mode) {
+  const { addToEvent } = await import('./eventflow.js');
+  const applicant = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const r = await addToEvent({ eventId, telegramId, name: applicant?.name || String(telegramId),
+    lang: (applicant?.language || 'ru') === 'ru' ? 'ru' : 'en',
+    mode, adminChatId: await getAdminChatId().catch(() => '') });
+  return sendMessage(chatId, r.message);
+}
+
+export async function eventRemoveDo(chatId, signupId, mode) {
+  const { removeFromEvent } = await import('./eventflow.js');
+  const r = await removeFromEvent({ signupId, mode, adminChatId: await getAdminChatId().catch(() => '') });
+  return sendMessage(chatId, r.message);
+}
+
 export async function eventDrop(chatId, eventId) {
   const { updateEvent } = await import('./events.js');
   await updateEvent(eventId, { status: 'cancelled' });
