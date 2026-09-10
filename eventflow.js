@@ -37,11 +37,16 @@ export async function thbPaymentDetails() {
 // --- карточка события ------------------------------------------------------
 
 // Формат взят из тренерского бота: эмодзи, место, дата, время, свободные места.
-export function eventCard(event, lang = 'ru', { taken = 0 } = {}) {
+// lead — карточка уходит в рассылку: сверху ставим заголовок «НОВОЕ СОБЫТИЕ»,
+// чтобы в ленте сообщений она сразу читалась как анонс. Название при этом идёт
+// отдельной строкой без мячика — два подряд выглядят неряшливо.
+export function eventCard(event, lang = 'ru', { taken = 0, lead = false } = {}) {
   const L = ru(lang);
   const title = (L ? event.title_ru : event.title_en) || event.title_ru || event.title_en;
   const desc = (L ? event.description_ru : event.description_en) || '';
-  const lines = [`🎾 <b>${escapeHtml(title)}</b>`];
+  const lines = lead
+    ? [L ? '🎾 <b>НОВОЕ СОБЫТИЕ</b>' : '🎾 <b>NEW EVENT</b>', '', `<b>${escapeHtml(title)}</b>`]
+    : [`🎾 <b>${escapeHtml(title)}</b>`];
   // Описание идёт сразу под заголовком: сперва о чём событие, потом детали.
   if (desc) lines.push('', escapeHtml(desc), '');
   // Место — ссылкой, если она задана; сам адрес отдельной строкой не дублируем.
@@ -93,7 +98,7 @@ export async function previewEventForAdmin(chatId, eventId) {
   const div = event.audience_division ? `, дивизион ${event.audience_division}` : '';
   const lock = event.invite_only ? '\n🔒 Только по приглашению: остальным событие не показывается.' : '';
   await sendMessage(chatId, `<b>Так карточка уйдёт в рассылку</b> (${who}${div}) — получателей: <b>${recipients.length}</b>.${lock}`);
-  await sendMessage(chatId, eventCard(event, 'ru', { taken }), {
+  await sendMessage(chatId, eventCard(event, 'ru', { taken, lead: true }), {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📣 Подтвердить и разослать', callback_data: `ev_pub:${eventId}` }],
@@ -116,7 +121,7 @@ export async function broadcastEvent(chatId, eventId, contacts = []) {
   for (const c of contacts) {
     const lang = (c.language || 'en') === 'ru' ? 'ru' : 'en';
     try {
-      await sendMessage(c.telegram_id, eventCard(event, lang, { taken }), { reply_markup: signupKeyboard(event, lang) });
+      await sendMessage(c.telegram_id, eventCard(event, lang, { taken, lead: true }), { reply_markup: signupKeyboard(event, lang) });
       ok++;
     } catch { fail++; }
   }
