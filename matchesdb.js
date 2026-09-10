@@ -12,7 +12,7 @@
 // Заявка может нести НЕСКОЛЬКО дат и НЕСКОЛЬКО кортов (хранятся строкой через запятую).
 // Отвечающий выбирает конкретную дату и корт — они пишутся в agreed_*.
 import { sheets as sheetsClient } from './google.js';
-import { MATCHES_SPREADSHEET_ID, MATCH_SHEETS, TIMEZONE } from './config.js';
+import { MATCHES_SPREADSHEET_ID, DIVISIONS_SPREADSHEET_ID, MATCH_SHEETS, TIMEZONE } from './config.js';
 import { nowISO, safe } from './util.js';
 
 const SLOT_HEADERS = [
@@ -151,11 +151,33 @@ export function spreadsheetIdFromUrl(value = '') {
   return /^[a-zA-Z0-9-_]{20,}$/.test(v) ? v : '';
 }
 
+// Лист Divisions читаем как есть, без создания и правки: это таблица организатора.
+// Колонок group / group_title в ней может не быть — тогда дивизион идёт одной
+// таблицей, и это нормально.
+async function readRegistryRows(spreadsheetId) {
+  if (!spreadsheetId) return [];
+  const res = await sheetsClient().spreadsheets.values.get({
+    spreadsheetId, range: `'${MATCH_SHEETS.divisions}'!A:BZ`
+  });
+  const values = res.data.values || [];
+  const head = (values[0] || []).map(h => safe(h).toLowerCase());
+  if (!head.length) return [];
+  return values.slice(1).map((r, i) => {
+    const o = { _rowNumber: i + 2 };
+    head.forEach((h, k) => { if (h) o[h] = r[k] ?? ''; });
+    return o;
+  });
+}
+
 export async function divisionRegistry() {
   if (registryCache.v && Date.now() - registryCache.t < REGISTRY_MS) return registryCache.v;
   let rows = [];
   try {
-    rows = await readObjects(MATCH_SHEETS.divisions, REGISTRY_HEADERS);
+    rows = await readRegistryRows(DIVISIONS_SPREADSHEET_ID);
+    // Если в таблице организатора листа нет, пробуем прежнее место — таблицу матчей бота.
+    if (!rows.length && MATCHES_SPREADSHEET_ID && MATCHES_SPREADSHEET_ID !== DIVISIONS_SPREADSHEET_ID) {
+      rows = await readObjects(MATCH_SHEETS.divisions, REGISTRY_HEADERS).catch(() => []);
+    }
   } catch (e) {
     console.error('divisionRegistry failed:', e.message);
     registryCache = { t: Date.now(), v: [] };

@@ -753,6 +753,44 @@ export async function adminMatchTest(msg) {
     lines.push(`доступ: <b>НЕТ ⚠️</b>`, `<code>${escapeHtml(e.message).slice(0, 300)}</code>`);
     lines.push('', 'Чаще всего это значит, что таблица не расшарена сервисному аккаунту как «Редактор».');
   }
+  // Реестр дивизионов. Самая частая причина «в сезоне пусто» — лист Divisions
+  // заполнен в другой таблице: бот читает его только из таблицы матчей выше.
+  // Заодно сбрасываем кэш реестра, чтобы команда показывала свежие строки.
+  lines.push('', '<b>Реестр дивизионов (лист Divisions)</b>');
+  try {
+    const { DIVISIONS_SPREADSHEET_ID } = await import('./config.js');
+    const { divisionRegistry, invalidateDivisionRegistry } = await import('./matchesdb.js');
+    lines.push(`читаем из: <code>${escapeHtml(DIVISIONS_SPREADSHEET_ID)}</code>`);
+    invalidateDivisionRegistry();
+    const reg = await divisionRegistry();
+    if (!reg.length) {
+      lines.push('строк: <b>0 ⚠️</b>');
+      lines.push('Лист <b>Divisions</b> ищется в таблице выше (Match_Log). Проверьте название листа и что таблица расшарена сервисному аккаунту.');
+    } else {
+      const bySeason = new Map();
+      for (const r of reg) {
+        const key = String(r.season);
+        if (!bySeason.has(key)) bySeason.set(key, []);
+        bySeason.get(key).push(r.letter + (r.group ? `/${r.group}` : ''));
+      }
+      lines.push(`строк: <b>${reg.length}</b>`);
+      for (const key of [...bySeason.keys()].sort()) {
+        lines.push(`сезон ${escapeHtml(key)}: ${escapeHtml(bySeason.get(key).join(', '))}`);
+      }
+      // Таблица без доступа читается как пустая — это выглядит как «состав не заведён».
+      const { sheets } = await import('./google.js');
+      const bad = [];
+      for (const r of reg.slice(0, 15)) {
+        try {
+          const meta = await sheets().spreadsheets.get({ spreadsheetId: r.spreadsheet_id });
+          const titles = (meta.data.sheets || []).map(s => s.properties?.title).filter(Boolean);
+          if (!titles.includes('Match_Log')) bad.push(`${r.season}/${r.letter} — нет листа Match_Log`);
+        } catch (e) { bad.push(`${r.season}/${r.letter} — нет доступа`); }
+      }
+      lines.push(bad.length ? `⚠️ ${bad.map(x => escapeHtml(x)).join('; ')}` : 'все таблицы читаются ✅');
+    }
+  } catch (e) { lines.push(`<code>${escapeHtml(e.message).slice(0, 200)}</code>`); }
+
   // Вторая причина, по которой раздел матчей может не открыться, — статус игрока.
   lines.push('', '<b>Ваш доступ к матчам</b>');
   try {

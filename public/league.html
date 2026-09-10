@@ -1853,8 +1853,10 @@ function seasonRowsWithLive(p,byTable){
   var hit=(byTable||{})[String(now)];
   if(!hit&&seasonHasTables(now))return rows;
   var s=seasonOf(now);
+  // Очки гонки за идущий сезон появятся, когда организатор их проставит, —
+  // выдумывать их из таблицы дивизиона нельзя, шкала другая.
   rows.unshift({n:now,name:(s&&s.label)||('Season '+now),division:(hit&&hit.division)||p.division||'',
-    g:0,w:0,place:(hit&&hit.place)||p.division_position||'',points:(hit&&hit.points)||0,live:true});
+    g:0,w:0,place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
   return rows;
 }
 function renderPlayer(p){
@@ -1887,8 +1889,8 @@ function renderPlayer(p){
     if(!hit)return;
     if(hit.division)r.division=hit.division;
     if(hit.place)r.place=hit.place;
-    // Очки за сезон — из таблицы дивизиона, там они и считаются.
-    if(hit.points)r.points=hit.points;
+    // Очки в этой строке — очки гонки за сезон (лист Year ranking points),
+    // а не очки внутри таблицы дивизиона: гонка считается по своей шкале.
   });
   h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
   if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';

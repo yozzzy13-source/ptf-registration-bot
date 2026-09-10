@@ -22,6 +22,11 @@ export const WEBSITE_PLAYERS_SHEET_ID = process.env.WEBSITE_PLAYERS_SHEET_ID || 
 // Отдельная таблица под матчи: заявки и журнал лиги живут вне основной таблицы PTF.
 export const MATCHES_SPREADSHEET_ID = process.env.MATCHES_SPREADSHEET_ID || '';
 export const MATCH_SHEETS = { slots:'Match Slots', log:'Match Log', courts:'Courts', results:'Match Results', divisions:'Divisions' };
+// Реестр дивизионов живёт в таблице Match_Log — там же, где Players_Master и
+// журнал матчей, и там его ведёт организатор. Бот читает лист Divisions только
+// оттуда и ничего в этой таблице не создаёт и не меняет.
+export const DIVISIONS_SPREADSHEET_ID = process.env.DIVISIONS_SPREADSHEET_ID
+  || '1tisUxFOJZgaD95o8cQKSvWpH8ySY-ht3H4wdHCeCI0Q';
 // Таблицы лиги, куда зеркалим подтверждённый счёт (как это делал results-бот).
 // Если не заданы — результат просто остаётся в таблице матчей.
 // В Railway эта таблица называется RESULTS_SHEET_ID — принимаем оба имени,
