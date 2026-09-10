@@ -61,7 +61,7 @@ async function sheetsSeason() {
 // ID таблицы дивизиона. Сначала пробуем таблицу конкретного сезона
 // (division_a_s2_sheet_id), затем общую — но только для того сезона, которому
 // эти общие таблицы принадлежат, иначе новый сезон показал бы данные старого.
-async function divisionSheetId(letter, season = '', group = '') {
+export async function divisionSheetId(letter, season = '', group = '') {
   const key = divisionLetter(letter);
   const low = key.toLowerCase();
   // Сначала реестр — лист Divisions в таблице матчей. Он главный источник:

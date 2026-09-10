@@ -289,6 +289,19 @@ export function registerAdminRoutes(app) {
   // --- события ---------------------------------------------------------------
   // Карточка создаётся здесь, а подтверждение и рассылка идут в боте: так
   // организатор видит событие ровно тем сообщением, которое получат игроки.
+  // Подтверждение участия из панели: то же, что кнопка в карточке игрока.
+  app.post('/api/admin/activate-player', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const telegramId = String(req.body.telegram_id || '').trim();
+      if (!telegramId) return res.status(400).json({ ok:false, error:'Нужен telegram_id' });
+      const { activatePlayer } = await import('./admin.js');
+      await activatePlayer({ chatId: auth.user.id, telegramId });
+      res.json({ ok:true });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
   app.get('/api/admin/events', async (req, res) => {
     try {
       const auth = adminFromInitData(req.query.initData || '');

@@ -1119,10 +1119,14 @@ function buildDivIndex(){
     });
   });
 }
-// Дивизион матча: тот, в котором игрок ИГРАЛ в этом сезоне, а не тот, где он
-// сейчас. В витринной таблице лежит текущий дивизион, поэтому после перехода
-// вся прошлая история переезжала следом.
-function divisionAt(season,aName,aId,bName,bId,fallback){
+// Дивизион матча: тот, в котором игрок ИГРАЛ тогда, а не тот, где он сейчас.
+// Главный источник — сама строка матча: в журнале лиги дивизион записан рядом со
+// счётом и после заморозки колонок он уже не меняется вслед за переходами.
+// Таблицы дивизионов сезона — запасной вариант, на случай пустой ячейки: реестр
+// может быть заполнен неточно, и перебивать им живую строку матча опаснее.
+function divisionAt(season,aName,aId,bName,bId,rowDiv){
+  var own=String(rowDiv||'').trim();
+  if(own)return own;
   if(!divIndex)buildDivIndex();
   var box=divIndex[String(season||'')];
   if(box){
@@ -1130,7 +1134,7 @@ function divisionAt(season,aName,aId,bName,bId,fallback){
               '#'+String(bId||''),String(bName||'').trim().toLowerCase()];
     for(var i=0;i<keys.length;i++){ if(keys[i]&&keys[i]!=='#'&&box[keys[i]])return box[keys[i]] }
   }
-  return fallback||'';
+  return '';
 }
 function seasonPlacesOf(name,id){
   var out={};

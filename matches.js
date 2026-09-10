@@ -705,6 +705,47 @@ ${resultBlock(slot)}
   return sendMessage(to.id, text, { reply_markup: kb }).catch(e => console.error('verify request failed:', e.message));
 }
 
+// Междивизионный матч: в зачёт он не идёт, поэтому счёт никуда не записан и ждёт
+// решения организатора. Уведомление идёт всегда, даже если копии матчей выключены —
+// иначе результат зависнет молча.
+export async function notifyCrossDivision(slot, info = {}) {
+  const chatId = await getAdminChatId().catch(() => '');
+  if (!chatId) return null;
+  let opts = {};
+  try {
+    const topic = await getOrCreatePlayerTopic({ telegram_id: slot.from_telegram_id, name: slot.from_name, username: slot.from_username });
+    if (topic?.message_thread_id) opts = { message_thread_id: topic.message_thread_id };
+  } catch (e) { /* топика может не быть — пишем в общий админ-чат */ }
+  const text = `<b>⚠️ Матч между разными дивизионами</b>
+
+${escapeHtml(slot.from_name || '')} (${escapeHtml(info.d1 || '?')}) — ${escapeHtml(slot.to_name || '')} (${escapeHtml(info.d2 || '?')})
+${resultDateBlock(slot)}
+
+${resultBlock(slot)}
+
+Счёт подтверждён обоими игроками, но <b>никуда не записан</b>: в зачёт дивизиона такой матч не идёт.
+Записать его в общий журнал лиги или отклонить?`;
+  return sendMessage(chatId, text, {
+    ...opts,
+    reply_markup: { inline_keyboard: [
+      [{ text: '✅ Записать всё равно', callback_data: `res_force:${slot.challenge_id}` }],
+      [{ text: '✖️ Отклонить', callback_data: `res_drop:${slot.challenge_id}` }]
+    ] }
+  }).catch(e => { console.error('notifyCrossDivision failed:', e.message); return null; });
+}
+
+// Организатор отклонил счёт — игрокам надо об этом сказать, иначе они будут ждать.
+export async function notifyResultRejected(slot) {
+  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!side) continue;
+    await sendMessage(side, `<b>⚠️ Результат не засчитан</b>
+
+${resultBlock(slot)}
+
+Организатор не принял этот матч в зачёт. Свяжитесь с ним, если это ошибка.`).catch(() => {});
+  }
+}
+
 export async function notifyResultConfirmed(slot, writeInfo = '') {
   const text = (opp) => `<b>✅ Результат засчитан</b>
 

@@ -852,6 +852,20 @@ export async function disputeResult(challengeId, actor = {}) {
   });
 }
 
+// Организатор отклонил уже подтверждённый счёт — например, выяснилось, что матч
+// междивизионный. Возвращаем результат в спор, чтобы игроки внесли его заново,
+// а не потеряли молча.
+export async function rejectResultByAdmin(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok: false, reason: 'not_found' };
+    const patch = { result_status: 'disputed', result_confirmed_at: '', result_note: 'отклонён организатором' };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    await logMatchEvent('result_rejected_admin', slot, actor, slot.result_score);
+    return { ok: true, slot: { ...slot, ...patch } };
+  });
+}
+
 export { SLOT_HEADERS, LOG_HEADERS };
 
 // Расписание согласованных матчей: только то, что впереди. Прошедшее живёт в

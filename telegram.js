@@ -140,32 +140,47 @@ export const MATCH_COMMANDS = {
 
 // Рассылки (в том числе опросы и их статистика) живут в админской панели —
 // в подсказке команд их нет, чтобы не было двух путей к одному и тому же.
-// Полный список команд организатора: всё, что бот умеет, видно по слэшу и
-// только в его чате — обычным игрокам этот список не приходит.
-export const ADMIN_COMMANDS = [
-  { command: 'admin', description: '🛠 Админ-панель' },
-  { command: 'stats', description: '📊 Статистика' },
-  { command: 'pending', description: '📥 Заявки и платежи в работе' },
-  { command: 'payment_auto', description: '💳 Счёт сразу или после подтверждения' },
-  { command: 'events', description: '🏆 События' },
-  { command: 'messages', description: '💬 Последние сообщения игроков' },
-  { command: 'profile', description: '👤 Карточка игрока по telegram_id' },
-  { command: 'rating', description: '📈 Рассылка «уточни свой уровень»' },
-  { command: 'rating_to', description: '📈 Запрос уровня одному игроку' },
-  { command: 'overview', description: '🎾 Обзор матчей и кортов' },
-  { command: 'matches', description: '🎾 То же, что overview' },
-  { command: 'league', description: '🏆 Витрина лиги' },
-  { command: 'match_test', description: '🔍 Проверка таблиц матчей' },
-  { command: 'topic_test', description: '🔍 Проверка вебхука и топиков' },
-  { command: 'topic_sync', description: '🔗 Привязать темы к этой группе' },
-  { command: 'results_here', description: '📣 Лента результатов в эту тему' },
-  { command: 'admin_init', description: '⚙️ Сделать этот чат админским' },
-  { command: 'links', description: '🔗 Коды разделов для рассылок' },
-  { command: 'help', description: '❔ Все команды' },
-  { command: 'avatar', description: '🖼 Мои варианты аватарки' },
-  { command: 'menu', description: '🏠 Главное меню' },
-  { command: 'cancel', description: '✖️ Отменить текущее действие' }
+// ЕДИНЫЙ список команд организатора. Из него собираются и меню по слэшу, и
+// текст /help — чтобы новая команда не могла попасть в одно место и потеряться
+// в другом. Добавил строку сюда — она появилась везде.
+export const ADMIN_COMMAND_LIST = [
+  { cmd:'admin',        group:'Панель и рассылки', short:'Админ-панель',
+    help:'админ-панель: игроки, фильтры, рассылки, события, балансы' },
+  { cmd:'stats',        group:'Лига', short:'Статистика', help:'заявки, оплаты, статусы' },
+  { cmd:'pending',      group:'Лига', short:'Заявки в работе', help:'заявки, ждущие проверки оплаты' },
+  { cmd:'profile',      group:'Лига', short:'Карточка игрока', args:'@ник или telegram_id',
+    help:'карточка игрока с кнопками: подтвердить участие, выставить счёт, написать' },
+  { cmd:'payment_auto', group:'Лига', short:'Счёт сразу или после подтверждения', args:'on|off',
+    help:'счёт на участие уходит игроку сразу или только после вашей кнопки' },
+  { cmd:'events',       group:'Лига', short:'События', help:'активные события' },
+  { cmd:'messages',     group:'Лига', short:'Сообщения игроков', help:'последние сообщения от игроков' },
+  { cmd:'overview',     group:'Матчи', short:'Сводка матчей',
+    help:'назначенные матчи, где не подтверждён корт, кто не ответил, где нет счёта, открытые окна' },
+  { cmd:'matches',      group:'Матчи', short:'То же, что overview', help:'то же, что /overview' },
+  { cmd:'league',       group:'Матчи', short:'Витрина лиги', help:'открыть витрину лиги' },
+  { cmd:'rating',       group:'Панель и рассылки', short:'Рассылка «уточни уровень»',
+    help:'рассылка «уточни свой уровень» — два охвата на выбор' },
+  { cmd:'rating_to',    group:'Панель и рассылки', short:'Запрос уровня одному', args:'@ник',
+    help:'запрос уровня одному игроку' },
+  { cmd:'links',        group:'Панель и рассылки', short:'Коды разделов', help:'коды разделов для рассылок' },
+  { cmd:'admin_init',   group:'Настройка', short:'Сделать чат админским',
+    help:'привязать текущий чат как админский (один раз, в нужной группе)' },
+  { cmd:'results_here', group:'Настройка', short:'Лента результатов сюда',
+    help:'привязать ленту результатов к текущей теме' },
+  { cmd:'topic_sync',   group:'Настройка', short:'Привязать темы',
+    help:'привязать существующие темы к текущей админской группе' },
+  { cmd:'topic_test',   group:'Настройка', short:'Проверка топиков', help:'проверка вебхука и топиков игроков' },
+  { cmd:'match_test',   group:'Настройка', short:'Проверка таблиц', help:'проверка таблиц матчей и таблиц лиги' },
+  { cmd:'avatar',       group:'Прочее', short:'Мои варианты аватарки', help:'мои варианты аватарки' },
+  { cmd:'help',         group:'Прочее', short:'Все команды', help:'этот список' },
+  { cmd:'menu',         group:'Прочее', short:'Главное меню', help:'главное меню' },
+  { cmd:'cancel',       group:'Прочее', short:'Отменить действие', help:'отменить текущее действие' }
 ];
+
+// Меню по слэшу: Telegram берёт только имя и короткое описание.
+export const ADMIN_COMMANDS = ADMIN_COMMAND_LIST.map(c => ({
+  command: c.cmd, description: c.short.slice(0, 256)
+}));
 
 // Персональный список для одного чата. commands:[] снимает переопределение,
 // и человек снова видит общий список.

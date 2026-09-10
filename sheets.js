@@ -1,6 +1,6 @@
 import { sheets as sheetsClient } from './google.js';
 import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID } from './config.js';
-import { nowISO, safe } from './util.js';
+import { nowISO, safe, parseSeasonNumber } from './util.js';
 
 const cache = new Map();
 const CACHE_MS = 20_000;
@@ -334,10 +334,10 @@ export async function getLeagueMatchHistory() {
       opponent_photo: r.opponent_photo_url || '',
       opponent_division: r.opponent_division || '',
       division: r.player_division || '',
-      // Сезон матча вытаскиваем из названия соревнования («Final S1», «Round 3 S2»).
-      // Он нужен, чтобы клик по ярлыку дивизиона вёл в таблицу того самого сезона.
-      season: (String(r.season_id || r.season || '').trim()
-        || (String(r.competition || '').match(/\bS\s*(\d+)\b/i) || [])[1] || ''),
+      // Сезон матча: сначала своя колонка, если она заполнена, иначе название
+      // соревнования — «Season 1», «Сезон 1», «Final S1» понимаются одинаково.
+      // Сезон нужен, чтобы клик по ярлыку дивизиона вёл в таблицу того самого сезона.
+      season: parseSeasonNumber(r.season_id, r.season, r.season_number, r.competition),
       result: String(r.result || '').toUpperCase().startsWith('W') ? 'WIN' : 'LOST',
       score: r.score || ''
     };

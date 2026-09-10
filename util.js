@@ -8,6 +8,24 @@ export const uid = (prefix='id') => `${prefix}_${Date.now()}_${Math.random().toS
 export const langOf = (code) => String(code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 export const escapeHtml = (s='') => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
+// Номер сезона из чего угодно, что встречается в таблицах: отдельная колонка
+// season_id, выпадашка «Season 1» / «Сезон 1», подпись матча «Semifinal S1» или
+// «Round 3 S2». Раньше понимался только формат S1, поэтому «Season 1» из колонки
+// Competition давал пустой сезон — и вся история теряла привязку к дивизиону.
+// Аргументы перебираются по порядку, первый распознанный выигрывает.
+export function parseSeasonNumber(...values) {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (!s) continue;
+    if (/^\d{1,2}$/.test(s)) return s;                       // просто «2»
+    let m = s.match(/(?:season|сезон)\s*[.:#№-]?\s*(\d{1,2})/i);
+    if (m) return m[1];                                      // «Season 1», «Сезон 2»
+    m = s.match(/(?:^|[^\p{L}\d])s\s*[.:#-]?\s*(\d{1,2})(?![\p{L}\d])/iu);
+    if (m) return m[1];                                      // «Final S1», «Round 3 S2»
+  }
+  return '';
+}
+
 export function parseInitData(initData='') {
   const params = new URLSearchParams(initData);
   const userRaw = params.get('user');

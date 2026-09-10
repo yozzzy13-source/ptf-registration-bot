@@ -1,17 +1,17 @@
-import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS } from './telegram.js';
+import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST } from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
 import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
-import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, confirmCourt, confirmResult, disputeResult, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
+import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
 import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
-  notifyResultConfirmed, notifyResultDisputed, broadcastResult,
+  notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, broadcastResult,
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, eventPreview, eventPublish, eventDrop, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -285,35 +285,21 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
 }
 
 function adminHelpText() {
-  return [
-    '<b>PTF — команды организатора</b>',
-    '',
-    '<b>Лига</b>',
-    '/overview — сводка: назначенные матчи, где не подтверждён корт, кто не ответил, где нет счёта, открытые окна',
-    '/stats — заявки, оплаты, статусы',
-    '/pending — заявки, ждущие проверки оплаты',
-    '/events — активные события',
-    '/messages — последние сообщения от игроков',
-    '',
-    '<b>Панель и рассылки</b>',
-    '/admin — админ-панель: игроки, фильтры, рассылки, опросы и их статистика',
-    '',
-    '<b>Настройка</b>',
-    '/admin_init — привязать текущий чат как админский (один раз, в нужной группе)',
-    '/results_here — привязать ленту результатов к текущей теме',
-    '/match_test — проверка таблиц матчей и таблиц лиги',
-    '/topic_test — проверка вебхука и топиков игроков',
-    '/topic_sync — привязать существующие темы к текущей админской группе',
-    '/payment_auto on|off — счёт на участие сразу или после вашего подтверждения',
-    '/links — коды разделов для рассылок',
-    '/profile telegram_id — карточка игрока',
-    '',
-    '<b>Прочее</b>',
-    '/menu, /cancel, /help',
-    '',
-    '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
-    '<i>Ответ игроку: Reply под его сообщением в топике.</i>'
-  ].join('\n');
+  // Текст собирается из того же списка, что и меню по слэшу: добавил команду
+  // в ADMIN_COMMAND_LIST — она сама появилась и здесь, и там.
+  const order = ['Лига', 'Матчи', 'Панель и рассылки', 'Настройка', 'Прочее'];
+  const lines = ['<b>PTF — команды организатора</b>'];
+  for (const group of order) {
+    const items = ADMIN_COMMAND_LIST.filter(c => c.group === group);
+    if (!items.length) continue;
+    lines.push('', `<b>${group}</b>`);
+    for (const c of items) {
+      lines.push(`/${c.cmd}${c.args ? ' ' + c.args : ''} — ${c.help || c.short}`);
+    }
+  }
+  lines.push('', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
+    '<i>Ответ игроку: Reply под его сообщением в топике.</i>');
+  return lines.join('\n');
 }
 
 // Экран настроек ленты результатов. Показывается и по команде /results,
@@ -990,6 +976,15 @@ export async function handleCallback(q) {
       return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
     }
     const write = await writeConfirmedResult(r.slot).catch(e => ({ status:'error', reason:e.message }));
+    // Междивизионный матч в зачёт не идёт: счёт никуда не записан, решает организатор.
+    // Игрокам про это не пишем — для них матч просто ждёт проверки.
+    if (write.status === 'cross_division_blocked') {
+      await notifyCrossDivision(r.slot, write).catch(e => console.error('notifyCrossDivision failed:', e.message));
+      const ru = lang === 'ru';
+      return sendMessage(chatId, ru
+        ? 'Счёт принят и отправлен организатору на проверку: соперники из разных дивизионов.'
+        : 'Score accepted and sent to the organiser: the players are in different divisions.').catch(() => {});
+    }
     // Счёт ушёл в таблицы лиги — витрина должна показать новые цифры сразу.
     invalidateLeagueCache();
     invalidateDivisionCache();
@@ -1113,9 +1108,29 @@ export async function handleCallback(q) {
       adminState.set(String(from.id), { mode:'reply_waiting', targetTelegramId });
       return sendMessage(chatId, `Write reply to TGID <code>${escapeHtml(targetTelegramId)}</code>.`);
     }
+    // Междивизионный матч: организатор решает, записывать его или нет.
+    if (data.startsWith('res_force:')) {
+      const slot = await findMatchSlot(data.split(':')[1]);
+      if (!slot) return sendMessage(chatId, 'Матч не найден.');
+      const write = await writeConfirmedResult(slot, { force: true }).catch(e => ({ status:'error', reason:e.message }));
+      invalidateLeagueCache();
+      invalidateDivisionCache();
+      await notifyResultConfirmed(slot, describeWrite(write)).catch(() => {});
+      broadcastResult(slot).catch(e => console.error('broadcastResult failed:', e.message));
+      return sendMessage(chatId, `Записал: <i>${escapeHtml(describeWrite(write))}</i>`);
+    }
+    if (data.startsWith('res_drop:')) {
+      const r = await rejectResultByAdmin(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
+      if (!r.ok) return sendMessage(chatId, 'Матч не найден.');
+      await notifyResultRejected(r.slot).catch(() => {});
+      return sendMessage(chatId, 'Результат отклонён, игрокам сообщил.');
+    }
     if (data.startsWith('ev_pub:')) return eventPublish(chatId, data.split(':')[1]);
     if (data.startsWith('ev_drop:')) return eventDrop(chatId, data.split(':')[1]);
     if (data.startsWith('ev_edit:')) return sendMessage(chatId, 'Открой админ-панель и поправь карточку — потом нажми «Предпросмотр» ещё раз.');
+    // Подтверждение участия руками: работает и без топика, и без заявки.
+    if (data.startsWith('admin_activate:')) return activatePlayer({ chatId, telegramId: data.split(':')[1] });
+    if (data.startsWith('admin_wait:')) return waitlistPlayer({ chatId, telegramId: data.split(':')[1] });
     if (data.startsWith('admin_invoice:')) {
       const applicationId = data.split(':')[1];
       return sendInvoiceToApplicant({ chatId, applicationId });

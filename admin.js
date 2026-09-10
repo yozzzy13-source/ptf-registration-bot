@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, findLatestApplicationByTelegramId as _findLatestApp } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -302,13 +302,73 @@ export async function adminMessages(chatId) {
   }
 }
 
+// Карточка игрока с кнопками. Нужна, когда топика ещё нет: игрок оплатил в
+// обход счёта, а активировать его негде. Карточка приходит туда, где набрана
+// команда, поэтому работает из любого чата.
+export function playerActionsKeyboard(telegramId, applicationId = '') {
+  const rows = [[{ text: '✅ Подтвердить участие', callback_data: `admin_activate:${telegramId}` }]];
+  if (applicationId) rows.push([{ text: '💳 Выставить счёт', callback_data: `admin_invoice:${applicationId}` }]);
+  rows.push([
+    { text: '⏳ В лист ожидания', callback_data: `admin_wait:${telegramId}` },
+    { text: '💬 Написать', callback_data: `admin_reply:${telegramId}` }
+  ]);
+  return { inline_keyboard: rows };
+}
+
+// Подтверждение участия «руками»: заявки может не быть вовсе, поэтому при
+// необходимости заводим её на текущее событие и только потом активируем.
+// Само приветствие и смена статуса идут через setApplicationStatus — тем же
+// путём, что и после одобрения оплаты, чтобы поведение не разъезжалось.
+export async function activatePlayer({ chatId, telegramId }) {
+  const applicant = await findApplicantByTelegramId(telegramId).catch(() => null);
+  if (!applicant) return sendMessage(chatId, 'Игрок не найден в анкетах.');
+  let app = await _findLatestApp(telegramId).catch(() => null);
+  if (!app) {
+    const events = await getActiveEvents().catch(() => []);
+    const ev = events[0];
+    if (!ev) return sendMessage(chatId, 'Нет активного события, к которому привязать участие.');
+    app = await createOrUpdateApplication({
+      application_id: uid('app'),
+      telegram_id: String(telegramId),
+      telegram_username: applicant.telegram_username || '',
+      player_name: applicant.name || '',
+      event_id: ev.event_id || ev.id || '',
+      event_name: ev.event_name || ev.name || '',
+      application_status: 'submitted',
+      submitted_at: nowISO(),
+      payment_status: 'approved_manually',
+      source: 'admin_manual',
+      notes: 'участие подтверждено организатором вручную'
+    });
+    await sendMessage(chatId, `Заявки не было — завёл на «${escapeHtml(app.event_name || '')}».`);
+  } else if (String(app.payment_status || '').toLowerCase() !== 'approved') {
+    // Деньги уже пришли, иначе бы участие не подтверждали: чтобы игрок не висел
+    // в списке неоплаченных, помечаем оплату подтверждённой вручную.
+    await updateApplication(app.application_id, { payment_status: 'approved_manually', payment_reviewed_at: nowISO() });
+  }
+  // Топик заводим здесь же: дальше переписка идёт в своём месте, как у всех.
+  await getOrCreatePlayerTopic({ ...applicant, telegram_id: telegramId }).catch(() => null);
+  await setApplicationStatus({ chatId, applicationId: app.application_id, status: 'active' });
+  return sendMessage(chatId, `✅ Участие подтверждено: <b>${escapeHtml(applicant.name || telegramId)}</b>. Приветствие отправлено.`);
+}
+
+export async function waitlistPlayer({ chatId, telegramId }) {
+  const app = await _findLatestApp(telegramId).catch(() => null);
+  if (!app) return sendMessage(chatId, 'Заявки у игрока нет.');
+  return setApplicationStatus({ chatId, applicationId: app.application_id, status: 'waitlist' });
+}
+
 export async function adminProfile(chatId, query) {
   const q = String(query || '').replace('/profile', '').trim().replace(/^@/, '');
   if (!q) return sendMessage(chatId, 'Usage: /profile @username or /profile telegram_id');
   const rows = (await getRows(SHEETS.applicants, { useCache:false })).rows;
   const r = rows.find(x => String(x.telegram_id) === q || String(x.telegram_username || '').replace(/^@/, '').toLowerCase() === q.toLowerCase() || String(x.name || '').toLowerCase().includes(q.toLowerCase()));
   if (!r) return sendMessage(chatId, 'Profile not found.');
-  await sendMessage(chatId, `<b>Player profile</b>\n\nName: <b>${escapeHtml(r.name)}</b>\nTGID: <code>${escapeHtml(r.telegram_id)}</code>\nUsername: ${r.telegram_username ? '@'+escapeHtml(r.telegram_username) : '-'}\nStatus: <b>${escapeHtml(r.status)}</b>\nDivision: ${escapeHtml(r.division)}\nNTRP: ${escapeHtml(r.ntrp)}\nExperience: ${escapeHtml(r.experience)}\nCountry: ${escapeHtml(r.country_of_origin)}\nWhatsApp: ${escapeHtml(r.whatsapp)}\nLast event: ${escapeHtml(r.last_application_event)}\nNotes: ${escapeHtml(r.notes)}`);
+  const app = await _findLatestApp(r.telegram_id).catch(() => null);
+  const payLine = app ? `\nЗаявка: <b>${escapeHtml(app.application_status || '')}</b> · оплата: <b>${escapeHtml(app.payment_status || '—')}</b>` : '\nЗаявки нет';
+  await sendMessage(chatId, `<b>Player profile</b>\n\nName: <b>${escapeHtml(r.name)}</b>\nTGID: <code>${escapeHtml(r.telegram_id)}</code>\nUsername: ${r.telegram_username ? '@'+escapeHtml(r.telegram_username) : '-'}\nStatus: <b>${escapeHtml(r.status)}</b>\nDivision: ${escapeHtml(r.division)}\nNTRP: ${escapeHtml(r.ntrp)}\nExperience: ${escapeHtml(r.experience)}\nCountry: ${escapeHtml(r.country_of_origin)}\nWhatsApp: ${escapeHtml(r.whatsapp)}\nLast event: ${escapeHtml(r.last_application_event)}\nNotes: ${escapeHtml(r.notes)}${payLine}`, {
+    reply_markup: playerActionsKeyboard(r.telegram_id, app?.application_id || '')
+  });
 }
 
 // --- события ---------------------------------------------------------------

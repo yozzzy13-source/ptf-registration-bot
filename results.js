@@ -10,6 +10,8 @@
 import { sheets as sheetsClient } from './google.js';
 import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, TIMEZONE } from './config.js';
 import { scoreValues, detectSet3Mode, reverseScore, cellToScore } from './tennis.js';
+import { divisionSheetId, divisionLetter } from './division.js';
+import { getSetting } from './sheets.js';
 
 const DATA_START_ROW = 2;
 const MASTER_START_ROW = 4;
@@ -103,8 +105,22 @@ async function findExistingResultRow(p1, p2, dateSerial) {
   return null;
 }
 
+// Дивизионы обоих игроков по Players_Master. Нужны и для проверки «одна ли это
+// лига», и чтобы понять, в какую таблицу дивизиона писать счёт.
+async function divisionPair(p1, p2) {
+  const index = await playersIndex();
+  const a = index[norm(p1)], b = index[norm(p2)];
+  if (!a || !b) return { known: false, a, b, d1: '', d2: '' };
+  return {
+    known: true, a, b,
+    d1: divisionLetter(a.division || ''),
+    d2: divisionLetter(b.division || '')
+  };
+}
+
 // Счёт в слоте всегда «от from_telegram_id», поэтому p1 = from_name.
-export async function writeConfirmedResult(slot) {
+// force: организатор разрешил записать междивизионный матч руками.
+export async function writeConfirmedResult(slot, { force = false } = {}) {
   if (!LEAGUE_RESULTS_SHEET_ID) return { status: 'skipped', reason: 'LEAGUE_RESULTS_SHEET_ID не задан' };
   const p1 = String(slot.from_name || '').trim();
   const p2 = String(slot.to_name || '').trim();
@@ -112,13 +128,22 @@ export async function writeConfirmedResult(slot) {
   const parsed = cellToScore(slot.result_score);
 
   try {
+    // Матч между разными дивизионами в зачёт не идёт. Раньше он молча уезжал в
+    // общий лог и портил историю; теперь не пишем никуда, пока организатор не
+    // подтвердит. Если игрока нет в Players_Master, дивизион неизвестен —
+    // блокировать по незнанию нельзя, пишем как раньше.
+    const pair = await divisionPair(p1, p2).catch(() => ({ known: false, d1: '', d2: '' }));
+    if (!force && pair.known && pair.d1 && pair.d2 && pair.d1 !== pair.d2) {
+      return { status: 'cross_division_blocked', d1: pair.d1, d2: pair.d2, p1, p2 };
+    }
+
     const dateSerial = localDateSerial(slot.agreed_date);
     // Если строка этой пары уже есть — не дописываем вторую. Скорее всего её внёс
     // старый бот из сообщения в чате; счёт из мини-приложения при этом подтверждён
     // обоими игроками, поэтому расхождение стоит проверить руками.
     const existing = await findExistingResultRow(p1, p2, dateSerial);
     if (existing) {
-      const division = await writeDivisionRow(p1, p2, parsed).catch(e => ({ status: 'error', reason: e.message }));
+      const division = await writeDivisionRow(p1, p2, parsed, pair).catch(e => ({ status: 'error', reason: e.message }));
       return { status: 'duplicate', row: existing.row, division };
     }
     const row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
@@ -129,7 +154,7 @@ export async function writeConfirmedResult(slot) {
       { range: `${LEAGUE_RESULTS_SHEETS.log}!W${row}:X${row}`, values: [[detectSet3Mode(parsed), 'Yes']] }
     ]);
 
-    const division = await writeDivisionRow(p1, p2, parsed).catch(e => ({ status: 'error', reason: e.message }));
+    const division = await writeDivisionRow(p1, p2, parsed, pair).catch(e => ({ status: 'error', reason: e.message }));
     return { status: 'saved', row, division };
   } catch (e) {
     console.error('writeConfirmedResult failed:', e.message);
@@ -137,14 +162,17 @@ export async function writeConfirmedResult(slot) {
   }
 }
 
-async function writeDivisionRow(p1, p2, parsed) {
-  const index = await playersIndex();
-  const a = index[norm(p1)], b = index[norm(p2)];
-  if (!a || !b) return { status: 'player_not_found' };
-  const d1 = String(a.division || '').trim().toUpperCase();
-  const d2 = String(b.division || '').trim().toUpperCase();
+async function writeDivisionRow(p1, p2, parsed, known = null) {
+  const pair = known && known.known !== undefined ? known : await divisionPair(p1, p2);
+  if (!pair.known) return { status: 'player_not_found' };
+  const { d1, d2 } = pair;
   if (!d1 || d1 !== d2) return { status: 'cross_division', d1, d2 };
-  const spreadsheetId = DIVISION_SPREADSHEETS[d1];
+  // Таблицу берём из реестра Divisions: там на каждый дивизион сезона своя
+  // строка со ссылкой, поэтому PRIME, W и любой будущий дивизион подключаются
+  // добавлением строки, а не правкой переменных Railway. Переменные остались
+  // запасным вариантом для A–D, если реестр ещё не заполнен.
+  const season = String(await getSetting('season_number').catch(() => '') || '').trim();
+  const spreadsheetId = (await divisionSheetId(d1, season).catch(() => '')) || DIVISION_SPREADSHEETS[d1] || '';
   if (!spreadsheetId) return { status: 'config_missing', division: d1 };
   const info = await findDivisionRow(spreadsheetId, 'Match_Log', p1, p2);
   if (!info) return { status: 'row_not_found', division: d1 };
@@ -167,7 +195,8 @@ export async function getDivisionSchedule(division) {
   if (!key) return [];
   const cached = scheduleCache.get(key);
   if (cached && Date.now() - cached.t < SCHEDULE_CACHE_MS) return cached.v;
-  const spreadsheetId = DIVISION_SPREADSHEETS[key];
+  const season = String(await getSetting('season_number').catch(() => '') || '').trim();
+  const spreadsheetId = (await divisionSheetId(key, season).catch(() => '')) || DIVISION_SPREADSHEETS[key] || '';
   if (!spreadsheetId) return [];
   try {
     // C — первый игрок, E — второй, F.. — счёт, S — отметка «сыграно».
@@ -204,6 +233,9 @@ export function describeWrite(result) {
   if (!result) return '';
   if (result.status === 'skipped') return 'таблицы лиги не подключены';
   if (result.status === 'error') return `ошибка записи: ${result.reason}`;
+  if (result.status === 'cross_division_blocked') {
+    return `междивизионный матч (${result.d1} — ${result.d2}): не записан, ждёт вашего решения`;
+  }
   if (result.status === 'duplicate') {
     return `в общем логе уже есть строка этой пары (строка ${result.row}) — вторую не добавлял, счёт дивизиона обновлён. Проверьте, совпадает ли счёт.`;
   }
