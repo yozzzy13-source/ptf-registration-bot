@@ -14,7 +14,33 @@
     details.fold[open]>summary:after{content:' ▴'}.actions{display:flex;gap:10px;flex-wrap:wrap}.btn{border:0;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:white;font-weight:800;padding:9px 13px;font-size:12.5px;cursor:pointer}.btn.secondary{background:#333;color:#eee;border:1px solid var(--border)}.btn.danger{background:var(--danger)}.tableWrap{overflow:auto;border-radius:18px;border:1px solid var(--border);max-height:460px}table{width:100%;border-collapse:collapse;min-width:980px;background:#1d1d1d}th,td{border-bottom:1px solid #333;padding:6px 8px;text-align:left;font-size:12px;white-space:nowrap}th{position:sticky;top:0;background:#292929;color:#ddd;z-index:1}tr:hover{background:#252525}.pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#333;border:1px solid #555;font-size:12px}.ok{color:var(--ok)}.err{color:var(--danger)}.tabs{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}.tab{padding:7px 11px;border-radius:999px;background:#333;border:1px solid var(--border);cursor:pointer;font-size:12.5px}.tab.active{background:var(--accent);border-color:var(--accent2)}.codes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}.codes span{padding:6px 10px;border-radius:999px;background:#2a2a2a;border:1px solid var(--border);font-size:12px;cursor:pointer;user-select:none}.codes span:hover{background:#3a3a3a;border-color:var(--accent2)}.prev{background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:13px;margin:6px 0;font-size:13px;line-height:1.55}.prev .pbtn{display:inline-block;margin:4px 6px 0 0;padding:6px 11px;border-radius:10px;background:#333;border:1px solid #555;font-size:12px}.prev .warn{color:var(--danger);font-weight:800;margin-top:8px}.hidden{display:none}
     .hist{min-width:0}.hist td{white-space:normal;vertical-align:top}.hist th:last-child,.hist td:last-child{padding-right:14px}.hist tr.row{cursor:pointer}.hist tr.row.open{background:#2a2a2a}.msg{color:#ccc;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.num{font-variant-numeric:tabular-nums;text-align:right}.ok-n{color:var(--ok);font-weight:800}.fail-n{color:var(--danger);font-weight:800}.logs{background:#191919;border-top:1px solid #333}.logs table{min-width:0;background:transparent}.logs td{font-size:12px;padding:5px 9px;white-space:normal}.logs .fail td{color:#ffb3b3}.chip{display:inline-block;padding:2px 7px;border-radius:999px;background:#2f2f2f;border:1px solid #4a4a4a;font-size:11px;margin:1px 3px 1px 0;color:#ddd}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.toolbar input{width:auto;min-width:220px}.toolbar label{margin:0;display:flex;gap:6px;align-items:center;font-size:12px}.toolbar label input{width:auto}
     @media(max-width:760px){.grid{grid-template-columns:repeat(2,1fr)}.filters{grid-template-columns:repeat(2,1fr)}body{padding:10px}.card{padding:12px}}
-  </style>
+  
+    /* Получатели прямо в рассылке: отметил — отправил, без прыжков по вкладкам. */
+    .rcp{border:1px solid var(--border);border-radius:12px;background:#1d1d1d;max-height:260px;overflow:auto;margin:6px 0 4px}
+    .rcp .r{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid #2c2c2c;cursor:pointer}
+    .rcp .r:last-child{border-bottom:0}
+    .rcp .r:hover{background:#252525}
+    .rcp .r.on{background:rgba(239,95,0,.10)}
+    .rcp .r input{width:auto;flex:0 0 auto}
+    .rcp .nm{font-weight:800;font-size:12.5px}
+    .rcp .sub{font-size:11px;color:var(--muted)}
+    .rcp .tags{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+    .rcpbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+    .rcpbar .cnt{font-size:12px;color:var(--muted);margin-left:auto}
+    /* Поиск игрока по имени вместо telegram_id. */
+    .pick{position:relative}
+    .pick .sug{position:absolute;left:0;right:0;top:100%;z-index:20;background:#232323;
+      border:1px solid var(--border);border-radius:12px;margin-top:4px;max-height:240px;overflow:auto;
+      box-shadow:0 14px 34px rgba(0,0,0,.4)}
+    .pick .sug div{padding:8px 11px;cursor:pointer;border-bottom:1px solid #2c2c2c;font-size:12.5px}
+    .pick .sug div:last-child{border-bottom:0}
+    .pick .sug div:hover,.pick .sug div.hi{background:#2e2e2e}
+    .pick .sug .sub{font-size:11px;color:var(--muted)}
+    .picked{display:inline-flex;align-items:center;gap:8px;margin-top:6px;padding:5px 10px;border-radius:999px;
+      background:#2a2a2a;border:1px solid var(--border);font-size:12px}
+    .picked b{font-weight:800}
+    .picked .x{cursor:pointer;color:var(--muted);font-weight:800}
+</style>
 </head>
 <body><div class="wrap">
   <div class="top"><div><h1>PTF Admin Panel</h1><div class="muted">Broadcasts, player filters, direct messages and selfie requests.</div></div><button class="btn secondary" onclick="reload()">Refresh</button></div>
@@ -37,8 +63,8 @@
     <div class="muted" id="countLine" style="margin-top:8px"></div>
   </div>
   <div id="tabPlayers" class="card"><h3>Players</h3><div class="tableWrap"><table id="playersTable"></table></div></div>
-  <div id="tabBroadcast" class="card hidden"><h3>Broadcast Builder</h3><p class="muted">Send to selected players, or to everyone matching the current filters if no checkboxes are selected.</p><textarea id="broadcastText" placeholder="Message text. HTML formatting is supported by Telegram Bot API."></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast()">Preview</button></div><div id="broadcastPreview" class="prev hidden"></div><label>Attach button</label><select id="broadcastButton"><option value="">No button</option><option value="participants">👥 Participants List (opens the list)</option><option value="join_event">🏆 Join Event (opens application)</option><option value="payment">💳 Payment</option><option value="main">🏠 Main menu</option></select><div class="actions"><button class="btn" onclick="sendBroadcast()">Send broadcast</button></div><div id="broadcastResult" class="muted"></div></div>
-  <div id="tabDirect" class="card hidden"><h3>Direct Message</h3><p class="muted">Select one player in the table or paste Telegram ID.</p><input id="directId" placeholder="telegram_id"/><textarea id="directText" placeholder="Message to player"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Attach button</label><select id="directButton"><option value="">No button</option><option value="participants">👥 Participants List</option><option value="join_event">🏆 Join Event</option><option value="payment">💳 Payment</option><option value="main">🏠 Main menu</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Send direct message</button></div><div id="directResult" class="muted"></div></div>
+  <div id="tabBroadcast" class="card hidden"><h3>Broadcast Builder</h3><p class="muted">Отметь получателей в списке ниже. Если не отмечен никто — уйдёт всем, кто попал под фильтры.</p><div class="rcpbar"><button class="btn secondary" onclick="selectFiltered()">Выбрать всех</button><button class="btn secondary" onclick="clearSelection()">Снять выделение</button><span class="cnt" id="rcpCount"></span></div><div class="rcp" id="rcpList"></div><textarea id="broadcastText" placeholder="Message text. HTML formatting is supported by Telegram Bot API."></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast()">Preview</button></div><div id="broadcastPreview" class="prev hidden"></div><label>Attach button</label><select id="broadcastButton"><option value="">No button</option><option value="participants">👥 Participants List (opens the list)</option><option value="join_event">🏆 Join Event (opens application)</option><option value="payment">💳 Payment</option><option value="main">🏠 Main menu</option></select><div class="actions"><button class="btn" onclick="sendBroadcast()">Send broadcast</button></div><div id="broadcastResult" class="muted"></div></div>
+  <div id="tabDirect" class="card hidden"><h3>Direct Message</h3><p class="muted">Select one player in the table or paste Telegram ID.</p><div class="pick"><input id="directPick" placeholder="Начни вводить имя или @ник" autocomplete="off" oninput="pickInput(this.value)" onkeydown="pickKey(event)" onblur="setTimeout(pickClose,150)"/><div class="sug hidden" id="directSug"></div></div><div id="directChosen"></div><input id="directId" class="hidden" placeholder="telegram_id"/><textarea id="directText" placeholder="Message to player"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Attach button</label><select id="directButton"><option value="">No button</option><option value="participants">👥 Participants List</option><option value="join_event">🏆 Join Event</option><option value="payment">💳 Payment</option><option value="main">🏠 Main menu</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Send direct message</button></div><div id="directResult" class="muted"></div></div>
   <div id="tabSelfie" class="card hidden"><h3>Missing Selfies</h3><p class="muted">Request selfies from active players who do not have selfie_status = received. Uses selected players or current filters.</p><div class="actions"><button class="btn" onclick="requestSelfies()">Request selfies</button></div><div id="selfieResult" class="muted"></div></div>
   <div id="tabHistory" class="card hidden"><h3>Broadcast History</h3><div class="toolbar"><input id="hSearch" placeholder="search text / segment / admin" oninput="renderHistory()"/><label><input type="checkbox" id="hFailedOnly" onchange="renderHistory()"> only with failures</label><button class="btn secondary" onclick="loadHistory()">Reload</button><span class="muted" id="hCount"></span></div><div class="tableWrap"><table id="historyTable" class="hist"></table></div></div>
   <div id="tabEvents" class="card hidden"><h3>Events</h3>
@@ -89,7 +115,7 @@ function noSelectionFilters(){const f=filters(); delete f.selected_ids; return f
 function matches(c){const f=noSelectionFilters(); const n=v=>String(v||'').toLowerCase(); if(f.status&&n(c.status)!==n(f.status))return false;if(f.division&&n(c.division)!==n(f.division))return false;if(f.language){if(f.language==='ru'&&n(c.language)!=='ru')return false;if(f.language==='en'&&n(c.language)==='ru')return false}if(f.selfie_status){if(f.selfie_status==='missing'){if(n(c.selfie_status)==='received')return false}else if(n(c.selfie_status)!==n(f.selfie_status))return false}if(f.event&&!n(c.last_application_event).includes(n(f.event)))return false;if(f.rating==='missing'&&!c.missing_rating)return false;if(f.rating==='set'&&c.missing_rating)return false;if(f.search){const hay=[c.name,c.telegram_username,c.telegram_id,c.whatsapp,c.country,c.crm_tags].map(n).join(' ');if(!hay.includes(n(f.search)))return false}return true}
 function renderStats(stats){const labels={contacts:'Contacts',applications:'Applications',active:'Active',waitlist:'Waitlist',unpaid:'Unpaid / waiting',proofReceived:'Proof received',paid:'Paid approved',rejectedPayments:'Payment rejected',paidThb:'Paid THB',paidUsdt:'Paid USDT',missingSelfie:'Missing selfies'};$('stats').innerHTML=Object.entries(stats).map(([k,v])=>`<div class="stat"><b>${v}</b><span>${labels[k]||k}</span></div>`).join('')}
 function optionize(id,arr){const el=$(id);const first=el.querySelector('option')?.outerHTML||'<option value="">All</option>';el.innerHTML=first+arr.map(x=>`<option value="${x}">${x}</option>`).join('')}
-function renderTable(){filtered=contacts.filter(matches);$('countLine').textContent=`Filtered: ${filtered.length}. Selected: ${selected.size}.`;let html='<thead><tr><th><input type="checkbox" onchange="toggleAll(this.checked)"></th><th>Name</th><th>Status</th><th>Division</th><th>NTRP</th><th>Selfie</th><th>Lang</th><th>Username</th><th>Event</th><th>Country</th><th>WhatsApp</th></tr></thead><tbody>';html+=filtered.map(c=>`<tr><td><input type="checkbox" ${selected.has(String(c.telegram_id))?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)"></td><td><b>${esc(c.name)}</b><br><span class="muted">${esc(c.telegram_id)}</span></td><td><span class="pill">${esc(c.status)}</span></td><td>${esc(c.division)}</td><td>${c.missing_rating?'<span class="err">—</span>':esc(c.ntrp)}</td><td>${esc(c.selfie_status)}</td><td>${esc(c.language)}</td><td>${c.telegram_username?'@'+esc(c.telegram_username):''}</td><td>${esc(c.last_application_event)}</td><td>${esc(c.country)}</td><td>${esc(c.whatsapp)}</td></tr>`).join('');html+='</tbody>';$('playersTable').innerHTML=html}
+function renderTable(){filtered=contacts.filter(matches);$('countLine').textContent=`Filtered: ${filtered.length}. Selected: ${selected.size}.`;let html='<thead><tr><th><input type="checkbox" onchange="toggleAll(this.checked)"></th><th>Name</th><th>Status</th><th>Division</th><th>NTRP</th><th>Selfie</th><th>Lang</th><th>Username</th><th>Event</th><th>Country</th><th>WhatsApp</th><th></th></tr></thead><tbody>';html+=filtered.map(c=>`<tr><td><input type="checkbox" ${selected.has(String(c.telegram_id))?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)"></td><td><b>${esc(c.name)}</b><br><span class="muted">${esc(c.telegram_id)}</span></td><td><span class="pill">${esc(c.status)}</span></td><td>${esc(c.division)}</td><td>${c.missing_rating?'<span class="err">—</span>':esc(c.ntrp)}</td><td>${esc(c.selfie_status)}</td><td>${esc(c.language)}</td><td>${c.telegram_username?'@'+esc(c.telegram_username):''}</td><td>${esc(c.last_application_event)}</td><td>${esc(c.country)}</td><td>${esc(c.whatsapp)}</td><td>${String(c.status||'').toLowerCase()==='active'?'':`<button class="btn secondary" onclick="event.stopPropagation();activatePlayer('${c.telegram_id}')">Активировать</button>`}</td></tr>`).join('');html+='</tbody>';$('playersTable').innerHTML=html;renderRecipients()}
 function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function toggleOne(id,on){if(on)selected.add(String(id));else selected.delete(String(id));renderTable()} function toggleAll(on){filtered.forEach(c=>on?selected.add(String(c.telegram_id)):selected.delete(String(c.telegram_id)));renderTable()} function selectFiltered(){filtered.forEach(c=>selected.add(String(c.telegram_id)));renderTable()} function clearSelection(){selected.clear();renderTable()} function applyFilters(){renderTable()} function clearFilters(){['fStatus','fDivision','fLanguage','fSelfie','fRating','fEvent','fSearch'].forEach(id=>$(id).value='');renderTable()}
 async function api(path,body=null){const opts=body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,...body})}:{};const url=body?path:path+(path.includes('?')?'&':'?')+'initData='+encodeURIComponent(initData);const r=await fetch(url,opts);const j=await r.json();if(!j.ok)throw new Error(j.error||'Error');return j}
@@ -104,7 +130,7 @@ function renderCodes(list){const html=list.map(c=>`<span onclick="insertCode('${
 function insertCode(code,target){const t=$(target||'broadcastText');const tag='{'+code+'}';const a=t.selectionStart||t.value.length;const b=t.selectionEnd||a;t.value=t.value.slice(0,a)+(a&&t.value[a-1]!=='\n'?'\n\n':'')+tag+t.value.slice(b);t.focus();t.selectionStart=t.selectionEnd=a+tag.length+2}
 async function previewBroadcast(){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message:$('broadcastText').value,lang:'ru'});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`<div class="muted" style="margin-top:8px">ссылок в тексте: ${j.inline}</div>`:'')+((j.unknown||[]).length?`<div class="warn">⚠️ неизвестные коды: ${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function sendBroadcast(){try{if(!confirm('Send broadcast?'))return;const message=$('broadcastText').value.trim();const useSelected=selected.size>0;const j=await api('/api/admin/broadcast',{message,button:$('broadcastButton').value,filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('broadcastResult').innerHTML=`✅ Sent: <b>${j.sent}</b>, failed: <b>${j.failed}</b>, recipients: <b>${j.recipients}</b> — see History tab`;history=[]}catch(e){$('broadcastResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
-async function sendDirect(){try{const id=$('directId').value.trim()||[...selected][0];const message=$('directText').value.trim();const j=await api('/api/admin/direct-message',{telegram_id:id,message,button:$('directButton').value});$('directResult').innerHTML='✅ Message sent'}catch(e){$('directResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function sendDirect(){try{const id=$('directId').value.trim()||[...selected][0];if(!id)throw new Error('Сначала выбери игрока');const message=$('directText').value.trim();const j=await api('/api/admin/direct-message',{telegram_id:id,message,button:$('directButton').value});$('directResult').innerHTML='✅ Message sent'}catch(e){$('directResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function requestSelfies(){try{if(!confirm('Request selfies from matching active players without selfie?'))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-selfie',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('selfieResult').innerHTML=`✅ Sent: <b>${j.sent}</b>, failed: <b>${j.failed}</b>, recipients: <b>${j.recipients}</b>`;await reload()}catch(e){$('selfieResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function requestRatings(){try{if(!confirm('Send NTRP (Raketo) update request?'))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-rating',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('ratingResult').innerHTML=`✅ Sent: <b>${j.sent}</b>, failed: <b>${j.failed}</b>, recipients: <b>${j.recipients}</b>`;await reload()}catch(e){$('ratingResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 let history=[],openId='',logsCache={};
@@ -177,8 +203,84 @@ async function changeBalance(){
     $('balResult').innerHTML='<span class="ok">Готово. Новый баланс: '+j.balance+' ฿</span>';loadBalances()}
   catch(e){$('balResult').innerHTML='<span class="err">'+e.message+'</span>'}
 }
+
+// Подтверждение участия прямо из таблицы: игрок становится активным и получает
+// приветствие — то же, что и после одобрения оплаты.
+async function activatePlayer(id){
+  if(!confirm('Подтвердить участие и отправить приветствие?'))return;
+  try{ await api('/api/admin/activate-player',{telegram_id:id});
+    status('Участие подтверждено'); await reload() }
+  catch(e){ status(e.message,true) }
+}
+
+// --- получатели прямо в рассылке ------------------------------------------
+// Список повторяет текущие фильтры и живёт на той же вкладке: отметил галочки
+// и отправил, не переключаясь на «Игроков».
+function renderRecipients(){
+  const box=$('rcpList'); if(!box)return;
+  const cnt=$('rcpCount');
+  if(cnt)cnt.textContent=`Под фильтрами: ${filtered.length}. Отмечено: ${selected.size}.`;
+  if(!filtered.length){box.innerHTML='<div class="r"><span class="sub">Никто не подходит под фильтры</span></div>';return}
+  box.innerHTML=filtered.slice(0,300).map(c=>{
+    const on=selected.has(String(c.telegram_id));
+    return `<label class="r ${on?'on':''}">`
+      +`<input type="checkbox" ${on?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)">`
+      +`<span><span class="nm">${esc(c.name)}</span>`
+      +`<span class="sub"> ${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}</span></span>`
+      +`<span class="tags"><span class="chip">${esc(c.status||'')}</span>`
+      +(c.division?`<span class="chip">${esc(c.division)}</span>`:'')
+      +(c.language?`<span class="chip">${esc(c.language)}</span>`:'')+`</span></label>`;
+  }).join('')+(filtered.length>300?'<div class="r"><span class="sub">Показаны первые 300 — сузь фильтры</span></div>':'');
+}
+
+// --- выбор игрока по имени -------------------------------------------------
+// Telegram ID помнить не нужно: начинаешь вводить имя — появляются варианты.
+let pickIdx=-1,pickRows=[];
+function pickMatches(q){
+  const s=String(q||'').trim().toLowerCase().replace(/^@/,'');
+  if(!s)return [];
+  return contacts.filter(c=>{
+    const name=String(c.name||'').toLowerCase();
+    const user=String(c.telegram_username||'').toLowerCase();
+    return name.includes(s)||user.includes(s)||String(c.telegram_id).includes(s);
+  }).slice(0,8);
+}
+function pickInput(q){
+  pickRows=pickMatches(q); pickIdx=-1;
+  const box=$('directSug');
+  if(!pickRows.length){box.classList.add('hidden');box.innerHTML='';return}
+  box.classList.remove('hidden');
+  box.innerHTML=pickRows.map((c,i)=>`<div onmousedown="pickChoose(${i})">`
+    +`<b>${esc(c.name)}</b>`
+    +`<div class="sub">${c.telegram_username?'@'+esc(c.telegram_username)+' · ':''}${esc(c.telegram_id)}`
+    +`${c.division?' · '+esc(c.division):''}${c.status?' · '+esc(c.status):''}</div></div>`).join('');
+}
+function pickChoose(i){
+  const c=pickRows[i]; if(!c)return;
+  $('directId').value=String(c.telegram_id);
+  $('directPick').value='';
+  $('directChosen').innerHTML=`<span class="picked"><b>${esc(c.name)}</b>`
+    +`<span class="sub">${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}</span>`
+    +`<span class="x" onclick="pickClear()">✕</span></span>`;
+  pickClose();
+}
+function pickClear(){ $('directId').value=''; $('directChosen').innerHTML=''; }
+function pickClose(){ const b=$('directSug'); if(b){b.classList.add('hidden');b.innerHTML=''} pickIdx=-1 }
+function pickKey(e){
+  const box=$('directSug'); if(!box||box.classList.contains('hidden'))return;
+  const items=[...box.querySelectorAll('div')];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    pickIdx=e.key==='ArrowDown'?Math.min(pickIdx+1,items.length-1):Math.max(pickIdx-1,0);
+    items.forEach((el,i)=>el.classList.toggle('hi',i===pickIdx));
+  } else if(e.key==='Enter'){
+    e.preventDefault();
+    pickChoose(pickIdx>=0?pickIdx:0);
+  } else if(e.key==='Escape'){ pickClose() }
+}
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');['Players','Broadcast','Direct','Selfie','Rating','History','Events','Balances'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',['history','events','balances'].includes(b.dataset.tab));
   if(b.dataset.tab==='history'&&!history.length)loadHistory();
+  if(b.dataset.tab==='broadcast')renderRecipients();
   if(b.dataset.tab==='events')loadEvents();
   if(b.dataset.tab==='balances')loadBalances()});reload();
 </script></body></html>
