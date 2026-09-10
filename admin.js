@@ -378,14 +378,36 @@ export async function eventPreview(chatId, eventId) {
   const { previewEventForAdmin } = await import('./eventflow.js');
   return previewEventForAdmin(chatId, eventId);
 }
+// Кому уходит карточка. Три режима плюс необязательный фильтр по дивизиону —
+// один и тот же расчёт нужен и предпросмотру, и рассылке, поэтому он здесь.
+export async function eventRecipients(event) {
+  if (!event) return [];
+  if (event.audience === 'personal') {
+    const wanted = new Set((event.invited_ids || []).map(String));
+    if (!wanted.size) return [];
+    const all = await getSegmentContacts('all').catch(() => []);
+    const byId = new Map(all.map(c => [String(c.telegram_id), c]));
+    // Приглашённого может не быть в общей выборке (например, ещё не активен) —
+    // тогда шлём по одному telegram_id, язык подставится по умолчанию.
+    return [...wanted].map(id => byId.get(id) || { telegram_id: id, language: 'ru' });
+  }
+  const segment = event.audience === 'active' ? 'active' : 'all';
+  let contacts = await getSegmentContacts(segment).catch(() => []);
+  // Букву принимаем в любом виде: «A», «a», «Division A» — сравниваем по букве.
+  const letter = (v) => String(v || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+  const div = letter(event.audience_division);
+  if (div) {
+    contacts = contacts.filter(c => letter(c.division) === div);
+  }
+  return contacts;
+}
+
 export async function eventPublish(chatId, eventId) {
   const { broadcastEvent } = await import('./eventflow.js');
   const { findEvent } = await import('./events.js');
   const event = await findEvent(eventId);
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
-  const segment = event.audience === 'active' ? 'active' : 'all';
-  const contacts = await getSegmentContacts(segment).catch(() => []);
-  return broadcastEvent(chatId, eventId, contacts);
+  return broadcastEvent(chatId, eventId, await eventRecipients(event));
 }
 export async function eventDrop(chatId, eventId) {
   const { updateEvent } = await import('./events.js');
@@ -639,12 +661,26 @@ function playerHeader(from) {
   return `TGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.name || '')}</b> ${from.username ? '@'+escapeHtml(from.username) : ''}`;
 }
 
+// Шапка с TGID и кнопкой «Reply» нужна ровно один раз — когда тема игрока
+// только что создана. Дальше имя игрока написано в названии темы, а ответ уходит
+// ему обычным сообщением прямо в тему, поэтому и подпись, и кнопка только мешают
+// читать переписку. Если темы нет вовсе (не форум, не удалось создать), шапка
+// остаётся: в общем чате иначе не понять, кто пишет.
+function insideOwnTopic(topic) {
+  return Boolean(topic?.message_thread_id) && topic?.existing === true;
+}
+
 export async function notifyIncomingMessage(from, text, telegramMessageId, sourceChatId=null, originalMessage=null) {
   const topic = await getOrCreatePlayerTopic(from);
   const chatId = topic?.chatId || await getAdminChatId();
   if (!chatId) return null;
-  const body = `<b>💬 New message from player</b>\n\n${playerHeader(from)}\n\n${escapeHtml(text && text !== '[media]' ? text : (hasMedia(originalMessage || {}) ? '' : '[media]'))}`.trimEnd();
-  const replyMarkup = { reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] } };
+  const plain = escapeHtml(text && text !== '[media]' ? text : (hasMedia(originalMessage || {}) ? '' : '[media]'));
+  const bare = insideOwnTopic(topic);
+  // Пустой текст бывает у медиа без подписи — Telegram пустое сообщение не примет.
+  const body = bare ? (plain || '📎')
+    : `<b>💬 New message from player</b>\n\n${playerHeader(from)}\n\n${plain}`.trimEnd();
+  const replyMarkup = bare ? {}
+    : { reply_markup: { inline_keyboard: [[{ text: '💬 Reply', callback_data: `admin_reply:${from.id}` }]] } };
   return deliverPlayerMessage({ chatId, topic, from, originalMessage, text: body, replyMarkup, fallbackTitle:'Player message topic fallback' });
 }
 
@@ -655,7 +691,11 @@ export async function notifyPlayerMedia(from, originalMessage, note='') {
   const chatId = topic?.chatId || await getAdminChatId();
   if (!chatId) return null;
   const caption = originalMessage?.caption ? `\n\n${escapeHtml(originalMessage.caption)}` : '';
-  const body = `<b>📎 Media from player</b>\n\n${playerHeader(from)}${note ? `\n${escapeHtml(note)}` : ''}${caption}`;
+  // Внутри темы игрока подпись с TGID не нужна, а кнопка «привязать к оплате» —
+  // нужна: руками её не заменить, поэтому она остаётся.
+  const body = insideOwnTopic(topic)
+    ? `<b>📎 Media from player</b>${note ? `\n${escapeHtml(note)}` : ''}${caption}`
+    : `<b>📎 Media from player</b>\n\n${playerHeader(from)}${note ? `\n${escapeHtml(note)}` : ''}${caption}`;
   // Кнопка «привязать к оплате» — для случая, когда игрок прислал чек без нажатия
   // «оплатил» и открытой заявки бот не нашёл. Она подтянет последнюю заявку игрока.
   const replyMarkup = { reply_markup: { inline_keyboard: [

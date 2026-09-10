@@ -28,7 +28,14 @@ export function eventCard(event, lang = 'ru', { taken = 0 } = {}) {
   const title = (L ? event.title_ru : event.title_en) || event.title_ru || event.title_en;
   const desc = (L ? event.description_ru : event.description_en) || '';
   const lines = [`🎾 <b>${escapeHtml(title)}</b>`];
-  if (event.place) lines.push(`📍 ${escapeHtml(event.place)}`);
+  // Описание идёт сразу под заголовком: сперва о чём событие, потом детали.
+  if (desc) lines.push('', escapeHtml(desc), '');
+  // Место — ссылкой, если она задана; сам адрес отдельной строкой не дублируем.
+  if (event.place) {
+    lines.push(event.place_url
+      ? `📍 <a href="${escapeHtml(event.place_url)}">${escapeHtml(event.place)}</a>`
+      : `📍 ${escapeHtml(event.place)}`);
+  }
   if (event.date) lines.push(`📅 <b>${escapeHtml(event.date)}</b>`);
   if (event.time) lines.push(`🕐 <b>${escapeHtml(event.time)}</b>`);
   if (event.capacity) {
@@ -44,8 +51,13 @@ export function eventCard(event, lang = 'ru', { taken = 0 } = {}) {
     lines.push(L ? '💳 Участие бесплатное' : '💳 Free entry');
   }
   if (event.signup_deadline) lines.push(L ? `⏳ Запись до ${escapeHtml(event.signup_deadline)}` : `⏳ Sign-up until ${escapeHtml(event.signup_deadline)}`);
-  if (desc) lines.push('', escapeHtml(desc));
+  if (event.invite_only) lines.push(L ? '🔒 Только по приглашению' : '🔒 By invitation only');
   return lines.join('\n');
+}
+
+// Приглашён ли игрок на закрытое событие.
+export function isInvited(event, telegramId) {
+  return (event?.invited_ids || []).map(String).includes(String(telegramId));
 }
 
 export function signupKeyboard(event, lang = 'ru') {
@@ -59,8 +71,14 @@ export async function previewEventForAdmin(chatId, eventId) {
   const event = await findEvent(eventId);
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
   const taken = await takenSeats(eventId);
-  const audience = event.audience === 'active' ? 'только активным игрокам' : 'всем в боте';
-  await sendMessage(chatId, `<b>Так карточка уйдёт в рассылку</b> (${audience}):`);
+  const { eventRecipients } = await import('./admin.js');
+  const recipients = await eventRecipients(event).catch(() => []);
+  const who = event.audience === 'personal'
+    ? `лично выбранным: ${recipients.length}`
+    : (event.audience === 'active' ? 'только активным игрокам' : 'всем в боте');
+  const div = event.audience_division ? `, дивизион ${event.audience_division}` : '';
+  const lock = event.invite_only ? '\n🔒 Только по приглашению: остальным событие не показывается.' : '';
+  await sendMessage(chatId, `<b>Так карточка уйдёт в рассылку</b> (${who}${div}) — получателей: <b>${recipients.length}</b>.${lock}`);
   await sendMessage(chatId, eventCard(event, 'ru', { taken }), {
     reply_markup: {
       inline_keyboard: [
@@ -135,6 +153,11 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
   const event = await findEvent(eventId);
   if (!event || event.status !== 'published') {
     return { ok: false, message: L ? 'Событие больше не активно.' : 'This event is no longer active.' };
+  }
+  // Закрытое событие: кнопка есть только у приглашённых, но callback можно
+  // подобрать — поэтому проверяем ещё раз здесь.
+  if (event.invite_only && !isInvited(event, telegramId)) {
+    return { ok: false, message: L ? 'Это событие только по приглашению.' : 'This event is by invitation only.' };
   }
   const existing = await findSignup(eventId, telegramId);
   if (existing) return { ok: false, message: L ? 'Ты уже записан на это событие.' : 'You are already signed up.' };
@@ -319,10 +342,13 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false) {
   const out = [];
   for (const e of events) {
     if (e.audience === 'active' && !isActivePlayer) continue;
-    const taken = await takenSeats(e.event_id);
     const signup = mine.find(s => s.event_id === e.event_id
       && String(s.telegram_id) === String(telegramId)
       && s.status !== SIGNUP_STATUS.cancelled) || null;
+    // Событие «только по приглашению» для остальных просто не существует.
+    // Уже записавшегося не выкидываем, даже если его убрали из списка.
+    if (e.invite_only && !signup && !isInvited(e, telegramId)) continue;
+    const taken = await takenSeats(e.event_id);
     out.push({
       ...e,
       taken,

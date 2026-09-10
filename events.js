@@ -25,8 +25,12 @@ export const EVENT_SHEETS = {
 
 export const REGISTRY_HEADERS = [
   'event_id', 'status', 'title_ru', 'title_en', 'description_ru', 'description_en',
-  'date', 'time', 'place', 'price_thb', 'guest_price_thb', 'capacity', 'signup_deadline',
-  'payment_required', 'guests_allowed', 'max_guests', 'refund_hours', 'audience',
+  'date', 'time', 'place', 'place_url', 'price_thb', 'guest_price_thb', 'capacity', 'signup_deadline',
+  'payment_required', 'guests_allowed', 'max_guests', 'refund_hours',
+  // Кому уходит карточка: all — всем в боте, active — только активным игрокам,
+  // personal — поимённо тем, кто перечислен в invited_ids. Плюс необязательный
+  // фильтр по дивизиону. invite_only прячет событие от всех, кроме приглашённых.
+  'audience', 'audience_division', 'invite_only', 'invited_ids',
   'created_at', 'published_at', 'created_by'
 ];
 export const SIGNUP_HEADERS = [
@@ -72,7 +76,7 @@ function mapEvent(r) {
     status: safe(r.status).toLowerCase() || 'draft',
     title_ru: safe(r.title_ru), title_en: safe(r.title_en || r.title_ru),
     description_ru: safe(r.description_ru), description_en: safe(r.description_en || r.description_ru),
-    date: safe(r.date), time: safe(r.time), place: safe(r.place),
+    date: safe(r.date), time: safe(r.time), place: safe(r.place), place_url: safe(r.place_url),
     price_thb: num(r.price_thb),
     guest_price_thb: String(r.guest_price_thb ?? '').trim() === '' ? null : num(r.guest_price_thb),
     capacity: num(r.capacity),
@@ -82,6 +86,11 @@ function mapEvent(r) {
     max_guests: num(r.max_guests) || (yes(r.guests_allowed) ? 1 : 0),
     refund_hours: String(r.refund_hours ?? '').trim() === '' ? CANCEL_LIMIT_HOURS : num(r.refund_hours),
     audience: safe(r.audience).toLowerCase() || 'all',
+    audience_division: safe(r.audience_division).toUpperCase(),
+    invite_only: yes(r.invite_only),
+    // Список приглашённых храним строкой через запятую — отдельный лист ради
+    // десятка id заводить незачем.
+    invited_ids: safe(r.invited_ids).split(/[,;\s]+/).map(x => x.trim()).filter(Boolean),
     created_at: safe(r.created_at), published_at: safe(r.published_at),
     _rowNumber: r._rowNumber
   };
@@ -108,7 +117,7 @@ export async function createEvent(data, createdBy = '') {
     status: 'draft',
     title_ru: safe(data.title_ru), title_en: safe(data.title_en),
     description_ru: safe(data.description_ru), description_en: safe(data.description_en),
-    date: safe(data.date), time: safe(data.time), place: safe(data.place),
+    date: safe(data.date), time: safe(data.time), place: safe(data.place), place_url: safe(data.place_url),
     price_thb: data.price_thb ?? '', guest_price_thb: data.guest_price_thb ?? '',
     capacity: data.capacity ?? '', signup_deadline: safe(data.signup_deadline),
     payment_required: data.payment_required ? 'TRUE' : 'FALSE',
@@ -116,6 +125,9 @@ export async function createEvent(data, createdBy = '') {
     max_guests: data.max_guests ?? '',
     refund_hours: data.refund_hours ?? '',
     audience: safe(data.audience) || 'all',
+    audience_division: safe(data.audience_division).toUpperCase(),
+    invite_only: data.invite_only ? 'TRUE' : 'FALSE',
+    invited_ids: Array.isArray(data.invited_ids) ? data.invited_ids.join(',') : safe(data.invited_ids),
     created_at: nowISO(), published_at: '', created_by: String(createdBy || '')
   };
   await appendObject(EVENT_SHEETS.registry, row, { uniqueBy: 'event_id' });

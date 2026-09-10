@@ -333,7 +333,14 @@ border:2px solid rgba(217,199,163,.55);box-shadow:0 0 0 6px rgba(217,199,163,.07
 padding:0 13px;height:50px;font-size:13px;color:var(--dim);border-top:1px solid var(--line2);position:relative;cursor:pointer}
 .drow span:not(.n){text-align:center}
 .drow .n{text-align:left;display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
-.drow .avr,.drow .avph{width:30px;height:30px;flex:0 0 30px;font-size:10px}
+.drow .avr,.drow .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px}
+/* Обойма для аватарки в таблице: круг режет края, а само фото внутри увеличено,
+   поэтому лицо занимает кадр целиком, а не тонет в пейзаже. */
+.drow .avz{width:38px;height:38px;flex:0 0 38px;border-radius:50%;overflow:hidden;
+  display:block;background:var(--avBg);border:1px solid var(--line3)}
+.drow .avz .avr{width:100%;height:100%;border-radius:0;border:0;transform:scale(1.22);
+  transform-origin:50% 32%}
+.drow .avz .avph{width:100%;height:100%;border-radius:0;border:0}
 .drow .n em{font-style:normal;font-weight:700;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
 .drow .p{font-weight:800;font-size:12.5px;color:var(--mute3)}
 .drow .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.3px}
@@ -658,6 +665,36 @@ function av(p,cls,extra){
     ? '<img class="avr '+c+'" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="fallbackAv(this,\''+q(initials(p.name))+'\')">'
     : '<div class="avph '+c+'">'+esc(initials(p&&p.name))+'</div>';
 }
+// Фото игрока во всём приложении одно и то же: берём из общего списка игроков,
+// где уже учтена утверждённая организатором аватарка. В таблицах дивизионов
+// лежит старый снимок с момента сборки состава — он идёт запасным вариантом,
+// а у новичков его нет вовсе, отсюда и брались инициалы.
+var photoIdx=null;
+function buildPhotoIdx(){
+  photoIdx={};
+  (players||[]).forEach(function(p){
+    if(!p||!p.photo)return;
+    var key='#'+String(p.id||'');
+    if(p.id&&!photoIdx[key])photoIdx[key]=p.photo;
+    var nm=String(p.name||'').trim().toLowerCase();
+    if(nm&&!photoIdx[nm])photoIdx[nm]=p.photo;
+  });
+}
+function livePhoto(p){
+  if(!photoIdx)buildPhotoIdx();
+  var byId=p&&p.id?photoIdx['#'+String(p.id)]:'';
+  var byName=photoIdx[String(p&&p.name||'').trim().toLowerCase()];
+  return byId||byName||(p&&p.photo)||'';
+}
+// Та же аватарка обычным размером — для чемпионов, плей-офф и повышений:
+// они тоже собраны из таблиц дивизионов и несут старое фото.
+function avL(p,cls,extra){
+  return av({name:p&&p.name,photo:livePhoto(p)},cls,extra);
+}
+// Аватарка в обойме: крупнее и с более плотным кадром.
+function avZoom(p){
+  return '<span class="avz">'+av({name:p&&p.name,photo:livePhoto(p)})+'</span>';
+}
 function fallbackAv(img,ini){
   var d=document.createElement('div');
   d.className=img.className.replace('avr','avph');
@@ -693,11 +730,54 @@ function formRow(form){
   if(!form||!form.length)return '';
   return '<span class="form">'+form.map(function(f){return '<span class="fm '+(f==='W'?'w':'l')+'">'+f+'</span>'}).join('')+'</span>';
 }
-var FLAGS={'japan':'🇯🇵','russia':'🇷🇺','spain':'🇪🇸','thailand':'🇹🇭','china':'🇨🇳','india':'🇮🇳','ukraine':'🇺🇦',
-'netherlands':'🇳🇱','serbia':'🇷🇸','brazil':'🇧🇷','uk':'🇬🇧','great britain':'🇬🇧','united kingdom':'🇬🇧',
-'australia':'🇦🇺','new zealand':'🇳🇿','israel':'🇮🇱','usa':'🇺🇸','france':'🇫🇷','germany':'🇩🇪','italy':'🇮🇹',
-'korea':'🇰🇷','south korea':'🇰🇷','kazakhstan':'🇰🇿','belarus':'🇧🇾','poland':'🇵🇱','sweden':'🇸🇪','finland':'🇫🇮'};
-function flag(c){ return FLAGS[String(c||'').trim().toLowerCase()]||'🌍' }
+// Флаг страны. Раньше был короткий список вручную, и любая страна вне его —
+// например Грузия — показывалась глобусом. Теперь храним только пары
+// «название → код», а сам флаг собирается из кода: список дешёвый и покрывает
+// английские и русские написания, а также готовый код вроде «GE».
+var COUNTRY_CODES=('afghanistan:AF,albania:AL,algeria:DZ,andorra:AD,argentina:AR,armenia:AM,australia:AU,'
++'austria:AT,azerbaijan:AZ,bahrain:BH,bangladesh:BD,belarus:BY,belgium:BE,bolivia:BO,bosnia:BA,brazil:BR,bulgaria:BG,'
++'cambodia:KH,cameroon:CM,canada:CA,chile:CL,china:CN,colombia:CO,costa rica:CR,croatia:HR,cuba:CU,cyprus:CY,'
++'czechia:CZ,czech republic:CZ,denmark:DK,dominican republic:DO,ecuador:EC,egypt:EG,estonia:EE,ethiopia:ET,'
++'finland:FI,france:FR,georgia:GE,germany:DE,ghana:GH,greece:GR,hong kong:HK,hungary:HU,iceland:IS,india:IN,'
++'indonesia:ID,iran:IR,iraq:IQ,ireland:IE,israel:IL,italy:IT,japan:JP,jordan:JO,kazakhstan:KZ,kenya:KE,kuwait:KW,'
++'kyrgyzstan:KG,latvia:LV,lebanon:LB,libya:LY,lithuania:LT,luxembourg:LU,macau:MO,malaysia:MY,maldives:MV,malta:MT,'
++'mexico:MX,moldova:MD,monaco:MC,mongolia:MN,montenegro:ME,morocco:MA,myanmar:MM,nepal:NP,netherlands:NL,holland:NL,'
++'new zealand:NZ,nigeria:NG,north macedonia:MK,macedonia:MK,norway:NO,oman:OM,pakistan:PK,panama:PA,paraguay:PY,'
++'peru:PE,philippines:PH,poland:PL,portugal:PT,qatar:QA,romania:RO,russia:RU,russian federation:RU,saudi arabia:SA,'
++'senegal:SN,serbia:RS,singapore:SG,slovakia:SK,slovenia:SI,south africa:ZA,korea:KR,south korea:KR,'
++'republic of korea:KR,spain:ES,sri lanka:LK,sweden:SE,switzerland:CH,syria:SY,taiwan:TW,tajikistan:TJ,tanzania:TZ,'
++'thailand:TH,tunisia:TN,turkey:TR,turkiye:TR,turkmenistan:TM,uae:AE,united arab emirates:AE,uganda:UG,ukraine:UA,'
++'uk:GB,great britain:GB,united kingdom:GB,britain:GB,england:GB,scotland:GB,wales:GB,usa:US,us:US,'
++'united states:US,united states of america:US,america:US,uruguay:UY,uzbekistan:UZ,venezuela:VE,vietnam:VN,'
++'zimbabwe:ZW,'
++'австралия:AU,австрия:AT,азербайджан:AZ,англия:GB,аргентина:AR,армения:AM,беларусь:BY,белоруссия:BY,бельгия:BE,'
++'болгария:BG,бразилия:BR,великобритания:GB,венгрия:HU,вьетнам:VN,германия:DE,голландия:NL,греция:GR,грузия:GE,'
++'дания:DK,египет:EG,израиль:IL,индия:IN,индонезия:ID,ирландия:IE,испания:ES,италия:IT,казахстан:KZ,канада:CA,'
++'кипр:CY,киргизия:KG,китай:CN,колумбия:CO,корея:KR,латвия:LV,литва:LT,малайзия:MY,мексика:MX,молдова:MD,'
++'нидерланды:NL,новая зеландия:NZ,норвегия:NO,оаэ:AE,перу:PE,польша:PL,португалия:PT,россия:RU,румыния:RO,'
++'сербия:RS,сингапур:SG,сша:US,таджикистан:TJ,таиланд:TH,тайланд:TH,тайвань:TW,турция:TR,узбекистан:UZ,'
++'украина:UA,филиппины:PH,финляндия:FI,франция:FR,хорватия:HR,черногория:ME,чехия:CZ,чили:CL,швейцария:CH,'
++'швеция:SE,шотландия:GB,эстония:EE,юар:ZA,япония:JP').split(',').reduce(function(acc,pair){
+  var i=pair.lastIndexOf(':');
+  if(i>0)acc[pair.slice(0,i).trim()]=pair.slice(i+1).trim().toUpperCase();
+  return acc;
+},{});
+function flagOfCode(code){
+  var c=String(code||'').trim().toUpperCase();
+  if(!/^[A-Z]{2}$/.test(c))return '';
+  return String.fromCodePoint(0x1F1E6+c.charCodeAt(0)-65,0x1F1E6+c.charCodeAt(1)-65);
+}
+function flag(c){
+  var v=String(c||'').trim().toLowerCase();
+  if(!v)return '🌍';
+  var code=COUNTRY_CODES[v];
+  // Хвосты вроде «Russia (Moscow)» или «Thailand / Phuket» — берём первую часть.
+  if(!code){
+    var head=v.split(/[(\/,|–—]/)[0].trim();
+    if(head&&head!==v)code=COUNTRY_CODES[head];
+  }
+  return flagOfCode(code||v)||'🌍';
+}
 // Иконка достижения по его типу.
 function achIcon(a){
   var t=String((a&&(a.type||a.title))||'').toLowerCase();
@@ -1168,7 +1248,7 @@ function lastFinishedSeason(){
 function chLine(pl,sub,small){
   if(!pl||!pl.name)return '';
   return '<div class="chline'+(small?' small':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
-    +av(pl)+'<div><div class="nm2">'+esc(pl.name)+'</div>'
+    +avL(pl)+'<div><div class="nm2">'+esc(pl.name)+'</div>'
     +(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div><span></span></div>';
 }
 // Крупная карточка чемпиона: большая аватарка, под ней дивизион и титул, ниже —
@@ -1179,19 +1259,19 @@ function champCard(d){
   if(!d.champion)return '';
   var h='<div class="chbig">'
     +'<div onclick="openPlayerByName(\''+q(d.champion.name)+'\',\'home\')">'
-    +av(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div></div>'
+    +avL(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div></div>'
     +'<div class="sub">'+esc((d.title||divLabel(d.letter))+' '+X.champTag)+'</div>';
   if(d.final_score)h+='<div class="chsc">'+esc(d.final_score)+'</div>';
   if(d.runner_up&&d.runner_up.name){
     h+='<div class="chru" onclick="openPlayerByName(\''+q(d.runner_up.name)+'\',\'home\')">'
-      +av(d.runner_up)+'<span class="nm3">'+esc(d.runner_up.name)+'</span></div>';
+      +avL(d.runner_up)+'<span class="nm3">'+esc(d.runner_up.name)+'</span></div>';
   }
   return h+'</div>';
 }
 // Переход между дивизионами: аватарка покрупнее и путь стрелкой.
 function mvLine(pl,cls,arrow){
   return '<div class="mv '+cls+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
-    +av(pl)+'<div><div class="nm2">'+esc(pl.name)
+    +avL(pl)+'<div><div class="nm2">'+esc(pl.name)
     +(pl.wildcard?'<span class="wc">wildcard</span>':'')+'</div>'
     +'<div class="path">'+esc(divLabel(pl.from))+' <i>'+arrow+'</i> '+esc(divLabel(pl.to))+'</div></div></div>';
 }
@@ -1233,6 +1313,31 @@ function renderHome(){
 }
 
 // ---------------------------------------------------------------- гонка
+// Номер в гонке. У кого есть очки — своё место из таблицы. У кого очков ещё нет,
+// номер берём не из таблицы (там он случайный и шёл вниз), а просто продолжаем
+// нумерацию: 31, 32, 33… — сами игроки при этом идут по алфавиту.
+// Считаем по всему составу, а не по отфильтрованному списку, чтобы номера не
+// прыгали при поиске и переключении дивизионов.
+var raceNoIdx=null;
+function buildRaceNo(){
+  raceNoIdx={};
+  var all=(players||[]).filter(function(p){return p.points>0||p.position>0});
+  var ranked=all.filter(function(p){return (p.points||0)>0});
+  var rest=all.filter(function(p){return !((p.points||0)>0)});
+  var maxNo=0;
+  ranked.sort(function(a,b){return (b.points||0)-(a.points||0)||(a.position||9999)-(b.position||9999)});
+  ranked.forEach(function(p,i){
+    var n=Number(p.position)||(i+1);
+    raceNoIdx['#'+String(p.id)]=n;
+    if(n>maxNo)maxNo=n;
+  });
+  rest.sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''),'en',{sensitivity:'base'})});
+  rest.forEach(function(p){ maxNo++; raceNoIdx['#'+String(p.id)]=maxNo; });
+}
+function raceNo(p){
+  if(!raceNoIdx)buildRaceNo();
+  return raceNoIdx['#'+String(p&&p.id)]||Number(p&&p.position)||0;
+}
 function raceList(){
   var qq=rQuery.trim().toLowerCase();
   var list=players.filter(function(p){return p.points>0||p.position>0});
@@ -1247,7 +1352,7 @@ function raceList(){
     });
   }
   if(qq)list=list.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qq)>=0});
-  var key={pos:function(p){return -(p.position||9999)},name:function(p){return p.name||''},
+  var key={pos:function(p){return -(raceNo(p)||9999)},name:function(p){return p.name||''},
     m:function(p){return p.matches},w:function(p){return p.wins||0},
     wr:function(p){return pct(p)},points:function(p){return p.points}};
   var k=key[rSort]||key.points;
@@ -1255,8 +1360,11 @@ function raceList(){
     var x=k(a),y=k(b),r;
     if(typeof x==='string')r=String(y).localeCompare(String(x),'en');
     else r=x-y;
-    if(!r)r=(a.position||9999)-(b.position||9999);
-    return rDesc?-r:r;
+    if(r)return rDesc?-r:r;
+    // При равенстве порядок всегда один и тот же — по номеру в гонке. Раньше
+    // он переворачивался вместе с основной сортировкой, и все безрейтинговые
+    // игроки выстраивались задом наперёд.
+    return (raceNo(a)||9999)-(raceNo(b)||9999);
   });
 }
 var RULES_DIV = {
@@ -1378,7 +1486,7 @@ function renderRace(){
   h+=list.length?list.map(function(p){
     var w=pct(p);
     return '<div class="trw'+(p.position&&p.position<=3?' top':'')+'" onclick="openPlayer(\''+q(p.id)+'\',\'race\')">'
-      +'<span class="p">'+(p.position||'—')+'</span>'+av(p)
+      +'<span class="p">'+(raceNo(p)||'—')+'</span>'+av(p)
       +'<span class="n"><div class="nm">'+esc(p.name)+'</div><div style="margin-top:3px">'+divChip(p.division)+'</div></span>'
       +'<span>'+p.matches+'</span>'
       +'<span>'+(p.wins||0)+'</span>'
@@ -1483,7 +1591,7 @@ function achNote(p){
 function playerRow(p){
   var w=pct(p);
   return '<div class="pr" onclick="openPlayer(\''+q(p.id)+'\',\'players\')"><div class="top">'
-    +'<div class="ph">'+av(p)+'<div class="rankb">#'+(p.position||'—')+'</div>'+achBadges(p)+'</div>'
+    +'<div class="ph">'+av(p)+'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p)+'</div>'
     +'<div><div class="nm">'+esc(p.name)+'</div>'
     +'<div class="rw">'+divChip(p.division)+statusBadge(p)+'</div>'
     +'<div class="meta">'+(p.ntrp?'<span>'+esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b></span>':'')
@@ -1501,7 +1609,7 @@ function playerRow(p){
 function playerTile(p){
   var w=pct(p);
   return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'players\')">'+av(p)
-    +'<div class="rankb">#'+(p.position||'—')+'</div>'+achBadges(p,'ach2')
+    +'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p,'ach2')
     +'<div class="bd"><div class="nm">'+esc(p.name)+'</div>'
     +'<div class="rw">'+divChip(p.division)+'</div>'
     +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
@@ -1553,7 +1661,7 @@ function renderDiv(){
   var d=divData,po=d.playoff||{},h=chips;
   if(po.champion){
     h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in">'
-      +'<div class="cl">'+esc(X.champion)+'</div>'+av(po.champion)
+      +'<div class="cl">'+esc(X.champion)+'</div>'+avL(po.champion)
       +'<div class="cn">'+esc(po.champion.name)+'</div>'
       +'<div class="cd">'+esc(divLabel(d.division))+(divSeason?' · Season '+esc(divSeason):'')+'</div></div></div>';
   }
@@ -1597,7 +1705,7 @@ function standingsBlock(d,title){
       var promo=p.place<=2?' promo':'';
       return '<div class="drow '+zone+promo+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
         +'<span class="p">'+p.place+'</span>'
-        +'<span class="n">'+av(p)+'<em>'+esc(p.name)+'</em></span>'
+        +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em></span>'
         +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
         +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
     }).join('')+'</div>'
@@ -1613,7 +1721,7 @@ function poBox(title,m,isFinal){
     var win=m.winner_id&&String(m.winner_id)===String(pl.id);
     var sc=m.score||'';
     return '<div class="sl'+(win?' win':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'div\')">'
-      +av(pl)+'<span class="nm2">'+esc(shortName(pl.name))+'</span><b>'+esc(win?sc:'')+'</b></div>';
+      +avL(pl)+'<span class="nm2">'+esc(shortName(pl.name))+'</span><b>'+esc(win?sc:'')+'</b></div>';
   };
   return '<div class="mbox'+(isFinal?' fin':'')+'"><div class="mtitle">'+esc(title)+'</div>'
     +side(m.first)+side(m.second)+'</div>';
@@ -1870,7 +1978,7 @@ function renderPlayer(p){
     +'<h2>'+esc(p.name)+'</h2>'
     +'<div class="row"><span onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')">'
       +divChip(p.division, p.division_position)+'</span>'
-      +(p.position?'<span class="badge g">'+esc(X.tRace)+' #'+p.position+'</span>':'')
+      +(raceNo(p)?'<span class="badge g">'+esc(X.tRace)+' #'+raceNo(p)+'</span>':'')
       +statusBadge(p)+'</div>'
     +(p.form&&p.form.length?'<div class="fline"><span class="lb">Form</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
@@ -1972,6 +2080,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
+    photoIdx=null;raceNoIdx=null;
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     seasons=j.seasons||[];
     buildTabs();

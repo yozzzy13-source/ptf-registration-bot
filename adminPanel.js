@@ -328,13 +328,16 @@ export function registerAdminRoutes(app) {
         ? await updateEvent(body.event_id, {
             title_ru:body.title_ru, title_en:body.title_en,
             description_ru:body.description_ru, description_en:body.description_en,
-            date:body.date, time:body.time, place:body.place,
+            date:body.date, time:body.time, place:body.place, place_url:body.place_url || '',
             price_thb:body.price_thb ?? '', guest_price_thb:body.guest_price_thb ?? '',
             capacity:body.capacity ?? '', signup_deadline:body.signup_deadline || '',
             payment_required: body.payment_required ? 'TRUE' : 'FALSE',
             guests_allowed: body.guests_allowed ? 'TRUE' : 'FALSE',
             max_guests: body.max_guests ?? '', refund_hours: body.refund_hours ?? '',
-            audience: body.audience || 'all'
+            audience: body.audience || 'all',
+            audience_division: String(body.audience_division || '').toUpperCase(),
+            invite_only: body.invite_only ? 'TRUE' : 'FALSE',
+            invited_ids: Array.isArray(body.invited_ids) ? body.invited_ids.join(',') : String(body.invited_ids || '')
           })
         : await createEvent(body, auth.user.id);
       if (!event) return res.status(404).json({ ok:false, error:'Событие не найдено' });

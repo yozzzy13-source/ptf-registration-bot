@@ -73,21 +73,34 @@
       <div><label>Название RU</label><input id="evTitleRu" placeholder="Вечеринка PTF"/></div>
       <div><label>Название EN</label><input id="evTitleEn" placeholder="PTF Party"/></div>
       <div><label>Место</label><input id="evPlace" placeholder="The Peak Racket Park"/></div>
-      <div><label>Дата (дд.мм.гггг)</label><input id="evDate" placeholder="20.09.2026"/></div>
-      <div><label>Время</label><input id="evTime" placeholder="18:00"/></div>
-      <div><label>Запись до</label><input id="evDeadline" placeholder="19.09.2026"/></div>
+      <div><label>Ссылка на локацию</label><input id="evPlaceUrl" placeholder="https://maps.app.goo.gl/…"/></div>
+      <div><label>Дата</label><select id="evDate"></select></div>
+      <div><label>Время</label><select id="evTime"></select></div>
+      <div><label>Запись до</label><select id="evDeadline"></select></div>
       <div><label>Цена, ฿</label><input id="evPrice" type="number" placeholder="500"/></div>
       <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = та же"/></div>
       <div><label>Вместимость</label><input id="evCapacity" type="number" placeholder="16"/></div>
       <div><label>Максимум гостей</label><input id="evMaxGuests" type="number" placeholder="1"/></div>
       <div><label>Возврат, часов до</label><input id="evRefund" type="number" placeholder="12"/></div>
-      <div><label>Кому</label><select id="evAudience"><option value="all">Всем в боте</option><option value="active">Только активным игрокам</option></select></div>
+      <div><label>Кому</label><select id="evAudience" onchange="evAudienceChanged()">
+        <option value="all">Всем в боте</option>
+        <option value="active">Только активным игрокам</option>
+        <option value="personal">Лично выбранным</option>
+      </select></div>
+      <div><label>Дивизион</label><select id="evDivision"><option value="">Любой</option></select></div>
+    </div>
+    <div id="evPickWrap" class="hidden" style="margin-top:6px">
+      <label>Кого приглашаем</label>
+      <div class="pick"><input id="evPick" placeholder="начни вводить имя" oninput="evPickInput(this.value)" onkeydown="evPickKey(event)" autocomplete="off"/><div id="evPickSug" class="sug hidden"></div></div>
+      <div id="evInvited" class="rcp" style="margin-top:6px"></div>
+      <div class="muted" id="evInvitedCount">Никого не выбрано</div>
     </div>
     <label>Описание RU</label><textarea id="evDescRu" placeholder="Что за событие, что взять с собой"></textarea>
     <label>Описание EN</label><textarea id="evDescEn"></textarea>
     <div class="actions" style="margin-top:8px">
       <label><input type="checkbox" id="evPaid" checked> нужна оплата</label>
       <label><input type="checkbox" id="evGuests"> можно с собой</label>
+      <label><input type="checkbox" id="evInviteOnly"> только по приглашению</label>
     </div>
     <div class="actions"><button class="btn" onclick="saveEvent()">Сохранить</button><button class="btn secondary" onclick="previewEvent()">Предпросмотр в боте</button><button class="btn secondary" onclick="newEvent()">Новое событие</button></div>
     <div id="evResult" class="muted"></div>
@@ -124,6 +137,13 @@ async function reload(){try{status('Loading...');const j=await api('/api/admin/b
   const evNames=[...new Set([...(j.events||[]).map(e=>e.event_name||e.name||'').filter(Boolean),
     ...contacts.map(c=>c.last_application_event||'').filter(Boolean)])].sort();
   optionize('fEvent',evNames);
+  // Дивизионы для фильтра рассылки события — тот же список, что и в фильтрах игроков.
+  const dv=$('evDivision');
+  if(dv)dv.innerHTML='<option value="">Любой</option>'+(j.divisions||[]).map(d=>{
+    const k=String(d).replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    return `<option value="${esc(k)}">${esc(d)}</option>`;
+  }).join('');
+  initEventPickers();evRenderInvited();evAudienceChanged();
   renderCodes(j.link_codes||[]);renderTable();status('Ready')}catch(e){status(e.message,true)}}
 function renderCodes(list){const html=list.map(c=>`<span onclick="insertCode('${esc(c.code)}')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('');$('codeChips').innerHTML=html;
   const d=$('directCodeChips');if(d)d.innerHTML=list.map(c=>`<span onclick="insertCode('${esc(c.code)}','directText')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('')}
@@ -144,18 +164,116 @@ async function toggleLogs(id){openId=openId===id?'':id;renderHistory();if(openId
 // --- события -----------------------------------------------------------------
 // Карточка живёт как черновик, пока организатор не подтвердит её в боте.
 let evEditing='';
+// Дата и время выбираются из списков: руками получалось «13.092026», и такая
+// карточка уходила игрокам как есть.
+const EV_DAYS=90;
+function pad2(n){return String(n).padStart(2,'0')}
+function dmy(d){return pad2(d.getDate())+'.'+pad2(d.getMonth()+1)+'.'+d.getFullYear()}
+const EV_WD=['вс','пн','вт','ср','чт','пт','сб'];
+function evDateOptions(){
+  const out=['<option value="">— выбери дату —</option>'];
+  const now=new Date();now.setHours(12,0,0,0);
+  for(let i=0;i<EV_DAYS;i++){
+    const d=new Date(now.getTime()+i*86400000);const v=dmy(d);
+    out.push(`<option value="${v}">${v} · ${EV_WD[d.getDay()]}</option>`);
+  }
+  return out.join('');
+}
+function evTimeOptions(){
+  const out=['<option value="">— выбери время —</option>'];
+  for(let h=6;h<=22;h++)for(const m of ['00','30']){
+    if(h===22&&m==='30')continue;
+    const v=pad2(h)+':'+m;out.push(`<option value="${v}">${v}</option>`);
+  }
+  return out.join('');
+}
+function shiftDate(v,days){
+  const m=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(v||''));
+  if(!m)return '';
+  const d=new Date(Number(m[3]),Number(m[2])-1,Number(m[1]),12,0,0);
+  return dmy(new Date(d.getTime()+days*86400000));
+}
+// Значение может быть не из списка (старая карточка) — добавляем его отдельным
+// пунктом, иначе правка молча стёрла бы дату.
+function evSetSelect(id,value){
+  const el=$(id);const v=String(value||'').trim();
+  if(v&&![...el.options].some(o=>o.value===v))
+    el.insertAdjacentHTML('beforeend',`<option value="${esc(v)}">${esc(v)}</option>`);
+  el.value=v;
+}
+function initEventPickers(){
+  $('evDate').innerHTML=evDateOptions();
+  $('evDeadline').innerHTML=evDateOptions();
+  $('evTime').innerHTML=evTimeOptions();
+  // «Запись до» по умолчанию — за день до события.
+  $('evDate').onchange=()=>{ if(!$('evDeadline').value)evSetSelect('evDeadline',shiftDate($('evDate').value,-1)) };
+}
+
+// --- кого приглашаем ---------------------------------------------------------
+let evInvited=new Map(),evPickIdx=-1,evPickRows=[];
+function evAudienceChanged(){
+  $('evPickWrap').classList.toggle('hidden',$('evAudience').value!=='personal');
+}
+function evRenderInvited(){
+  const box=$('evInvited');
+  const list=[...evInvited.values()];
+  $('evInvitedCount').textContent=list.length?`Выбрано: ${list.length}`:'Никого не выбрано';
+  box.innerHTML=list.length?list.map(c=>`<label class="r on"><input type="checkbox" checked onchange="evInviteOff('${esc(c.telegram_id)}')"><span><span class="nm">${esc(c.name||c.telegram_id)}</span> <span class="sub">${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}</span></span></label>`).join(''):'';
+}
+function evInviteOff(id){evInvited.delete(String(id));evRenderInvited()}
+function evPickMatches(q){
+  const s=String(q||'').trim().toLowerCase().replace(/^@/,'');
+  if(!s)return [];
+  return (contacts||[]).filter(c=>!evInvited.has(String(c.telegram_id))&&(
+    String(c.name||'').toLowerCase().includes(s)||
+    String(c.telegram_username||'').toLowerCase().includes(s)||
+    String(c.telegram_id||'').includes(s))).slice(0,8);
+}
+function evPickInput(q){
+  evPickRows=evPickMatches(q);evPickIdx=-1;
+  const box=$('evPickSug');
+  if(!evPickRows.length){box.classList.add('hidden');box.innerHTML='';return}
+  box.innerHTML=evPickRows.map((c,i)=>`<div onclick="evPickChoose(${i})"><b>${esc(c.name||'—')}</b> <span class="sub">${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}${c.division?' · '+esc(c.division):''}</span></div>`).join('');
+  box.classList.remove('hidden');
+}
+function evPickChoose(i){
+  const c=evPickRows[i];if(!c)return;
+  evInvited.set(String(c.telegram_id),c);
+  $('evPick').value='';$('evPickSug').classList.add('hidden');$('evPickSug').innerHTML='';
+  evRenderInvited();
+}
+function evPickKey(e){
+  const box=$('evPickSug');if(box.classList.contains('hidden'))return;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    evPickIdx=Math.max(0,Math.min(evPickRows.length-1,evPickIdx+(e.key==='ArrowDown'?1:-1)));
+    [...box.children].forEach((el,i)=>el.classList.toggle('on',i===evPickIdx));
+  } else if(e.key==='Enter'){ e.preventDefault();evPickChoose(evPickIdx<0?0:evPickIdx); }
+  else if(e.key==='Escape'){ box.classList.add('hidden'); }
+}
+
 function evForm(){return{
   event_id:evEditing,
   title_ru:$('evTitleRu').value.trim(),title_en:$('evTitleEn').value.trim(),
   description_ru:$('evDescRu').value.trim(),description_en:$('evDescEn').value.trim(),
-  date:$('evDate').value.trim(),time:$('evTime').value.trim(),place:$('evPlace').value.trim(),
+  date:$('evDate').value.trim(),time:$('evTime').value.trim(),
+  place:$('evPlace').value.trim(),place_url:$('evPlaceUrl').value.trim(),
   price_thb:$('evPrice').value||'',guest_price_thb:$('evGuestPrice').value||'',
   capacity:$('evCapacity').value||'',signup_deadline:$('evDeadline').value.trim(),
   payment_required:$('evPaid').checked,guests_allowed:$('evGuests').checked,
   max_guests:$('evMaxGuests').value||'',refund_hours:$('evRefund').value||'',
-  audience:$('evAudience').value
+  audience:$('evAudience').value,
+  audience_division:$('evDivision').value,
+  invite_only:$('evInviteOnly').checked,
+  invited_ids:[...evInvited.keys()]
 }}
-function newEvent(){evEditing='';['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evPlace','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');$('evResult').textContent='Новая карточка'}
+function newEvent(){
+  evEditing='';
+  ['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evPlace','evPlaceUrl','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');
+  $('evAudience').value='all';$('evDivision').value='';$('evInviteOnly').checked=false;
+  evInvited=new Map();evRenderInvited();evAudienceChanged();
+  $('evResult').textContent='Новая карточка';
+}
 async function saveEvent(){
   try{const j=await api('/api/admin/event-save',{event:evForm()});evEditing=j.event.event_id;
     $('evResult').innerHTML='<span class="ok">Сохранено: '+j.event.event_id+'</span>';loadEvents()}
@@ -172,12 +290,21 @@ function editEvent(id){
   evEditing=id;
   $('evTitleRu').value=e.title_ru||'';$('evTitleEn').value=e.title_en||'';
   $('evDescRu').value=e.description_ru||'';$('evDescEn').value=e.description_en||'';
-  $('evDate').value=e.date||'';$('evTime').value=e.time||'';$('evPlace').value=e.place||'';
+  evSetSelect('evDate',e.date||'');evSetSelect('evTime',e.time||'');
+  $('evPlace').value=e.place||'';$('evPlaceUrl').value=e.place_url||'';
   $('evPrice').value=e.price_thb||'';$('evGuestPrice').value=e.guest_price_thb==null?'':e.guest_price_thb;
-  $('evCapacity').value=e.capacity||'';$('evDeadline').value=e.signup_deadline||'';
+  $('evCapacity').value=e.capacity||'';evSetSelect('evDeadline',e.signup_deadline||'');
   $('evMaxGuests').value=e.max_guests||'';$('evRefund').value=e.refund_hours||'';
   $('evPaid').checked=!!e.payment_required;$('evGuests').checked=!!e.guests_allowed;
   $('evAudience').value=e.audience||'all';
+  $('evDivision').value=e.audience_division||'';
+  $('evInviteOnly').checked=!!e.invite_only;
+  evInvited=new Map();
+  (e.invited_ids||[]).forEach(id=>{
+    const c=(contacts||[]).find(x=>String(x.telegram_id)===String(id));
+    evInvited.set(String(id),c||{telegram_id:String(id),name:String(id)});
+  });
+  evRenderInvited();evAudienceChanged();
   $('evResult').textContent='Правим: '+(e.title_ru||e.event_id);
   window.scrollTo(0,0);
 }
