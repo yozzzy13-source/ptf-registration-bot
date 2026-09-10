@@ -257,7 +257,9 @@ export async function allBalances() {
     if (safe(r.name)) cur.name = safe(r.name);
     byId.set(id, cur);
   }
-  return [...byId.values()].filter(b => b.balance !== 0).sort((a, b) => b.balance - a.balance);
+  // Отдаём всех, у кого было хоть одно движение, — обнулившийся депозит это
+  // тоже история, и организатору важно видеть, что человек уже платил.
+  return [...byId.values()].sort((a, b) => b.balance - a.balance || a.name.localeCompare(b.name, 'ru'));
 }
 
 // История операций игрока — то, что он видит в кассе. Свежие сверху.

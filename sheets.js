@@ -1436,12 +1436,18 @@ export async function playerGroup(telegramId, applicant = null) {
 // умолчанию, то есть всё. «Лига» (главная) есть у всех всегда: без неё человек
 // открывает приложение в пустоту.
 export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'sched', 'matches', 'events', 'about'];
-export const ALWAYS_TABS = ['home'];
+// Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.
+export const ALWAYS_TABS = [];
 const tabsKey = (group) => `tabs_${group}`;
 
+// Пустая строка = «не настраивали» и означает полный набор. Чтобы можно было
+// оставить группу совсем без вкладок, пустой выбор пишем словом none.
+const NONE = 'none';
+
 export async function getGroupTabs(group) {
-  const raw = await getSetting(tabsKey(group)).catch(() => '');
-  const picked = String(raw || '').split(',').map(s => s.trim()).filter(s => MINIAPP_TABS.includes(s));
+  const raw = String(await getSetting(tabsKey(group)).catch(() => '')).trim();
+  if (raw === NONE) return [];
+  const picked = raw.split(',').map(s => s.trim()).filter(s => MINIAPP_TABS.includes(s));
   const out = picked.length ? picked : MINIAPP_TABS.slice();
   for (const t of ALWAYS_TABS) if (!out.includes(t)) out.unshift(t);
   return out;
@@ -1451,7 +1457,7 @@ export async function setGroupTabs(group, tabs = []) {
   if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
   const picked = (Array.isArray(tabs) ? tabs : []).map(s => String(s).trim()).filter(s => MINIAPP_TABS.includes(s));
   for (const t of ALWAYS_TABS) if (!picked.includes(t)) picked.unshift(t);
-  await setSetting(tabsKey(group), picked.join(','), 'Вкладки мини-приложения для группы');
+  await setSetting(tabsKey(group), picked.length ? picked.join(',') : NONE, 'Вкладки мини-приложения для группы');
   return picked;
 }
 
@@ -1459,6 +1465,39 @@ export async function allGroupTabs() {
   const out = {};
   for (const g of PLAYER_GROUPS) out[g] = await getGroupTabs(g);
   return out;
+}
+
+// --- кнопки под сообщением бота ---------------------------------------------
+//
+// То самое стартовое меню, которое человек видит в переписке с ботом. Тексты и
+// адреса кнопок не меняются никогда — настраивается только то, кто их видит.
+export const BOT_MENU_BUTTONS = ['join_event', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
+const buttonsKey = (group) => `btns_${group}`;
+
+export async function getGroupButtons(group) {
+  const raw = String(await getSetting(buttonsKey(group)).catch(() => '')).trim();
+  if (raw === NONE) return [];
+  const picked = raw.split(',').map(s => s.trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
+  return picked.length ? picked : BOT_MENU_BUTTONS.slice();
+}
+
+export async function setGroupButtons(group, list = []) {
+  if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
+  const picked = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
+  await setSetting(buttonsKey(group), picked.length ? picked.join(',') : NONE, 'Кнопки меню бота для группы');
+  return picked;
+}
+
+export async function allGroupButtons() {
+  const out = {};
+  for (const g of PLAYER_GROUPS) out[g] = await getGroupButtons(g);
+  return out;
+}
+
+// Что показывать конкретному человеку под сообщением бота.
+export async function buttonsFor(telegramId, applicant = null) {
+  const group = await playerGroup(telegramId, applicant).catch(() => 'guest');
+  return getGroupButtons(group).catch(() => BOT_MENU_BUTTONS.slice());
 }
 
 // Доступ к матчам — только у активных игроков текущего состава.

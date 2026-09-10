@@ -1,6 +1,6 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST } from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
@@ -70,9 +70,18 @@ function keyboardFor(chatId, lang, kind, userId) {
 // у него внизу постоянное меню, и два одинаковых списка на экране только мешают.
 // Кнопки-действия (оплатить, записаться) это правило не затрагивает — они живут
 // в своих клавиатурах и остаются на месте.
+// Какие кнопки видит этот человек. Набор задаётся в админке для каждой группы:
+// активные, лист ожидания, заявка без оплаты, все остальные. Не смогли узнать —
+// показываем всё, как было раньше.
+async function allowedButtons(telegramId) {
+  try { return await buttonsFor(telegramId); } catch (e) { console.error('menu buttons failed:', e.message); return null; }
+}
 async function menuMarkup(lang, telegramId, extra = {}) {
   const active = await isActiveLeaguePlayer({ id: telegramId, telegram_id: telegramId }).catch(() => false);
-  return active ? { ...extra } : { ...extra, reply_markup: mainKeyboard(lang) };
+  if (active) return { ...extra };
+  const allow = await allowedButtons(telegramId);
+  const kb = mainKeyboard(lang, { allow });
+  return kb.inline_keyboard.length ? { ...extra, reply_markup: kb } : { ...extra };
 }
 
 async function playerDigest(userId, lang) {
@@ -136,7 +145,11 @@ async function sendMain(chatId, lang, from=null) {
   // У активного игрока внизу есть постоянное меню, и второй такой же список
   // кнопок под сообщением только загромождает экран — показываем его только тем,
   // кто ещё не в лиге и для кого это единственная навигация.
-  const opts = st.active && isPrivateChat ? {} : { reply_markup: mainKeyboard(l, { matches: st.active, noWebApp }) };
+  let opts = {};
+  if (!(st.active && isPrivateChat)) {
+    const kb = mainKeyboard(l, { matches: st.active, noWebApp, allow: await allowedButtons(userId) });
+    if (kb.inline_keyboard.length) opts = { reply_markup: kb };
+  }
   await sendMessage(chatId, body, opts);
   // Постоянное меню ставим отдельным коротким сообщением — двух reply_markup
   // в одном сообщении Telegram не принимает.
@@ -223,7 +236,7 @@ async function sendMatchShortcut(chatId, lang, from, tab) {
     return sendMessage(chatId, l === 'ru'
       ? '🎾 Матчи доступны игрокам действующего состава лиги. Если ты уже подал заявку — дождись распределения по дивизионам.'
       : '🎾 Matches are for players in the current league roster. If you have applied, wait until divisions are set.',
-      { reply_markup: mainKeyboard(l) });
+      await menuMarkup(l, from?.id ?? chatId));
   }
   const titles = {
     open: l === 'ru' ? '🎾 Матчи и вызовы' : '🎾 Matches and challenges',
@@ -313,7 +326,8 @@ function adminHelpText() {
     '• На чеке за лигу три решения: <b>Approve</b> — участие подтверждено, <b>⏳ Оплата принята → Waitlist</b> — деньги приняли, место ждём, <b>Reject</b>.',
     '• Событие правится и удаляется в панели: удаление спрашивает, вернуть деньги на балансы или ты вернёшь переводом сам.',
     '• Возвраты переводом копятся во вкладке «Возвраты» — там же отмечаешь «отправил».',
-    '• Вкладка «Кнопки» — какие разделы мини-приложения видит каждая группа игроков.',
+    '• Касса: игрок выбирается из списка, пополнение/списание/возврат — кнопками, комментарий обязателен.',
+    '• Вкладка «Кнопки» — что видит каждая группа игроков: и вкладки мини-приложения, и кнопки под сообщением бота.',
     '', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
     '<i>Ответ игроку: Reply под его сообщением в топике.</i>');
   return lines.join('\n');

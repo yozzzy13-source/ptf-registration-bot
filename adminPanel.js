@@ -441,8 +441,11 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.query.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { allGroupTabs, MINIAPP_TABS, ALWAYS_TABS, PLAYER_GROUPS } = await import('./sheets.js');
-      res.json({ ok:true, tabs: await allGroupTabs(), all: MINIAPP_TABS, always: ALWAYS_TABS, groups: PLAYER_GROUPS });
+      const { allGroupTabs, allGroupButtons, MINIAPP_TABS, BOT_MENU_BUTTONS, ALWAYS_TABS, PLAYER_GROUPS } = await import('./sheets.js');
+      res.json({ ok:true,
+        tabs: await allGroupTabs(), all: MINIAPP_TABS,
+        buttons: await allGroupButtons(), allButtons: BOT_MENU_BUTTONS,
+        always: ALWAYS_TABS, groups: PLAYER_GROUPS });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -450,10 +453,33 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { setGroupTabs, allGroupTabs } = await import('./sheets.js');
-      const map = req.body.tabs || {};
-      for (const [group, list] of Object.entries(map)) await setGroupTabs(group, list);
-      res.json({ ok:true, tabs: await allGroupTabs() });
+      const { setGroupTabs, setGroupButtons, allGroupTabs, allGroupButtons } = await import('./sheets.js');
+      for (const [group, list] of Object.entries(req.body.tabs || {})) await setGroupTabs(group, list);
+      for (const [group, list] of Object.entries(req.body.buttons || {})) await setGroupButtons(group, list);
+      res.json({ ok:true, tabs: await allGroupTabs(), buttons: await allGroupButtons() });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Возврат переводом из кассы: с депозита списываем, а долг кладём в тот же
+  // список «ожидают ручного возврата», чтобы перевод не потерялся.
+  app.post('/api/admin/balance-refund', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { addTransaction, addRefund, getBalance } = await import('./events.js');
+      const amount = Math.abs(Number(req.body.amount || 0));
+      const telegramId = String(req.body.telegram_id || '');
+      const name = String(req.body.name || '');
+      const reason = String(req.body.comment || '').trim();
+      if (!telegramId || !amount) return res.status(400).json({ ok:false, error:'Нужны игрок и сумма' });
+      if (!reason) return res.status(400).json({ ok:false, error:'Нужен комментарий' });
+      const balance = await getBalance(telegramId).catch(() => 0);
+      if (balance < amount) return res.status(400).json({ ok:false, error:`На депозите ${balance} ฿, а возвращаем ${amount} ฿` });
+      const left = await addTransaction({ telegramId, name, type:'возврат переводом', amount: -amount, description: reason });
+      await addRefund({ telegramId, name, amount, reason, eventTitle: reason });
+      await sendMessage(telegramId,
+        `↩️ Возврат <b>${amount} ฿</b> — отправлю переводом (${escapeHtml(reason)}). Остаток на депозите: <b>${left} ฿</b>`).catch(() => {});
+      res.json({ ok:true, balance:left });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

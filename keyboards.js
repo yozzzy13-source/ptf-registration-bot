@@ -17,19 +17,40 @@ export function languageKeyboard() { return inlineKeyboard([[{text:'🇷🇺 Р�
 // Кнопки web_app Telegram принимает только в личке. В группе такая клавиатура
 // возвращает BUTTON_TYPE_INVALID и сообщение не уходит вовсе, поэтому там же
 // показываем обычные ссылки на бота.
+// opts.allow — список кодов кнопок, которые видит эта группа игроков. Не задан —
+// показываем всё, как было. Сами кнопки и их адреса не меняются: настраивается
+// только видимость.
 export function mainKeyboard(lang, opts={}) {
   const app = opts.noWebApp
     ? (text, path) => urlButton(text, `https://t.me/${(opts.botUsername || 'PTF1_BOT').replace(/^@/,'')}`)
     : webAppButton;
-  return inlineKeyboard([
-  [app(t(lang,'join_event'),'/apply?mode=event')],
-  ...(opts.matches ? [[app(t(lang,'matches'),'/match')]] : []),
-  [app(t(lang,'participants'),'/participants')],
-  [app(t(lang,'league'),'/league')],
-  [{text:t(lang,'about'),callback_data:'text:about_ptf'},{text:t(lang,'how'),callback_data:'text:how_league_works'}],
-  [{text:t(lang,'yearly'),callback_data:'text:yearly_race'},{text:t(lang,'pass'),callback_data:'payment_entry'}],
-  [{text:t(lang,'contact'),callback_data:'contact'}]
-]); }
+  const allow = Array.isArray(opts.allow) ? new Set(opts.allow) : null;
+  const on = (code) => !allow || allow.has(code);
+  const btn = {
+    join_event: () => app(t(lang,'join_event'),'/apply?mode=event'),
+    matches: () => app(t(lang,'matches'),'/match'),
+    participants: () => app(t(lang,'participants'),'/participants'),
+    league: () => app(t(lang,'league'),'/league'),
+    about: () => ({text:t(lang,'about'),callback_data:'text:about_ptf'}),
+    how: () => ({text:t(lang,'how'),callback_data:'text:how_league_works'}),
+    yearly: () => ({text:t(lang,'yearly'),callback_data:'text:yearly_race'}),
+    pass: () => ({text:t(lang,'pass'),callback_data:'payment_entry'}),
+    contact: () => ({text:t(lang,'contact'),callback_data:'contact'})
+  };
+  // Парные ряды собираем из того, что осталось: если одна кнопка выключена,
+  // вторая занимает всю строку, а не висит половинкой.
+  const pair = (a, b) => [a, b].filter(code => on(code)).map(code => btn[code]());
+  const rows = [
+    on('join_event') ? [btn.join_event()] : null,
+    (opts.matches && on('matches')) ? [btn.matches()] : null,
+    on('participants') ? [btn.participants()] : null,
+    on('league') ? [btn.league()] : null,
+    pair('about', 'how'),
+    pair('yearly', 'pass'),
+    on('contact') ? [btn.contact()] : null
+  ].filter(r => r && r.length);
+  return inlineKeyboard(rows);
+}
 export function textKeyboard(lang,key,opts={}) { const app=opts.noWebApp?((text)=>urlButton(text,`https://t.me/${(opts.botUsername||'PTF1_BOT').replace(/^@/,'')}`)):webAppButton; const rows=[[app(t(lang,'join_event'),'/apply?mode=event')],[app(t(lang,'participants'),'/participants')]]; if(key!=='how_league_works') rows.push([{text:t(lang,'how'),callback_data:'text:how_league_works'}]); if(key!=='yearly_race') rows.push([{text:t(lang,'yearly'),callback_data:'text:yearly_race'}]); rows.push([app(t(lang,'league'),'/league')]); rows.push([{text:t(lang,'contact'),callback_data:'contact'},{text:t(lang,'back'),callback_data:'main'}]); return inlineKeyboard(rows); }
 export function contactOpenKeyboard(lang) { return inlineKeyboard([[{text:t(lang,'main_menu'),callback_data:'main'},{text:t(lang,'close_chat'),callback_data:'close_contact'}]]); }
 export function paymentKeyboard(lang, applicationId) { return inlineKeyboard([[{text:t(lang,'bank'),callback_data:`pay:${applicationId}:thai_bank`}],[{text:t(lang,'crypto'),callback_data:`crypto:${applicationId}`}],[{text:t(lang,'pay_later'),callback_data:`paylater:${applicationId}`}],[{text:t(lang,'call_admin'),callback_data:'contact'}]]); }
