@@ -30,7 +30,7 @@ export const REGISTRY_HEADERS = [
   // Кому уходит карточка: all — всем в боте, active — только активным игрокам,
   // personal — поимённо тем, кто перечислен в invited_ids. Плюс необязательный
   // фильтр по дивизиону. invite_only прячет событие от всех, кроме приглашённых.
-  'audience', 'audience_division', 'invite_only', 'invited_ids',
+  'audience', 'audience_division', 'invite_only', 'invited_ids', 'remind_unregistered',
   'created_at', 'published_at', 'created_by'
 ];
 export const SIGNUP_HEADERS = [
@@ -88,6 +88,8 @@ function mapEvent(r) {
     audience: safe(r.audience).toLowerCase() || 'all',
     audience_division: safe(r.audience_division).toUpperCase(),
     invite_only: yes(r.invite_only),
+    // Пусто — напоминаем: так ведут себя все прежние карточки.
+    remind_unregistered: safe(r.remind_unregistered) === '' ? true : yes(r.remind_unregistered),
     // Список приглашённых храним строкой через запятую — отдельный лист ради
     // десятка id заводить незачем.
     invited_ids: safe(r.invited_ids).split(/[,;\s]+/).map(x => x.trim()).filter(Boolean),
@@ -127,6 +129,7 @@ export async function createEvent(data, createdBy = '') {
     audience: safe(data.audience) || 'all',
     audience_division: safe(data.audience_division).toUpperCase(),
     invite_only: data.invite_only ? 'TRUE' : 'FALSE',
+    remind_unregistered: data.remind_unregistered === false ? 'FALSE' : 'TRUE',
     invited_ids: Array.isArray(data.invited_ids) ? data.invited_ids.join(',') : safe(data.invited_ids),
     created_at: nowISO(), published_at: '', created_by: String(createdBy || '')
   };
@@ -245,7 +248,8 @@ export async function allBalances() {
   return [...byId.values()].filter(b => b.balance !== 0).sort((a, b) => b.balance - a.balance);
 }
 
-export async function transactionsOf(telegramId, limit = 20) {
+// История операций игрока — то, что он видит в кассе. Свежие сверху.
+export async function transactionsOf(telegramId, limit = 50) {
   await ensureEventSheets();
   const { rows } = await getRows(EVENT_SHEETS.transactions, { useCache: false });
   return rows
@@ -280,12 +284,23 @@ async function refreshBalanceRow(telegramId, name, balance) {
 // --- отмена ----------------------------------------------------------------
 
 // Сколько часов осталось до начала. Дата в карточке — «14.09.2026», время «18:00».
-export function hoursUntil(event, now = Date.now()) {
+// Дата и время события — всегда по Пхукету. Раньше здесь брался часовой пояс
+// сервера (на Railway это UTC), и до события «оставалось» на 7 часов больше:
+// поздняя отмена засчитывалась как ранняя, и деньги возвращались зря.
+// В Таиланде нет перехода на летнее время, поэтому смещение постоянное.
+const PHUKET_OFFSET_H = 7;
+
+export function eventStartMs(event) {
   const [d, m, y] = String(event?.date || '').split(/[.\-/]/).map(Number);
   if (!d || !m) return null;
   const [hh, mm] = String(event?.time || '').split(':').map(Number);
-  const year = y > 2000 ? y : new Date(now).getFullYear();
-  const start = new Date(year, m - 1, d, hh || 0, mm || 0).getTime();
+  const year = y > 2000 ? y : new Date().getFullYear();
+  return Date.UTC(year, m - 1, d, (hh || 0) - PHUKET_OFFSET_H, mm || 0);
+}
+
+export function hoursUntil(event, now = Date.now()) {
+  const start = eventStartMs(event);
+  if (start === null) return null;
   return (start - now) / 3600000;
 }
 

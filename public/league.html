@@ -147,6 +147,29 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
   padding:10px 14px;font-size:12.5px;font-weight:700;opacity:0;pointer-events:none;
   transition:opacity .18s,transform .18s;z-index:99;max-width:86vw;text-align:center}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Касса игрока: цифра в шапке между переключателем темы и карточкой игрока. */
+.wchip{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card2);cursor:pointer;white-space:nowrap;
+  font-weight:800;font-size:12px;color:var(--amber)}
+.wchip:active{transform:translateY(1px)}
+.wpanel{border:1px solid var(--line);border-radius:16px;background:var(--surf);
+  padding:12px;margin:0 0 10px}
+.wpanel .big{font-size:26px;font-weight:800;color:var(--amber);letter-spacing:-.5px}
+.wpanel .lab{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--mute);margin-bottom:2px}
+.wrow{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid var(--line4);font-size:12.5px}
+.wrow:last-child{border-bottom:0}
+.wrow .d{color:var(--mute);font-size:11px;white-space:nowrap}
+.wrow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wrow .a{margin-left:auto;font-weight:800;white-space:nowrap}
+.wrow .a.plus{color:var(--win)} .wrow .a.minus{color:var(--lose)}
+.wsum{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.wsum button{flex:1 1 auto;padding:9px 12px;border-radius:11px;border:1px solid var(--line);
+  background:var(--surf2);color:var(--text);font-weight:800;font-size:12.5px;cursor:pointer}
+.wsum button.go{background:linear-gradient(180deg,var(--win),var(--goBtn2));color:var(--onGo);
+  border-color:var(--goLine)}
+.wown{display:flex;gap:7px;margin-top:8px}
+.wown input{flex:1;padding:9px 10px;border-radius:11px;border:1px solid var(--line);
+  background:var(--surf2);color:var(--text);font-size:12.5px}
 .spo{margin:10px 0 0;border:1px solid var(--line2);border-radius:12px;background:var(--card2)}
 .spo summary{cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700;color:var(--dim);list-style:none}
 .spo summary::-webkit-details-marker{display:none}
@@ -547,8 +570,10 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
       <button type="button" data-th="dark" title="Тёмная тема">☾</button>
       <button type="button" data-th="light" title="Светлая тема">☀</button>
     </div>
+    <div id="walletChip" class="hidden"></div>
     <div id="mePlate"></div>
   </div>
+  <div id="walletPanel" class="hidden"></div>
   <div class="tabs" id="tabs"></div>
   <div id="viewHome"></div>
   <div id="viewDiv" class="hidden"></div>
@@ -592,6 +617,9 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   evInviteOnly:'Только по приглашению',evAdd:'Добавить игрока',evRemove:'убрать',
   evClosed:'Запись закрыта',evSending:'Секунду…',evJoined:'Готово — счёт и детали в боте',
   evCancelAsk:'Отменить участие? Деньги вернутся по правилу отмены.',evGuestsN:'гостей',evUntil:'Запись до',
+  wBalance:'Депозит',wEmpty:'Операций пока нет',wTopup:'Пополнить',wOwn:'Своя сумма',wGo:'Пополнить',
+  wSent:'Счёт на пополнение отправлен в бот',wMin:'Минимум {n} ฿',
+  wNote:'После перевода пришли скриншот в бот — организатор подтвердит, и деньги появятся здесь.',
   tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
@@ -646,6 +674,9 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   evInviteOnly:'By invitation only',evAdd:'Add player',evRemove:'remove',
   evClosed:'Sign-up closed',evSending:'One moment…',evJoined:'Done — invoice and details are in the bot',
   evCancelAsk:'Cancel your spot? Refund follows the cancellation rule.',evGuestsN:'guests',evUntil:'Sign-up until',
+  wBalance:'Deposit',wEmpty:'No operations yet',wTopup:'Top up',wOwn:'Custom amount',wGo:'Top up',
+  wSent:'Top-up invoice sent to the bot',wMin:'Minimum {n} ฿',
+  wNote:'After the transfer send the screenshot to the bot — once confirmed the money appears here.',
   tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
@@ -1217,6 +1248,72 @@ function syncBack(){
   if(openId)tg.BackButton.show();else tg.BackButton.hide();
 }
 if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(backTo) });
+
+// ---------------------------------------------------------------- касса
+// Цифра баланса живёт в шапке и появляется только тогда, когда деньги на
+// депозите действительно есть или были операции: остальным она ни о чём не
+// говорит и только занимает место.
+var wallet=null,walletOpen=false,walletLoaded=false;
+function loadWallet(){
+  if(walletLoaded)return;walletLoaded=true;
+  fetch('/api/league/wallet?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j||!j.ok)return;
+      wallet=j;renderWallet();
+    }).catch(function(){});
+}
+function walletVisible(){
+  return wallet&&((wallet.balance||0)>0||(wallet.history||[]).length>0);
+}
+function renderWallet(){
+  var chip=$('walletChip'),panel=$('walletPanel');
+  if(!walletVisible()){
+    chip.classList.add('hidden');panel.classList.add('hidden');
+    chip.innerHTML='';panel.innerHTML='';return;
+  }
+  chip.classList.remove('hidden');
+  chip.innerHTML='<div class="wchip" onclick="toggleWallet()">💳 '+esc(String(wallet.balance))+' ฿</div>';
+  if(!walletOpen){panel.classList.add('hidden');panel.innerHTML='';return}
+  panel.classList.remove('hidden');
+  var rows=(wallet.history||[]).map(function(h){
+    var plus=(h.amount||0)>0;
+    return '<div class="wrow"><span class="d">'+esc(shortDate(h.date))+'</span>'
+      +'<span class="t">'+esc(h.description||h.type||'')+'</span>'
+      +'<span class="a '+(plus?'plus':'minus')+'">'+(plus?'+':'')+esc(String(h.amount))+' ฿</span></div>';
+  }).join('');
+  var presets=(wallet.presets||[1000,3000,5000]).map(function(v){
+    return '<button onclick="topup('+v+')">'+v+' ฿</button>';
+  }).join('');
+  panel.innerHTML='<div class="wpanel">'
+    +'<div class="lab">'+esc(X.wBalance)+'</div><div class="big">'+esc(String(wallet.balance))+' ฿</div>'
+    +(rows?'<div style="margin-top:10px">'+rows+'</div>':'<div class="hint" style="margin-top:8px">'+esc(X.wEmpty)+'</div>')
+    +'<div class="lab" style="margin-top:12px">'+esc(X.wTopup)+'</div>'
+    +'<div class="wsum">'+presets+'</div>'
+    +'<div class="wown"><input id="wOwn" inputmode="numeric" placeholder="'+esc(X.wOwn)+'">'
+    +'<button class="go" onclick="topupOwn()">'+esc(X.wGo)+'</button></div>'
+    +'<div class="hint" style="margin-top:8px">'+esc(X.wNote)+'</div>'
+    +'</div>';
+}
+function shortDate(v){
+  var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||''));
+  return m?(m[3]+'.'+m[2]):String(v||'').slice(0,10);
+}
+function toggleWallet(){ walletOpen=!walletOpen;renderWallet();
+  if(walletOpen)$('walletPanel').scrollIntoView({behavior:'smooth',block:'nearest'}) }
+function topup(amount){
+  var min=(wallet&&wallet.min)||1000;
+  if(!amount||amount<min){toast(X.wMin.replace('{n}',min));return}
+  toast(X.evSending);
+  fetch('/api/league/wallet-topup',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({initData:initData,amount:amount},linkToken?{t:linkToken}:{}))})
+    .then(function(r){return r.json()}).then(function(j){
+      toast(j&&j.ok?X.wSent:((j&&j.error)||'…'));
+    }).catch(function(){toast('…')});
+}
+function topupOwn(){
+  var el=$('wOwn');
+  topup(Math.round(Number(String(el&&el.value||'').replace(/[^\d]/g,''))||0));
+}
 
 // ---------------------------------------------------------------- главная
 // Итоги последнего завершённого сезона: чемпионы из плей-офф, финалисты помельче
@@ -2218,7 +2315,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
-    photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;
+    photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     seasons=j.seasons||[];
     buildTabs();

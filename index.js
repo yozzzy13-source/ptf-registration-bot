@@ -809,6 +809,43 @@ app.post('/api/league/event-roster', async (req, res) => {
   }
 });
 
+// Касса игрока: баланс и история операций. Показывается, только когда деньги
+// на депозите уже появились — обычно после первого возврата.
+app.get('/api/league/wallet', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const { getBalance, transactionsOf } = await import('./events.js');
+    const { TOPUP_MIN, TOPUP_PRESETS } = await import('./eventflow.js');
+    const [balance, history] = await Promise.all([
+      getBalance(v.user.id).catch(() => 0),
+      transactionsOf(v.user.id).catch(() => [])
+    ]);
+    res.json({ ok:true, balance, history, min: TOPUP_MIN, presets: TOPUP_PRESETS });
+  } catch (e) {
+    console.error('wallet failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Запрос на пополнение: счёт с реквизитами уходит в бот, там же игрок шлёт чек.
+app.post('/api/league/wallet-topup', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const { startTopup, TOPUP_MIN } = await import('./eventflow.js');
+    const amount = Math.round(Number(req.body.amount) || 0);
+    if (amount < TOPUP_MIN) return res.status(400).json({ ok:false, error:`Минимум ${TOPUP_MIN} ฿` });
+    const applicant = await findApplicantByTelegramId(v.user.id).catch(() => null);
+    await startTopup({ telegramId: v.user.id, name: applicant?.name || '', amount,
+      lang: v.lang === 'ru' ? 'ru' : 'en', chatId: v.user.id });
+    res.json({ ok:true });
+  } catch (e) {
+    console.error('wallet topup failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
 app.get('/api/league/bootstrap', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
@@ -1317,8 +1354,14 @@ app.listen(PORT, async () => {
       await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));
       // Напоминания по событиям идут тем же проходом: за сутки, за два часа и
       // про неоплаченный счёт.
-      const { runEventReminders } = await import('./eventflow.js');
+      const { runEventReminders, runWaitlistOffers, runSignupNudges } = await import('./eventflow.js');
       await runEventReminders().catch(e => console.error('event reminders failed:', e.message));
+      // И напоминание тем, кто карточку получил, но так и не записался.
+      await runSignupNudges().catch(e => console.error('signup nudges failed:', e.message));
+      // Лист ожидания: снимаем протухшие удержания и раздаём освободившиеся места.
+      const { getAdminChatId } = await import('./admin.js');
+      const evAdmin = await getAdminChatId().catch(() => '');
+      await runWaitlistOffers(Date.now(), evAdmin).catch(e => console.error('waitlist offers failed:', e.message));
     } catch (e) {
       console.error('match sweep failed:', e.message);
     } finally { resultSweepBusy = false; }

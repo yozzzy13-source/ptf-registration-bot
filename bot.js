@@ -11,7 +11,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -66,6 +66,15 @@ function keyboardFor(chatId, lang, kind, userId) {
 
 // Короткая сводка для активного игрока: ближайший матч и то, чего от него ждут.
 // Если сказать нечего — возвращаем пустую строку, и меню остаётся коротким.
+// Навигационный блок кнопок под сообщением. Активному игроку он не нужен:
+// у него внизу постоянное меню, и два одинаковых списка на экране только мешают.
+// Кнопки-действия (оплатить, записаться) это правило не затрагивает — они живут
+// в своих клавиатурах и остаются на месте.
+async function menuMarkup(lang, telegramId, extra = {}) {
+  const active = await isActiveLeaguePlayer({ id: telegramId, telegram_id: telegramId }).catch(() => false);
+  return active ? { ...extra } : { ...extra, reply_markup: mainKeyboard(lang) };
+}
+
 async function playerDigest(userId, lang) {
   const ru = lang === 'ru';
   const lines = [];
@@ -124,7 +133,10 @@ async function sendMain(chatId, lang, from=null) {
     body = txt?.html_text || '<b>Welcome to Phuket Tennis Family</b> 🎾';
   }
 
-  const opts = { reply_markup: mainKeyboard(l, { matches: st.active, noWebApp }) };
+  // У активного игрока внизу есть постоянное меню, и второй такой же список
+  // кнопок под сообщением только загромождает экран — показываем его только тем,
+  // кто ещё не в лиге и для кого это единственная навигация.
+  const opts = st.active && isPrivateChat ? {} : { reply_markup: mainKeyboard(l, { matches: st.active, noWebApp }) };
   await sendMessage(chatId, body, opts);
   // Постоянное меню ставим отдельным коротким сообщением — двух reply_markup
   // в одном сообщении Telegram не принимает.
@@ -601,13 +613,13 @@ ${t(lang,'payment_no_application')}`, { reply_markup: paymentEntryKeyboard(lang,
   const aStatus = String(app.application_status || '').toLowerCase();
   if (aStatus === 'active') return sendMessage(chatId, `${t(lang,'payment_section')}
 
-${t(lang,'payment_active')}`, { reply_markup: mainKeyboard(lang) });
+${t(lang,'payment_active')}`, await menuMarkup(lang, from.id));
   if (pStatus === 'approved' || aStatus === 'payment_approved') return sendMessage(chatId, `${t(lang,'payment_section')}
 
-${t(lang,'payment_already_paid')}`, { reply_markup: mainKeyboard(lang) });
+${t(lang,'payment_already_paid')}`, await menuMarkup(lang, from.id));
   if (pStatus === 'proof_received' || aStatus === 'proof_received') return sendMessage(chatId, `${t(lang,'payment_section')}
 
-${t(lang,'payment_already_proof')}`, { reply_markup: mainKeyboard(lang) });
+${t(lang,'payment_already_proof')}`, await menuMarkup(lang, from.id));
   const { amountThb, amountUsdt } = await paymentAmountsForApplication(app);
   return sendMessage(chatId, `${t(lang,'payment_section')}${formatPaymentAmounts(lang, amountThb, amountUsdt)}`, { reply_markup: paymentKeyboard(lang, app.application_id) });
 }
@@ -808,7 +820,7 @@ export async function handleMessage(msg) {
     await updateApplicantByTelegramId(from.id, { selfie_status:'received', selfie_file_id:fileId, selfie_received_at:nowISO() });
     userState.delete(String(chatId));
     await notifyAboutPlayer(from.id, `<b>📸 Selfie received</b>\n\nTGID: <code>${escapeHtml(from.id)}</code>\nFrom: <b>${escapeHtml(from.first_name || '')}</b> ${from.username ? '@' + escapeHtml(from.username) : ''}`);
-    return sendMessage(chatId, t(lang, 'selfie_received'), { reply_markup: mainKeyboard(lang) });
+    return sendMessage(chatId, t(lang, 'selfie_received'), await menuMarkup(lang, from.id));
   }
 
   if (state?.mode === 'awaiting_payment_proof') {
@@ -837,12 +849,38 @@ export async function handleMessage(msg) {
     if (handled) return null;
   }
 
+  // Чек на пополнение депозита: игрок сам назвал сумму, поэтому распознаётся
+  // однозначно и проверяется первым.
+  if (isPrivate && paymentProofMedia(msg)) {
+    const proof = paymentProofMedia(msg);
+    const { handleTopupProof } = await import('./eventflow.js');
+    const topupAdmin = await getAdminChatId().catch(() => '');
+    const done = await handleTopupProof({
+      telegramId: from.id, name: contactName(from), lang,
+      fileId: proof.fileId, fileType: proof.type, chatId, adminChatId: topupAdmin
+    }).catch(e => { console.error('topup proof failed:', e.message); return false; });
+    if (done) return null;
+  }
+
+  // Чек за участие в событии. Стоит ПОСЛЕ платёжной ветки лиги и срабатывает
+  // только когда у игрока висит неоплаченный счёт за событие — поэтому приём
+  // скриншотов для лиги эта развилка не задевает.
+  if (isPrivate && paymentProofMedia(msg)) {
+    const proof = paymentProofMedia(msg);
+    const { handleEventProof } = await import('./eventflow.js');
+    const evAdminChat = await getAdminChatId().catch(() => '');
+    const taken = await handleEventProof({
+      telegramId: from.id, lang, fileId: proof.fileId, fileType: proof.type, chatId, adminChatId: evAdminChat
+    }).catch(e => { console.error('event proof failed:', e.message); return false; });
+    if (taken) return null;
+  }
+
   // Catch-all: media sent in a private chat outside any flow must still reach the player's admin topic.
   if (isPrivate && paymentProofMedia(msg)) {
     const type = messageType(msg);
     await logMessage({ message_id:uid('msg'), telegram_id:from.id, telegram_username:from.username || '', name:contactName(from), direction:'incoming', message_type:type, message_text:msg.caption || '[media]', timestamp:nowISO(), status:'new', telegram_message_id:msg.message_id }).catch(e => console.error('log media failed:', e.message));
     await notifyPlayerMedia({ id:from.id, username:from.username, name:contactName(from) }, msg, 'Sent outside payment/contact flow').catch(e => console.error('notify player media failed:', e.message));
-    return sendMessage(chatId, lang === 'ru' ? '✅ Файл получен и передан организатору.' : '✅ File received and forwarded to the organizer.', { reply_markup: mainKeyboard(lang) });
+    return sendMessage(chatId, lang === 'ru' ? '✅ Файл получен и передан организатору.' : '✅ File received and forwarded to the organizer.', await menuMarkup(lang, from.id));
   }
   // В группе главное меню не показываем: оно личное, и вываливать его при
   // каждом сообщении в общем чате — шум для всех остальных.
@@ -919,7 +957,7 @@ export async function handleCallback(q) {
   }
   if (data === 'close_contact') {
     closeContactSession(chatId);
-    return sendMessage(chatId, t(lang, 'contact_closed'), { reply_markup: mainKeyboard(lang) });
+    return sendMessage(chatId, t(lang, 'contact_closed'), await menuMarkup(lang, from.id));
   }
   if (data === 'upload_selfie') {
     userState.set(String(chatId), { mode:'selfie_upload' });
@@ -930,7 +968,7 @@ export async function handleCallback(q) {
     const methods = await getPaymentMethods().catch(() => []);
     return sendMessage(chatId, t(lang, 'choose_crypto_network'), { reply_markup: cryptoKeyboard(lang, data.split(':')[1], methods) });
   }
-  if (data.startsWith('paylater:')) return sendMessage(chatId, t(lang, 'payment_later'), { reply_markup: mainKeyboard(lang) });
+  if (data.startsWith('paylater:')) return sendMessage(chatId, t(lang, 'payment_later'), await menuMarkup(lang, from.id));
   if (data.startsWith('pay:')) {
     const [, applicationId, methodId] = data.split(':');
     return sendPaymentInstructions(chatId, lang, applicationId, methodId);
@@ -1092,6 +1130,21 @@ export async function handleCallback(q) {
   }
 
   // События: запись, оплата с депозита, отмена. Кнопки видит любой игрок.
+  if (data.startsWith('ev_take:') || data.startsWith('ev_pass:')) {
+    const { takeOffer, passOffer } = await import('./eventflow.js');
+    const signupId = data.split(':')[1];
+    const evAdmin = await getAdminChatId().catch(() => '');
+    return data.startsWith('ev_take:')
+      ? takeOffer({ signupId, telegramId: from.id, lang, chatId, adminChatId: evAdmin })
+      : passOffer({ signupId, lang, chatId, adminChatId: evAdmin });
+  }
+  if (data.startsWith('ev_pf:')) {
+    const { attachStoredProof } = await import('./eventflow.js');
+    return attachStoredProof({
+      signupId: data.split(':')[1], telegramId: from.id, lang, chatId,
+      adminChatId: await getAdminChatId().catch(() => '')
+    });
+  }
   if (data.startsWith('ev_join:')) return eventJoin({ chatId, from, lang, eventId: data.split(':')[1] });
   if (data.startsWith('ev_dep:')) return eventPayFromDeposit({ chatId, from, lang, signupId: data.split(':')[1] });
   if (data.startsWith('ev_cxl:')) return eventCancelAsk({ chatId, lang, signupId: data.split(':')[1] });
@@ -1125,6 +1178,28 @@ export async function handleCallback(q) {
       await notifyResultRejected(r.slot).catch(() => {});
       return sendMessage(chatId, 'Результат отклонён, игрокам сообщил.');
     }
+    // Организатор смотрит чек на пополнение депозита.
+    if (data.startsWith('ev_tok:') || data.startsWith('ev_tno:')) {
+      const { reviewTopup } = await import('./eventflow.js');
+      const parts = data.split(':');
+      const target = parts[1];
+      const player = await findApplicantByTelegramId(target).catch(() => null);
+      const r = await reviewTopup({
+        telegramId: target, amount: parts[2] || 0, approve: data.startsWith('ev_tok:'),
+        name: player?.name || '', adminChatId: await getAdminChatId().catch(() => '')
+      });
+      return sendMessage(chatId, r.message);
+    }
+    // Организатор смотрит чек за событие.
+    if (data.startsWith('ev_pok:') || data.startsWith('ev_pno:')) {
+      const { reviewEventProof } = await import('./eventflow.js');
+      const r = await reviewEventProof({
+        signupId: data.split(':')[1],
+        approve: data.startsWith('ev_pok:'),
+        adminChatId: await getAdminChatId().catch(() => '')
+      });
+      return sendMessage(chatId, r.message);
+    }
     // Правка состава события: организатор решает, что делать с оплатой и возвратом.
     if (data.startsWith('evadd:')) {
       const [, eventId, telegramId, mode] = data.split(':');
@@ -1133,6 +1208,10 @@ export async function handleCallback(q) {
     if (data.startsWith('evrm:')) {
       const [, signupId, mode] = data.split(':');
       return eventRemoveDo(chatId, signupId, mode);
+    }
+    if (data.startsWith('ev_nudge:')) {
+      const { remindUnregistered } = await import('./eventflow.js');
+      return remindUnregistered(chatId, data.split(':')[1]);
     }
     if (data.startsWith('ev_pub:')) return eventPublish(chatId, data.split(':')[1]);
     if (data.startsWith('ev_drop:')) return eventDrop(chatId, data.split(':')[1]);

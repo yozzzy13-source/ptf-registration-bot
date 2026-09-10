@@ -420,6 +420,8 @@ export async function askAddToEvent(chatId, eventId, telegramId) {
   const applicant = await findApplicantByTelegramId(telegramId).catch(() => null);
   const who = applicant?.name || String(telegramId);
   const free = !event.payment_required || !event.price_thb;
+  const { getBalance } = await import('./events.js');
+  const balance = await getBalance(telegramId).catch(() => 0);
   if (free) {
     const { addToEvent } = await import('./eventflow.js');
     const r = await addToEvent({ eventId, telegramId, name: who, mode: 'free', adminChatId: await getAdminChatId().catch(() => '') });
@@ -430,10 +432,14 @@ export async function askAddToEvent(chatId, eventId, telegramId) {
 Игрок: <b>${escapeHtml(who)}</b>
 Событие: <b>${escapeHtml(event.title_ru || event.event_id)}</b>
 Участие: <b>${event.price_thb} ฿</b>
+Депозит игрока: <b>${balance} ฿</b>
 
 Что делаем с оплатой?`, {
     reply_markup: { inline_keyboard: [
       [{ text: '💳 Выставить счёт', callback_data: `evadd:${eventId}:${telegramId}:inv` }],
+      ...(balance >= event.price_thb
+        ? [[{ text: `💰 Списать с депозита (${balance} ฿)`, callback_data: `evadd:${eventId}:${telegramId}:dep` }]]
+        : []),
       [{ text: '✅ Засчитать оплаченным', callback_data: `evadd:${eventId}:${telegramId}:paid` }]
     ] }
   });

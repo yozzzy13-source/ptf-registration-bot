@@ -13,7 +13,7 @@ import { escapeHtml, safe } from './util.js';
 import { getSetting, setSetting, getPaymentMethods } from './sheets.js';
 import {
   findEvent, listEvents, listSignups, findSignup, createSignup, updateSignup,
-  takenSeats, priceFor, seatsOf, refundForCancel, hoursUntil,
+  takenSeats, priceFor, seatsOf, refundForCancel, hoursUntil, eventStartMs,
   addTransaction, getBalance, publishEvent, updateEvent,
   SIGNUP_STATUS, CANCEL_LIMIT_HOURS
 } from './events.js';
@@ -97,6 +97,7 @@ export async function previewEventForAdmin(chatId, eventId) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📣 Подтвердить и разослать', callback_data: `ev_pub:${eventId}` }],
+        ...(event.status === 'published' ? [[{ text: '🔔 Напомнить незаписавшимся', callback_data: `ev_nudge:${eventId}` }]] : []),
         [{ text: '✏️ Отредактировать', callback_data: `ev_edit:${eventId}` }],
         [{ text: '🗑 Удалить', callback_data: `ev_drop:${eventId}` }]
       ]
@@ -189,9 +190,18 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
 
   let message;
   if (noRoom) {
+    // Сразу говорим номер в очереди и сколько будет времени на решение —
+    // чтобы человек знал, чего ждать, и не пропустил окно.
+    const queue = await listSignups().catch(() => []);
+    const pos = waitlistPosition(queue, event.event_id, telegramId);
+    const window = offerWindowHours(event);
     message = L
-      ? `Мест на «${event.title_ru}» сейчас нет — ты в листе ожидания. Если кто-то откажется, напишу тебе первым. Деньги пока не переводи.`
-      : `“${event.title_en}” is full — you are on the waitlist. If a spot frees up, I will write to you first. Do not pay yet.`;
+      ? `Мест на «${event.title_ru}» сейчас нет — ты в листе ожидания${pos ? `, <b>${pos}-й в очереди</b>` : ''}.
+Если кто-то откажется, напишу первым. На решение будет <b>${window} ч</b>, потом место уйдёт следующему.
+Деньги пока не переводи.`
+      : `“${event.title_en}” is full — you are on the waitlist${pos ? `, <b>#${pos} in line</b>` : ''}.
+If a spot frees up, I will write to you first. You will have <b>${window} h</b> to decide, then the spot goes to the next person.
+Do not pay yet.`;
   } else if (status === SIGNUP_STATUS.confirmed) {
     message = L
       ? `Заявка на «${event.title_ru}» принята. Ты в списке участников.\n📅 ${event.date} ${event.time}\n📍 ${event.place}`
@@ -275,17 +285,26 @@ export function cancelWarning(event, signup, lang = 'ru', now = Date.now()) {
   const hours = event.refund_hours ?? CANCEL_LIMIT_HOURS;
   const left = hoursUntil(event, now);
   const late = hours > 0 && left !== null && left < hours;
+  // Правило проговариваем цифрами: сколько часов осталось, сколько вернётся или
+  // сгорит. «По правилам» без объяснения игроку ничего не говорит.
+  const title = (L ? event.title_ru : event.title_en) || event.title_ru;
+  const head = L ? `⚠️ <b>Отменить участие в «${escapeHtml(title)}»?</b>` : `⚠️ <b>Cancel your spot for “${escapeHtml(title)}”?</b>`;
+  const leftLine = left === null ? '' : (L
+    ? `\nДо события: <b>${Math.max(0, Math.round(left))} ч</b>.`
+    : `\nTime until the event: <b>${Math.max(0, Math.round(left))} h</b>.`);
   if (!signup.paid_thb) {
-    return L ? 'Отменить участие?' : 'Cancel your spot?';
+    return L
+      ? `${head}${leftLine}\n\nОплаты по этой записи не было, возвращать нечего. Место освободится для других.`
+      : `${head}${leftLine}\n\nNothing was paid for this spot, so there is nothing to refund. The spot will be freed up.`;
   }
   if (late) {
     return L
-      ? `⚠️ До события меньше ${hours} ч. По правилам поздней отмены оплата <b>не возвращается</b>. Всё равно отменить?`
-      : `⚠️ Less than ${hours} h before the event. Under the late cancellation rule the payment is <b>not refunded</b>. Cancel anyway?`;
+      ? `${head}${leftLine}\n\nПравило отмены: вернуть деньги можно не позже чем за <b>${hours} ч</b>. Сейчас этот срок уже прошёл, поэтому оплата <b>${signup.paid_thb} ฿ не возвращается</b> — она удерживается как плата за позднюю отмену.\n\nВсё равно отменить?`
+      : `${head}${leftLine}\n\nCancellation rule: a refund is possible no later than <b>${hours} h</b> before the event. That deadline has passed, so your <b>${signup.paid_thb} ฿ is not refunded</b> — it is withheld as a late cancellation fee.\n\nCancel anyway?`;
   }
   return L
-    ? `Отменить участие? До события больше ${hours} ч — оплата вернётся на депозит.`
-    : `Cancel your spot? More than ${hours} h before the event — the payment returns to your deposit.`;
+    ? `${head}${leftLine}\n\nПравило отмены: до события больше <b>${hours} ч</b>, значит отмена без потерь — <b>${signup.paid_thb} ฿</b> вернутся на твой депозит и их можно потратить на другое событие.\n\nПодтверждаешь отмену?`
+    : `${head}${leftLine}\n\nCancellation rule: more than <b>${hours} h</b> left, so this is a free cancellation — <b>${signup.paid_thb} ฿</b> returns to your deposit and can be spent on another event.\n\nConfirm cancellation?`;
 }
 
 export function cancelKeyboard(signup, event, lang = 'ru') {
@@ -331,32 +350,500 @@ export async function cancelSignup({ signupId, keepGuests = false, telegramId, n
     });
   }
   if (adminChatId) {
-    const extra = decision.refund > 0 ? `↩️ Возврат на депозит: <b>${decision.refund} ฿</b>`
-      : (decision.burned > 0 ? `🔥 Поздняя отмена, удержано: <b>${decision.burned} ฿</b>` : '');
+    // Организатору — своей строкой, чтобы по ленте было видно, ранняя отмена
+    // или поздняя, и что стало с деньгами.
+    const extra = decision.refund > 0
+      ? `↩️ Отменил рано — возвращено на депозит: <b>${decision.refund} ฿</b>`
+      : (decision.burned > 0
+        ? `⚠️ Отменил поздно — <b>${decision.burned} ฿</b> удержаны`
+        : 'Отменил, оплаты не было');
     await notifyOrganizer({ ...signup, ...updated, status: keepGuests ? signup.status : SIGNUP_STATUS.cancelled }, event, adminChatId, extra).catch(() => {});
   }
 
   let message;
+  // Итог всегда с цифрами: с какого события сняли, сколько вернули и что стало
+  // с депозитом. Сухое «участие отменено» вызывает только новые вопросы.
+  const title = (L ? event?.title_ru : event?.title_en) || event?.title_ru || '';
+  const head = L ? `✅ Ты снят с события «${escapeHtml(title)}».` : `✅ You are removed from “${escapeHtml(title)}”.`;
+  const hours = event?.refund_hours ?? CANCEL_LIMIT_HOURS;
   if (decision.refund > 0) {
     message = L
-      ? `↩️ Участие отменено. Возвращено на депозит: <b>${decision.refund} ฿</b>. Остаток: <b>${left} ฿</b>`
-      : `↩️ Cancelled. Returned to your deposit: <b>${decision.refund} ฿</b>. Balance: <b>${left} ฿</b>`;
+      ? `${head}\n↩️ Возвращено на депозит: <b>${decision.refund} ฿</b>. Остаток: <b>${left} ฿</b>`
+      : `${head}\n↩️ Returned to your deposit: <b>${decision.refund} ฿</b>. Balance: <b>${left} ฿</b>`;
   } else if (decision.burned > 0) {
     message = L
-      ? `Участие отменено. Отмена позже срока — оплата <b>${decision.burned} ฿</b> удержана.`
-      : `Cancelled. Late cancellation — <b>${decision.burned} ฿</b> is withheld.`;
+      ? `${head}\n💳 Отмена менее чем за ${hours} ч — оплата <b>${decision.burned} ฿ удержана</b> как плата за позднюю отмену.`
+      : `${head}\n💳 Cancelled less than ${hours} h before — <b>${decision.burned} ฿ is withheld</b> as a late cancellation fee.`;
   } else {
-    message = L ? 'Участие отменено.' : 'Your spot is cancelled.';
+    message = L
+      ? `${head}\nОплаты по этой записи не было — возвращать нечего.`
+      : `${head}\nNothing was paid for this spot, so there is nothing to refund.`;
   }
   if (keepGuests && signup.guests > 0) {
     message += L ? `\nГости (${signup.guests}) остаются в списке.` : `\nYour guests (${signup.guests}) stay on the list.`;
   }
+  // Место освободилось — сразу предлагаем первому в очереди.
+  await runWaitlistOffers(now, adminChatId).catch(() => {});
   return { ok: true, message, refund: decision.refund, burned: decision.burned };
 }
 
 // --- витрина ---------------------------------------------------------------
 
 // Что показать игроку во вкладке «События».
+// --- касса игрока -----------------------------------------------------------
+// Пополнение по той же цепочке, что и всё остальное: счёт по тайским реквизитам,
+// игрок присылает чек, организатор подтверждает — только после этого баланс
+// растёт. Крипту здесь не принимаем.
+export const TOPUP_MIN = 1000;
+export const TOPUP_PRESETS = [1000, 3000, 5000];
+const topupKey = (telegramId) => `ev_topup_${telegramId}`;
+
+export async function startTopup({ telegramId, name, amount, lang = 'ru', chatId }) {
+  const L = ru(lang);
+  const sum = Math.round(Number(amount) || 0);
+  if (!Number.isFinite(sum) || sum < TOPUP_MIN) {
+    return sendMessage(chatId, L
+      ? `⚠️ Минимальная сумма пополнения — <b>${TOPUP_MIN} ฿</b>. Введи сумму числом, например: 3000`
+      : `⚠️ The minimum top-up is <b>${TOPUP_MIN} ฿</b>. Enter the amount as a number, for example: 3000`);
+  }
+  await setSetting(topupKey(telegramId), String(sum), 'Ожидаемое пополнение депозита').catch(() => {});
+  const bank = await thbPaymentDetails().catch(() => []);
+  const lines = [
+    L ? '💳 <b>Пополнение депозита</b>' : '💳 <b>Deposit top-up</b>',
+    L ? `Сумма: <b>${sum} ฿</b>` : `Amount: <b>${sum} ฿</b>`
+  ];
+  for (const b of bank) {
+    lines.push('', `🏦 <b>${escapeHtml(b.title)}</b>`, `<code>${escapeHtml(b.recipient)}</code>`);
+  }
+  lines.push('', L
+    ? 'После перевода пришли сюда скриншот — организатор подтвердит, и деньги появятся на депозите.'
+    : 'After the transfer send the screenshot here — the organizer will confirm it and the money will appear on your deposit.');
+  return sendMessage(chatId, lines.join('\n'));
+}
+
+// Чек на пополнение: уходит организатору с суммой и кнопками подтверждения.
+export async function handleTopupProof({ telegramId, name, lang = 'ru', fileId, fileType = 'photo', chatId, adminChatId = '' }) {
+  const raw = await getSetting(topupKey(telegramId)).catch(() => '');
+  const sum = Math.round(Number(raw) || 0);
+  if (!sum) return false;
+  await setSetting(topupKey(telegramId), '', 'Чек на пополнение отправлен').catch(() => {});
+  const caption = `<b>💰 Чек на пополнение депозита</b>
+
+👤 ${escapeHtml(name || String(telegramId))}
+Сумма: <b>${sum} ฿</b>`;
+  const markup = { reply_markup: { inline_keyboard: [
+    [{ text: `✅ Зачислить ${sum} ฿`, callback_data: `ev_tok:${telegramId}:${sum}` }],
+    [{ text: '❌ Отклонить', callback_data: `ev_tno:${telegramId}` }]
+  ] } };
+  if (adminChatId) {
+    let to = adminChatId, opts = {};
+    try {
+      const { getOrCreatePlayerTopic } = await import('./admin.js');
+      const topic = await getOrCreatePlayerTopic({ telegram_id: telegramId, name });
+      if (topic?.chatId) to = topic.chatId;
+      if (topic?.message_thread_id) opts = { message_thread_id: topic.message_thread_id };
+    } catch (e) { /* темы нет — пишем в общий чат */ }
+    const { sendPhoto } = await import('./telegram.js');
+    if (fileType === 'photo') {
+      await sendPhoto(to, fileId, { caption, ...opts, ...markup })
+        .catch(() => sendMessage(to, caption, { ...opts, ...markup }));
+    } else {
+      await sendMessage(to, caption, { ...opts, ...markup }).catch(() => {});
+    }
+  }
+  const L = ru(lang);
+  await sendMessage(chatId, L
+    ? `✅ Запрос на пополнение <b>${sum} ฿</b> отправлен организатору. Депозит пополнится после подтверждения оплаты.`
+    : `✅ Top-up request for <b>${sum} ฿</b> sent to the organizer. Your deposit will grow once the payment is confirmed.`);
+  return true;
+}
+
+export async function reviewTopup({ telegramId, amount, approve, name = '', adminChatId = '' }) {
+  if (!approve) {
+    await sendMessage(telegramId, '⚠️ Пополнение не подтверждено. Проверь перевод и пришли чек ещё раз.').catch(() => {});
+    return { ok: true, message: `Пополнение отклонено: <b>${escapeHtml(name || String(telegramId))}</b>.` };
+  }
+  const sum = Math.round(Number(amount) || 0);
+  if (sum <= 0) return { ok: false, message: 'Сумма не распознана.' };
+  const left = await addTransaction({
+    telegramId, name, type: 'пополнение', amount: sum, description: 'Пополнение депозита'
+  });
+  await sendMessage(telegramId,
+    `💳 Депозит пополнен на <b>${sum} ฿</b>. Текущий баланс: <b>${left} ฿</b>`).catch(() => {});
+  return { ok: true, message: `✅ Зачислено <b>${sum} ฿</b>, баланс: <b>${left} ฿</b>.` };
+}
+
+// Ручные операции организатора: пополнить или списать с причиной.
+export async function adminBalanceChange({ telegramId, name, amount, reason = '', chatId }) {
+  const sum = Math.round(Number(amount) || 0);
+  if (!sum) return sendMessage(chatId, 'Сумма не распознана.');
+  const left = await addTransaction({
+    telegramId, name,
+    type: sum > 0 ? 'пополнение' : 'списание',
+    amount: sum,
+    description: reason || (sum > 0 ? 'Пополнение организатором' : 'Списание организатором')
+  });
+  const tail = reason ? ` (${escapeHtml(reason)})` : '';
+  await sendMessage(telegramId, sum > 0
+    ? `💳 Депозит пополнен на <b>${sum} ฿</b>${tail}. Текущий баланс: <b>${left} ฿</b>`
+    : `💳 С депозита списано <b>${Math.abs(sum)} ฿</b>${tail}. Текущий баланс: <b>${left} ฿</b>`).catch(() => {});
+  return sendMessage(chatId, `✅ Баланс <b>${escapeHtml(name || String(telegramId))}</b>: <b>${left} ฿</b>.`);
+}
+
+// --- напоминания незаписавшимся ---------------------------------------------
+// Тем, кто получил карточку, но не отреагировал: два автоматических письма —
+// за 3 суток и за сутки до конца записи. Тем, кто отменился, не пишем: это был
+// осознанный отказ. Максимум два письма на событие, тихие часы соблюдаем.
+const nudgeKey = (eventId, key) => `ev_nudge_${key}_${eventId}`;
+const manualKey = (eventId) => `ev_nudge_manual_${eventId}`;
+const QUIET_FROM_H = 21;
+const QUIET_TO_H = 9;
+
+// Час по Пхукету: письма в три ночи никому не нужны.
+function phuketHour(now) {
+  return new Date(now + 7 * 3600000).getUTCHours();
+}
+export function isQuietHour(now = Date.now()) {
+  const h = phuketHour(now);
+  return h >= QUIET_FROM_H || h < QUIET_TO_H;
+}
+
+// Момент закрытия записи: срок записи, а если его нет — начало события.
+export function signupClosesMs(event) {
+  const d = safe(event?.signup_deadline);
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(d);
+  if (m) return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 16, 59);
+  return startMs(event);
+}
+
+// Кто получил карточку, но так и не записался.
+export async function pendingInvitees(event) {
+  const { eventRecipients } = await import('./admin.js');
+  const contacts = await eventRecipients(event).catch(() => []);
+  const all = await listSignups().catch(() => []);
+  const busy = new Set(all
+    .filter(s => s.event_id === event.event_id)
+    .map(s => String(s.telegram_id)));
+  return contacts.filter(c => !busy.has(String(c.telegram_id)));
+}
+
+async function sendNudge(event, contacts) {
+  const taken = await takenSeats(event.event_id);
+  let sent = 0;
+  for (const c of contacts) {
+    const lang = (c.language || 'en') === 'ru' ? 'ru' : 'en';
+    const head = lang === 'ru' ? '👀 <b>Ещё можно записаться</b>' : '👀 <b>You can still join</b>';
+    try {
+      await sendMessage(c.telegram_id, `${head}\n\n${eventCard(event, lang, { taken })}`,
+        { reply_markup: signupKeyboard(event, lang) });
+      sent++;
+    } catch { /* заблокировал бота — не наша забота */ }
+  }
+  return sent;
+}
+
+export async function runSignupNudges(now = Date.now()) {
+  if (isQuietHour(now)) return { sent: 0, quiet: true };
+  const events = await listEvents().catch(() => []);
+  let sent = 0;
+  for (const event of events) {
+    if (!isSignupOpen(event, now)) continue;
+    if (event.remind_unregistered === false) continue;
+    const taken = await takenSeats(event.event_id);
+    // Мест нет — звать некуда.
+    if (event.capacity && taken >= event.capacity) continue;
+    const closes = signupClosesMs(event);
+    if (!closes) continue;
+    const hoursLeft = (closes - now) / 3600000;
+    for (const step of [{ key: 'd3', hours: 72 }, { key: 'd1', hours: 24 }]) {
+      if (hoursLeft > step.hours || hoursLeft < step.hours - 12) continue;
+      if (await getSetting(nudgeKey(event.event_id, step.key)).catch(() => '')) continue;
+      const list = await pendingInvitees(event).catch(() => []);
+      if (!list.length) { await setSetting(nudgeKey(event.event_id, step.key), 'нет адресатов', 'Напоминание незаписавшимся').catch(() => {}); continue; }
+      sent += await sendNudge(event, list);
+      await setSetting(nudgeKey(event.event_id, step.key), new Date(now).toISOString(), 'Напоминание незаписавшимся отправлено').catch(() => {});
+    }
+  }
+  return { sent };
+}
+
+// Ручная перерассылка: работает независимо от автоматических, но не чаще раза
+// в сутки на событие — чтобы двойное нажатие не превратилось в спам.
+export async function remindUnregistered(chatId, eventId, now = Date.now()) {
+  const event = await findEvent(eventId);
+  if (!event) return sendMessage(chatId, 'Событие не найдено.');
+  const last = await getSetting(manualKey(eventId)).catch(() => '');
+  if (last && now - Date.parse(last) < 24 * 3600000) {
+    const hours = Math.ceil((24 * 3600000 - (now - Date.parse(last))) / 3600000);
+    return sendMessage(chatId, `Напоминание по этому событию уже уходило сегодня. Следующее можно через <b>${hours} ч</b>.`);
+  }
+  const list = await pendingInvitees(event).catch(() => []);
+  if (!list.length) return sendMessage(chatId, 'Все, кому уходила карточка, уже записались или отказались.');
+  const sent = await sendNudge(event, list);
+  await setSetting(manualKey(eventId), new Date(now).toISOString(), 'Ручное напоминание незаписавшимся').catch(() => {});
+  return sendMessage(chatId, `📣 Напомнил незаписавшимся: <b>${sent}</b>.`);
+}
+
+// --- лист ожидания ----------------------------------------------------------
+// Место освободилось — предлагаем первому в очереди и держим его за ним:
+// 2 часа, если до события больше суток, и 1 час, если день в день. Не ответил —
+// уходит в конец очереди, место предлагается следующему.
+// Пока место держится, запись стоит в статусе pending: он уже считается занятым
+// местом, поэтому новый статус заводить не пришлось.
+const holdKey = (signupId) => `ev_hold_${signupId}`;
+const MISSED_NOTE = 'пропустил окно, в конце очереди';
+
+export function offerWindowHours(event, now = Date.now()) {
+  const left = hoursUntil(event, now);
+  if (left === null) return 2;
+  return left > 24 ? 2 : 1;
+}
+
+// Очередь: кто раньше записался, тот выше. Пропустивший своё окно — в конец.
+export function waitlistQueue(all, eventId) {
+  return all
+    .filter(s => s.event_id === eventId && s.status === SIGNUP_STATUS.waitlist)
+    .sort((a, b) => {
+      const am = String(a.note || '').includes('пропустил') ? 1 : 0;
+      const bm = String(b.note || '').includes('пропустил') ? 1 : 0;
+      return am - bm || String(a.created_at || '').localeCompare(String(b.created_at || ''));
+    });
+}
+
+export function waitlistPosition(all, eventId, telegramId) {
+  const q = waitlistQueue(all, eventId);
+  const i = q.findIndex(s => String(s.telegram_id) === String(telegramId));
+  return i < 0 ? 0 : i + 1;
+}
+
+async function offerSeat(signup, event, adminChatId, now) {
+  const hours = offerWindowHours(event, now);
+  const until = Math.min(now + hours * 3600000, startMs(event) || Infinity);
+  await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.pending, note: 'предложено место' });
+  await setSetting(holdKey(signup.signup_id), String(until), 'До какого момента держим место').catch(() => {});
+  const title = event.title_ru || event.title_en;
+  await sendMessage(signup.telegram_id, `🎉 <b>Освободилось место — «${escapeHtml(title)}»</b>
+
+📅 ${escapeHtml(event.date)} ${escapeHtml(event.time)}${event.place ? `\n📍 ${escapeHtml(event.place)}` : ''}
+${event.payment_required && event.price_thb ? `💳 Участие: <b>${event.price_thb} ฿</b>\n` : ''}
+Место держится за тобой <b>${hours} ч</b>. Если не ответишь, оно уйдёт следующему в очереди.`, {
+    reply_markup: { inline_keyboard: [
+      [{ text: '✅ Занять место', callback_data: `ev_take:${signup.signup_id}` }],
+      [{ text: '✖️ Отказаться', callback_data: `ev_pass:${signup.signup_id}` }]
+    ] }
+  }).catch(() => {});
+  if (adminChatId) {
+    await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.pending }, event, adminChatId,
+      `⏳ Предложено место из листа ожидания, окно ${hours} ч`).catch(() => {});
+  }
+}
+
+// Один проход: снимаем протухшие удержания и раздаём свободные места.
+export async function runWaitlistOffers(now = Date.now(), adminChatId = '') {
+  const events = await listEvents().catch(() => []);
+  let offered = 0, expired = 0;
+  for (const event of events) {
+    const start = startMs(event);
+    if (start && start < now) continue;
+    let all = await listSignups().catch(() => []);
+
+    // Протухшие окна: место возвращается в оборот, игрок — в конец очереди.
+    for (const s of all.filter(x => x.event_id === event.event_id && x.status === SIGNUP_STATUS.pending)) {
+      const raw = await getSetting(holdKey(s.signup_id)).catch(() => '');
+      if (!raw) continue;
+      if (Number(raw) > now) continue;
+      await updateSignup(s.signup_id, { status: SIGNUP_STATUS.waitlist, note: MISSED_NOTE });
+      await setSetting(holdKey(s.signup_id), '', 'Окно истекло').catch(() => {});
+      expired++;
+    }
+
+    if (!isSignupOpen(event, now)) continue;
+    all = await listSignups().catch(() => []);
+    const taken = all.filter(s => s.event_id === event.event_id
+      && [SIGNUP_STATUS.pending, SIGNUP_STATUS.invoiced, SIGNUP_STATUS.paid, SIGNUP_STATUS.confirmed].includes(s.status))
+      .reduce((sum, s) => sum + seatsOf(s), 0);
+    let free = event.capacity ? event.capacity - taken : 0;
+    if (free <= 0) continue;
+    for (const s of waitlistQueue(all, event.event_id)) {
+      if (free <= 0) break;
+      await offerSeat(s, event, adminChatId, now);
+      free -= seatsOf(s);
+      offered++;
+    }
+  }
+  return { offered, expired };
+}
+
+// Игрок принял предложение: платное событие — счёт, бесплатное — сразу в составе.
+export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adminChatId = '' }) {
+  const L = ru(lang);
+  const all = await listSignups().catch(() => []);
+  const signup = all.find(s => s.signup_id === String(signupId));
+  if (!signup) return sendMessage(chatId, L ? 'Запись не найдена.' : 'Signup not found.');
+  if (signup.status !== SIGNUP_STATUS.pending) {
+    return sendMessage(chatId, L
+      ? 'Это предложение уже неактуально — место ушло дальше по очереди.'
+      : 'This offer is no longer valid — the spot went to the next person.');
+  }
+  const event = await findEvent(signup.event_id);
+  await setSetting(holdKey(signup.signup_id), '', 'Место занято').catch(() => {});
+  const amount = priceFor(event, signup.guests || 0);
+  if (event?.payment_required && amount > 0) {
+    const updated = await updateSignup(signup.signup_id, {
+      status: SIGNUP_STATUS.invoiced, amount_thb: amount, note: 'принял место из листа ожидания'
+    });
+    const balance = await getBalance(telegramId).catch(() => 0);
+    await sendMessage(chatId, await invoiceText(event, { ...signup, ...updated, amount_thb: amount }, lang, balance),
+      { reply_markup: invoiceKeyboard(event, signup, lang, balance) }).catch(() => {});
+    if (adminChatId) await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.invoiced, amount_thb: amount }, event, adminChatId, '✅ Принял место из листа ожидания').catch(() => {});
+    return null;
+  }
+  await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.confirmed, note: 'принял место из листа ожидания' });
+  if (adminChatId) await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.confirmed }, event, adminChatId, '✅ Принял место из листа ожидания').catch(() => {});
+  return sendMessage(chatId, L
+    ? `✅ Место твоё — «${escapeHtml(event?.title_ru || '')}».\n📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}`
+    : `✅ The spot is yours — “${escapeHtml(event?.title_en || '')}”.\n📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}`);
+}
+
+// Игрок отказался или вышел из очереди — держать место больше не нужно.
+export async function passOffer({ signupId, lang = 'ru', chatId, adminChatId = '' }) {
+  const L = ru(lang);
+  const all = await listSignups().catch(() => []);
+  const signup = all.find(s => s.signup_id === String(signupId));
+  if (!signup) return sendMessage(chatId, L ? 'Запись не найдена.' : 'Signup not found.');
+  const event = await findEvent(signup.event_id);
+  await setSetting(holdKey(signup.signup_id), '', 'Отказался').catch(() => {});
+  await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.cancelled, note: 'вышел из листа ожидания' });
+  if (adminChatId) {
+    await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.cancelled }, event, adminChatId, '✖️ Отказался от места').catch(() => {});
+  }
+  // Место освободилось прямо сейчас — сразу предлагаем следующему.
+  await runWaitlistOffers(Date.now(), adminChatId).catch(() => {});
+  return sendMessage(chatId, L
+    ? 'Понял, место не занимаем. Ты вышел из листа ожидания.'
+    : 'Got it, the spot is released. You are out of the waitlist.');
+}
+
+// --- чек за участие в событии ----------------------------------------------
+// Ветку приёма чеков за лигу не трогаем: эта развилка стоит после неё и
+// срабатывает только когда у игрока висит неоплаченный счёт за событие.
+const proofKey = (telegramId) => `ev_proof_${telegramId}`;
+
+function unpaidSignupsOf(all, telegramId) {
+  return all.filter(s => String(s.telegram_id) === String(telegramId)
+    && (s.status === SIGNUP_STATUS.invoiced || s.status === SIGNUP_STATUS.pending));
+}
+
+// Возвращает true, если чек разобран здесь и дальше по цепочке идти не нужно.
+export async function handleEventProof({ telegramId, lang = 'ru', fileId, fileType = 'photo', chatId, adminChatId = '' }) {
+  const L = ru(lang);
+  const all = await listSignups().catch(() => []);
+  const mine = unpaidSignupsOf(all, telegramId);
+  if (!mine.length) return false;
+
+  if (mine.length > 1) {
+    // Несколько неоплаченных событий — пусть игрок скажет, за какое платил.
+    await setSetting(proofKey(telegramId), `${fileType}:${fileId}`, 'Чек за событие ждёт выбора события').catch(() => {});
+    const rows = [];
+    for (const s of mine) {
+      const e = await findEvent(s.event_id);
+      const title = (L ? e?.title_ru : e?.title_en) || e?.title_ru || s.event_id;
+      rows.push([{ text: `${title} · ${s.amount_thb} ฿`.slice(0, 60), callback_data: `ev_pf:${s.signup_id}` }]);
+    }
+    await sendMessage(chatId, L
+      ? 'Спасибо! За какое событие этот перевод?'
+      : 'Thanks! Which event is this payment for?', { reply_markup: { inline_keyboard: rows } });
+    return true;
+  }
+
+  await attachEventProof({ signup: mine[0], telegramId, lang, fileId, fileType, chatId, adminChatId });
+  return true;
+}
+
+// Игрок выбрал событие из списка — берём отложенный чек и привязываем.
+export async function attachStoredProof({ signupId, telegramId, lang = 'ru', chatId, adminChatId = '' }) {
+  const L = ru(lang);
+  const stored = await getSetting(proofKey(telegramId)).catch(() => '');
+  const all = await listSignups().catch(() => []);
+  const signup = all.find(s => s.signup_id === String(signupId));
+  if (!signup) return sendMessage(chatId, L ? 'Запись не найдена.' : 'Signup not found.');
+  const idx = String(stored).indexOf(':');
+  const fileType = idx > 0 ? String(stored).slice(0, idx) : 'photo';
+  const fileId = idx > 0 ? String(stored).slice(idx + 1) : '';
+  if (!fileId) {
+    return sendMessage(chatId, L
+      ? 'Чек потерялся — пришли его ещё раз, пожалуйста.'
+      : 'The receipt is gone — please send it again.');
+  }
+  await setSetting(proofKey(telegramId), '', 'Чек за событие обработан').catch(() => {});
+  return attachEventProof({ signup, telegramId, lang, fileId, fileType, chatId, adminChatId });
+}
+
+async function attachEventProof({ signup, telegramId, lang = 'ru', fileId, fileType, chatId, adminChatId }) {
+  const L = ru(lang);
+  const event = await findEvent(signup.event_id);
+  const title = event?.title_ru || event?.title_en || signup.event_id;
+  await updateSignup(signup.signup_id, { note: 'чек прислан, ждёт подтверждения' }).catch(() => {});
+
+  const caption = `<b>💳 Чек за событие</b>
+
+🎾 <b>${escapeHtml(title)}</b>
+👤 ${escapeHtml(signup.player_name || String(telegramId))}
+📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}
+Сумма по счёту: <b>${signup.amount_thb} ฿</b>`;
+  const markup = { reply_markup: { inline_keyboard: [
+    [{ text: '✅ Подтвердить оплату', callback_data: `ev_pok:${signup.signup_id}` }],
+    [{ text: '❌ Отклонить', callback_data: `ev_pno:${signup.signup_id}` }]
+  ] } };
+
+  if (adminChatId) {
+    // Чек кладём в тему игрока, если она есть; нет темы — в общий админ-чат.
+    let to = adminChatId, opts = {};
+    try {
+      const { getOrCreatePlayerTopic } = await import('./admin.js');
+      const topic = await getOrCreatePlayerTopic({ telegram_id: telegramId, name: signup.player_name });
+      if (topic?.chatId) to = topic.chatId;
+      if (topic?.message_thread_id) opts = { message_thread_id: topic.message_thread_id };
+    } catch (e) { /* темы нет — пишем в общий чат, чек не теряется */ }
+    const { sendPhoto } = await import('./telegram.js');
+    if (fileType === 'photo') {
+      await sendPhoto(to, fileId, { caption, ...opts, ...markup })
+        .catch(() => sendMessage(to, caption, { ...opts, ...markup }));
+    } else {
+      await sendMessage(to, caption, { ...opts, ...markup }).catch(() => {});
+    }
+  }
+  return sendMessage(chatId, L
+    ? `✅ Чек за «${escapeHtml(title)}» получен и передан организатору. Как подтвердит — появишься в списке участников.`
+    : `✅ Receipt for “${escapeHtml(title)}” received and passed to the organizer. Once confirmed, you will appear in the participants list.`);
+}
+
+// Организатор подтвердил или отклонил чек за событие.
+export async function reviewEventProof({ signupId, approve, adminChatId = '' }) {
+  const all = await listSignups().catch(() => []);
+  const signup = all.find(s => s.signup_id === String(signupId));
+  if (!signup) return { ok: false, message: 'Запись не найдена.' };
+  const event = await findEvent(signup.event_id);
+  const title = event?.title_ru || signup.event_id;
+  if (!approve) {
+    await updateSignup(signup.signup_id, { note: 'чек отклонён организатором' }).catch(() => {});
+    await sendMessage(signup.telegram_id,
+      `⚠️ Оплата за «${escapeHtml(title)}» не подтверждена. Проверь перевод и пришли чек ещё раз.`).catch(() => {});
+    return { ok: true, message: `Чек отклонён: <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b>.` };
+  }
+  const amount = signup.amount_thb || 0;
+  const updated = await updateSignup(signup.signup_id, {
+    status: SIGNUP_STATUS.paid, paid_thb: amount, paid_from: 'перевод', note: 'оплата подтверждена'
+  });
+  await sendMessage(signup.telegram_id, `✅ Оплата за «${escapeHtml(title)}» подтверждена. Ты в составе!
+📅 ${escapeHtml(event?.date || '')} ${escapeHtml(event?.time || '')}`).catch(() => {});
+  if (adminChatId) {
+    await notifyOrganizer({ ...signup, ...updated, status: SIGNUP_STATUS.paid, paid_thb: amount },
+      event, adminChatId, '💰 Оплата подтверждена').catch(() => {});
+  }
+  return { ok: true, message: `✅ Оплата зачтена: <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b>, ${amount} ฿.` };
+}
+
 // --- напоминания ------------------------------------------------------------
 // Работают как напоминания о матчах: проход по расписанию раз в 15 минут, отметка
 // об отправке лежит в Settings, поэтому одно и то же письмо не уходит дважды.
@@ -469,15 +956,30 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
   if (existing) return { ok: false, message: `<b>${escapeHtml(name)}</b> уже в составе.` };
 
   const amount = priceFor(event, 0);
+  // mode === 'dep' — оплачиваем сразу с депозита игрока, если денег хватает.
+  if (mode === 'dep' && event.payment_required && amount > 0) {
+    const balance = await getBalance(telegramId).catch(() => 0);
+    if (balance < amount) {
+      return { ok: false, message: `На депозите <b>${balance} ฿</b>, а нужно <b>${amount} ฿</b> — не хватает.` };
+    }
+  }
   const paying = mode === 'inv' && event.payment_required && amount > 0;
   const status = paying ? SIGNUP_STATUS.invoiced
-    : (mode === 'paid' ? SIGNUP_STATUS.paid : SIGNUP_STATUS.confirmed);
+    : ((mode === 'paid' || mode === 'dep') ? SIGNUP_STATUS.paid : SIGNUP_STATUS.confirmed);
   const signup = await createSignup({
     event, telegramId, name, guests: 0, status,
     amount: paying ? amount : 0
   });
   if (mode === 'paid') {
     await updateSignup(signup.signup_id, { paid_thb: amount, paid_from: 'добавлен организатором' });
+  }
+  let depositLeft = null;
+  if (mode === 'dep' && event.payment_required && amount > 0) {
+    depositLeft = await addTransaction({
+      telegramId, name, type: 'расход', amount: -amount,
+      description: `Участие: ${event.title_ru || event.event_id}`
+    });
+    await updateSignup(signup.signup_id, { paid_thb: amount, paid_from: 'депозит' });
   }
 
   const L = ru(lang);
@@ -489,12 +991,17 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
     await sendMessage(telegramId, await invoiceText(event, signup, lang, balance),
       { reply_markup: invoiceKeyboard(event, signup, lang, balance) }).catch(() => {});
   } else {
+    const dep = depositLeft === null ? '' : (L
+      ? `\n💳 Списано с депозита: <b>${amount} ฿</b>. Остаток: <b>${depositLeft} ฿</b>`
+      : `\n💳 Charged to your deposit: <b>${amount} ฿</b>. Balance: <b>${depositLeft} ฿</b>`);
     await sendMessage(telegramId, L
-      ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n${escapeHtml(event.date)} ${escapeHtml(event.time)}`
-      : `✅ You are in for “${escapeHtml(event.title_en)}”.\n${escapeHtml(event.date)} ${escapeHtml(event.time)}`).catch(() => {});
+      ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n${escapeHtml(event.date)} ${escapeHtml(event.time)}${dep}`
+      : `✅ You are in for “${escapeHtml(event.title_en)}”.\n${escapeHtml(event.date)} ${escapeHtml(event.time)}${dep}`).catch(() => {});
   }
   if (adminChatId) await notifyOrganizer({ ...signup, status }, event, adminChatId, 'добавлен организатором').catch(() => {});
-  const what = paying ? 'счёт отправлен' : (mode === 'paid' ? 'засчитан оплаченным' : 'участие подтверждено');
+  const what = paying ? 'счёт отправлен'
+    : (mode === 'dep' ? `оплачено с депозита, остаток ${depositLeft} ฿`
+      : (mode === 'paid' ? 'засчитан оплаченным' : 'участие подтверждено'));
   return { ok: true, message: `✅ <b>${escapeHtml(name)}</b> в составе — ${what}.` };
 }
 
@@ -527,6 +1034,8 @@ export async function removeFromEvent({ signupId, mode = 'rule', adminChatId = '
     await notifyOrganizer({ ...signup, status: SIGNUP_STATUS.cancelled }, event, adminChatId,
       refund > 0 ? `↩️ Возврат: <b>${refund} ฿</b>` : '🚫 Без возврата').catch(() => {});
   }
+  // Освободившееся место сразу уходит в лист ожидания.
+  await runWaitlistOffers(Date.now(), adminChatId).catch(() => {});
   const tail = refund > 0 ? ` Возврат: <b>${refund} ฿</b>${left != null ? `, депозит: <b>${left} ฿</b>` : ''}.` : '';
   return { ok: true, message: `✅ <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b> снят с события.${tail}` };
 }
@@ -551,6 +1060,17 @@ function participantsOf(all, eventId, isAdmin) {
     .sort((a, b) => Number(a.waitlist) - Number(b.waitlist) || a.name.localeCompare(b.name, 'ru'));
 }
 
+// Лист ожидания карточки: по порядку очереди, с номерами.
+function queueOf(all, eventId, isAdmin) {
+  return waitlistQueue(all, eventId).map((s, i) => ({
+    name: s.player_name || String(s.telegram_id),
+    place: i + 1,
+    guests: s.guests || 0,
+    signup_id: isAdmin ? s.signup_id : '',
+    telegram_id: isAdmin ? String(s.telegram_id) : ''
+  }));
+}
+
 export async function eventsForViewer(telegramId = '', isActivePlayer = false, isAdmin = false) {
   const events = await listEvents();
   const mine = await listSignups();
@@ -572,7 +1092,11 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false, i
       my_signup_id: signup?.signup_id || '',
       my_guests: signup?.guests || 0,
       my_paid: signup?.paid_thb || 0,
-      participants: participantsOf(mine, e.event_id, isAdmin),
+      // Свой номер в очереди и окно на решение — чтобы человек видел, чего ждёт.
+      my_queue: signup?.status === SIGNUP_STATUS.waitlist ? waitlistPosition(mine, e.event_id, telegramId) : 0,
+      offer_window_hours: offerWindowHours(e),
+      participants: participantsOf(mine, e.event_id, isAdmin).filter(p => !p.waitlist),
+      waitlist: queueOf(mine, e.event_id, isAdmin),
       // Открыта ли запись прямо сейчас: по этому признаку вкладка «События»
       // подсвечивается, чтобы люди не пропускали новое.
       open_now: isSignupOpen(e) && (!e.capacity || Math.max(0, e.capacity - taken) > 0) && !signup
@@ -582,12 +1106,10 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false, i
   return out.sort((a, b) => (startMs(a) || Infinity) - (startMs(b) || Infinity));
 }
 
-// Дата и время события в миллисекундах. Формат в таблице — дд.мм.гггг и чч:мм.
+// Дата и время события в миллисекундах. Считает events.js, чтобы у напоминаний
+// и у правила отмены был один и тот же момент старта.
 export function startMs(event) {
-  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(safe(event?.date));
-  if (!m) return 0;
-  const t = /^(\d{1,2}):(\d{2})$/.exec(safe(event?.time)) || [, '12', '00'];
-  return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(t[1]) - 7, Number(t[2]));
+  return eventStartMs(event) || 0;
 }
 
 // Запись открыта, пока не прошёл срок записи, а если он не задан — пока не

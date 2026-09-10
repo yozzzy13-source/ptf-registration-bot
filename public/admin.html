@@ -279,6 +279,12 @@ async function saveEvent(){
     $('evResult').innerHTML='<span class="ok">Сохранено: '+j.event.event_id+'</span>';loadEvents()}
   catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
 }
+// Ручная перерассылка тем, кто не записался. Сам текст и защита от спама — в боте.
+async function nudgeEvent(id){
+  try{ await api('/api/admin/event-nudge',{event_id:id});
+    $('evResult').innerHTML='<span class="ok">Напоминание запущено — отчёт придёт в бот.</span>' }
+  catch(e){ $('evResult').innerHTML='<span class="err">'+e.message+'</span>' }
+}
 async function previewEvent(){
   try{if(!evEditing)await saveEvent();
     await api('/api/admin/event-preview',{event_id:evEditing});
@@ -315,7 +321,9 @@ async function loadEvents(){
       +evData.map(e=>'<tr><td>'+esc(e.title_ru||e.title_en||e.event_id)+'</td><td>'+esc([e.date,e.time].filter(Boolean).join(' '))+'</td>'
         +'<td><span class="pill">'+esc(e.status)+'</span></td><td class="num">'+(e.capacity?e.seats+' / '+e.capacity:e.seats)+'</td>'
         +'<td class="num">'+e.signups+'</td>'
-        +'<td><button class="btn secondary" onclick="editEvent(\''+e.event_id+'\')">Править</button></td></tr>').join('')}
+        +'<td><button class="btn secondary" onclick="editEvent(\''+e.event_id+'\')">Править</button> '
+        +(e.status==='published'?'<button class="btn secondary" onclick="nudgeEvent(\''+e.event_id+'\')">Напомнить</button>':'')
+        +'</td></tr>').join('')}
   catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
 }
 // --- балансы -----------------------------------------------------------------

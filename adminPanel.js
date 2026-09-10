@@ -318,6 +318,17 @@ export function registerAdminRoutes(app) {
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
+  app.post('/api/admin/event-nudge', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { remindUnregistered } = await import('./eventflow.js');
+      // Отчёт уходит организатору в бот: там же он увидит, скольким написали.
+      await remindUnregistered(auth.user.id, String(req.body.event_id || ''));
+      res.json({ ok:true });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
   app.post('/api/admin/event-save', async (req, res) => {
     try {
       const auth = adminFromInitData(req.body.initData || '');
@@ -380,18 +391,41 @@ export function registerAdminRoutes(app) {
   });
 
   // Начисление и списание руками: депозит игрока правится только отсюда.
+  app.get('/api/admin/balance-history', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { transactionsOf, getBalance } = await import('./events.js');
+      const telegramId = String(req.query.telegram_id || '').trim();
+      if (!telegramId) return res.status(400).json({ ok:false, error:'Нужен игрок' });
+      const [balance, history] = await Promise.all([
+        getBalance(telegramId).catch(() => 0),
+        transactionsOf(telegramId, 100).catch(() => [])
+      ]);
+      res.json({ ok:true, balance, history });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
   app.post('/api/admin/balance-change', async (req, res) => {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { addTransaction } = await import('./events.js');
+      const { addTransaction, getBalance } = await import('./events.js');
       const amount = Number(req.body.amount || 0);
       if (!req.body.telegram_id || !amount) return res.status(400).json({ ok:false, error:'Нужны игрок и сумма' });
+      const telegramId = String(req.body.telegram_id);
+      const name = String(req.body.name || '');
+      const reason = String(req.body.comment || '').trim();
       const left = await addTransaction({
-        telegramId: String(req.body.telegram_id), name: String(req.body.name || ''),
+        telegramId, name,
         type: amount > 0 ? 'пополнение' : 'списание', amount,
-        description: String(req.body.comment || 'правка организатора')
+        description: reason || (amount > 0 ? 'Пополнение организатором' : 'Списание организатором')
       });
+      // Игрок должен узнать о движении денег — иначе баланс «сам меняется».
+      const tail = reason ? ` (${escapeHtml(reason)})` : '';
+      await sendMessage(telegramId, amount > 0
+        ? `💳 Депозит пополнен на <b>${amount} ฿</b>${tail}. Текущий баланс: <b>${left} ฿</b>`
+        : `💳 С депозита списано <b>${Math.abs(amount)} ฿</b>${tail}. Текущий баланс: <b>${left} ฿</b>`).catch(() => {});
       res.json({ ok:true, balance:left });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
