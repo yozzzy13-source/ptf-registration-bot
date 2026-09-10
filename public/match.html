@@ -11,22 +11,32 @@
    не задевает разметку и логику. */
 :root{
   --bg:#0A0A0B;--card:#111010;--card2:#0D0C0B;--text:#EFEBE4;--muted:#B9B1A5;
-  --accent:#E8A45C;--accent2:#C9873C;--border:#1D1A17;--line2:#1A1714;
+  --accent:#E8A45C;--accent2:#C9873C;--border:#2A2521;--line2:#221F1B;
   --danger:#C2695E;--green:#8FBF9A;--green2:#2A3A2E;--yellow:#C9A76A;--champ:#D9C7A3;
+  --accBg:var(--accBg);--accBg2:var(--accBg2);--accLine:var(--accLine);--onAcc:var(--onAcc);--avBg:var(--avBg);
+  --grain:var(--grain);--fadeNone:var(--fadeNone);
+}
+/* Светлая тема Court — те же роли, другой свет. Выбор общий с витриной лиги. */
+html[data-theme="light"]{
+  --bg:#F2F5F1;--card:#FFFFFF;--card2:#EBF0EA;--text:#16211A;--muted:#4C5A50;
+  --accent:#1F6B44;--accent2:#145236;--border:#C7D3C5;--line2:#DDE5DB;
+  --danger:#B04A2E;--green:#1F6B44;--green2:#E1F0E7;--yellow:#8E9A2E;--champ:#6E7A22;
+  --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--onAcc:#FFFFFF;--avBg:#E7EDE6;
+  --grain:rgba(0,0,0,.02);--fadeNone:rgba(242,245,241,0);
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
 font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;
 background:var(--bg);color:var(--text);min-height:100vh;padding:0 14px 40px;position:relative}
 .grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
-background-image:radial-gradient(rgba(255,255,255,.028) .5px,transparent .5px);background-size:3px 3px}
+background-image:radial-gradient(var(--grain) .5px,transparent .5px);background-size:3px 3px}
 .wrap{position:relative;z-index:1}
 .wrap{max-width:620px;margin:0 auto}
 h1{font-size:22px;font-weight:800;letter-spacing:-.6px;margin:14px 0 4px}
 .sub{color:var(--muted);font-size:13px;line-height:1.45;margin:0 0 12px}
-.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,var(--bg) 78%,rgba(10,10,11,0));margin-bottom:4px}
+.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,var(--bg) 78%,var(--fadeNone));margin-bottom:4px}
 .tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
-.tab.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--accent)}
+.tab.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;margin:0 0 12px}
 label{display:block;font-size:10px;letter-spacing:1.1px;text-transform:uppercase;font-weight:800;color:var(--muted);margin:12px 0 6px}
 label:first-of-type{margin-top:0}
@@ -34,13 +44,13 @@ select,input,textarea{width:100%;padding:12px;border-radius:12px;border:1px soli
 textarea{min-height:60px;resize:vertical}
 .row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
 button{width:100%;border:0;border-radius:14px;padding:15px;font-size:15px;font-weight:900;margin-top:14px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border);font-family:inherit}
-button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#191512;border:0;font-weight:900}
+button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--onAcc);border:0;font-weight:900}
 button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11px}
 .dowhead,.datestrip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
 .dowhead{padding:0 0 4px}
 .dowlabel{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.3px;opacity:.5;font-weight:800}
 .daycell{padding:9px 4px 7px;border-radius:12px;background:var(--card2);text-align:center;cursor:pointer;border:1px solid var(--border);transition:.15s;user-select:none;min-width:0}
-.daycell.sel{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#191512;border-color:var(--accent)}
+.daycell.sel{background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--onAcc);border-color:var(--accent)}
 .daycell.past{opacity:.22;cursor:default;border-color:transparent}
 .daycell .dnum{font-size:17px;font-weight:800;line-height:1.15}
 .daycell .dmon{font-size:9px;opacity:.6;font-weight:700;margin-top:2px}
@@ -48,30 +58,30 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .slot.mine{border-left-color:var(--green)}
 .slot.agreed{border-left-color:var(--green)}
 .slot-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-.av{width:38px;height:38px;border-radius:50%;flex:0 0 38px;background:#1E1B18;object-fit:cover;object-position:50% 32%;border:1px solid #2A2521;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:var(--mute,#8A7F6F)}
+.av{width:38px;height:38px;border-radius:50%;flex:0 0 38px;background:var(--avBg);object-fit:cover;object-position:50% 32%;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:var(--mute,var(--muted))}
 .who{font-weight:800;font-size:15px;line-height:1.25}
 .when{font-size:14px;margin:2px 0}
 .meta{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.5}
 .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:800;border:1px solid var(--line2);background:var(--card2);color:var(--muted);margin:2px 4px 2px 0}
-.pill.acc{background:var(--green2);border-color:#3F5A46;color:var(--green)}
-.pill.open{background:#221B14;border-color:#4A3925;color:var(--accent)}
+.pill.acc{background:var(--green2);border-color:var(--accLine);color:var(--green)}
+.pill.open{background:var(--accBg);border-color:var(--accLine);color:var(--accent)}
 .acts{display:flex;gap:8px;margin-top:10px}
 .opp{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:14px;background:var(--card2);margin-bottom:8px;cursor:pointer}
-.opp.sel{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14)}
+.opp.sel{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg))}
 .opp .who{font-size:14px}
 .hint{color:var(--muted);font-size:12px;line-height:1.5;margin-top:8px}
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
 .res{margin-top:12px;font-size:14px;line-height:1.5}
-.res.ok{background:var(--green2);border:1px solid #3F5A46;color:var(--green);padding:12px;border-radius:12px}
+.res.ok{background:var(--green2);border:1px solid var(--accLine);color:var(--green);padding:12px;border-radius:12px}
 .res.err{color:var(--danger)}
 .hidden{display:none}
 .seg{display:flex;gap:8px;margin-bottom:4px}
 .seg .s{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;color:var(--muted)}
-.seg .s.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--accent)}
-.daycell.on{background:linear-gradient(180deg,var(--accent),var(--accent2));color:#191512;border-color:var(--accent)}
+.seg .s.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
+.daycell.on{background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--onAcc);border-color:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{padding:9px 13px;border-radius:999px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
-.chip.on{border-color:#4A3925;background:linear-gradient(180deg,#2C231A,#221B14);color:var(--accent)}
+.chip.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-end;justify-content:center;z-index:50}
 .sheet{background:var(--card);border:1px solid var(--border);border-radius:20px 20px 0 0;padding:18px 16px 22px;width:100%;max-width:620px;max-height:88vh;overflow:auto}
 .sheet h3{margin:0 0 4px;font-size:17px}
@@ -85,14 +95,45 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .scorehead .nm{font-size:12px;font-weight:800;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .scorehead .nm.win{color:var(--text)}
 .scorehead .dash{text-align:center;color:var(--muted);font-weight:800}
-.photo-btn{display:block;width:100%;padding:14px;border-radius:12px;border:1px dashed #4A3925;background:var(--card2);color:var(--accent);text-align:center;font-size:13px;font-weight:800;cursor:pointer}
+.photo-btn{display:block;width:100%;padding:14px;border-radius:12px;border:1px dashed var(--accLine);background:var(--card2);color:var(--accent);text-align:center;font-size:13px;font-weight:800;cursor:pointer}
 .photo-prev{width:100%;border-radius:12px;margin-top:8px;max-height:220px;object-fit:cover}
+
+/* Календарь: сразу видны две недели, остальное открывается свайпом или тапом
+   по язычку — иначе три ряда дат съедают весь экран. */
+.dtwrap{position:relative;overflow:hidden;transition:max-height .3s ease}
+.dtwrap.open{max-height:none!important}
+.dtwrap:not(.open):after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;
+  pointer-events:none;background:linear-gradient(180deg,var(--fadeNone),var(--card))}
+.dtmore{margin-top:6px;display:flex;align-items:center;justify-content:center;gap:7px;
+  padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--card2);
+  color:var(--muted);font-size:11px;font-weight:800;cursor:pointer;user-select:none}
+.dtmore i{font-style:normal;font-size:12px;line-height:1}
+
+/* Переключатель темы — те же два ярлычка, что в витрине лиги. */
+.ttop{display:flex;align-items:center;gap:10px}
+.ttop h1{flex:1 1 auto;min-width:0}
+.thsw{display:flex;gap:3px;padding:3px;border:1px solid var(--border);border-radius:999px;
+  background:var(--card);flex:0 0 auto}
+.thsw button{width:27px;height:24px;border:0;border-radius:999px;background:transparent;
+  color:var(--muted);font-size:13px;line-height:1;cursor:pointer;padding:0;display:flex;
+  align-items:center;justify-content:center;font-family:inherit}
+.thsw button.on{background:var(--accBg);color:var(--accent);box-shadow:0 0 0 1px var(--accLine) inset}
 </style>
 </head>
 <body>
+<script>
+// Тема общая с витриной лиги: выбор хранится на устройстве под тем же ключом.
+try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
+  document.documentElement.setAttribute('data-theme',_th); }catch(e){}
+</script>
 <div class="grain"></div>
 <div class="wrap">
-  <h1 id="title">Матчи</h1>
+  <div class="ttop"><h1 id="title">Матчи</h1>
+    <div class="thsw" id="thSw">
+      <button type="button" data-th="dark" title="Тёмная тема">☾</button>
+      <button type="button" data-th="light" title="Светлая тема">☀</button>
+    </div>
+  </div>
   <p class="sub" id="sub"></p>
   <div class="tabs">
     <div class="tab on" data-t="open" id="tabOpen">Открытые окна</div>
@@ -213,6 +254,63 @@ function timeOptions(sel,minHM,maxHM){
   var minM=minHM?hm2min(minHM):6*60,maxM=maxHM?hm2min(maxHM):22*60+30,o='';
   for(var m=Math.ceil(minM/30)*30;m<=maxM;m+=30){var hm=pad(Math.floor(m/60))+':'+pad(m%60);o+='<option value="'+hm+'"'+(hm===sel?' selected':'')+'>'+hm+'</option>'}
   return o;
+}
+// Две недели видно всегда, третья — по свайпу вверх/вниз внутри календаря
+// или тапом по язычку. Высоту считаем по реальной ячейке, а не на глаз.
+// Тема: ключ общий с витриной лиги, поэтому выбор переносится между экранами.
+function applyTheme(name){
+  var th=name==='light'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',th);
+  try{ localStorage.setItem('ptf_theme',th) }catch(e){}
+  var bg=th==='light'?'#F2F5F1':'#0A0A0B';
+  try{ if(tg&&tg.setHeaderColor)tg.setHeaderColor(bg) }catch(e){}
+  try{ if(tg&&tg.setBackgroundColor)tg.setBackgroundColor(bg) }catch(e){}
+  var box=document.getElementById('thSw');
+  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
+    b.classList.toggle('on',b.getAttribute('data-th')===th);
+  });
+}
+function initTheme(){
+  var box=document.getElementById('thSw');
+  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
+    b.onclick=function(){ applyTheme(b.getAttribute('data-th')) };
+  });
+  var cur='dark';
+  try{ var v=localStorage.getItem('ptf_theme'); if(v==='light'||v==='dark')cur=v }catch(e){}
+  applyTheme(cur);
+}
+initTheme();
+
+function dtMore(){
+  return '<div class="dtmore" data-more="1"><i>⌄</i>'+(L?'Ещё даты':'More dates')+'</div>';
+}
+function foldStrips(){
+  var list=document.querySelectorAll('.dtwrap.fold:not([data-ready])');
+  [].forEach.call(list,function(w){
+    w.setAttribute('data-ready','1');
+    var cell=w.querySelector('.daycell');
+    if(!cell)return;
+    var h=cell.getBoundingClientRect().height;
+    if(!h)return;
+    w.style.maxHeight=Math.round(h*2+6)+'px';
+    var tab=w.nextElementSibling;
+    var toggle=function(open){
+      w.classList.toggle('open',open);
+      if(tab&&tab.classList.contains('dtmore')){
+        tab.innerHTML='<i>'+(open?'⌃':'⌄')+'</i>'+(open?(L?'Свернуть':'Less'):(L?'Ещё даты':'More dates'));
+      }
+    };
+    if(tab&&tab.classList.contains('dtmore'))tab.onclick=function(){ toggle(!w.classList.contains('open')) };
+    var y0=null;
+    w.addEventListener('touchstart',function(e){ y0=e.touches[0].clientY },{passive:true});
+    w.addEventListener('touchmove',function(e){
+      if(y0===null)return;
+      var dy=e.touches[0].clientY-y0;
+      if(Math.abs(dy)<26)return;
+      toggle(dy>0);
+      y0=null;
+    },{passive:true});
+  });
 }
 function isoDate(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
 function fmtDay(iso){
@@ -400,6 +498,7 @@ function renderCounter(){
   var s=myMatches.filter(function(x){return x.challenge_id===counterSlotId})[0];
   if(!s){$('viewNew').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>';return}
   var today=new Date(),todayIso=isoDate(today);
+  foldStrips();
   var base=s.agreed_date&&s.agreed_date>=todayIso?s.agreed_date:todayIso;
   if(!selDates.length)selDates=[base];
   var mons=(L?['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']);
@@ -418,11 +517,12 @@ function renderCounter(){
     +'<div class="hint">'+esc(X.counterHint)+'</div>'
     +'<label>'+esc(X.pickDate)+'</label>'
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
-    +'<div class="datestrip">'+days+'</div>'
+    +'<div class="dtwrap fold"><div class="datestrip">'+days+'</div></div>'+dtMore()
     +'<label>'+esc(X.pickTime)+' <span class="pill">'+esc(X.durFixed)+'</span></label><select id="cTime">'+timeOptions(s.agreed_time||s.time_from||'17:00')+'</select>'
     +'<label>'+esc(X.pickCourt)+'</label><select id="cCourt">'+courtOpts+'</select>'
     +'<button class="primary" onclick="submitCounter(this)">'+esc(X.counterSend)+'</button>'
     +'<div id="cRes" class="res"></div></div>';
+  foldStrips();
 }
 function pickCounterDate(iso){selDates=[iso];renderCounter()}
 function submitCounter(btn){
@@ -707,7 +807,7 @@ function renderBook(){
     +'<div class="hint">'+esc(X.bookHint)+'</div>'
     +'<label>'+esc(X.pickDate)+'</label>'
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
-    +'<div class="datestrip">'+days+'</div>'
+    +'<div class="dtwrap fold"><div class="datestrip">'+days+'</div></div>'+dtMore()
     +'<label>'+esc(X.bookTime)+'</label>'
     +'<div class="row"><select id="bkTime">'+timeOptions('17:00')+'</select>'
     +'<select id="bkDur"><option value="60">'+esc(X.h1)+'</option><option value="90">'+esc(X.h15)+'</option>'
@@ -717,6 +817,7 @@ function renderBook(){
     +'<div class="hint">'+esc(X.bookNote)+'</div>'
     +'<button class="primary" onclick="submitBooking(this)">'+esc(X.bookSend)+'</button>'
     +'<div id="bkRes" class="res"></div></div>';
+  foldStrips();
 }
 function pickBookDate(iso){bookDate=iso;renderBook()}
 function toggleBookCourt(n){var i=bookCourts.indexOf(n);if(i>=0)bookCourts.splice(i,1);else bookCourts.push(n);renderBook()}
@@ -764,7 +865,7 @@ function renderNew(){
     +(newMode==='direct'?'<label>'+esc(X.opp)+'</label><div id="oppBox">'+oppList+'</div>':'')
     +'<label>'+esc(X.date)+(selDates.length?' <span class="pill">'+selDates.length+'</span>':'')+'</label>'
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
-    +'<div class="datestrip" id="strip">'+days+'</div>'
+    +'<div class="dtwrap fold"><div class="datestrip" id="strip">'+days+'</div></div>'+dtMore()
     +'<label>'+esc(X.time)+' <span class="pill">'+esc(X.durFixed)+'</span></label>'
     +'<div class="row"><select id="mFrom">'+timeOptions('17:00')+'</select><select id="mTo">'+timeOptions('21:00')+'</select></div>'
     +'<div class="hint">'+esc(X.timeHint)+'</div>'
@@ -774,6 +875,7 @@ function renderNew(){
     +'<button class="primary" onclick="submitSlot(this)">'+esc(X.send)+'</button>'
     +'<div id="mRes" class="res"></div>'
     +'</div>';
+  foldStrips();
 }
 function toggleDate(iso){var i=selDates.indexOf(iso);if(i>=0)selDates.splice(i,1);else selDates.push(iso);selDates.sort();renderNew()}
 function toggleCourt(name){var i=selCourts.indexOf(name);if(i>=0)selCourts.splice(i,1);else selCourts.push(name);renderNew()}
