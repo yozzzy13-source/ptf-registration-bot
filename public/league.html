@@ -88,6 +88,12 @@ color:var(--text);font-size:14px;margin-bottom:10px}
 font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .chip.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
 .chips.sm .chip{padding:5px 9px;font-size:10px;border-radius:8px}
+/* Шапка блока внутри вкладки: название, счётчик и язычок фильтров одной
+   строкой — фильтры не висят развёрнутыми и не съедают экран. */
+.bhead{display:flex;align-items:center;gap:8px;margin:4px 0 8px}
+.bhead h3{margin:0;font-size:15px;letter-spacing:-.2px}
+.bcnt{font-size:11px;color:var(--mute2);font-weight:700}
+.bhead .chip.sm{margin-left:auto;padding:5px 10px;font-size:10.5px;border-radius:9px}
 .sday{margin:15px 0 7px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .srow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:6px;border:1px solid var(--line4);border-radius:12px;background:var(--card2)}
 .srow.me{border-color:var(--accLine);background:linear-gradient(180deg,#1C1712,#161310)}
@@ -579,7 +585,6 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
   <div id="viewDiv" class="hidden"></div>
   <div id="viewRace" class="hidden"></div>
   <div id="viewPlayers" class="hidden"></div>
-  <div id="viewSched" class="hidden"></div>
   <div id="viewMatches" class="hidden"></div>
   <div id="viewEvents" class="hidden"></div>
   <div id="viewAbout" class="hidden"></div>
@@ -624,7 +629,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Статус',
-  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Мои матчи',schPlayer:'Игрок',schCourt:'Корт',
+  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
   avTitle:'Аватарка',avSend:'📸 Загрузить селфи',avRedo:'📸 Заменить селфи',avSending:'Отправляю…',
@@ -681,7 +686,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Status',
-  schToday:'Today',schTomorrow:'Tomorrow',schMine:'My matches',schPlayer:'Player',schCourt:'Court',
+  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
   avTitle:'Avatar',avSend:'📸 Upload a selfie',avRedo:'📸 Replace the selfie',avSending:'Sending…',
@@ -877,13 +882,15 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
 // Все экраны приложения. VIEWS — те, что реально показаны в нижнем меню:
 // набор приходит с сервера и зависит от группы игрока (активный, лист
 // ожидания, заявка без оплаты, остальные). Главная есть всегда.
-var ALL_VIEWS=['home','div','race','players','sched','matches','events','about'];
+// «Расписание» больше не отдельный экран: согласованные матчи живут сверху
+// вкладки «Матчи», прямо над историей.
+var ALL_VIEWS=['home','div','race','players','matches','events','about'];
 var VIEWS=ALL_VIEWS.slice();
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
-sched:'viewSched',matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
+matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
 function buildTabs(){
   var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
-              sched:X.tSched,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
+              matches:X.tMatches,events:X.tEvents,about:X.tAbout};
   var labels=VIEWS.map(function(k){return [k,byCode[k]||k]});
   $('tabs').innerHTML=labels.map(function(x){
     // У «Событий» — зелёная точка, когда есть открытая регистрация: иначе про
@@ -964,13 +971,12 @@ function showTab(t){
   $('tabs').classList.remove('hidden');
   $('hdr').classList.remove('hidden');
   $('viewCard').classList.add('hidden');
-  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,sched:X.tSched,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
+  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,about:X.tAbout};
   $('title').textContent=titles[t]||X.title;
   if(t==='home')renderHome();
   else if(t==='div')renderDiv();
   else if(t==='race')renderRace();
   else if(t==='players')renderPlayers();
-  else if(t==='sched')renderSched();
   else if(t==='matches')renderFeed();
   else if(t==='events')renderEvents();
   else renderAbout();
@@ -983,7 +989,7 @@ function showTab(t){
 // вкладке «Матчи». Игрок открывает раздел сразу на своём дивизионе — остальные
 // рядом, одним касанием. Метрика по кортам приходит только организатору.
 var schData=null,schLoading=false,schErr='';
-var schDiv=null,schPlayer='',schCourt='',schMine=false,schFiltersOpen=false;
+var schDiv='',schMine=false;
 function loadSched(){
   schLoading=true;schErr='';
   fetch('/api/league/schedule?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
@@ -997,20 +1003,15 @@ function loadSched(){
           schDiv=(j.me_division&&j.divisions.indexOf(j.me_division)>=0)?j.me_division:'';
         }
       }
-      renderSched();
-    }).catch(function(e){schLoading=false;schErr=e.message;renderSched()});
+      if(mode==='matches')renderFeed();
+    }).catch(function(e){schLoading=false;schErr=e.message;if(mode==='matches')renderFeed()});
 }
-function setSchDiv(v){schDiv=v;renderSched()}
-function setSchPlayer(v){schPlayer=v;renderSched()}
-function setSchCourt(v){schCourt=v;renderSched()}
-function toggleSchMine(){schMine=!schMine;renderSched()}
-function toggleSchFilters(){schFiltersOpen=!schFiltersOpen;renderSched()}
+function setSchDiv(v){schDiv=v;renderFeed()}
+function toggleSchMine(){schMine=!schMine;renderFeed()}
 function schVisible(){
   if(!schData)return [];
   return schData.items.filter(function(i){
     if(schDiv&&i.division!==schDiv)return false;
-    if(schCourt&&i.court!==schCourt)return false;
-    if(schPlayer&&String(i.p1.id)!==schPlayer&&String(i.p2.id)!==schPlayer)return false;
     if(schMine&&String(i.p1.id)!==schData.me&&String(i.p2.id)!==schData.me)return false;
     return true;
   });
@@ -1028,57 +1029,30 @@ function schDayLabel(dateStr,nowMs){
   return d.toLocaleDateString(L?'ru-RU':'en-GB',{weekday:'short',day:'numeric',month:'short'});
 }
 function schName(p){return p.name||'—'}
-function renderSched(){
-  var box=$('viewSched');
-  if(schLoading&&!schData){box.innerHTML='<div class="empty">…</div>';return}
-  if(schErr){box.innerHTML='<div class="empty" style="color:#C2695E">'+esc(schErr)+'</div>';return}
-  if(!schData){box.innerHTML='<div class="empty">…</div>';loadSched();return}
+// Ближайшие матчи — верхний блок вкладки «Матчи». Только то, о чём игроки уже
+// договорились: кто, когда и где. Договорённости в работе живут в «Моих матчах»,
+// сюда они не попадают. Фильтры спрятаны под язычок, чтобы не занимать экран.
+var schFOpen=false;
+function toggleSchF(){schFOpen=!schFOpen;renderFeed()}
+function upcomingBlock(){
+  if(schErr)return '<div class="empty" style="color:#C2695E">'+esc(schErr)+'</div>';
+  if(!schData){loadSched();return '<div class="empty">…</div>'}
 
   var items=schVisible();
-  var h='';
+  var h='<div class="bhead"><h3>'+esc(X.schUpcoming)+'</h3>'
+    +'<div class="bcnt">'+items.length+'</div>'
+    +'<div class="chip sm'+(schFOpen?' on':'')+'" onclick="toggleSchF()">'+esc(X.filters)+'</div></div>';
 
-  // Организатору — короткая сводка и накладки. Игроку это лишний шум.
-  if(schData.admin){
-    var clashes=schData.clashes||[];
-    h+='<div class="chips" style="margin-bottom:9px"><div class="chip on">'+esc(X.schTotal)+': '+schData.items.length+'</div>'
-      +'<div class="chip">'+esc(X.schNoCourt)+': '+(schData.pending_court||0)+'</div>'
-      +(clashes.length?'<div class="chip" style="border-color:#5A2E2A;color:#C2695E">'+esc(X.schClash)+': '+clashes.length+'</div>':'')
-      +'</div>';
+  if(schFOpen){
+    var divChips='<div class="chip'+(schDiv===''?' on':'')+'" onclick="setSchDiv(\'\')">'+esc(X.all)+'</div>'
+      +(schData.divisions||[]).map(function(d){
+        return '<div class="chip'+(schDiv===d?' on':'')+'" onclick="setSchDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
+      }).join('')
+      +'<div class="chip'+(schMine?' on':'')+'" onclick="toggleSchMine()">'+esc(X.schMine)+'</div>';
+    h+='<div class="chips sm">'+divChips+'</div>';
   }
 
-  // Фильтры: дивизион всегда на виду, остальное прячем под «Фильтры» —
-  // список игроков и кортов длинный и забивает экран.
-  var divChips='<div class="chip'+(schDiv===''?' on':'')+'" onclick="setSchDiv(\'\')">'+esc(X.all)+'</div>'
-    +(schData.divisions||[]).map(function(d){
-      return '<div class="chip'+(schDiv===d?' on':'')+'" onclick="setSchDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
-    }).join('');
-  h+='<div class="chips">'+divChips+'</div>';
-
-  var extra='<div class="chip'+(schMine?' on':'')+'" onclick="toggleSchMine()">'+esc(X.schMine)+'</div>'
-    +'<div class="chip'+(schFiltersOpen?' on':'')+'" onclick="toggleSchFilters()">'+esc(X.filters)+'</div>';
-  h+='<div class="chips">'+extra+'</div>';
-
-  if(schFiltersOpen){
-    var pl='<div class="chip'+(schPlayer===''?' on':'')+'" onclick="setSchPlayer(\'\')">'+esc(X.all)+'</div>'
-      +(schData.players||[]).map(function(p){
-        return '<div class="chip'+(schPlayer===String(p.id)?' on':'')+'" onclick="setSchPlayer(\''+q(String(p.id))+'\')">'+esc(p.name)+'</div>';
-      }).join('');
-    var ct='<div class="chip'+(schCourt===''?' on':'')+'" onclick="setSchCourt(\'\')">'+esc(X.all)+'</div>'
-      +(schData.courts||[]).map(function(c){
-        return '<div class="chip'+(schCourt===c?' on':'')+'" onclick="setSchCourt(\''+q(c)+'\')">'+esc(c)+'</div>';
-      }).join('');
-    h+='<div class="fpanel"><div class="flab">'+esc(X.schPlayer)+'</div><div class="chips sm">'+pl+'</div>'
-      +'<div class="flab">'+esc(X.schCourt)+'</div><div class="chips sm" style="margin-bottom:0">'+ct+'</div></div>';
-  }
-
-  if(!items.length){
-    h+='<div class="empty">'+esc(X.schEmpty)+'</div>';
-    box.innerHTML=h;
-    return;
-  }
-
-  var clashIds={};
-  (schData.clashes||[]).forEach(function(pair){clashIds[pair[0]]=1;clashIds[pair[1]]=1});
+  if(!items.length)return h+'<div class="empty">'+esc(X.schEmpty)+'</div>';
 
   var day='';
   items.forEach(function(i){
@@ -1087,28 +1061,18 @@ function renderSched(){
       h+='<div class="sday">'+esc(schDayLabel(i.date,schData.now))+'</div>';
     }
     var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
+    // Корт показываем как есть: подтверждён он или нет — вопрос переписки, а не
+    // этого экрана.
     var marks=[];
-    if(i.court)marks.push(esc(i.court)+(i.court_confirmed?' ✓':' ⏳'));
-    else marks.push(X.schCourtTbd);
+    if(i.court)marks.push(esc(i.court));
     if(i.division)marks.push(esc(divLabel(i.division)));
-    h+='<div class="srow'+(mine?' me':'')+(clashIds[i.id]?' clash':'')+'">'
+    h+='<div class="srow'+(mine?' me':'')+'">'
       +'<div class="stime">'+esc(i.time||'—')+'</div>'
       +'<div class="spair">'+esc(schName(i.p1))+' <span class="vs">—</span> '+esc(schName(i.p2))+'</div>'
-      +'<div class="smeta">'+marks.join(' · ')+'</div>'
+      +(marks.length?'<div class="smeta">'+marks.join(' · ')+'</div>':'')
       +'</div>';
   });
-
-  // Корты — только организатору: это операционная метрика, не для ленты.
-  if(schData.admin&&(schData.court_usage||[]).length){
-    h+='<div class="sday">'+esc(X.schCourts)+'</div>';
-    h+=schData.court_usage.map(function(c){
-      return '<div class="srow"><div class="stime">'+c.played+'</div>'
-        +'<div class="spair">'+esc(c.court)+'</div>'
-        +'<div class="smeta">'+esc(X.schWithScore)+': '+c.with_score+'</div></div>';
-    }).join('');
-  }
-
-  box.innerHTML=h;
+  return h;
 }
 
 // ------------------------------------------------------------- аватарка
@@ -1220,7 +1184,7 @@ function openAvatarFull(src){
 // Разделы идут по кругу в порядке верхнего меню. На странице игрока стрелки
 // работают как «назад к разделу», вперёд там некуда.
 function tabTitle(t){
-  var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,sched:X.tSched,
+  var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
               matches:X.tMatches,events:X.tEvents,about:X.tAbout};
   return titles[t]||X.title;
 }
@@ -1946,26 +1910,36 @@ function reverseScore(sc){
     return part.replace(/(\d+):(\d+)/g,function(_,a,b){return b+':'+a});
   }).join('/');
 }
+// Вкладка «Матчи»: сверху ближайшие согласованные, снизу история лиги.
+// У каждого блока свой набор фильтров, и оба спрятаны под язычки.
+var fOpen=false;
+function toggleF(){fOpen=!fOpen;renderFeed()}
 function renderFeed(){
   var list=allMatchesList();
   var divs=[];
   list.forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
   divs.sort();
-  var chips='<div class="chip'+(fDiv===''?' on':'')+'" onclick="setFDiv(\'\')">'+esc(X.all)+'</div>'
-    +divs.map(function(d){return '<div class="chip'+(fDiv===d?' on':'')+'" onclick="setFDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>'}).join('');
   var qq=fQuery.trim().toLowerCase();
   var shown=list.filter(function(m){
     if(fDiv&&String(m.division||'').trim()!==fDiv)return false;
     if(qq&&String(m.winner.name).toLowerCase().indexOf(qq)<0&&String(m.loser.name).toLowerCase().indexOf(qq)<0)return false;
     return true;
   });
-  var h='<input class="search" id="fq" placeholder="'+esc(X.searchP)+'" value="'+esc(fQuery)+'" oninput="setFQuery(this.value)">'
-    +'<div class="chips">'+chips+'</div><div class="cnt">'+esc(X.found)+shown.length+'</div>';
+  var h=upcomingBlock();
+  h+='<div class="bhead" style="margin-top:16px"><h3>'+esc(X.histTitle)+'</h3>'
+    +'<div class="bcnt">'+shown.length+'</div>'
+    +'<div class="chip sm'+(fOpen||fQuery||fDiv?' on':'')+'" onclick="toggleF()">'+esc(X.filters)+'</div></div>';
+  if(fOpen||fQuery||fDiv){
+    var chips='<div class="chip'+(fDiv===''?' on':'')+'" onclick="setFDiv(\'\')">'+esc(X.all)+'</div>'
+      +divs.map(function(d){return '<div class="chip'+(fDiv===d?' on':'')+'" onclick="setFDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>'}).join('');
+    h+='<input class="search" id="fq" placeholder="'+esc(X.searchP)+'" value="'+esc(fQuery)+'" oninput="setFQuery(this.value)">'
+      +'<div class="chips sm">'+chips+'</div>';
+  }
   var page=shown.slice(0,fLimit);
   h+=page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
   if(shown.length>fLimit)h+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
   $('viewMatches').innerHTML=h;
-  keepFocus('fq',fQuery);
+  if(fOpen||fQuery)keepFocus('fq',fQuery);
 }
 function setFDiv(d){fDiv=d;fLimit=20;renderFeed()}
 function setFQuery(v){fQuery=v;fLimit=20;renderFeed()}
@@ -2218,8 +2192,10 @@ function seasonRowsWithLive(p,byTable){
 function renderPlayer(p){
   var w=pct(p);
   var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
-  var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>'
-    +'<div class="hero">'
+  var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>';
+  // Панель загрузки фото — над самой фотографией: иначе её не видно без прокрутки.
+  h+=avatarBlock(p);
+  h+='<div class="hero">'
     +'<div onclick="openAvatarFull(\''+q(p.photo||'')+'\')">'+av(p)+'</div>'
     +'<div class="vign t"></div><div class="vign b"></div>'
     +avatarButton(p)+'<div class="fade"></div><div class="info">'
@@ -2235,8 +2211,6 @@ function renderPlayer(p){
       +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
       +stt('Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''))
     +'</div></div></div>';
-
-  h+=avatarBlock(p);
 
   var byTable=seasonPlacesOf(p.name,p.id);
   var srows=seasonRowsWithLive(p,byTable);
