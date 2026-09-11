@@ -1,6 +1,6 @@
 import { sheets as sheetsClient } from './google.js';
 import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID } from './config.js';
-import { nowISO, safe, parseSeasonNumber } from './util.js';
+import { nowISO, safe, parseSeasonNumber, directPhotoUrl } from './util.js';
 
 const cache = new Map();
 const CACHE_MS = 20_000;
@@ -363,10 +363,21 @@ export async function getMasterPhotos() {
   if (!LEAGUE_RESULTS_SHEET_ID) return out;
   const { rows } = await readNamedSheet(LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
     .catch(() => ({ rows: [] }));
+  // Колонку с фото ищем не по точному имени: в таблице она называлась и
+  // player_photo, и photo_url, и просто «Фото». Берём первую подходящую, где
+  // действительно лежит ссылка, и приводим её к виду, который покажет браузер.
+  const photoKeys = new Set(['player_photo', 'photo', 'photo_url', 'player_photo_url', 'avatar', 'image', 'foto']);
+  const looksPhoto = (k) => photoKeys.has(k) || /photo|avatar|image|фото|аватар/i.test(k);
   for (const r of rows) {
     const name = String(r.player_name || '').trim();
-    const url = String(r.player_photo || r.photo || r.photo_url || '').trim();
-    if (name && /^https?:\/\//i.test(url)) out.set(name, url);
+    if (!name) continue;
+    let url = '';
+    for (const [k, v] of Object.entries(r)) {
+      if (!looksPhoto(k)) continue;
+      const direct = directPhotoUrl(v);
+      if (direct) { url = direct; break; }
+    }
+    if (url) out.set(name, url);
   }
   masterPhotoCache = { t: Date.now(), v: out };
   return out;
@@ -444,7 +455,7 @@ export async function getLeagueProfiles() {
       id: at(row, 'player_id'),
       slug: at(row, 'player_slug'),
       name,
-      photo: at(row, 'player_photo_url'),
+      photo: directPhotoUrl(at(row, 'player_photo_url')),
       division: at(row, 'current_division'),
       position: pickNumber(at(row, 'position')),
       points: pickNumber(at(row, 'total_ranking_points')),
@@ -999,6 +1010,23 @@ export async function findApplicantByTelegramIdentity(userOrProfile={}) {
     });
   }
   return null;
+}
+
+// Строка игрока могла попасть в таблицу без telegram_id — анкету заводили руками
+// или переносили из старой базы. Тогда бот узнаёт человека только по нику: из
+// кнопки под сообщением узнаёт, а из нижней клавиатуры (там в адресе лишь id) —
+// уже нет, и тот же игрок видит меню как посторонний. Поэтому, узнав его по
+// нику, сразу дописываем id — со следующего раза сработают оба пути.
+export async function healApplicantId(row, telegramId) {
+  const id = String(telegramId || '').trim();
+  if (!row?._rowNumber || !id) return false;
+  if (String(row.telegram_id || '').trim() === id) return false;
+  try {
+    await updateObjectByRow(SHEETS.applicants, row._rowNumber, { telegram_id: id });
+    row.telegram_id = id;
+    console.log(`healApplicantId: ${row.name || row._rowNumber} → ${id}`);
+    return true;
+  } catch (e) { console.error('healApplicantId failed:', e.message); return false; }
 }
 
 export async function setUserLanguage(user={}, language='en') {

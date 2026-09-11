@@ -13,6 +13,7 @@ import { sheets as sheetsClient } from './google.js';
 import { DIVISION_SPREADSHEETS } from './config.js';
 import { getSetting } from './sheets.js';
 import { divisionRegistry } from './matchesdb.js';
+import { directPhotoUrl } from './util.js';
 
 const WIN_POINTS = 3;
 const LOSS_POINTS = 1;
@@ -155,7 +156,7 @@ export async function getDivisionTable(letter, season = '', group = '') {
   // Фото игроков лежат сбоку отдельным списком: имя → ссылка.
   const photos = new Map();
   for (const r of rows) {
-    const n = txt(r.name1), u = txt(r.url || r.pic);
+    const n = txt(r.name1), u = directPhotoUrl(txt(r.url || r.pic));
     if (n && u) photos.set(n, u);
   }
 

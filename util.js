@@ -94,3 +94,23 @@ export function verifyWebAppToken(token = '') {
   catch { return ''; }
   return id;
 }
+
+// Ссылка на фото из таблицы в вид, который браузер реально покажет в <img>.
+// Самая частая причина «имя совпадает, ссылка стоит, а аватарки нет» — обычная
+// ссылка «поделиться» с Google Диска: она открывает страницу просмотра, а не
+// картинку, и тег <img> по ней получает HTML. Вытаскиваем id файла и собираем
+// прямой адрес. Всё остальное (включая уже прямые ссылки) отдаём как есть.
+export function directPhotoUrl(value = '') {
+  const raw = String(value || '').trim().replace(/^["']|["']$/g, '');
+  if (!raw) return '';
+  // =IMAGE("…") — в таблицах пишут и так; вытаскиваем адрес из формулы.
+  const img = /^=?\s*image\s*\(\s*["']([^"']+)["']/i.exec(raw);
+  const url = img ? img[1].trim() : raw;
+  if (!/^https?:\/\//i.test(url)) return '';
+  if (!/drive\.google\.com/i.test(url)) return url;
+  const id = (/\/file\/d\/([\w-]{10,})/.exec(url)
+    || /[?&]id=([\w-]{10,})/.exec(url)
+    || /\/d\/([\w-]{10,})/.exec(url) || [])[1];
+  if (!id) return url;
+  return `https://drive.google.com/thumbnail?id=${id}&sz=w800`;
+}

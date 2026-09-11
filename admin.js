@@ -358,6 +358,149 @@ export async function waitlistPlayer({ chatId, telegramId }) {
   return setApplicationStatus({ chatId, applicationId: app.application_id, status: 'waitlist' });
 }
 
+// Что бот ВИДИТ по игроку: узнаётся ли он по id, какая у него группа и какие
+// кнопки ему достаются. Нужна, когда один и тот же человек видит разное меню,
+// заходя из нижней клавиатуры и из кнопки под сообщением: первая знает только
+// id, вторая — ещё и ник, и при пустом telegram_id в таблице пути расходятся.
+export async function adminWhois(chatId, query) {
+  const q = String(query || '').replace('/whois', '').trim().replace(/^@/, '');
+  if (!q) return sendMessage(chatId, 'Как пользоваться: /whois @ник или /whois telegram_id');
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const low = q.toLowerCase();
+  const matches = rows.filter(x =>
+    String(x.telegram_id || '').trim() === q
+    || String(x.telegram_username || '').replace(/^@/, '').toLowerCase() === low
+    || String(x.name || '').toLowerCase().includes(low));
+  if (!matches.length) return sendMessage(chatId, 'Никого не нашёл.');
+  const r = matches[0];
+  const id = String(r.telegram_id || '').trim();
+  const { playerGroup, getGroupTabs, getGroupButtons, getGroupKeyboard } = await import('./sheets.js');
+  const { MENU_LABELS } = await import('./keyboards.js');
+  const group = id ? await playerGroup(id).catch(() => 'guest') : 'guest';
+  const names = { active:'активные', waitlist:'лист ожидания', applied:'заявка без оплаты', guest:'все остальные' };
+  const tabNames = { home:'Лига', div:'Дивизионы', race:'Гонка', players:'Игроки', sched:'Расписание', matches:'Матчи', events:'События', about:'О лиге' };
+  const [tabs, btns, keys] = await Promise.all([
+    getGroupTabs(group).catch(() => []), getGroupButtons(group).catch(() => []), getGroupKeyboard(group).catch(() => [])
+  ]);
+  const lines = [
+    `<b>🔎 ${escapeHtml(r.name || q)}</b>`,
+    '',
+    `telegram_id в таблице: ${id ? `<code>${escapeHtml(id)}</code>` : '<b>ПУСТО</b>'}`,
+    `Ник: ${r.telegram_username ? '@' + escapeHtml(r.telegram_username) : '—'}`,
+    `Статус: <b>${escapeHtml(r.status || '—')}</b> · дивизион: ${escapeHtml(r.division || '—')}`,
+    `Группа для кнопок: <b>${escapeHtml(names[group] || group)}</b>`,
+    ''
+  ];
+  if (!id) {
+    lines.push('⚠️ <b>Без telegram_id бот узнаёт его только по нику.</b>',
+      'Из кнопки под сообщением — узнаёт, из нижней клавиатуры — нет, и меню у него будет как у постороннего.',
+      'Починится само, как только он откроет любой раздел из сообщения бота: id допишется в строку.', '');
+  }
+  if (matches.length > 1) {
+    lines.push(`⚠️ Строк с таким человеком: <b>${matches.length}</b> — правило «один telegram_id = одна анкета» нарушено.`, '');
+  }
+  // Заодно смотрим, найдётся ли для него фото: аватарки в витрине подставляются
+  // по ИМЕНИ из трёх источников, и «нет аватарки» почти всегда значит, что имя
+  // в таблице дивизиона написано иначе, чем в анкете.
+  try {
+    const { getMasterPhotos, publishedAvatars, getLeagueProfiles } = await import('./sheets.js');
+    const key = (v) => String(v || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    const mine = key(r.name);
+    const [master, approved, profiles] = await Promise.all([
+      getMasterPhotos().catch(() => new Map()),
+      publishedAvatars().catch(() => new Map()),
+      getLeagueProfiles().catch(() => [])
+    ]);
+    const inMaster = [...master.keys()].some(n => key(n) === mine);
+    const inApproved = [...approved.keys()].some(n => key(n) === mine);
+    const shop = profiles.find(pl => key(pl.name) === mine);
+    const masterUrl = [...master.entries()].find(([n]) => key(n) === mine)?.[1] || '';
+    const where = [inApproved ? 'своя аватарка' : '', inMaster ? 'Players_Master' : '', shop?.photo ? 'витрина' : ''].filter(Boolean);
+    lines.push('', `🖼 Фото: ${where.length ? where.join(' · ') : '<b>нигде не найдено</b>'}`);
+    // Показываем сам адрес: по нему сразу видно, живая это ссылка на картинку
+    // или страница просмотра Google Диска, которую <img> показать не может.
+    const shown = inApproved ? `${PUBLIC_URL}/avatar/…png` : (masterUrl || shop?.photo || '');
+    if (shown) lines.push(`<code>${escapeHtml(shown)}</code>`);
+    if (!where.length) lines.push('Проверь, что имя в таблице дивизиона написано так же, как в анкете — фото ищется по имени.');
+    lines.push('');
+  } catch (e) { console.error('whois photo check failed:', e.message); }
+  lines.push(`📱 Вкладки мини-аппа: ${tabs.length ? tabs.map(t => tabNames[t] || t).join(', ') : '— пусто —'}`);
+  lines.push(`💬 Под сообщением: ${btns.length ? btns.length + ' кнопок' : '— пусто —'}`);
+  lines.push(`⌨️ Внизу чата: ${keys.length ? keys.map(k => (MENU_LABELS.ru[k] || k)).join(' · ') : '— пусто —'}`);
+  return sendMessage(chatId, lines.join('\n'));
+}
+
+// Сколько в базе строк без telegram_id и сколько дублей по одному id — из-за них
+// игрок и видит себя то участником, то посторонним.
+export async function adminIdCheck(chatId) {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const real = rows.filter(r => String(r.name || '').trim() || String(r.telegram_username || '').trim());
+  const noId = real.filter(r => !String(r.telegram_id || '').trim());
+  const byId = new Map();
+  for (const r of real) {
+    const id = String(r.telegram_id || '').trim();
+    if (!id) continue;
+    byId.set(id, (byId.get(id) || 0) + 1);
+  }
+  const dupes = [...byId.entries()].filter(([, n]) => n > 1);
+  const list = noId.slice(0, 25).map(r => `• ${escapeHtml(r.name || '—')}${r.telegram_username ? ' @' + escapeHtml(r.telegram_username) : ''} — ${escapeHtml(r.status || '')}`);
+  const lines = [
+    '<b>🔎 Проверка telegram_id</b>', '',
+    `Строк с людьми: <b>${real.length}</b>`,
+    `Без telegram_id: <b>${noId.length}</b>`,
+    `Дублей по одному id: <b>${dupes.length}</b>`
+  ];
+  if (noId.length) {
+    lines.push('', 'Эти узнаются только по нику — из нижней клавиатуры бот их не узнаёт:', ...list);
+    if (noId.length > list.length) lines.push(`…и ещё ${noId.length - list.length}`);
+    lines.push('', 'Id допишется сам, когда человек откроет раздел из сообщения бота.');
+  }
+  if (dupes.length) {
+    lines.push('', 'Дубли (одинаковый id в разных строках):',
+      ...dupes.slice(0, 15).map(([id, n]) => `• <code>${escapeHtml(id)}</code> — ${n} строки`));
+  }
+  return sendMessage(chatId, lines.join('\n'));
+}
+
+// Откуда вообще берутся аватарки и у кого их нет. Цепочка такая:
+// своя утверждённая аватарка → ссылка из Players_Master → фото из витрины →
+// фото из таблицы дивизиона. Побеждает первая, что нашлась.
+export async function adminPhotoCheck(chatId) {
+  const { getMasterPhotos, publishedAvatars, getLeagueProfiles } = await import('./sheets.js');
+  const key = (v) => String(v || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const [master, approved, profiles] = await Promise.all([
+    getMasterPhotos().catch(e => { console.error('master photos:', e.message); return new Map(); }),
+    publishedAvatars().catch(() => new Map()),
+    getLeagueProfiles().catch(() => [])
+  ]);
+  const masterKeys = new Set([...master.keys()].map(key));
+  const approvedKeys = new Set([...approved.keys()].map(key));
+  const drive = [...master.values()].filter(u => /drive\.google\.com/i.test(u)).length;
+  const noPhoto = profiles.filter(p => {
+    const k = key(p.name);
+    return !p.photo && !masterKeys.has(k) && !approvedKeys.has(k);
+  });
+  const lines = [
+    '<b>🖼 Откуда берутся аватарки</b>', '',
+    'Цепочка: своя аватарка → Players_Master → витрина игроков → таблица дивизиона.', '',
+    `Players_Master: <b>${master.size}</b> строк со ссылкой${drive ? ` (с Google Диска: ${drive} — они переводятся в прямой адрес)` : ''}`,
+    `Свои утверждённые аватарки: <b>${approved.size}</b>`,
+    `Витрина игроков: <b>${profiles.filter(p => p.photo).length}</b> из ${profiles.length} с фото`,
+    '',
+    `Без фото вообще: <b>${noPhoto.length}</b>`
+  ];
+  if (!master.size) {
+    lines.push('', '⚠️ Из Players_Master не прочиталось ни одной ссылки.',
+      'Проверь: лист называется Players_Master, в шапке есть колонка player_name,',
+      'а колонка с фото содержит слово photo, avatar, image или «фото».');
+  }
+  if (noPhoto.length) {
+    lines.push('', ...noPhoto.slice(0, 25).map(p => `• ${escapeHtml(p.name)}`));
+    if (noPhoto.length > 25) lines.push(`…и ещё ${noPhoto.length - 25}`);
+  }
+  return sendMessage(chatId, lines.join('\n'));
+}
+
 export async function adminProfile(chatId, query) {
   const q = String(query || '').replace('/profile', '').trim().replace(/^@/, '');
   if (!q) return sendMessage(chatId, 'Usage: /profile @username or /profile telegram_id');

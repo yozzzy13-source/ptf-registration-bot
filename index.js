@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
@@ -400,6 +400,7 @@ async function matchViewer(initData, token = '') {
   const user = who.user;
   const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
   if (!profile) return { ok:false, code:404, error:'Player profile not found. Complete the profile first.' };
+  if (user.id) await healApplicantId(profile, user.id).catch(() => {});
   const lang = ['ru','en'].includes(String(profile.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : 'en';
   // Матчи доступны только активным игрокам текущего состава. Проверка на сервере —
   // скрытая кнопка меню это лишь удобство, а не защита.
@@ -426,6 +427,9 @@ async function leagueViewer(initData, token = '') {
   const user = who.user;
   const profile = await findApplicantByTelegramIdentity(user).catch(() => null)
     || await findApplicantByTelegramId(user.id).catch(() => null);
+  // Узнали по нику, а id в строке нет — дописываем. Иначе из нижней клавиатуры,
+  // где в адресе только id, тот же человек приходит как посторонний.
+  if (profile && user.id) await healApplicantId(profile, user.id).catch(() => {});
   const lang = ['ru','en'].includes(String(profile?.language || '').toLowerCase())
     ? String(profile.language).toLowerCase()
     : (['ru','en'].includes(String(user.language_code || '').toLowerCase()) ? String(user.language_code).toLowerCase() : 'en');
