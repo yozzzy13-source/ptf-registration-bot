@@ -188,6 +188,17 @@
     </details>
     <div class="muted" id="countLine" style="margin-top:8px"></div>
   </div>
+  <div id="avPanel" class="card hidden"><h3>Аватарка игрока</h3>
+    <div class="who"><div class="av" id="avAv"></div>
+      <div><div class="nm" id="avName"></div><div class="muted" id="avSub"></div></div></div>
+    <div id="avBig" style="margin-top:10px"></div>
+    <p class="muted" style="margin-top:8px">Фото обрежется по центру в квадрат 1024×1024 — как у остальных карточек. Игрок получит уведомление.</p>
+    <input type="file" accept="image/*" id="avFile" style="display:none" onchange="avPickFile(this)"/>
+    <div class="actions"><button class="btn" id="avUpBtn" onclick="document.getElementById('avFile').click()">Загрузить фото</button>
+      <button class="btn secondary" id="avClrBtn" onclick="avClear()">Убрать аватарку</button>
+      <button class="btn secondary" onclick="avClose()">Закрыть</button></div>
+    <div id="avResult" class="muted" style="margin-top:8px"></div>
+  </div>
   <div id="tabPlayers" class="card"><h3>Игроки</h3><div class="tableWrap"><table id="playersTable"></table></div></div>
   <div id="tabBroadcast" class="card hidden"><h3>Рассылка</h3><p class="muted">Отметь получателей в списке ниже. Если не отмечен никто — уйдёт всем, кто попал под фильтры.</p><div class="rcpbar"><button class="btn secondary" onclick="selectFiltered()">Выбрать всех</button><button class="btn secondary" onclick="clearSelection()">Снять выделение</button><span class="cnt" id="rcpCount"></span></div><div class="rcp" id="rcpList"></div><textarea id="broadcastText" placeholder="Текст рассылки. HTML-разметка работает."></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast()">Предпросмотр</button></div><div id="broadcastPreview" class="prev hidden"></div><label>Кнопка под сообщением</label><select id="broadcastButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendBroadcast()">Отправить рассылку</button></div><div id="broadcastResult" class="muted"></div></div>
   <div id="tabDirect" class="card hidden"><h3>Личное сообщение</h3><p class="muted">Найди игрока по имени — Telegram ID вводить не нужно.</p><div class="pick"><input id="directPick" placeholder="Начни вводить имя или @ник" autocomplete="off" oninput="pickInput(this.value)" onkeydown="pickKey(event)" onblur="setTimeout(pickClose,150)"/><div class="sug hidden" id="directSug"></div></div><div id="directChosen"></div><input id="directId" class="hidden" placeholder="telegram_id"/><textarea id="directText" placeholder="Текст сообщения игроку"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="directButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Отправить</button></div><div id="directResult" class="muted"></div></div>
@@ -300,7 +311,7 @@ function noSelectionFilters(){const f=filters(); delete f.selected_ids; return f
 function matches(c){const f=noSelectionFilters(); const n=v=>String(v||'').toLowerCase(); if(f.status&&n(c.status)!==n(f.status))return false;if(f.division&&n(c.division)!==n(f.division))return false;if(f.language){if(f.language==='ru'&&n(c.language)!=='ru')return false;if(f.language==='en'&&n(c.language)==='ru')return false}if(f.selfie_status){if(f.selfie_status==='missing'){if(n(c.selfie_status)==='received')return false}else if(n(c.selfie_status)!==n(f.selfie_status))return false}if(f.event&&!n(c.last_application_event).includes(n(f.event)))return false;if(f.rating==='missing'&&!c.missing_rating)return false;if(f.rating==='set'&&c.missing_rating)return false;if(f.search){const hay=[c.name,c.telegram_username,c.telegram_id,c.whatsapp,c.country,c.crm_tags].map(n).join(' ');if(!hay.includes(n(f.search)))return false}return true}
 function renderStats(stats){const labels={contacts:'Contacts',applications:'Applications',active:'Active',waitlist:'Waitlist',unpaid:'Unpaid / waiting',proofReceived:'Proof received',paid:'Paid approved',rejectedPayments:'Payment rejected',paidThb:'Paid THB',paidUsdt:'Paid USDT',missingSelfie:'Missing selfies'};$('stats').innerHTML=Object.entries(stats).map(([k,v])=>`<div class="stat"><b>${v}</b><span>${labels[k]||k}</span></div>`).join('')}
 function optionize(id,arr){const el=$(id);const first=el.querySelector('option')?.outerHTML||'<option value="">Все</option>';el.innerHTML=first+arr.map(x=>`<option value="${x}">${x}</option>`).join('')}
-function renderTable(){filtered=contacts.filter(matches);$('countLine').textContent=`Найдено: ${filtered.length} · отмечено: ${selected.size}`;let html='<thead><tr><th><input type="checkbox" onchange="toggleAll(this.checked)"></th><th>Игрок</th><th>Статус</th><th>Дивизион</th><th class="lo">NTRP</th><th class="lo">Selfie</th><th class="lo">Язык</th><th class="lo">Ник</th><th class="lo">Событие</th><th class="lo">Страна</th><th class="lo">WhatsApp</th><th></th></tr></thead><tbody>';html+=filtered.map(c=>`<tr><td><input type="checkbox" ${selected.has(String(c.telegram_id))?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)"></td><td class="grow"><b>${esc(c.name)}</b><br><span class="muted">${c.telegram_username?'@'+esc(c.telegram_username)+' · ':''}${esc(c.telegram_id)}</span></td><td><span class="pill">${esc(c.status)}</span></td><td>${esc(c.division)}</td><td class="lo">${c.missing_rating?'<span class="err">—</span>':esc(c.ntrp)}</td><td class="lo">${esc(c.selfie_status)}</td><td class="lo">${esc(c.language)}</td><td class="lo">${c.telegram_username?'@'+esc(c.telegram_username):''}</td><td class="lo">${esc(c.last_application_event)}</td><td class="lo">${esc(c.country)}</td><td class="lo">${esc(c.whatsapp)}</td><td>${String(c.status||'').toLowerCase()==='active'?'':`<button class="btn secondary" onclick="event.stopPropagation();activatePlayer('${c.telegram_id}')">Активировать</button>`}</td></tr>`).join('');html+='</tbody>';$('playersTable').innerHTML=html;renderRecipients()}
+function renderTable(){filtered=contacts.filter(matches);$('countLine').textContent=`Найдено: ${filtered.length} · отмечено: ${selected.size}`;let html='<thead><tr><th><input type="checkbox" onchange="toggleAll(this.checked)"></th><th>Игрок</th><th>Статус</th><th>Дивизион</th><th class="lo">NTRP</th><th class="lo">Selfie</th><th class="lo">Язык</th><th class="lo">Ник</th><th class="lo">Событие</th><th class="lo">Страна</th><th class="lo">WhatsApp</th><th></th></tr></thead><tbody>';html+=filtered.map(c=>`<tr><td><input type="checkbox" ${selected.has(String(c.telegram_id))?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)"></td><td class="grow"><b>${esc(c.name)}</b><br><span class="muted">${c.telegram_username?'@'+esc(c.telegram_username)+' · ':''}${esc(c.telegram_id)}</span></td><td><span class="pill">${esc(c.status)}</span></td><td>${esc(c.division)}</td><td class="lo">${c.missing_rating?'<span class="err">—</span>':esc(c.ntrp)}</td><td class="lo">${esc(c.selfie_status)}</td><td class="lo">${esc(c.language)}</td><td class="lo">${c.telegram_username?'@'+esc(c.telegram_username):''}</td><td class="lo">${esc(c.last_application_event)}</td><td class="lo">${esc(c.country)}</td><td class="lo">${esc(c.whatsapp)}</td><td><button class="btn secondary" onclick="event.stopPropagation();avOpen('${c.telegram_id}')">Аватар</button>${String(c.status||'').toLowerCase()==='active'?'':` <button class="btn secondary" onclick="event.stopPropagation();activatePlayer('${c.telegram_id}')">Активировать</button>`}</td></tr>`).join('');html+='</tbody>';$('playersTable').innerHTML=html;renderRecipients()}
 function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function toggleOne(id,on){if(on)selected.add(String(id));else selected.delete(String(id));renderTable()} function toggleAll(on){filtered.forEach(c=>on?selected.add(String(c.telegram_id)):selected.delete(String(c.telegram_id)));renderTable()} function selectFiltered(){filtered.forEach(c=>selected.add(String(c.telegram_id)));renderTable()} function clearSelection(){selected.clear();renderTable()} function applyFilters(){renderTable()} function clearFilters(){['fStatus','fDivision','fLanguage','fSelfie','fRating','fEvent','fSearch'].forEach(id=>$(id).value='');renderTable()}
 async function api(path,body=null){const opts=body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,...body})}:{};const url=body?path:path+(path.includes('?')?'&':'?')+'initData='+encodeURIComponent(initData);const r=await fetch(url,opts);const j=await r.json();if(!j.ok)throw new Error(j.error||'Error');return j}
@@ -555,11 +566,11 @@ async function refundSent(id){
 // Две настройки в одном месте: вкладки внизу мини-приложения и кнопки под
 // сообщением бота. Одна группа на экране — на телефоне четыре колонки галочек
 // читать невозможно. Содержание кнопок не меняем, только видимость и порядок.
-const TAB_NAMES={home:'Лига',div:'Дивизионы',race:'Гонка',players:'Игроки',sched:'Расписание',matches:'Матчи',events:'События',about:'О лиге'};
-const BTN_NAMES={join_event:'🎾 Заявка на событие',matches:'🎾 Матчи',participants:'👥 Состав',league:'🏆 Лига',
+const TAB_NAMES={home:'Лига',div:'Дивизионы',race:'Гонка',players:'Игроки',matches:'Матчи',events:'События',about:'О лиге'};
+const BTN_NAMES={join_event:'🎾 Заявка на событие',matches:'🎾 Мои матчи',participants:'👥 Состав',league:'🏆 Лига',
   about:'ℹ️ О лиге',how:'📖 Как работает лига',yearly:'⭐ Гонка года',pass:'💳 Оплатить взнос',contact:'💬 Связаться'};
 const GROUP_NAMES={active:'Активные',waitlist:'Лист ожидания',applied:'Заявка без оплаты',guest:'Все остальные'};
-const KB_NAMES={matches:'🎾 Матчи',result:'📊 Результат',court:'📅 Корт',league:'🏆 Лига',
+const KB_NAMES={matches:'🎾 Мои матчи',result:'📊 Результат',court:'📅 Корт',league:'🏆 Лига',
   squad:'👥 Состав',apply:'🎾 Заявка',pay:'💳 Оплатить',contact:'💬 Связаться',menu:'🏠 Меню'};
 let tabsState={},btnsState={},kbState={},tabsAll=[],btnsAll=[],kbAll=[],tabsAlways=[];
 function menuGroup(){return $('menuGroup').value||'active'}
@@ -664,6 +675,80 @@ function balPickKey(e){
 }
 function balPickClose(){$('balSug').classList.add('hidden')}
 function balPick(i){const c=balSugItems[i];if(!c)return;balPickClose();$('balPick').value='';balOpen(c.telegram_id,c)}
+
+// ——— Аватарки игроков ———
+const AV_SIDE=1024;
+let avWho=null,avBusy=false;
+async function avOpen(id){
+  const c=(contacts||[]).find(x=>String(x.telegram_id)===String(id))||{telegram_id:id,name:String(id)};
+  avWho={telegram_id:String(id),name:c.name||String(id)};
+  $('avPanel').classList.remove('hidden');
+  $('avName').textContent=avWho.name;
+  $('avAv').textContent=(avWho.name||'?').trim().charAt(0).toUpperCase();
+  $('avSub').textContent=[c.telegram_username?'@'+c.telegram_username:'',c.status||''].filter(Boolean).join(' · ');
+  $('avResult').textContent='';$('avBig').innerHTML='<div class="muted">Смотрю, что сейчас стоит…</div>';
+  $('avPanel').scrollIntoView({behavior:'smooth',block:'start'});
+  try{
+    const j=await api('/api/admin/player-avatar?telegram_id='+encodeURIComponent(avWho.telegram_id));
+    avShow(j.url,j.status);
+  }catch(e){$('avBig').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+}
+function avShow(url,status){
+  $('avBig').innerHTML=url
+    ? '<img src="'+esc(url)+'" alt="" style="width:160px;height:160px;border-radius:14px;object-fit:cover;border:1px solid var(--line)"/>'
+      +'<div class="muted" style="margin-top:6px">Своя аватарка'+(status?' · '+esc(status):'')+'</div>'
+    : '<div class="muted">Своей аватарки нет — в приложении показывается фото из общей таблицы.</div>';
+  const clr=$('avClrBtn');if(clr)clr.classList.toggle('hidden',!url);
+}
+function avClose(){avWho=null;$('avPanel').classList.add('hidden')}
+function avPickFile(input){
+  const f=input.files&&input.files[0];input.value='';
+  if(!f||!avWho)return;
+  if(f.size>16*1024*1024){$('avResult').innerHTML='<span class="err">Файл больше 16 МБ — выбери поменьше</span>';return}
+  $('avResult').textContent='Готовлю квадрат 1024×1024…';
+  const fr=new FileReader();
+  fr.onerror=function(){$('avResult').innerHTML='<span class="err">Не смог прочитать файл</span>'};
+  fr.onload=function(){avSquare(String(fr.result)).then(avSend).catch(e=>{
+    $('avResult').innerHTML='<span class="err">'+esc(e.message)+'</span>'})};
+  fr.readAsDataURL(f);
+}
+// Обрезаем по центру и приводим к одному размеру — чтобы карточки не прыгали.
+function avSquare(dataUrl){
+  return new Promise(function(resolve,reject){
+    const img=new Image();
+    img.onerror=function(){reject(new Error('Это не похоже на картинку'))};
+    img.onload=function(){
+      const side=Math.min(img.naturalWidth||img.width,img.naturalHeight||img.height);
+      if(!side)return reject(new Error('Пустая картинка'));
+      const sx=((img.naturalWidth||img.width)-side)/2, sy=((img.naturalHeight||img.height)-side)/2;
+      const cv=document.createElement('canvas');cv.width=AV_SIDE;cv.height=AV_SIDE;
+      const ctx=cv.getContext('2d');
+      ctx.fillStyle='#101214';ctx.fillRect(0,0,AV_SIDE,AV_SIDE);
+      ctx.drawImage(img,sx,sy,side,side,0,0,AV_SIDE,AV_SIDE);
+      resolve(cv.toDataURL('image/jpeg',0.9));
+    };
+    img.src=dataUrl;
+  });
+}
+async function avSend(dataUrl){
+  if(avBusy||!avWho)return;
+  avBusy=true;$('avUpBtn').textContent='Отправляю…';$('avResult').textContent='Отправляю…';
+  try{
+    const j=await api('/api/admin/player-avatar',{telegram_id:avWho.telegram_id,photo:dataUrl});
+    avShow(j.url,'published');
+    $('avResult').innerHTML='✅ Аватарка обновлена, игроку ушло уведомление';
+  }catch(e){$('avResult').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+  avBusy=false;$('avUpBtn').textContent='Загрузить фото';
+}
+async function avClear(){
+  if(!avWho)return;
+  if(!confirm('Убрать аватарку у «'+avWho.name+'»? Вернётся фото из общей таблицы.'))return;
+  try{
+    await api('/api/admin/player-avatar-clear',{telegram_id:avWho.telegram_id});
+    avShow('','');
+    $('avResult').innerHTML='✅ Аватарка убрана, игроку ушло уведомление';
+  }catch(e){$('avResult').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+}
 
 async function balOpen(id,contact){
   const c=contact||(contacts||[]).find(x=>String(x.telegram_id)===String(id))
@@ -807,6 +892,8 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelect
   b.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
   window.scrollTo({top:0,behavior:'smooth'});
   ['Players','Broadcast','Direct','Selfie','Rating','History','Events','Balances','Refunds','Menu'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',['history','events','balances','refunds','menu'].includes(b.dataset.tab));
+  // Карточка аватарки живёт рядом со списком игроков — уходим из него, закрываем.
+  if(b.dataset.tab!=='players')avClose();
   if(b.dataset.tab==='history'&&!history.length)loadHistory();
   if(b.dataset.tab==='broadcast')renderRecipients();
   if(b.dataset.tab==='events')loadEvents();
