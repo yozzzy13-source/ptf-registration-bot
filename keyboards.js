@@ -109,10 +109,10 @@ export function adminPanelKeyboard(lang) { return inlineKeyboard([[{ text:'🛠 
 // Набор кнопок зависит от состояния игрока: новичку не нужен «Результат»,
 // активному — «Оплатить».
 export const MENU_LABELS = {
-  ru: { matches:'🎾 Матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига',
+  ru: { matches:'🎾 Мои матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига',
         pay:'💳 Оплатить', apply:'🎾 Заявка', squad:'👥 Состав',
         menu:'🏠 Меню', contact:'💬 Связаться' },
-  en: { matches:'🎾 Matches', result:'📊 Result', court:'📅 Court', league:'🏆 League',
+  en: { matches:'🎾 My matches', result:'📊 Result', court:'📅 Court', league:'🏆 League',
         pay:'💳 Pay', apply:'🎾 Apply', squad:'👥 Line-up',
         menu:'🏠 Menu', contact:'💬 Contact' }
 };
@@ -143,7 +143,7 @@ const MENU_LAYOUTS = {
 // Значит после любой правки набора кнопок или адресов номер надо поднять —
 // иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
 // без мгновенного открытия мини-приложения).
-export const MENU_VERSION = 4;
+export const MENU_VERSION = 5;
 
 // allow — набор кнопок для группы игрока (настраивается в админке). Не задан —
 // берём прежнюю раскладку по состоянию. Кнопки раскладываем по две в ряд, а
@@ -179,6 +179,13 @@ export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null)
 const ACTION_BY_LABEL = new Map();
 for (const l of ['ru','en']) {
   for (const [key, text] of Object.entries(MENU_LABELS[l])) ACTION_BY_LABEL.set(text.toLowerCase(), key);
+}
+// Подписи менялись, а клавиатура живёт у человека в чате до следующего
+// сообщения боту. Старые надписи продолжаем понимать, иначе нажатие уходит в
+// бота обычным текстом и остаётся без ответа.
+const LEGACY_LABELS = { '🎾 матчи': 'matches', '🎾 matches': 'matches' };
+for (const [text, key] of Object.entries(LEGACY_LABELS)) {
+  if (!ACTION_BY_LABEL.has(text)) ACTION_BY_LABEL.set(text, key);
 }
 export function menuAction(text='') {
   return ACTION_BY_LABEL.get(String(text).trim().toLowerCase()) || '';

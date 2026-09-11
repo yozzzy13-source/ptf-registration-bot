@@ -938,21 +938,9 @@ export async function courtUsage(now = Date.now()) {
   return [...tally.values()].sort((a, b) => b.played - a.played);
 }
 
-// Накладка: два матча на одном корте в пересекающееся время. Организатору это
-// важно увидеть заранее — игроки узнают об этом только приехав на корт.
-export function scheduleClashes(items = []) {
-  const clashes = [];
-  for (let i = 0; i < items.length; i++) {
-    for (let j = i + 1; j < items.length; j++) {
-      const a = items[i], b = items[j];
-      const court = String(a.court || '').trim().toLowerCase();
-      if (!court || court !== String(b.court || '').trim().toLowerCase()) continue;
-      if (a.start === null || b.start === null) continue;
-      if (a.start < b.end && b.start < a.end) clashes.push([a.id, b.id]);
-    }
-  }
-  return clashes;
-}
+// Поиска накладок здесь больше нет. Он сравнивал поле «корт», а туда попадает
+// НАЗВАНИЕ КЛУБА — кортов в клубе несколько, и два матча в один час это норма.
+// Проверка давала ложную тревогу на каждом втором вечере.
 
 // Корт по сыгранным матчам, ключ — «дата + пара имён» в любом порядке.
 // В журнал результатов корт не пишется, поэтому история лиги его не знает;

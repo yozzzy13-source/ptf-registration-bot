@@ -1463,7 +1463,9 @@ export async function playerGroup(telegramId, applicant = null) {
 // админки, хранится в Settings одной строкой на группу. Пустая строка = набор по
 // умолчанию, то есть всё. «Лига» (главная) есть у всех всегда: без неё человек
 // открывает приложение в пустоту.
-export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'sched', 'matches', 'events', 'about'];
+// «Расписание» слилось с «Матчами»: согласованные матчи теперь показываются
+// сверху той же вкладки, отдельного экрана для них больше нет.
+export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'about'];
 // Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.
 export const ALWAYS_TABS = [];
 const tabsKey = (group) => `tabs_${group}`;

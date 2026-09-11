@@ -17,7 +17,7 @@ import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as 
 import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
-  listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage, scheduleClashes,
+  listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage,
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
@@ -1129,11 +1129,11 @@ app.get('/api/league/schedule', async (req, res) => {
         .sort((a, b) => a.name.localeCompare(b.name)),
       items
     };
+    // Накладки по кортам больше не считаем: в поле «корт» стоит название клуба,
+    // а кортов там несколько — два матча в один час это норма, а не конфликт.
     if (v.isAdmin) {
       payload.admin = true;
-      payload.clashes = scheduleClashes(items);
       payload.court_usage = await courtUsage().catch(() => []);
-      payload.pending_court = items.filter(i => !i.court_confirmed).length;
     }
     res.json(payload);
   } catch (e) {
