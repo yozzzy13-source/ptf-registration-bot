@@ -1,6 +1,6 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST } from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
@@ -51,17 +51,26 @@ async function playerState(userId) {
 // поставить один раз и обновлять только при смене состояния. Сигнатуру держим
 // в памяти: лишняя перестановка на каждое сообщение мигает у человека экраном.
 const menuSignature = new Map();
-function keyboardFor(chatId, lang, kind, userId) {
+// Матчи, результат и бронь корта имеют смысл только игроку из действующего
+// состава: остальным эти экраны всё равно откажут. Поэтому набор из админки
+// пересекаем с тем, что человеку реально доступно.
+const MATCH_ONLY = ['matches', 'result', 'court'];
+async function keyboardFor(chatId, lang, kind, userId) {
   const key = String(chatId);
-  // В сигнатуру входит версия раскладки и наличие персонального токена: после
-  // деплоя с новыми кнопками клавиатура обязана обновиться у всех, иначе люди
-  // остаются со старой и жмут кнопки, которые уходят в бот текстом.
-  const kb = persistentKeyboard(lang, kind, userId);
+  let allow = null;
+  try {
+    allow = await keyboardForGroup(userId);
+    if (kind !== 'active') allow = allow.filter(k => !MATCH_ONLY.includes(k));
+  } catch (e) { console.error('keyboard set failed:', e.message); allow = null; }
+  // В сигнатуру входит версия раскладки, набор кнопок и наличие персонального
+  // токена: после деплоя или правки в админке клавиатура обязана обновиться у
+  // всех, иначе люди остаются со старой и жмут кнопки, которых уже нет.
+  const kb = persistentKeyboard(lang, kind, userId, allow);
   const oneTap = kb.keyboard.flat().some(b => b.web_app) ? 'app' : 'txt';
-  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}`;
+  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}:${(allow || []).join('.')}`;
   if (menuSignature.get(key) === sig) return null;
   menuSignature.set(key, sig);
-  return kb;
+  return kb.keyboard.length ? kb : null;
 }
 
 // Короткая сводка для активного игрока: ближайший матч и то, чего от него ждут.
@@ -116,7 +125,7 @@ async function refreshMenu(chatId, lang, from) {
   const userId = from?.id ?? chatId;
   const l = fallbackLang(lang);
   const st = await playerState(userId);
-  const kb = keyboardFor(chatId, l, st.kind, userId);
+  const kb = await keyboardFor(chatId, l, st.kind, userId);
   if (!kb) return null;
   return sendMessage(chatId, l === 'ru' ? '⌨️ Обновил быстрые кнопки — теперь разделы открываются одним нажатием.' : '⌨️ Quick buttons updated — sections now open in one tap.', { reply_markup: kb });
 }
@@ -154,7 +163,7 @@ async function sendMain(chatId, lang, from=null) {
   // Постоянное меню ставим отдельным коротким сообщением — двух reply_markup
   // в одном сообщении Telegram не принимает.
   if (isPrivateChat) {
-    const kb = keyboardFor(chatId, l, st.kind, userId);
+    const kb = await keyboardFor(chatId, l, st.kind, userId);
     if (kb) await sendMessage(chatId, l === 'ru' ? '⌨️ Быстрые кнопки внизу — они всегда под рукой.' : '⌨️ Quick buttons below — always at hand.', { reply_markup: kb }).catch(e => console.error('persistent keyboard failed:', e.message));
   }
 }
@@ -327,7 +336,8 @@ function adminHelpText() {
     '• Событие правится и удаляется в панели: удаление спрашивает, вернуть деньги на балансы или ты вернёшь переводом сам.',
     '• Возвраты переводом копятся во вкладке «Возвраты» — там же отмечаешь «отправил».',
     '• Касса: игрок выбирается из списка, пополнение/списание/возврат — кнопками, комментарий обязателен.',
-    '• Вкладка «Кнопки» — что видит каждая группа игроков: и вкладки мини-приложения, и кнопки под сообщением бота.',
+    '• Вкладка «Кнопки» — что видит каждая группа игроков: вкладки мини-приложения, кнопки под сообщением и нижняя клавиатура в чате.',
+    '• Там же «Прислать в бот» и «Открыть мини-апп» — посмотреть всё глазами выбранной группы, без второго аккаунта.',
     '', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
     '<i>Ответ игроку: Reply под его сообщением в топике.</i>');
   return lines.join('\n');

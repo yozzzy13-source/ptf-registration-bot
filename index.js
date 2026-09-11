@@ -437,6 +437,43 @@ async function leagueViewer(initData, token = '') {
   return { ok:true, user, profile: profile || {}, division, lang, isAdmin: ADMIN_IDS.includes(String(user.id)) };
 }
 
+// История матчей лиги для экрана матчей: плоская лента, по строке на матч.
+// В витрине она хранится по игрокам — один матч лежит в двух карточках, поэтому
+// схлопываем по номеру матча и паре имён.
+app.get('/api/match/history', async (req, res) => {
+  try {
+    const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const [history, players] = await Promise.all([
+      getLeagueMatchHistory().catch(() => new Map()),
+      getLeagueProfiles().catch(() => [])
+    ]);
+    const nameById = new Map(players.map(p => [String(p.id), p.name]));
+    const seen = new Set();
+    const out = [];
+    for (const [pid, list] of history.entries()) {
+      for (const m of (list || [])) {
+        const key = `${m.match_no || ''}-${[String(pid), String(m.opponent_id || m.opponent)].sort().join('-')}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const me = nameById.get(String(pid)) || '';
+        const win = m.result === 'WIN';
+        out.push({
+          no: m.match_no || '', date: m.date || '', season: m.season || '',
+          division: (m.division || m.opponent_division || '').toString().toUpperCase(),
+          winner: win ? me : m.opponent, loser: win ? m.opponent : me,
+          score: m.score || '', court: m.court || ''
+        });
+      }
+    }
+    out.sort((a, b) => Number(b.no || 0) - Number(a.no || 0));
+    res.json({ ok:true, division: v.division || '', matches: out.slice(0, 300) });
+  } catch (e) {
+    console.error('match history failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
 app.get('/api/match/bootstrap', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
@@ -949,7 +986,13 @@ app.get('/api/league/bootstrap', async (req, res) => {
     // Нижнее меню зависит от того, кто смотрит: у гостя нет смысла в матчах и
     // расписании, у активного игрока — есть. Организатор видит всё.
     const group = await playerGroup(v.user.id, v.profile).catch(() => 'guest');
-    const tabs = v.isAdmin ? MINIAPP_TABS.slice() : await getGroupTabs(group).catch(() => MINIAPP_TABS.slice());
+    // Организатору отдаём всё, иначе он сам себе отрежет доступ. Но с ?as=<группа>
+    // он может посмотреть приложение ровно так, как его видит эта группа.
+    const asGroup = String(req.query.as || '').trim();
+    const viewAs = v.isAdmin && PLAYER_GROUPS.includes(asGroup) ? asGroup : '';
+    const tabs = (v.isAdmin && !viewAs)
+      ? MINIAPP_TABS.slice()
+      : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
     res.json({
       ok: true,
       lang: v.lang,
@@ -958,6 +1001,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
       seasons,
       me_division: v.division || '',
       group,
+      view_as: viewAs,
       tabs,
       players,
       photos: photoByName,

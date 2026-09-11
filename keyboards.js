@@ -143,21 +143,34 @@ const MENU_LAYOUTS = {
 // Значит после любой правки набора кнопок или адресов номер надо поднять —
 // иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
 // без мгновенного открытия мини-приложения).
-export const MENU_VERSION = 3;
+export const MENU_VERSION = 4;
 
-export function persistentKeyboard(lang, kind='lead', telegramId='') {
+// allow — набор кнопок для группы игрока (настраивается в админке). Не задан —
+// берём прежнюю раскладку по состоянию. Кнопки раскладываем по две в ряд, а
+// нечётную последнюю оставляем во всю ширину: так ничего не висит половинкой.
+export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null) {
   const l = lang === 'ru' ? 'ru' : 'en';
   const labels = MENU_LABELS[l];
   const token = telegramId ? signWebAppToken(telegramId) : '';
-  const rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(key => {
+  const make = (key) => {
     const text = labels[key];
+    if (!text) return null;
     const path = MENU_PATHS[key];
     // Без токена (нет BOT_TOKEN или id) кнопка остаётся текстовой — бот ответит
     // сообщением с inline-кнопкой. Хуже на один тап, но работает всегда.
     if (!path || !token) return { text };
     const sep = path.includes('?') ? '&' : '?';
     return { text, web_app: { url: `${PUBLIC_URL}${path}${sep}t=${encodeURIComponent(token)}` } };
-  }));
+  };
+  let rows;
+  if (Array.isArray(allow)) {
+    const keys = allow.filter(k => labels[k]);
+    rows = [];
+    for (let i = 0; i < keys.length; i += 2) rows.push(keys.slice(i, i + 2).map(make).filter(Boolean));
+  } else {
+    rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(make).filter(Boolean));
+  }
+  rows = rows.filter(r => r.length);
   return { keyboard: rows, resize_keyboard: true, is_persistent: true };
 }
 

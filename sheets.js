@@ -1500,6 +1500,48 @@ export async function buttonsFor(telegramId, applicant = null) {
   return getGroupButtons(group).catch(() => BOT_MENU_BUTTONS.slice());
 }
 
+// --- постоянная клавиатура внизу чата ---------------------------------------
+//
+// Третий набор кнопок и единственный, который человек видит всегда. Раскладка
+// раньше была жёстко зашита по состоянию игрока — теперь она тоже настраивается
+// по группам, иначе галочки в панели расходятся с тем, что на экране.
+export const KEYBOARD_BUTTONS = ['matches', 'result', 'court', 'league', 'squad', 'apply', 'pay', 'contact', 'menu'];
+// Что показываем, пока организатор ничего не настроил. У активного «Меню» нет:
+// под сообщением у него кнопок и так нет, и нажатие выдавало пустую строку.
+export const DEFAULT_KEYBOARD = {
+  active:   ['matches', 'court', 'league', 'squad', 'contact'],
+  waitlist: ['league', 'squad', 'contact'],
+  applied:  ['pay', 'league', 'squad', 'contact'],
+  guest:    ['apply', 'league', 'squad', 'contact']
+};
+const kbKey = (group) => `kb_${group}`;
+
+export async function getGroupKeyboard(group) {
+  const raw = String(await getSetting(kbKey(group)).catch(() => '')).trim();
+  if (raw === NONE) return [];
+  const picked = raw.split(',').map(s => s.trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
+  return picked.length ? picked : (DEFAULT_KEYBOARD[group] || DEFAULT_KEYBOARD.guest).slice();
+}
+
+export async function setGroupKeyboard(group, list = []) {
+  if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
+  const picked = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
+  await setSetting(kbKey(group), picked.length ? picked.join(',') : NONE, 'Нижняя клавиатура для группы');
+  return picked;
+}
+
+export async function allGroupKeyboards() {
+  const out = {};
+  for (const g of PLAYER_GROUPS) out[g] = await getGroupKeyboard(g);
+  return out;
+}
+
+// Набор нижних кнопок для конкретного человека.
+export async function keyboardForGroup(telegramId, applicant = null) {
+  const group = await playerGroup(telegramId, applicant).catch(() => 'guest');
+  return getGroupKeyboard(group);
+}
+
 // Доступ к матчам — только у активных игроков текущего состава.
 export async function isActiveLeaguePlayer(profile = {}) {
   const info = await getPlayerLeagueInfo(profile);

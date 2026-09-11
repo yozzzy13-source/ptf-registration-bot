@@ -441,10 +441,11 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.query.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { allGroupTabs, allGroupButtons, MINIAPP_TABS, BOT_MENU_BUTTONS, ALWAYS_TABS, PLAYER_GROUPS } = await import('./sheets.js');
+      const { allGroupTabs, allGroupButtons, allGroupKeyboards, MINIAPP_TABS, BOT_MENU_BUTTONS, KEYBOARD_BUTTONS, ALWAYS_TABS, PLAYER_GROUPS } = await import('./sheets.js');
       res.json({ ok:true,
         tabs: await allGroupTabs(), all: MINIAPP_TABS,
         buttons: await allGroupButtons(), allButtons: BOT_MENU_BUTTONS,
+        keyboard: await allGroupKeyboards(), allKeyboard: KEYBOARD_BUTTONS,
         always: ALWAYS_TABS, groups: PLAYER_GROUPS });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
@@ -453,10 +454,11 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { setGroupTabs, setGroupButtons, allGroupTabs, allGroupButtons } = await import('./sheets.js');
+      const { setGroupTabs, setGroupButtons, setGroupKeyboard, allGroupTabs, allGroupButtons, allGroupKeyboards } = await import('./sheets.js');
       for (const [group, list] of Object.entries(req.body.tabs || {})) await setGroupTabs(group, list);
       for (const [group, list] of Object.entries(req.body.buttons || {})) await setGroupButtons(group, list);
-      res.json({ ok:true, tabs: await allGroupTabs(), buttons: await allGroupButtons() });
+      for (const [group, list] of Object.entries(req.body.keyboard || {})) await setGroupKeyboard(group, list);
+      res.json({ ok:true, tabs: await allGroupTabs(), buttons: await allGroupButtons(), keyboard: await allGroupKeyboards() });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -480,6 +482,29 @@ export function registerAdminRoutes(app) {
       await sendMessage(telegramId,
         `↩️ Возврат <b>${amount} ฿</b> — отправлю переводом (${escapeHtml(reason)}). Остаток на депозите: <b>${left} ฿</b>`).catch(() => {});
       res.json({ ok:true, balance:left });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // «Глазами группы»: бот присылает организатору то же сообщение и те же кнопки,
+  // которые увидит выбранная группа. Нижнюю клавиатуру здесь не подменяем — она
+  // прилипает к чату, и организатор остался бы с чужим меню.
+  app.post('/api/admin/preview-as', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { getGroupButtons, getGroupKeyboard, PLAYER_GROUPS } = await import('./sheets.js');
+      const { mainKeyboard, MENU_LABELS } = await import('./keyboards.js');
+      const group = PLAYER_GROUPS.includes(String(req.body.group)) ? String(req.body.group) : 'guest';
+      const names = { active:'активные', waitlist:'лист ожидания', applied:'заявка без оплаты', guest:'все остальные' };
+      const allow = await getGroupButtons(group);
+      const keys = await getGroupKeyboard(group);
+      const labels = MENU_LABELS.ru;
+      const bottom = keys.length ? keys.map(k => `«${labels[k] || k}»`).join(' · ') : '— пусто —';
+      const kb = mainKeyboard('ru', { allow, matches: group === 'active' });
+      await sendMessage(auth.user.id,
+        `👁 <b>Глазами группы: ${escapeHtml(names[group])}</b>\n\nТак выглядит меню бота. Внизу у этой группы: ${escapeHtml(bottom)}`,
+        kb.inline_keyboard.length ? { reply_markup: kb } : {});
+      res.json({ ok:true, buttons: allow.length, keyboard: keys.length });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

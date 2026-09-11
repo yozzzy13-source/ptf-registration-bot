@@ -60,9 +60,15 @@ export function calendarButtons(event, lang = 'ru') {
     { text: L ? '🍎 Apple Календарь' : '🍎 Apple Calendar', web_app: { url: apple } }
   ];
 }
-export function calendarKeyboard(event, lang = 'ru') {
+// Подтверждение участия: календарь и сразу отмена. Без отмены человек, который
+// записался и передумал, остаётся в составе — кнопки у него нигде нет, только в
+// мини-приложении или в напоминании накануне, а это уже поздно.
+export function calendarKeyboard(event, lang = 'ru', signupId = '') {
+  const rows = [];
   const row = calendarButtons(event, lang);
-  return row ? { inline_keyboard: [row] } : undefined;
+  if (row) rows.push(row);
+  if (signupId) rows.push([{ text: ru(lang) ? '❌ Отменить участие' : '❌ Cancel', callback_data: `ev_cxl:${signupId}` }]);
+  return rows.length ? { inline_keyboard: rows } : undefined;
 }
 
 // Способы оплаты в батах из вкладки «Payment Methods». Крипта сюда не попадает:
@@ -367,7 +373,13 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
   const denied = eventAccessDenial(event, who, lang);
   if (denied) return { ok: false, ...denied };
   const existing = await findSignup(eventId, telegramId);
-  if (existing) return { ok: false, message: L ? 'Ты уже записан на это событие.' : 'You are already signed up.' };
+  // Уже записан — не просто отказ: рядом та же кнопка отмены, иначе человек
+  // жмёт «Записаться» второй раз именно потому, что не нашёл, где отписаться.
+  if (existing) {
+    return { ok: false,
+      message: L ? 'Ты уже записан на это событие.' : 'You are already signed up.',
+      markup: calendarKeyboard(event, lang, existing.signup_id) };
+  }
 
   const wantSeats = 1 + (event.guests_allowed ? Math.min(guests, event.max_guests) : 0);
   const taken = await takenSeats(eventId);
@@ -395,7 +407,7 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guests
 If a spot frees up, I will write to you first. You will have <b>${window} h</b> to decide, then the spot goes to the next person.
 Do not pay yet.`;
   } else if (status === SIGNUP_STATUS.confirmed) {
-    markup = calendarKeyboard(event, lang);
+    markup = calendarKeyboard(event, lang, signup.signup_id);
     message = L
       ? `Заявка на «${event.title_ru}» принята. Ты в списке участников.\n📅 ${fmtDay(event.date, lang)} ${event.time}\n📍 ${event.place}`
       : `You are in for “${event.title_en}”.\n📅 ${event.date} ${event.time}\n📍 ${event.place}`;
@@ -467,7 +479,7 @@ export async function payFromDeposit({ signupId, telegramId, name, lang = 'ru', 
     status: SIGNUP_STATUS.paid, paid_thb: signup.amount_thb, paid_from: 'депозит'
   });
   if (adminChatId) await notifyOrganizer({ ...signup, ...updated }, event, adminChatId).catch(() => {});
-  return { ok: true, markup: calendarKeyboard(event, lang), message: L
+  return { ok: true, markup: calendarKeyboard(event, lang, signup.signup_id), message: L
     ? `✅ Оплачено с депозита: <b>${signup.amount_thb} ฿</b>. Остаток: <b>${left} ฿</b>\nТы в списке участников.`
     : `✅ Paid from deposit: <b>${signup.amount_thb} ฿</b>. Remaining: <b>${left} ฿</b>\nYou are on the list.` };
 }
@@ -900,7 +912,7 @@ export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adm
   return sendMessage(chatId, L
     ? `✅ Место твоё — «${escapeHtml(event?.title_ru || '')}».\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`
     : `✅ The spot is yours — “${escapeHtml(event?.title_en || '')}”.\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`,
-    { reply_markup: calendarKeyboard(event, lang) });
+    { reply_markup: calendarKeyboard(event, lang, signup.signup_id) });
 }
 
 // Игрок отказался или вышел из очереди — держать место больше не нужно.
@@ -1036,7 +1048,7 @@ export async function reviewEventProof({ signupId, approve, adminChatId = '' }) 
   });
   await sendMessage(signup.telegram_id, `✅ Оплата за «${escapeHtml(title)}» подтверждена. Ты в составе!
 📅 ${escapeHtml(fmtDay(event?.date, 'ru'))} ${escapeHtml(event?.time || '')}`,
-    { reply_markup: calendarKeyboard(event, 'ru') }).catch(() => {});
+    { reply_markup: calendarKeyboard(event, 'ru', signup.signup_id) }).catch(() => {});
   if (adminChatId) {
     await notifyOrganizer({ ...signup, ...updated, status: SIGNUP_STATUS.paid, paid_thb: amount },
       event, adminChatId, '💰 Оплата подтверждена').catch(() => {});
@@ -1197,7 +1209,7 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
     await sendMessage(telegramId, L
       ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}${dep}`
       : `✅ You are in for “${escapeHtml(event.title_en)}”.\n📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}${dep}`,
-      { reply_markup: calendarKeyboard(event, lang) }).catch(() => {});
+      { reply_markup: calendarKeyboard(event, lang, signup.signup_id) }).catch(() => {});
   }
   if (adminChatId) await notifyOrganizer({ ...signup, status }, event, adminChatId, 'добавлен организатором').catch(() => {});
   touchEventCards(event.event_id);
