@@ -1,7 +1,7 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
 import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck } from './sheets.js';
-import { sendMessage } from './telegram.js';
+import { sendMessage, sendPhotoBuffer } from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 import { parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
 
@@ -506,6 +506,88 @@ export function registerAdminRoutes(app) {
         kb.inline_keyboard.length ? { reply_markup: kb } : {});
       res.json({ ok:true, buttons: allow.length, keyboard: keys.length });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // --- аватарки игроков -------------------------------------------------------
+  //
+  // Организатор ставит готовую картинку напрямую: генератор и выбор вариантов
+  // тут не участвуют. Храним ровно там же, где лежит аватарка, сделанная самим
+  // игроком, — поэтому во всём приложении она подхватывается сама.
+  const AVATAR_MAX = 8 * 1024 * 1024;
+  function dataUrlToBuffer(value = '') {
+    const m = String(value).match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+    if (!m) throw new Error('Ожидается изображение');
+    const buffer = Buffer.from(m[2], 'base64');
+    if (!buffer.length) throw new Error('Пустой файл');
+    if (buffer.length > AVATAR_MAX) throw new Error('Фото больше 8 МБ');
+    return { buffer, mime: m[1] };
+  }
+
+  app.get('/api/admin/player-avatar', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { findApplicantByTelegramId } = await import('./sheets.js');
+      const telegramId = String(req.query.telegram_id || '').trim();
+      if (!telegramId) return res.status(400).json({ ok:false, error:'Нужен игрок' });
+      const row = await findApplicantByTelegramId(telegramId).catch(() => null);
+      if (!row) return res.status(404).json({ ok:false, error:'Игрок не найден' });
+      res.json({ ok:true, name: row.name || '', status: String(row.avatar_status || ''),
+        url: row.avatar_file_id ? `${PUBLIC_URL}/avatar/${encodeURIComponent(telegramId)}.png?v=${Date.now()}` : '' });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  app.post('/api/admin/player-avatar', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { findApplicantByTelegramId, updateApplicantByTelegramId, ensureAvatarColumns, invalidateLeagueCache } = await import('./sheets.js');
+      const telegramId = String(req.body.telegram_id || '').trim();
+      if (!telegramId) return res.status(400).json({ ok:false, error:'Нужен игрок' });
+      const row = await findApplicantByTelegramId(telegramId).catch(() => null);
+      if (!row) return res.status(404).json({ ok:false, error:'Игрок не найден' });
+      const { buffer, mime } = dataUrlToBuffer(req.body.photo);
+      await ensureAvatarColumns().catch(() => {});
+      // Постоянный адрес картинки даёт Telegram: отправляем её себе и забираем
+      // file_id самого крупного варианта.
+      const sent = await sendPhotoBuffer(auth.user.id, buffer, mime,
+        { caption: `🖼 Аватарка для <b>${escapeHtml(row.name || telegramId)}</b>`, parse_mode: 'HTML' });
+      const fileId = (sent?.photo || []).slice(-1)[0]?.file_id || '';
+      if (!fileId) throw new Error('Telegram не принял фото');
+      await updateApplicantByTelegramId(telegramId, {
+        avatar_file_id: fileId, avatar_status: 'published', avatar_error: '', avatar_updated_at: nowISO()
+      });
+      invalidateLeagueCache?.();
+      const ru = String(row.language || 'ru').toLowerCase() !== 'en';
+      await sendMessage(telegramId, ru
+        ? '🖼 Организатор обновил твою аватарку в приложении. Если не понравилась — сделай свою в разделе «Лига», в своей карточке.'
+        : '🖼 The organizer has updated your avatar in the app. If you would rather have your own, make one in “League”, on your player card.')
+        .catch(() => {});
+      res.json({ ok:true, url: `${PUBLIC_URL}/avatar/${encodeURIComponent(telegramId)}.png?v=${Date.now()}` });
+    } catch (e) { console.error('admin avatar failed:', e.message); res.status(400).json({ ok:false, error:e.message }); }
+  });
+
+  app.post('/api/admin/player-avatar-clear', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.body.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const { findApplicantByTelegramId, updateApplicantByTelegramId, invalidateLeagueCache } = await import('./sheets.js');
+      const telegramId = String(req.body.telegram_id || '').trim();
+      const row = telegramId ? await findApplicantByTelegramId(telegramId).catch(() => null) : null;
+      if (!row) return res.status(404).json({ ok:false, error:'Игрок не найден' });
+      // Чистим только саму картинку: фото вернётся из Players_Master, а история
+      // попыток игрока остаётся как была.
+      await updateApplicantByTelegramId(telegramId, {
+        avatar_file_id: '', avatar_status: '', avatar_updated_at: nowISO()
+      });
+      invalidateLeagueCache?.();
+      const ru = String(row.language || 'ru').toLowerCase() !== 'en';
+      await sendMessage(telegramId, ru
+        ? '🖼 Организатор убрал аватарку из приложения — вернулось фото из общей таблицы. Свою можно сделать в разделе «Лига», в своей карточке.'
+        : '🖼 The organizer removed your avatar — the photo from the main sheet is back. You can make your own in “League”, on your player card.')
+        .catch(() => {});
+      res.json({ ok:true });
+    } catch (e) { res.status(400).json({ ok:false, error:e.message }); }
   });
 
   app.get('/api/admin/balances', async (req, res) => {
