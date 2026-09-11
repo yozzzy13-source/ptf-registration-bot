@@ -276,8 +276,19 @@
       <div id="menuGrid"></div></details>
     <details class="fold" open style="margin-top:10px"><summary>💬 Кнопки под сообщением бота</summary>
       <div id="btnGrid"></div></details>
+    <details class="fold" open style="margin-top:10px"><summary>⌨️ Нижняя клавиатура в чате</summary>
+      <div id="kbGrid"></div>
+      <div class="muted" style="margin-top:6px">Матчи, Результат и Корт показываются только игрокам действующего состава — остальным эти экраны всё равно откажут.</div>
+    </details>
     <div class="actions"><button class="btn" onclick="saveTabs()">Сохранить</button><button class="btn secondary" onclick="loadTabs()">Обновить</button></div>
     <div id="menuResult" class="muted"></div>
+    <label style="margin-top:14px">Проверить</label>
+    <div class="actions" style="margin-top:0">
+      <button class="btn secondary" onclick="previewAs()">👁 Прислать в бот</button>
+      <button class="btn secondary" onclick="openAs()">📱 Открыть мини-апп</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Бот пришлёт сообщение с кнопками этой группы, а мини-апп откроется с её набором вкладок. Нижняя клавиатура в чате при этом не меняется — она твоя.</div>
+    <div id="previewResult" class="muted"></div>
   </div>
   <div id="tabRating" class="card hidden"><h3>Нет рейтинга NTRP</h3><p class="muted">Отправить кнопку «указать рейтинг» отмеченным игрокам или всем, кто попал под фильтры и без рейтинга.</p><div class="actions"><button class="btn" onclick="requestRatings()">Запросить рейтинг</button></div><div id="ratingResult" class="muted"></div></div>
 </div>
@@ -488,6 +499,16 @@ async function loadEvents(){
         +'</td></tr>').join('')}
   catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
 }
+// Проверка «глазами группы»: сообщение с её кнопками уходит мне в бот, а
+// мини-апп открывается с её набором вкладок прямо здесь, в том же окне.
+async function previewAs(){
+  $('previewResult').textContent='Отправляю…';
+  try{const j=await api('/api/admin/preview-as',{group:menuGroup()});
+    $('previewResult').innerHTML='<span class="ok">Готово — посмотри сообщение в чате с ботом ('+j.buttons+' кнопок под сообщением, '+j.keyboard+' внизу).</span>'}
+  catch(e){$('previewResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+function openAs(){location.href='/league?as='+encodeURIComponent(menuGroup())}
+
 // --- удаление события ---------------------------------------------------------
 // Спрашиваем один раз и на всё событие: как возвращать деньги. Дальше бот сам
 // оповещает записавшихся, правит разосланные карточки и стирает строку.
@@ -538,13 +559,15 @@ const TAB_NAMES={home:'Лига',div:'Дивизионы',race:'Гонка',play
 const BTN_NAMES={join_event:'🎾 Заявка на событие',matches:'🎾 Матчи',participants:'👥 Состав',league:'🏆 Лига',
   about:'ℹ️ О лиге',how:'📖 Как работает лига',yearly:'⭐ Гонка года',pass:'💳 Оплатить взнос',contact:'💬 Связаться'};
 const GROUP_NAMES={active:'Активные',waitlist:'Лист ожидания',applied:'Заявка без оплаты',guest:'Все остальные'};
-let tabsState={},btnsState={},tabsAll=[],btnsAll=[],tabsAlways=[];
+const KB_NAMES={matches:'🎾 Матчи',result:'📊 Результат',court:'📅 Корт',league:'🏆 Лига',
+  squad:'👥 Состав',apply:'🎾 Заявка',pay:'💳 Оплатить',contact:'💬 Связаться',menu:'🏠 Меню'};
+let tabsState={},btnsState={},kbState={},tabsAll=[],btnsAll=[],kbAll=[],tabsAlways=[];
 function menuGroup(){return $('menuGroup').value||'active'}
 async function loadTabs(){
   try{
     const j=await api('/api/admin/tabs');
-    tabsAll=j.all||[];btnsAll=j.allButtons||[];tabsAlways=j.always||[];
-    tabsState=j.tabs||{};btnsState=j.buttons||{};
+    tabsAll=j.all||[];btnsAll=j.allButtons||[];kbAll=j.allKeyboard||[];tabsAlways=j.always||[];
+    tabsState=j.tabs||{};btnsState=j.buttons||{};kbState=j.keyboard||{};
     const sel=$('menuGroup');
     if(!sel.options.length)sel.innerHTML=Object.keys(GROUP_NAMES).map(g=>'<option value="'+g+'">'+esc(GROUP_NAMES[g])+'</option>').join('');
     renderTabs();$('menuResult').textContent='';
@@ -567,8 +590,10 @@ function menuRows(gridId,state,all,names,kind){
 function renderTabs(){
   menuRows('menuGrid',tabsState,tabsAll,TAB_NAMES,'tabs');
   menuRows('btnGrid',btnsState,btnsAll,BTN_NAMES,'btns');
+  menuRows('kbGrid',kbState,kbAll,KB_NAMES,'kb');
+  $('previewResult').textContent='';
 }
-function menuState(kind){return kind==='tabs'?tabsState:btnsState}
+function menuState(kind){return kind==='tabs'?tabsState:(kind==='btns'?btnsState:kbState)}
 function menuToggle(kind,t){
   if(kind==='tabs'&&tabsAlways.indexOf(t)>=0)return;
   const st=menuState(kind),g=menuGroup();
@@ -588,9 +613,9 @@ function tabToggle(g,t){const st=tabsState;const on=(st[g]||[]).slice();const i=
 function tabMove(g,t,step){const on=(tabsState[g]||[]).slice();const i=on.indexOf(t);const j=i+step;if(i<0||j<0||j>=on.length)return;on.splice(j,0,on.splice(i,1)[0]);tabsState[g]=on;renderTabs()}
 async function saveTabs(){
   $('menuResult').textContent='Сохраняю…';
-  try{const j=await api('/api/admin/tabs',{tabs:tabsState,buttons:btnsState});
-    tabsState=j.tabs||tabsState;btnsState=j.buttons||btnsState;renderTabs();
-    $('menuResult').innerHTML='<span class="ok">Сохранено. У игроков применится при следующем открытии.</span>'}
+  try{const j=await api('/api/admin/tabs',{tabs:tabsState,buttons:btnsState,keyboard:kbState});
+    tabsState=j.tabs||tabsState;btnsState=j.buttons||btnsState;kbState=j.keyboard||kbState;renderTabs();
+    $('menuResult').innerHTML='<span class="ok">Сохранено. Мини-апп подхватит при следующем открытии, нижняя клавиатура — при следующем сообщении боту.</span>'}
   catch(e){$('menuResult').innerHTML='<span class="err">'+e.message+'</span>'}
 }
 // --- касса --------------------------------------------------------------------

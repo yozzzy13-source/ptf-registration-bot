@@ -2323,7 +2323,9 @@ function toggleMatches(id){
 }
 
 // ---------------------------------------------------------------- старт
-fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+// ?as=<группа> — организатор смотрит приложение глазами выбранной группы.
+var asQ=(new URLSearchParams(location.search).get('as')||'').trim();
+fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
@@ -2339,6 +2341,15 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache
     }
     buildTabs();
     $('title').textContent=X.title;
+    // Видно, что это чужой набор вкладок, а не поломка.
+    if(j.view_as){
+      var names={active:'активные',waitlist:'лист ожидания',applied:'заявка без оплаты',guest:'все остальные'};
+      var b=document.createElement('div');
+      b.className='hint';
+      b.style.cssText='position:sticky;top:0;z-index:40;background:#E8A45C;color:#191512;font-weight:800;padding:8px 12px;text-align:center';
+      b.textContent='👁 Смотришь глазами группы: '+(names[j.view_as]||j.view_as);
+      document.body.insertBefore(b,document.body.firstChild);
+    }
     // ?tab=race / ?division=B — чтобы кнопка из меню или рассылки открывала
     // приложение сразу на нужном разделе, а не на главной.
     var qs=new URLSearchParams(location.search);

@@ -37,6 +37,10 @@ h1{font-size:22px;font-weight:800;letter-spacing:-.6px;margin:14px 0 4px}
 .tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,var(--bg) 78%,var(--fadeNone));margin-bottom:4px}
 .tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
 .tab.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
+/* Ход за тобой — вкладка «Вызовы» горит, иначе входящее предложение легко проспать. */
+.tab.hot{color:var(--accent);border-color:var(--accLine)}
+.tab.hot:after{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:5px;vertical-align:middle;animation:pulseDot 1.6s ease-in-out infinite}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
 .card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;margin:0 0 12px}
 label{display:block;font-size:10px;letter-spacing:1.1px;text-transform:uppercase;font-weight:800;color:var(--muted);margin:12px 0 6px}
 label:first-of-type{margin-top:0}
@@ -70,6 +74,7 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .opp.sel{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg))}
 .opp .who{font-size:14px}
 .hint{color:var(--muted);font-size:12px;line-height:1.5;margin-top:8px}
+.muted{color:var(--muted)}
 .empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
 .res{margin-top:12px;font-size:14px;line-height:1.5}
 .res.ok{background:var(--green2);border:1px solid var(--accLine);color:var(--green);padding:12px;border-radius:12px}
@@ -136,11 +141,10 @@ try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
   </div>
   <p class="sub" id="sub"></p>
   <div class="tabs">
-    <div class="tab on" data-t="open" id="tabOpen">Открытые окна</div>
-    <div class="tab" data-t="new" id="tabNew">Создать</div>
-    <div class="tab" data-t="mine" id="tabMine">Мои матчи</div>
-    <div class="tab" data-t="res" id="tabRes">Результаты</div>
-    <div class="tab hidden" data-t="book" id="tabBook">Бронь корта</div>
+    <div class="tab on" data-t="mine" id="tabMine">Расписание</div>
+    <div class="tab" data-t="open" id="tabOpen">Вызовы</div>
+    <div class="tab hidden" data-t="book" id="tabBook">Корт</div>
+    <div class="tab" data-t="res" id="tabRes">Результат</div>
   </div>
   <div id="viewOpen"><div class="empty">Загружаем…</div></div>
   <div id="viewNew" class="hidden"></div>
@@ -155,10 +159,10 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='open',focusSlot='',counterSlotId='',matchDuration=120;
+var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
-      tOpen:'Открытые окна',tNew:'Создать',tMine:'Мои матчи',
+      tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
       emptyOpen:'Сейчас нет открытых окон в твоём дивизионе. Создай своё — соперник увидит его в чате дивизиона.',
       emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
       modeOpen:'🔓 Открытое окно',modeDirect:'🎯 Конкретный соперник',
@@ -180,7 +184,7 @@ var T={
       unplayedTitle:'Ещё не сыграно',unplayedHint:'Соперники по дивизиону, с которыми матч ещё не сыгран. Нажмите на имя — отправим вызов.',
       noTelegram:'У этого игрока пока нет Telegram в базе:',
       you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.',
-      tRes:'Результаты',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
+      tRes:'Результат',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
       resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',
       set3mode:'Решающий сет',full:'Полный сет',mtb:'Чемпионский тай-брейк',noSet3:'Не игрался',
       winnerFirst:'Сначала отметьте победителя — счёт пишется от него.',
@@ -200,7 +204,7 @@ var T={
       bookNote:'Бот ничего не отправляет сам: он только готовит текст и ссылку. Ответы кортов приходят вам в WhatsApp.',
       h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
   en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
-      tOpen:'Open slots',tNew:'Create',tMine:'My matches',
+      tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
       emptyOpen:'No open slots in your division right now. Create one — your division will see it in chat.',
       emptyMine:'No scheduled matches or open slots yet.',
       modeOpen:'🔓 Open slot',modeDirect:'🎯 Specific opponent',
@@ -222,7 +226,7 @@ var T={
       unplayedTitle:'Still to play',unplayedHint:'Division opponents you have not played yet. Tap a name to send a challenge.',
       noTelegram:'This player has no Telegram on file yet:',
       you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.',
-      tRes:'Results',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
+      tRes:'Result',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
       resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',
       set3mode:'Deciding set',full:'Full set',mtb:'Match tie-break',noSet3:'Not played',
       winnerFirst:'Pick the winner first — the score is written from their side.',
@@ -322,13 +326,31 @@ function fmtDay(iso){
 function initials(n){return String(n||'').split(/\s+/).filter(Boolean).slice(0,2).map(function(s){return s[0].toUpperCase()}).join('')}
 function avatar(p){return p&&p.photo_url?'<img class="av" src="'+esc(p.photo_url)+'" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'av\',textContent:\''+esc(initials(p.name))+'\'}))">':'<span class="av">'+esc(initials(p&&p.name))+'</span>'}
 
+// Вкладок четыре: Расписание, Вызовы, Корт, Результат. «Создать вызов» — это не
+// отдельная вкладка, а экран внутри «Вызовов»: подсветка остаётся на них.
 function showTab(t){
   mode=t;
+  var onTab=(t==='new')?'open':t;
   ['open','new','mine','res','book'].forEach(function(k){
-    var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
+    var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===onTab);
     $('view'+k[0].toUpperCase()+k.slice(1)).classList.toggle('hidden',k!==t);
   });
   if(t==='open')renderOpen();else if(t==='new')renderNew();else if(t==='mine')renderMine();else if(t==='res')renderRes();else renderBook();
+  markCalls();
+  window.scrollTo(0,0);
+}
+// Точка на «Вызовах», когда ход за мной: входящее предложение или встречное.
+function callsWaiting(){
+  return (myMatches||[]).filter(function(s){
+    return s.status==='pending' && String(s.pending_by)!==String(me&&me.id);
+  }).length;
+}
+function markCalls(){
+  var tab=$('tabOpen');if(!tab)return;
+  var n=callsWaiting();
+  tab.classList.toggle('hot',n>0);
+  tab.textContent=X.tCalls+(n?' ·'+n:'');
+  if(mode==='open'||mode==='new')tab.classList.add('on');
 }
 
 // Кого ещё не сыграл в дивизионе — главное, что игроку нужно видеть в лиге.
@@ -349,7 +371,9 @@ function challengeByName(name){
   mode='direct';selOpp=String(hit.telegram_id);showTab('new');
 }
 function renderOpen(){
-  var top=unplayedBlock();
+  // Создание вызова живёт здесь же, отдельной вкладкой его больше нет.
+  var top='<button class="mini primary" style="width:100%;padding:12px;margin-bottom:10px" onclick="showTab(\'new\')">'+esc(X.tCreate)+'</button>'
+    +waitingBlock()+unplayedBlock();
   if(!openSlots.length){$('viewOpen').innerHTML=top+'<div class="empty">'+esc(X.emptyOpen)+'</div>';return}
   $('viewOpen').innerHTML=top+openSlots.map(function(s){
     var mine=String(s.from_telegram_id)===String(me&&me.id);
@@ -419,13 +443,69 @@ function confirmTake(id,btn){
   }).catch(function(e){btn.disabled=false;btn.textContent=X.accept;res.className='res err';res.textContent='⛔ '+e.message});
 }
 
+// Входящие предложения, где ход за мной. Показываем их первыми в «Вызовах» —
+// это то, на что человек должен ответить прямо сейчас.
+function waitingBlock(){
+  var mineTurn=(myMatches||[]).filter(function(s){
+    return s.status==='pending' && String(s.pending_by)!==String(me&&me.id);
+  });
+  if(!mineTurn.length)return '';
+  return mineTurn.map(function(s){
+    var iAmAuthor=String(s.from_telegram_id)===String(me&&me.id);
+    var opp=iAmAuthor?(s.to_name||''):(s.from_name||'');
+    return '<div class="slot"><div class="slot-head"><div><div class="who">'+esc(opp||'—')+'</div>'
+      +'<div class="meta"><span class="pill open">'+esc(X.yourTurn)+'</span>'+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
+      +'<div class="when">📅 <b>'+s.dates.map(fmtDay).map(esc).join(' · ')+'</b> · 🕐 <b>'+esc(s.time_from)+'</b></div>'
+      +(s.courts.length?'<div class="meta">📍 '+s.courts.map(esc).join(' · ')+'</div>':'')
+      +'</div>';
+  }).join('');
+}
+
+// --- история матчей лиги -----------------------------------------------------
+// Лежит под расписанием на той же вкладке: сначала свои матчи, следом — что
+// происходит в лиге. По умолчанию свой дивизион, вся лига — переключателем.
+var histList=null,histScope='div',histLimit=15,histLoading=false;
+function loadHistory(){
+  if(histLoading||histList)return;
+  histLoading=true;
+  fetch('/api/match/history?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      histLoading=false;
+      if(!j.ok)return;
+      histList=j.matches||[];
+      if(mode==='mine')renderMine();
+    }).catch(function(){histLoading=false});
+}
+function setHistScope(v){histScope=v;histLimit=15;renderMine()}
+function moreHist(){histLimit+=15;renderMine()}
+function historyBlock(){
+  if(histList===null)return '<div class="card"><h3 style="margin:0;font-size:16px">'+esc(X.histTitle)+'</h3><div class="hint">…</div></div>';
+  var mineDiv=String(division||'').toUpperCase();
+  var list=histList.filter(function(m){
+    return histScope==='all' || !mineDiv || String(m.division||'').toUpperCase()===mineDiv;
+  });
+  var chips='<div class="chip'+(histScope==='div'?' on':'')+'" onclick="setHistScope(\'div\')">'+esc(X.histMine)+(mineDiv?' '+esc(mineDiv):'')+'</div>'
+    +'<div class="chip'+(histScope==='all'?' on':'')+'" onclick="setHistScope(\'all\')">'+esc(X.histAll)+'</div>';
+  var rows=list.slice(0,histLimit).map(function(m){
+    var head=[m.date,m.division?('Div '+m.division):'',m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+    return '<div class="slot"><div class="meta">'+esc(head)+'</div>'
+      +'<div class="who" style="font-size:14px"><b>'+esc(m.winner)+'</b> <span style="color:var(--muted)">vs</span> '+esc(m.loser)+'</div>'
+      +'<div class="when">🎾 <b>'+esc(m.score||'—')+'</b></div></div>';
+  }).join('');
+  return '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:16px">'+esc(X.histTitle)+'</h3>'
+    +'<div class="chips">'+chips+'</div></div>'
+    +(rows||'<div class="empty">'+esc(X.histEmpty)+'</div>')
+    +(list.length>histLimit?'<button class="mini" style="width:100%;padding:12px;margin-top:8px" onclick="moreHist()">'+esc(X.histMore)+'</button>':'');
+}
+
 function renderMine(){
+  loadHistory();
   if(retimeId){
     var rt=myMatches.filter(function(x){return x.challenge_id===retimeId})[0];
     if(rt){$('viewMine').innerHTML=renderRetimePanel(rt);return}
     retimeId='';
   }
-  if(!myMatches.length){$('viewMine').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>';return}
+  if(!myMatches.length){$('viewMine').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>'+historyBlock();return}
   $('viewMine').innerHTML=myMatches.map(function(s){
     var agreed=s.status==='accepted';var pending=s.status==='pending';
     var iAmAuthor=String(s.from_telegram_id)===String(me&&me.id);
@@ -440,7 +520,7 @@ function renderMine(){
       +(agreed?agreedActions(s,opp):'')
       +(!agreed&&iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')
       +'</div>';
-  }).join('');
+  }).join('')+historyBlock();
 }
 
 // Что можно сделать с согласованным матчем: написать, перенести время, отменить.
@@ -859,7 +939,9 @@ function renderNew(){
     ? opponents.map(function(o){return '<div class="opp'+(String(o.telegram_id)===String(selOpp)?' sel':'')+'" onclick="pickOpp(\''+esc(o.telegram_id)+'\')">'+avatar(o)+'<div><div class="who">'+esc(o.name)+'</div><div class="meta">'+(o.rating?'NTRP '+esc(o.rating):'')+'</div></div></div>'}).join('')
     : '<div class="hint">'+esc(X.noOpp)+'</div>';
 
-  $('viewNew').innerHTML='<div class="card">'
+  // Возврат к списку вызовов: «Создать» больше не вкладка, уйти отсюда иначе некуда.
+  $('viewNew').innerHTML='<div class="meta" style="cursor:pointer;margin-bottom:8px" onclick="showTab(\'open\')">'+esc(X.tBackCalls)+'</div>'
+    +'<div class="card">'
     +'<div class="seg"><div class="s'+(newMode==='open'?' on':'')+'" onclick="setMode(\'open\')">'+esc(X.modeOpen)+'</div><div class="s'+(newMode==='direct'?' on':'')+'" onclick="setMode(\'direct\')">'+esc(X.modeDirect)+'</div></div>'
     +'<div class="hint">'+esc(newMode==='open'?X.hintOpen:X.hintDirect)+'</div>'
     +(newMode==='direct'?'<label>'+esc(X.opp)+'</label><div id="oppBox">'+oppList+'</div>':'')
@@ -920,7 +1002,7 @@ function load(keepTab){
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
       $('sub').textContent=division?(X.subDiv+division):X.subNone;
-      $('tabOpen').textContent=X.tOpen;$('tabNew').textContent=X.tNew;$('tabMine').textContent=X.tMine;$('tabRes').textContent=X.tRes;$('tabBook').textContent=X.tBook;$('tabBook').classList.toggle('hidden',!canBookCourt);
+      $('tabOpen').textContent=X.tCalls;$('tabMine').textContent=X.tMine;$('tabRes').textContent=X.tRes;$('tabBook').textContent=X.tCourt;$('tabBook').classList.toggle('hidden',!canBookCourt);
       if(!keepTab){
         var want=new URLSearchParams(location.search).get('tab');
         // Пришли по кнопке «Другое время / Другой корт» — сразу экран встречного предложения.
@@ -929,7 +1011,7 @@ function load(keepTab){
         // ?tab= приходит из команд бота (/match, /result, /book) — открываем нужную вкладку сразу.
         var allowed=['open','new','mine','res'];
         if(canBookCourt)allowed.push('book');
-        showTab(allowed.indexOf(want)>=0?want:'open');
+        showTab(allowed.indexOf(want)>=0?want:'mine');
         // Переход по ссылке «Играю» из чата дивизиона — сразу открываем выбор даты и корта.
         if(focusSlot&&openSlots.some(function(s){return s.challenge_id===focusSlot}))openPicker(focusSlot);
       } else showTab(mode);
