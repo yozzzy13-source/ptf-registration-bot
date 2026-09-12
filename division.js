@@ -37,6 +37,16 @@ export function divisionLetter(division = '') {
   return String(division || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
 }
 
+// Как дивизион называется в интерфейсе. Держим те же подписи, что и раньше:
+// PRIME и женский дивизион пишутся не по шаблону «Division X».
+const LETTER_TO_NAME = { P:'PRIME', PRIME:'PRIME', W:'Division Woman', WOMAN:'Division Woman', WOMEN:'Division Woman' };
+export function divisionDisplayName(division = '') {
+  const key = divisionLetter(division);
+  if (!key) return '';
+  if (LETTER_TO_NAME[key]) return LETTER_TO_NAME[key];
+  return key.length <= 2 ? `Division ${key}` : key;
+}
+
 // Сезоны лиги. Список правится в Settings без деплоя:
 //   league_seasons = 1:finished,2:upcoming
 // Порядок в строке — порядок вкладок. Если строки нет, берём значение по умолчанию.
@@ -121,6 +131,122 @@ export async function availableDivisions(season = '') {
     if (await divisionSheetId(extra, season)) out.push(extra);
   }
   return out;
+}
+
+// ===========================================================================
+// Состав дивизиона. Источник правды — лист Division_Tracker таблицы дивизиона:
+// именно его организатор правит, когда переносит игрока. Блок со списком в
+// разных таблицах стоит в разных колонках, поэтому ищем его по заголовку
+// «Player» где угодно на листе, а не по фиксированному адресу. Если списка нет
+// (старая таблица), откатываемся на имена из Match_Log.
+const ROSTER_SHEET = 'Division_Tracker';
+// Состав правят руками и сразу идут проверять — держим кэш коротким.
+const ROSTER_CACHE_MS = 60 * 1000;
+const rosterCache = new Map();
+export function invalidateRosterCache() { rosterCache.clear(); }
+
+// Подпись над списком — та же ячейка, что и в шапке перекрёстной сетки, поэтому
+// список считаем закончившимся на двух пустых строках подряд.
+function namesUnderPlayerHeader(values = []) {
+  const found = [];
+  for (let r = 0; r < values.length; r++) {
+    const row = values[r] || [];
+    for (let c = 0; c < row.length; c++) {
+      if (norm(row[c]) !== 'player') continue;
+      const names = [];
+      let blanks = 0;
+      for (let i = r + 1; i < values.length; i++) {
+        const cell = txt((values[i] || [])[c]);
+        if (!cell) { if (++blanks >= 2) break; continue; }
+        blanks = 0;
+        if (norm(cell) === 'player') break;
+        names.push({ name: cell, row: i + 1 });
+      }
+      if (names.length) found.push({ column: c, headerRow: r + 1, names });
+    }
+  }
+  if (!found.length) return [];
+  // Если списков несколько (сводка + сетка), берём самый длинный — это состав.
+  found.sort((a, b) => b.names.length - a.names.length);
+  return found[0].names;
+}
+
+async function readRosterSheet(spreadsheetId) {
+  try {
+    const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId, range: `${ROSTER_SHEET}!A:BZ` });
+    return namesUnderPlayerHeader(res.data.values || []);
+  } catch (e) {
+    // Листа может не быть вовсе — это не ошибка, просто откатываемся на Match_Log.
+    return [];
+  }
+}
+
+export async function divisionRoster(letter, season = '', group = '') {
+  const key = divisionLetter(letter);
+  const cacheId = `${season || '-'}:${key}:${group || '-'}`;
+  const hit = rosterCache.get(cacheId);
+  if (hit && Date.now() - hit.t < ROSTER_CACHE_MS) return hit.v;
+
+  const spreadsheetId = await divisionSheetId(key, season, group);
+  if (!spreadsheetId) return { ok: false, reason: 'not_configured', division: key, season, players: [] };
+
+  let players = await readRosterSheet(spreadsheetId);
+  let source = ROSTER_SHEET;
+  if (!players.length) {
+    // Запасной путь: имена из пар расписания, как считалась таблица дивизиона.
+    try {
+      const { rows } = await readMatchLog(spreadsheetId);
+      const seen = new Map();
+      for (const r of rows) {
+        for (const n of [txt(r.player_1), txt(r.player_2)]) {
+          if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), { name: n, row: 0 });
+        }
+      }
+      players = [...seen.values()];
+      source = 'Match_Log';
+    } catch (e) {
+      return { ok: false, reason: 'no_access', division: key, season, players: [] };
+    }
+  }
+  const value = { ok: true, division: key, season, group, source, spreadsheet_id: spreadsheetId, players };
+  rosterCache.set(cacheId, { t: Date.now(), v: value });
+  return value;
+}
+
+// Самый свежий сезон — максимальный номер в реестре дивизионов. Именно его
+// составы считаются действующими: матчи формируются по ним.
+export async function latestSeason() {
+  const reg = await divisionRegistry().catch(() => []);
+  const nums = reg.map(r => Number(r.season)).filter(n => Number.isFinite(n) && n > 0);
+  if (nums.length) return String(Math.max(...nums));
+  const seasons = await getSeasons().catch(() => []);
+  const fromSettings = seasons.map(s => Number(s.number)).filter(n => Number.isFinite(n) && n > 0);
+  return fromSettings.length ? String(Math.max(...fromSettings)) : '';
+}
+
+// В каком дивизионе игрок сейчас. Идём по всем таблицам последнего сезона и
+// ищем имя в составе. Совпадение по имени — другого ключа в этих таблицах нет.
+export async function findPlayerDivision(name, matchName, season = '') {
+  const target = txt(name);
+  if (!target) return { found: false };
+  const use = season || await latestSeason();
+  const letters = await availableDivisions(use).catch(() => []);
+  for (const letter of letters) {
+    const groups = await divisionGroups(letter, use).catch(() => []);
+    const variants = groups.length ? groups.map(g => g.group) : [''];
+    for (const group of variants) {
+      const roster = await divisionRoster(letter, use, group).catch(() => null);
+      if (!roster?.ok) continue;
+      const hit = roster.players.find(p => matchName(p.name, target));
+      if (hit) {
+        return {
+          found: true, division: divisionDisplayName(letter), letter, season: use, group,
+          name: hit.name, row: hit.row, source: roster.source, spreadsheet_id: roster.spreadsheet_id
+        };
+      }
+    }
+  }
+  return { found: false, season: use };
 }
 
 async function readMatchLog(spreadsheetId) {
