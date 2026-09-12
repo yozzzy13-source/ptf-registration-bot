@@ -1349,32 +1349,39 @@ export async function getBotMenuRows(parent='main', language='en'){try{const {ro
 // сразу закреплённое за конкретным соперником.
 // Обе формы живут в одном листе Match Challenges (колонка match_type).
 // ===========================================================================
-// Кто игрок в лиге: дивизион и статус из ручной таблицы участников (она — источник
-// правды по составам). Сначала пробуем точную привязку по telegram_id, если колонка
-// заведена; иначе — сопоставление по имени, как для страниц игроков на сайте.
+// Кто игрок в лиге. Два разных вопроса — два разных источника:
+//   дивизион  — таблица дивизиона последнего сезона (лист Division_Tracker);
+//               организатор правит её, когда переносит игрока, и больше нигде;
+//   статус    — анкета в Applicants (active / inactive / waitlist).
+// Ручная таблица предварительного состава здесь больше не участвует: она нужна
+// только для страницы «Состав» и живёт своей жизнью.
+export function sameName(a = '', b = '') {
+  const x = nameKeys(a), y = nameKeys(b);
+  return x.some(k => y.includes(k));
+}
+
 export async function getPlayerLeagueInfo(profile = {}) {
   const telegramId = String(profile.telegram_id || profile.id || '').trim();
-  const name = String(profile.name || '').trim();
-  let data;
-  try { data = await getManualParticipants(); }
-  catch (e) { console.error('league info failed:', e.message); return { found:false, division:'', status:'', matched_by:'' }; }
-  const players = data.players || [];
+  let row = null;
+  if (telegramId) row = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const name = String(row?.name || profile.name || '').trim();
+  const status = String(row?.status || profile.status || '').trim();
+  if (!name) return { found:false, division:'', status:'', matched_by:'' };
 
-  if (telegramId) {
-    const byId = players.find(p => p.telegram_id && String(p.telegram_id) === telegramId);
-    if (byId) return { found:true, division: byId.division || '', status: byId.status || '', name: byId.name, matched_by:'telegram_id' };
+  let hit;
+  try {
+    const { findPlayerDivision } = await import('./division.js');
+    hit = await findPlayerDivision(name, sameName);
+  } catch (e) {
+    console.error('league info failed:', e.message);
+    return { found:false, division:'', status, matched_by:'' };
   }
-  if (name) {
-    const keys = nameKeys(name);
-    const byName = players.find(p => nameKeys(p.name).some(k => keys.includes(k)));
-    // Если у строки участника уже проставлен telegram_id и он не наш — это чужая строка,
-    // совпало лишь имя. Пускать нельзя.
-    if (byName && byName.telegram_id && telegramId && String(byName.telegram_id) !== telegramId) {
-      return { found:false, division:'', status:'', matched_by:'name_conflict' };
-    }
-    if (byName) return { found:true, division: byName.division || '', status: byName.status || '', name: byName.name, matched_by:'name' };
-  }
-  return { found:false, division:'', status:'', matched_by:'' };
+  if (!hit?.found) return { found:false, division:'', status, matched_by:'', season: hit?.season || '' };
+  return {
+    found:true, division: hit.division, status, name: hit.name, matched_by:'division_table',
+    season: hit.season, letter: hit.letter, group: hit.group,
+    source: { sheet: hit.source, season: hit.season, row: hit.row, spreadsheet_id: hit.spreadsheet_id }
+  };
 }
 
 export async function getPlayerDivision(profile = {}) {
@@ -1416,11 +1423,14 @@ export async function getAllBotSubscribers() {
   return out;
 }
 
-// Все активные игроки лиги с Telegram — для общих рассылок (результаты матчей).
+// Все игроки действующих дивизионов с Telegram — для напоминаний по матчам.
+// Состав берём из таблиц дивизионов последнего сезона, анкету — из Applicants.
 export async function getAllActiveLeaguePlayers() {
-  const [data, { rows: applicants }] = await Promise.all([
-    getManualParticipants().catch(() => ({ players: [] })),
-    getRows(SHEETS.applicants, { useCache:false })
+  const { divisionRoster, divisionGroups, availableDivisions, latestSeason, divisionDisplayName } = await import('./division.js');
+  const season = await latestSeason().catch(() => '');
+  const [{ rows: applicants }, letters] = await Promise.all([
+    getRows(SHEETS.applicants, { useCache:false }),
+    availableDivisions(season).catch(() => [])
   ]);
   const byKey = new Map();
   for (const a of applicants) {
@@ -1428,13 +1438,21 @@ export async function getAllActiveLeaguePlayers() {
     for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
   }
   const out = [];
-  for (const p of (data.players || [])) {
-    if (String(p.status || '').toLowerCase() !== 'active') continue;
-    const hit = (p.telegram_id && applicants.find(a => String(a.telegram_id) === String(p.telegram_id)))
-      || nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
-    if (!hit) continue;
-    if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
-    out.push({ telegram_id: String(hit.telegram_id), name: p.name, division: p.division || '', language: hit.language || '' });
+  for (const letter of letters) {
+    const groups = await divisionGroups(letter, season).catch(() => []);
+    const variants = groups.length ? groups.map(g => g.group) : [''];
+    for (const group of variants) {
+      const roster = await divisionRoster(letter, season, group).catch(() => null);
+      if (!roster?.ok) continue;
+      for (const p of roster.players) {
+        const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+        if (!hit) continue;
+        if (DEAD_SUBSCRIBER_STATUSES.includes(String(hit.status || '').trim().toLowerCase())) continue;
+        if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+        out.push({ telegram_id: String(hit.telegram_id), name: p.name,
+          division: divisionDisplayName(letter), language: hit.language || '' });
+      }
+    }
   }
   return out;
 }
@@ -1578,35 +1596,51 @@ export async function isActiveLeaguePlayer(profile = {}) {
   return info.found && String(info.status || '').toLowerCase() === 'active' && Boolean(info.division);
 }
 
-// Соперники: участники того же дивизиона, у которых есть telegram_id в Applicants.
-export async function getDivisionOpponents(division, excludeTelegramId = '') {
+// Соперники: состав того же дивизиона из таблицы дивизиона, у кого есть анкета
+// с telegram_id. Имя в сетке связывается с анкетой по имени — другого ключа в
+// таблицах дивизионов нет.
+export async function getDivisionOpponents(division, excludeTelegramId = '', season = '') {
   if (!division) return [];
-  const [data, { rows: applicants }] = await Promise.all([
-    getManualParticipants().catch(() => ({ players: [] })),
-    getRows(SHEETS.applicants, { useCache:false })
+  const { divisionRoster, divisionGroups, latestSeason } = await import('./division.js');
+  const use = season || await latestSeason().catch(() => '');
+  const letter = String(division).replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+  const groups = await divisionGroups(letter, use).catch(() => []);
+  const variants = groups.length ? groups.map(g => g.group) : [''];
+
+  const [{ rows: applicants }, rosters] = await Promise.all([
+    getRows(SHEETS.applicants, { useCache:false }),
+    Promise.all(variants.map(g => divisionRoster(letter, use, g).catch(() => null)))
   ]);
   const byKey = new Map();
   for (const a of applicants) {
     if (!a.telegram_id) continue;
     for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
   }
+  // Фото и ссылку на профиль по-прежнему берём с витрины сайта.
+  const site = await getWebsitePlayers().catch(() => []);
+  const siteByKey = new Map();
+  for (const sp of site) for (const k of nameKeys(sp.name || '')) if (!siteByKey.has(k)) siteByKey.set(k, sp);
+
   const out = [];
-  for (const p of (data.players || [])) {
-    if (p.division !== division) continue;
-    if (String(p.status || '').toLowerCase() !== 'active') continue; // вызвать можно только активного
-    const hit = (p.telegram_id && applicants.find(a => String(a.telegram_id) === String(p.telegram_id)))
-      || nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
-    if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
-    if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
-    out.push({
-      telegram_id: String(hit.telegram_id),
-      name: p.name,
-      username: hit.telegram_username || '',
-      rating: p.rating || '',
-      status: p.status || '',
-      profile_url: p.profile_url || '',
-      photo_url: p.photo_url || ''
-    });
+  for (const roster of rosters) {
+    if (!roster?.ok) continue;
+    for (const p of roster.players) {
+      const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+      if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
+      // Снятых и неактивных не показываем: статус живёт в анкете.
+      if (DEAD_SUBSCRIBER_STATUSES.includes(String(hit.status || '').trim().toLowerCase())) continue;
+      if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+      const sp = nameKeys(p.name).map(k => siteByKey.get(k)).find(Boolean) || {};
+      out.push({
+        telegram_id: String(hit.telegram_id),
+        name: p.name,
+        username: hit.telegram_username || '',
+        rating: hit.ntrp || hit.rating || '',
+        status: hit.status || '',
+        profile_url: sp.profile_url || '',
+        photo_url: sp.photo_url || ''
+      });
+    }
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity:'base' }));
 }
