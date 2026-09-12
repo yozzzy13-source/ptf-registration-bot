@@ -402,13 +402,14 @@ async function matchViewer(initData, token = '') {
   if (!profile) return { ok:false, code:404, error:'Player profile not found. Complete the profile first.' };
   if (user.id) await healApplicantId(profile, user.id).catch(() => {});
   const lang = ['ru','en'].includes(String(profile.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : 'en';
-  // Матчи доступны только активным игрокам текущего состава. Проверка на сервере —
-  // скрытая кнопка меню это лишь удобство, а не защита.
+  // Матчи доступны только активным игрокам действующих дивизионов. Состав берётся
+  // из таблиц дивизионов последнего сезона. Проверка на сервере — скрытая кнопка
+  // меню это лишь удобство, а не защита.
   const league = await getPlayerLeagueInfo({ ...profile, id: user.id });
   if (!league.found) {
     return { ok:false, code:403, error: lang === 'ru'
-      ? 'Матчи доступны игрокам текущего состава лиги. Вас пока нет в списке участников.'
-      : 'Matches are for players in the current league line-up. You are not on the participants list yet.' };
+      ? 'Матчи доступны игрокам действующих дивизионов. Вас пока нет ни в одном составе этого сезона.'
+      : 'Matches are for players in the current divisions. You are not in any division line-up this season yet.' };
   }
   if (String(league.status || '').toLowerCase() !== 'active') {
     return { ok:false, code:403, error: lang === 'ru'
