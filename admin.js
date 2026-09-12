@@ -321,12 +321,12 @@ export function playerActionsKeyboard(telegramId, applicationId = '') {
 // путём, что и после одобрения оплаты, чтобы поведение не разъезжалось.
 export async function activatePlayer({ chatId, telegramId }) {
   const applicant = await findApplicantByTelegramId(telegramId).catch(() => null);
-  if (!applicant) return sendMessage(chatId, 'Игрок не найден в анкетах.');
+  if (!applicant) return replyInPlayerTopic(chatId, telegramId, 'Игрок не найден в анкетах.');
   let app = await _findLatestApp(telegramId).catch(() => null);
   if (!app) {
     const events = await getActiveEvents().catch(() => []);
     const ev = events[0];
-    if (!ev) return sendMessage(chatId, 'Нет активного события, к которому привязать участие.');
+    if (!ev) return replyInPlayerTopic(chatId, telegramId, 'Нет активного события, к которому привязать участие.');
     app = await createOrUpdateApplication({
       application_id: uid('app'),
       telegram_id: String(telegramId),
@@ -340,7 +340,7 @@ export async function activatePlayer({ chatId, telegramId }) {
       source: 'admin_manual',
       notes: 'участие подтверждено организатором вручную'
     });
-    await sendMessage(chatId, `Заявки не было — завёл на «${escapeHtml(app.event_name || '')}».`);
+    await replyInPlayerTopic(chatId, telegramId, `Заявки не было — завёл на «${escapeHtml(app.event_name || '')}».`);
   } else if (String(app.payment_status || '').toLowerCase() !== 'approved') {
     // Деньги уже пришли, иначе бы участие не подтверждали: чтобы игрок не висел
     // в списке неоплаченных, помечаем оплату подтверждённой вручную.
@@ -349,12 +349,12 @@ export async function activatePlayer({ chatId, telegramId }) {
   // Топик заводим здесь же: дальше переписка идёт в своём месте, как у всех.
   await getOrCreatePlayerTopic({ ...applicant, telegram_id: telegramId }).catch(() => null);
   await setApplicationStatus({ chatId, applicationId: app.application_id, status: 'active' });
-  return sendMessage(chatId, `✅ Участие подтверждено: <b>${escapeHtml(applicant.name || telegramId)}</b>. Приветствие отправлено.`);
+  return replyInPlayerTopic(chatId, telegramId, `✅ Участие подтверждено: <b>${escapeHtml(applicant.name || telegramId)}</b>. Приветствие отправлено.`);
 }
 
 export async function waitlistPlayer({ chatId, telegramId }) {
   const app = await _findLatestApp(telegramId).catch(() => null);
-  if (!app) return sendMessage(chatId, 'Заявки у игрока нет.');
+  if (!app) return replyInPlayerTopic(chatId, telegramId, 'Заявки у игрока нет.');
   return setApplicationStatus({ chatId, applicationId: app.application_id, status: 'waitlist' });
 }
 
@@ -559,7 +559,7 @@ export async function eventPublish(chatId, eventId) {
 export async function askAddToEvent(chatId, eventId, telegramId) {
   const { findEvent } = await import('./events.js');
   const event = await findEvent(eventId);
-  if (!event) return sendMessage(chatId, 'Событие не найдено.');
+  if (!event) return replyInPlayerTopic(chatId, telegramId, 'Событие не найдено.');
   const applicant = await findApplicantByTelegramId(telegramId).catch(() => null);
   const who = applicant?.name || String(telegramId);
   const free = !event.payment_required || !event.price_thb;
@@ -568,9 +568,9 @@ export async function askAddToEvent(chatId, eventId, telegramId) {
   if (free) {
     const { addToEvent } = await import('./eventflow.js');
     const r = await addToEvent({ eventId, telegramId, name: who, mode: 'free', adminChatId: await getAdminChatId().catch(() => '') });
-    return sendMessage(chatId, r.message);
+    return replyInPlayerTopic(chatId, telegramId, r.message);
   }
-  return sendMessage(chatId, `<b>➕ Добавить в состав</b>
+  return replyInPlayerTopic(chatId, telegramId, `<b>➕ Добавить в состав</b>
 
 Игрок: <b>${escapeHtml(who)}</b>
 Событие: <b>${escapeHtml(event.title_ru || event.event_id)}</b>
@@ -598,12 +598,12 @@ export async function askRemoveFromEvent(chatId, signupId) {
   if (!paid) {
     const { removeFromEvent } = await import('./eventflow.js');
     const r = await removeFromEvent({ signupId, mode: 'none', adminChatId: await getAdminChatId().catch(() => '') });
-    return sendMessage(chatId, r.message);
+    return replyInPlayerTopic(chatId, signup.telegram_id, r.message);
   }
   const hint = Number.isFinite(left)
     ? `\nДо события: <b>${Math.round(left)} ч</b> (правило возврата: ${event.refund_hours} ч)`
     : '';
-  return sendMessage(chatId, `<b>➖ Убрать из состава</b>
+  return replyInPlayerTopic(chatId, signup.telegram_id, `<b>➖ Убрать из состава</b>
 
 Игрок: <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b>
 Событие: <b>${escapeHtml(event?.title_ru || signup.event_id)}</b>
@@ -624,13 +624,14 @@ export async function eventAddDo(chatId, eventId, telegramId, mode) {
   const r = await addToEvent({ eventId, telegramId, name: applicant?.name || String(telegramId),
     lang: (applicant?.language || 'ru') === 'ru' ? 'ru' : 'en',
     mode, adminChatId: await getAdminChatId().catch(() => '') });
-  return sendMessage(chatId, r.message);
+  return replyInPlayerTopic(chatId, telegramId, r.message);
 }
 
 export async function eventRemoveDo(chatId, signupId, mode) {
-  const { removeFromEvent } = await import('./eventflow.js');
+  const { removeFromEvent, signupOwner } = await import('./eventflow.js');
+  const owner = await signupOwner(signupId).catch(() => '');
   const r = await removeFromEvent({ signupId, mode, adminChatId: await getAdminChatId().catch(() => '') });
-  return sendMessage(chatId, r.message);
+  return replyInPlayerTopic(chatId, owner, r.message);
 }
 
 // Удаление события: сначала спрашиваем, как возвращать деньги — один раз на всё
@@ -732,7 +733,7 @@ export async function sendInvoiceToApplicant({ chatId, applicationId }) {
     : '✅ There is a spot in the division — payment is open now.\n\nChoose a method below. The spot is confirmed once the payment is approved.');
   await sendPaymentStart(app.telegram_id, lang, app.application_id);
   await updateApplication(app.application_id, { application_status: 'waiting_payment' }).catch(() => {});
-  return sendMessage(chatId, `Счёт отправлен: <b>${escapeHtml(app.player_name || app.telegram_id)}</b>.`);
+  return replyInPlayerTopic(chatId, app.telegram_id, `Счёт отправлен: <b>${escapeHtml(app.player_name || app.telegram_id)}</b>.`);
 }
 
 export async function notifyNewApplication(app, profile) {
@@ -1076,6 +1077,8 @@ export async function adminMatchTest(msg) {
           const meta = await sheets().spreadsheets.get({ spreadsheetId: r.spreadsheet_id });
           const titles = (meta.data.sheets || []).map(s => s.properties?.title).filter(Boolean);
           if (!titles.includes('Match_Log')) bad.push(`${r.season}/${r.letter} — нет листа Match_Log`);
+          // Состав дивизиона читается отсюда: без листа состав берётся из пар Match_Log.
+          if (!titles.includes('Division_Tracker')) bad.push(`${r.season}/${r.letter} — нет листа Division_Tracker`);
         } catch (e) { bad.push(`${r.season}/${r.letter} — нет доступа`); }
       }
       lines.push(bad.length ? `⚠️ ${bad.map(x => escapeHtml(x)).join('; ')}` : 'все таблицы читаются ✅');
@@ -1086,6 +1089,12 @@ export async function adminMatchTest(msg) {
   lines.push('', '<b>Ваш доступ к матчам</b>');
   try {
     const { getPlayerLeagueInfo } = await import('./sheets.js');
+    // Проверку запускают сразу после правки таблицы — читаем составы заново,
+    // иначе минуту показывали бы прежнюю картину.
+    const { invalidateRosterCache, invalidateDivisionRegistry } = await import('./division.js')
+      .then(async d => ({ ...d, invalidateDivisionRegistry: (await import('./matchesdb.js')).invalidateDivisionRegistry }));
+    invalidateRosterCache?.();
+    invalidateDivisionRegistry?.();
     const profile = await findApplicantByTelegramId(msg.from.id).catch(() => null);
     if (!profile) {
       lines.push('анкета: <b>не найдена ⚠️</b> — раздел матчей закрыт');
@@ -1093,14 +1102,19 @@ export async function adminMatchTest(msg) {
       lines.push(`анкета: <b>${escapeHtml(profile.name || '(без имени)')}</b>`);
       const info = await getPlayerLeagueInfo({ ...profile, id: msg.from.id });
       if (!info.found) {
-        lines.push(`в составе: <b>НЕТ ⚠️</b>${info.matched_by === 'name_conflict' ? ' (в таблице участников у этого имени указан другой telegram_id)' : ''}`);
-        lines.push('Проверьте, что имя в анкете совпадает с именем в таблице участников.');
+        lines.push(`в составе сезона ${escapeHtml(info.season || '?')}: <b>НЕТ ⚠️</b>`);
+        lines.push('Имя из анкеты не нашлось ни в одном листе Division_Tracker этого сезона.');
+        lines.push('Проверьте, что имя в анкете написано так же, как в таблице дивизиона.');
       } else {
         const active = String(info.status || '').toLowerCase() === 'active';
-        lines.push(`в составе: <b>да</b> (привязка по ${escapeHtml(info.matched_by === 'telegram_id' ? 'telegram_id' : 'имени')})`);
+        lines.push(`в составе: <b>да</b>, сезон <b>${escapeHtml(info.season || '?')}</b>`);
         lines.push(`дивизион: <b>${escapeHtml(info.division || '— не указан ⚠️')}</b>`);
-        lines.push(`статус: <b>${escapeHtml(info.status || '—')}</b>`);
-        lines.push(active && info.division ? 'кнопка «Матчи» — <b>показывается ✅</b>' : 'кнопка «Матчи» — <b>скрыта</b>: нужен статус active и дивизион');
+        lines.push(`статус: <b>${escapeHtml(info.status || '—')}</b> (из анкеты)`);
+        // Откуда именно взята буква — чтобы не гадать, какую таблицу править.
+        const src = info.source || {};
+        lines.push(`взято из: лист <b>${escapeHtml(src.sheet || '—')}</b>${src.row ? `, строка <b>${escapeHtml(String(src.row))}</b>` : ''}`);
+        if (src.spreadsheet_id) lines.push(`таблица: <code>${escapeHtml(src.spreadsheet_id)}</code>`);
+        lines.push(active && info.division ? 'кнопка «Матчи» — <b>показывается ✅</b>' : 'кнопка «Матчи» — <b>скрыта</b>: нужен статус active в анкете и дивизион');
       }
     }
   } catch (e) { lines.push(`<code>${escapeHtml(e.message).slice(0, 200)}</code>`); }
