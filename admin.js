@@ -1088,9 +1088,10 @@ export async function adminMatchTest(msg) {
   // Вторая причина, по которой раздел матчей может не открыться, — статус игрока.
   lines.push('', '<b>Ваш доступ к матчам</b>');
   try {
-    const { getPlayerLeagueInfo } = await import('./sheets.js');
-    // Проверку запускают сразу после правки таблицы — читаем составы заново,
-    // иначе минуту показывали бы прежнюю картину.
+    const { getPlayerLeagueInfo, invalidateSheetCache } = await import('./sheets.js');
+    // Проверку запускают сразу после правки таблицы — читаем всё заново,
+    // иначе показывали бы прежнюю картину.
+    invalidateSheetCache?.();
     const { invalidateRosterCache, invalidateDivisionRegistry } = await import('./division.js')
       .then(async d => ({ ...d, invalidateDivisionRegistry: (await import('./matchesdb.js')).invalidateDivisionRegistry }));
     invalidateRosterCache?.();

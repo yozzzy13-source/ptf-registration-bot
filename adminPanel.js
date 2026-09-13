@@ -85,6 +85,63 @@ async function getContacts() {
   return (await getRows(SHEETS.applicants, { useCache:false })).rows;
 }
 
+// Рассылка по событию: получатели — те, кто записан на ОДНО выбранное событие.
+// Отменившие в список не попадают никогда.
+const EVENT_SCOPES = {
+  all:       (s) => true,
+  confirmed: (s) => ['paid', 'confirmed'].includes(String(s.status || '').toLowerCase()),
+  waitlist:  (s) => String(s.status || '').toLowerCase() === 'waitlist',
+  unpaid:    (s) => ['pending', 'invoiced'].includes(String(s.status || '').toLowerCase())
+};
+
+async function eventRecipients(eventId, scope = 'all') {
+  const id = String(eventId || '').trim();
+  if (!id) return [];
+  const { listSignups } = await import('./events.js');
+  const pick = EVENT_SCOPES[String(scope || 'all')] || EVENT_SCOPES.all;
+  const rows = await getContacts();
+  const byId = new Map(rows.filter(r => r.telegram_id).map(r => [String(r.telegram_id), r]));
+
+  const out = [];
+  const seen = new Set();
+  for (const s of await listSignups().catch(() => [])) {
+    if (String(s.event_id) !== id) continue;
+    if (String(s.status || '').toLowerCase() === 'cancelled') continue;
+    if (!pick(s)) continue;
+    const tid = String(s.telegram_id || '').trim();
+    if (!tid || seen.has(tid)) continue;
+    seen.add(tid);
+    // Анкета даёт язык и ник; если её нет — шлём как есть, имя берём из записи.
+    const row = byId.get(tid) || { telegram_id: tid, name: s.player_name || tid };
+    out.push({ ...row, signup_status: s.status || '' });
+  }
+  return out;
+}
+
+// Подстановки в тексте рассылки: одно событие — одни и те же значения у всех.
+function eventTokens(event = {}, lang = 'ru') {
+  const ru = lang !== 'en';
+  return {
+    'событие': ru ? (event.title_ru || event.title_en || '') : (event.title_en || event.title_ru || ''),
+    'event':   event.title_en || event.title_ru || '',
+    'дата':    event.date || '', 'date': event.date || '',
+    'время':   event.time || '', 'time': event.time || '',
+    'место':   event.place || '', 'place': event.place || ''
+  };
+}
+const EVENT_TOKEN_KEYS = ['событие', 'event', 'дата', 'date', 'время', 'time', 'место', 'place'];
+function isEventToken(code = '') {
+  return EVENT_TOKEN_KEYS.includes(String(code).trim().toLowerCase());
+}
+function fillEventTokens(text = '', event = null, lang = 'ru') {
+  if (!event) return text;
+  const map = eventTokens(event, lang);
+  return String(text).replace(/\{([^{}]+)\}/g, (whole, key) => {
+    const k = String(key).trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : whole;
+  });
+}
+
 export function registerAdminRoutes(app) {
   app.get('/admin', (req, res) => res.sendFile(process.cwd() + '/public/admin.html'));
 
@@ -130,13 +187,37 @@ export function registerAdminRoutes(app) {
       if (!auth.ok) return res.status(403).json(auth);
       const lang = String(req.body.lang || 'ru').toLowerCase() === 'en' ? 'en' : 'ru';
       const parsed = parseTemplate(String(req.body.message || ''));
+      // В предпросмотре подставляем данные выбранного события — чтобы было
+      // видно, во что превратятся {событие}, {дата}, {время}, {место}.
+      let event = null;
+      if (req.body.event_id) {
+        const { findEvent } = await import('./events.js');
+        event = await findEvent(String(req.body.event_id)).catch(() => null);
+      }
       res.json({
         ok: true,
-        text: renderText(parsed, lang, await getBotUsername()),
+        text: fillEventTokens(renderText(parsed, lang, await getBotUsername()), event, lang),
         buttons: parsed.buttons.map(b => b.custom || destinationLabel(b.dest, lang)),
         inline: parsed.inline.length,
-        unknown: parsed.unknown
+        // {событие} и соседи — не коды разделов, ругаться на них не за что.
+        unknown: parsed.unknown.filter(u => !isEventToken(u))
       });
+    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+  });
+
+  // Сколько человек получит рассылку по событию — считаем до отправки, чтобы
+  // организатор видел цифру, а не жал вслепую.
+  app.get('/api/admin/event-recipients', async (req, res) => {
+    try {
+      const auth = adminFromInitData(req.query.initData || '');
+      if (!auth.ok) return res.status(403).json(auth);
+      const eventId = String(req.query.event_id || '').trim();
+      if (!eventId) return res.json({ ok:true, count:0, names:[], counts:{} });
+      const counts = {};
+      for (const key of Object.keys(EVENT_SCOPES)) counts[key] = (await eventRecipients(eventId, key)).length;
+      const list = await eventRecipients(eventId, String(req.query.scope || 'all'));
+      res.json({ ok:true, count:list.length, counts,
+        names: list.slice(0, 60).map(c => c.name || c.telegram_id) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -147,7 +228,24 @@ export function registerAdminRoutes(app) {
       const message = String(req.body.message || '').trim();
       if (!message) return res.status(400).json({ ok:false, error:'Message is empty' });
       const button = String(req.body.button || '').trim();
-      const contacts = applyFilters(await getContacts(), req.body.filters || {});
+      // Рассылка по событию идёт своим списком: записанные на него, а не срез
+      // по фильтрам игроков. Одно событие за раз — на второе будет отдельная.
+      const eventId = String(req.body.event_id || '').trim();
+      const scope = String(req.body.scope || 'all').trim();
+      let event = null;
+      let contacts;
+      if (eventId) {
+        const { findEvent } = await import('./events.js');
+        event = await findEvent(eventId).catch(() => null);
+        if (!event) return res.status(404).json({ ok:false, error:'Событие не найдено' });
+        contacts = await eventRecipients(eventId, scope);
+        if (!contacts.length) return res.status(400).json({ ok:false, error:'На это событие ещё никто не записан' });
+      } else {
+        contacts = applyFilters(await getContacts(), req.body.filters || {});
+      }
+      const segment = eventId
+        ? JSON.stringify({ event_id: eventId, event: event.title_ru || event.title_en || eventId, scope })
+        : JSON.stringify(req.body.filters || {});
       // Коды разделов в тексте ({оплата}, {состав}, {!гонка}) превращаются
       // в кнопки под сообщением с названием на языке получателя.
       const parsed = parseTemplate(message);
@@ -157,21 +255,23 @@ export function registerAdminRoutes(app) {
       for (const c of contacts) {
         try {
           const lang = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
-          const body = parsed.hasLinks ? renderText(parsed, lang, username) : message;
+          const raw = parsed.hasLinks ? renderText(parsed, lang, username) : message;
+          // {событие}, {дата}, {время}, {место} — из выбранного события.
+          const body = fillEventTokens(raw, event, lang);
           // Кнопка из выпадающего списка панели добавляется отдельной строкой снизу.
           const fromCodes = renderButtons(parsed, lang);
           const fromPicker = broadcastButtonMarkup(button, lang);
           const rows = [...(fromCodes?.inline_keyboard || []), ...(fromPicker?.inline_keyboard || [])];
           const markup = rows.length ? { inline_keyboard: rows } : null;
           await sendMessage(c.telegram_id, body, markup ? { reply_markup: markup } : {});
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
+          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:segment });
           sent++;
         } catch (e) {
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:c.language, segment_filter:JSON.stringify(req.body.filters || {}) });
+          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:c.language, segment_filter:segment });
           failed++;
         }
       }
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:JSON.stringify(req.body.filters || {}), language:'mixed', message_text:message, media_type: button ? `text+button:${button}` : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:segment, language:'mixed', message_text:message, media_type: button ? `text+button:${button}` : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });

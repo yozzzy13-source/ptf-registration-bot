@@ -674,6 +674,10 @@ export async function ensureExtraSheet(sheetName, headers) {
 }
 const extraSheetsReady = new Map();
 
+// Сбросить кэш листов. Записи через бота делают это сами; отдельная кнопка
+// нужна там, где таблицу правили руками и хотят увидеть результат сразу.
+export function invalidateSheetCache() { cache.clear(); }
+
 export async function getRows(sheetName, { useCache=true } = {}) {
   const key = `rows:${sheetName}`;
   const c = cache.get(key);
@@ -988,13 +992,16 @@ export async function updateApplicantAdminTopic(telegramId, patch, user={}) {
   return { ...found, ...patch };
 }
 
+// Опознание игрока идёт на каждый запрос мини-приложения и на каждое сообщение
+// боту, поэтому читаем лист из кэша (20 секунд). Любая запись в таблицу кэш
+// сбрасывает, так что свежесозданная анкета находится сразу.
 export async function findApplicantByTelegramId(telegramId) {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const { rows } = await getRows(SHEETS.applicants);
   return rows.find(r => String(r.telegram_id) === String(telegramId));
 }
 
 export async function findApplicantByTelegramIdentity(userOrProfile={}) {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const { rows } = await getRows(SHEETS.applicants);
   const telegramId = userOrProfile.id || userOrProfile.telegram_id || '';
   const usernameRaw = userOrProfile.username || userOrProfile.telegram_username || '';
   const username = String(usernameRaw || '').replace(/^@/,'').toLowerCase();
@@ -1426,11 +1433,10 @@ export async function getAllBotSubscribers() {
 // Все игроки действующих дивизионов с Telegram — для напоминаний по матчам.
 // Состав берём из таблиц дивизионов последнего сезона, анкету — из Applicants.
 export async function getAllActiveLeaguePlayers() {
-  const { divisionRoster, divisionGroups, availableDivisions, latestSeason, divisionDisplayName } = await import('./division.js');
-  const season = await latestSeason().catch(() => '');
-  const [{ rows: applicants }, letters] = await Promise.all([
-    getRows(SHEETS.applicants, { useCache:false }),
-    availableDivisions(season).catch(() => [])
+  const { seasonRoster } = await import('./division.js');
+  const [{ rows: applicants }, map] = await Promise.all([
+    getRows(SHEETS.applicants),
+    seasonRoster().catch(() => ({ players: [] }))
   ]);
   const byKey = new Map();
   for (const a of applicants) {
@@ -1438,21 +1444,13 @@ export async function getAllActiveLeaguePlayers() {
     for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
   }
   const out = [];
-  for (const letter of letters) {
-    const groups = await divisionGroups(letter, season).catch(() => []);
-    const variants = groups.length ? groups.map(g => g.group) : [''];
-    for (const group of variants) {
-      const roster = await divisionRoster(letter, season, group).catch(() => null);
-      if (!roster?.ok) continue;
-      for (const p of roster.players) {
-        const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
-        if (!hit) continue;
-        if (DEAD_SUBSCRIBER_STATUSES.includes(String(hit.status || '').trim().toLowerCase())) continue;
-        if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
-        out.push({ telegram_id: String(hit.telegram_id), name: p.name,
-          division: divisionDisplayName(letter), language: hit.language || '' });
-      }
-    }
+  for (const p of (map.players || [])) {
+    const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+    if (!hit) continue;
+    if (DEAD_SUBSCRIBER_STATUSES.includes(String(hit.status || '').trim().toLowerCase())) continue;
+    if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+    out.push({ telegram_id: String(hit.telegram_id), name: p.name,
+      division: p.division, language: hit.language || '' });
   }
   return out;
 }
@@ -1601,16 +1599,14 @@ export async function isActiveLeaguePlayer(profile = {}) {
 // таблицах дивизионов нет.
 export async function getDivisionOpponents(division, excludeTelegramId = '', season = '') {
   if (!division) return [];
-  const { divisionRoster, divisionGroups, latestSeason } = await import('./division.js');
-  const use = season || await latestSeason().catch(() => '');
+  const { seasonRoster } = await import('./division.js');
   const letter = String(division).replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
-  const groups = await divisionGroups(letter, use).catch(() => []);
-  const variants = groups.length ? groups.map(g => g.group) : [''];
-
-  const [{ rows: applicants }, rosters] = await Promise.all([
-    getRows(SHEETS.applicants, { useCache:false }),
-    Promise.all(variants.map(g => divisionRoster(letter, use, g).catch(() => null)))
+  // Составы сезона уже собраны и лежат в кэше — второй раз в таблицы не ходим.
+  const [{ rows: applicants }, map] = await Promise.all([
+    getRows(SHEETS.applicants),
+    seasonRoster(season).catch(() => ({ players: [] }))
   ]);
+  const roster = (map.players || []).filter(p => p.letter === letter);
   const byKey = new Map();
   for (const a of applicants) {
     if (!a.telegram_id) continue;
@@ -1622,9 +1618,8 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
   for (const sp of site) for (const k of nameKeys(sp.name || '')) if (!siteByKey.has(k)) siteByKey.set(k, sp);
 
   const out = [];
-  for (const roster of rosters) {
-    if (!roster?.ok) continue;
-    for (const p of roster.players) {
+  {
+    for (const p of roster) {
       const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
       if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
       // Снятых и неактивных не показываем: статус живёт в анкете.

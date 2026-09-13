@@ -13,16 +13,29 @@
    иначе при переключении часть экрана останется от другой темы. */
 :root{
   --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#2A2521;--line2:#221F1B;
-  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;--mute3:var(--mute3);
-  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--champ2:var(--champ2);--gold:#C9A76A;
-  --win:#8FBF9A;--goBtn2:#6FA57C;--goLine:#7FB18C;--onGo:#0E1710;--goGlow:rgba(143,191,154,.28);--link:#7FB6E8;--linkLine:rgba(127,182,232,.4);--lose:#C2695E;--silver:var(--silver);--upArrow:var(--upArrow);
-  --card2:var(--card2);--line3:var(--line3);--line4:var(--line4);--line5:var(--line5);
-  --accBg:var(--accBg);--accBg2:var(--accBg2);--accLine:var(--accLine);--accLine2:var(--accLine2);
-  --onAcc:var(--onAcc);--winBg:var(--winBg);--winLine:var(--winLine);--loseBg:var(--loseBg);--loseLine:var(--loseLine);
-  --tile:var(--tile);--tile2:var(--tile2);--grain:var(--grain);
-  --edge:var(--edge);--edgeOn:var(--edgeOn);
-  --fadeTop:var(--fadeTop);--fadeMid:var(--fadeMid);--fadeNone:var(--fadeNone);
-  --avBg:var(--avBg);--sheet:var(--sheet);--hair:var(--hair);
+  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;--mute3:#7A7164;
+  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--champ2:#A99167;--gold:#C9A76A;
+  --win:#8FBF9A;--goBtn2:#6FA57C;--goLine:#7FB18C;--onGo:#0E1710;--goGlow:rgba(143,191,154,.28);--link:#7FB6E8;--linkLine:rgba(127,182,232,.4);--lose:#C2695E;--silver:#9A948B;--upArrow:#8FBF9A;
+  --card2:#161514;--line3:#332D28;--line4:#262220;--line5:#1B1918;
+  --accBg:rgba(232,164,92,.12);--accBg2:rgba(232,164,92,.18);--accLine:rgba(232,164,92,.34);--accLine2:rgba(232,164,92,.22);
+  --onAcc:#12100E;--winBg:rgba(143,191,154,.14);--winLine:rgba(143,191,154,.34);--loseBg:rgba(194,105,94,.14);--loseLine:rgba(194,105,94,.34);
+  --tile:#141312;--tile2:#171514;--grain:rgba(255,255,255,.03);
+  --edge:rgba(255,255,255,.06);--edgeOn:rgba(232,164,92,.22);
+  --fadeTop:rgba(17,16,16,.55);--fadeMid:rgba(17,16,16,.92);--fadeNone:rgba(17,16,16,0);
+  --avBg:#1C1A18;--sheet:rgba(17,16,16,.96);--hair:rgba(255,255,255,.05);
+  /* Цвета дивизионов, зон и титулов были заведены только в светлой теме, а в
+     тёмной ссылались сами на себя — то есть не работали вовсе. Отсюда и
+     пропавшие цветные ярлыки. Здесь та же палитра, но по тёмному фону. */
+  --dA:#8FBF9A;--dABg:rgba(143,191,154,.15);--dALine:rgba(143,191,154,.34);
+  --dB:#7FB6E8;--dBBg:rgba(127,182,232,.15);--dBLine:rgba(127,182,232,.34);
+  --dC:#C6CE72;--dCBg:rgba(198,206,114,.14);--dCLine:rgba(198,206,114,.32);
+  --dD:#D9A0C4;--dDBg:rgba(217,160,196,.14);--dDLine:rgba(217,160,196,.32);
+  --dP:#E3C177;--dPBg:rgba(227,193,119,.15);--dPLine:rgba(227,193,119,.34);
+  --champBg:rgba(217,199,163,.10);--champGlow:rgba(201,167,106,.22);--finBg:rgba(201,167,106,.08);
+  --zStay:#3A3531;--zDown1:#C2695E;--zDown2:#8E463C;
+  --zUpTint:rgba(143,191,154,.08);--zDownTint:rgba(194,105,94,.07);
+  --goldLine:rgba(201,167,106,.38);--goldBg:rgba(201,167,106,.12);--onForm:#12100E;
+  --goldRing:#C9A76A;--goldGlow:rgba(201,167,106,.24);
 }
 /* Светлая тема Court: зелень корта как акцент, лимон на титулах. */
 html[data-theme="light"]{
@@ -476,6 +489,9 @@ font-weight:800;margin-bottom:9px}
 .fm2 .nm3 b{color:var(--text);font-weight:800}
 .fm2 .nm3 s{text-decoration:none;color:var(--mute3);font-weight:600}
 .fm2 .nm3 em{font-style:normal;color:#9A9186;font-weight:600}
+/* Имена в ленте открывают карточку игрока — палец должен понимать, что тут жмут. */
+.fm2 .nm3 b,.fm2 .nm3 em{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fm2 .nm3 b:active,.fm2 .nm3 em:active{opacity:.6}
 .sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--amber);margin-top:3px}
 /* строка матча в карточке игрока */
 .mrow{display:grid;grid-template-columns:46px 46px minmax(0,1fr);gap:10px;align-items:center}
@@ -618,9 +634,11 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   evSignUp:'Записаться',evOpenBot:'Записаться в боте',evFull:'Мест нет',evSpots:'Свободно мест',
   evPrice:'Участие',evGuest:'Гость',evYouIn:'Ты записан',evWait:'Лист ожидания',
   evPay:'Ждём оплату',evPaid:'Оплачено',evDeposit:'Депозит',evPast:'Событие прошло',
+  evOk:'Участвует',evPending:'Записался',
   evCancel:'Отменить участие',evWho:'Участники',evNobody:'Пока никто не записался',
   evInviteOnly:'Только по приглашению',evAdd:'Добавить игрока',evRemove:'убрать',
   evClosed:'Запись закрыта',evSending:'Секунду…',evJoined:'Готово — счёт и детали в боте',
+  evToTopic:'Вопрос ушёл в тему игрока в админ-группе',
   evCancelAsk:'Отменить участие? Деньги вернутся по правилу отмены.',evGuestsN:'гостей',evUntil:'Запись до',
   wBalance:'Депозит',wEmpty:'Операций пока нет',wTopup:'Пополнить',wOwn:'Своя сумма',wGo:'Пополнить',
   wSent:'Счёт на пополнение отправлен в бот',wMin:'Минимум {n} ฿',
@@ -675,9 +693,11 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   evSignUp:'Sign up',evOpenBot:'Sign up in the bot',evFull:'No spots left',evSpots:'Spots left',
   evPrice:'Entry',evGuest:'Guest',evYouIn:'You are in',evWait:'Waitlist',
   evPay:'Awaiting payment',evPaid:'Paid',evDeposit:'Deposit',evPast:'Event has passed',
+  evOk:'In',evPending:'Signed up',
   evCancel:'Cancel my spot',evWho:'Participants',evNobody:'Nobody has signed up yet',
   evInviteOnly:'By invitation only',evAdd:'Add player',evRemove:'remove',
   evClosed:'Sign-up closed',evSending:'One moment…',evJoined:'Done — invoice and details are in the bot',
+  evToTopic:'Sent to the player’s topic in the admin group',
   evCancelAsk:'Cancel your spot? Refund follows the cancellation rule.',evGuestsN:'guests',evUntil:'Sign-up until',
   wBalance:'Deposit',wEmpty:'No operations yet',wTopup:'Top up',wOwn:'Custom amount',wGo:'Top up',
   wSent:'Top-up invoice sent to the bot',wMin:'Minimum {n} ฿',
@@ -1314,10 +1334,10 @@ function buildDivIndex(){
     divIndex[key]=divIndex[key]||{};
     (s.divisions||[]).forEach(function(d){
       (d.table||[]).forEach(function(p){
+        // Только имя: номер в таблице дивизиона — свой, 1..n, и к номеру игрока
+        // в витрине отношения не имеет. По нему дивизион определялся наугад.
         var nm=String(p.name||'').trim().toLowerCase();
         if(nm&&!divIndex[key][nm])divIndex[key][nm]=d.letter;
-        var id='#'+String(p.id||'');
-        if(p.id&&!divIndex[key][id])divIndex[key][id]=d.letter;
       });
     });
   });
@@ -1333,9 +1353,8 @@ function divisionAt(season,aName,aId,bName,bId,rowDiv){
   if(!divIndex)buildDivIndex();
   var box=divIndex[String(season||'')];
   if(box){
-    var keys=['#'+String(aId||''),String(aName||'').trim().toLowerCase(),
-              '#'+String(bId||''),String(bName||'').trim().toLowerCase()];
-    for(var i=0;i<keys.length;i++){ if(keys[i]&&keys[i]!=='#'&&box[keys[i]])return box[keys[i]] }
+    var keys=[String(aName||'').trim().toLowerCase(),String(bName||'').trim().toLowerCase()];
+    for(var i=0;i<keys.length;i++){ if(keys[i]&&box[keys[i]])return box[keys[i]] }
   }
   return '';
 }
@@ -1344,8 +1363,11 @@ function seasonPlacesOf(name,id){
   (summary||[]).forEach(function(s){
     (s.divisions||[]).forEach(function(d){
       (d.table||[]).forEach(function(p){
-        var same=(id&&String(p.id)===String(id))
-          ||String(p.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase();
+        // Только по имени. Номера в таблице дивизиона свои, 1..n, и с номером
+        // игрока в витрине они не связаны: сравнение по id ловило чужого
+        // игрока из первого попавшегося дивизиона — так в карточке появлялся
+        // Prime у того, кто играет в A.
+        var same=String(p.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase();
         // Игрок за сезон играет в одном дивизионе — берём первое совпадение
         // и не перетираем его следующими таблицами.
         if(same&&!out[String(s.number)])out[String(s.number)]={division:d.letter,place:p.place||'',
@@ -1951,7 +1973,11 @@ function feedCard(m){
   return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
-    +'<div class="mid"><div class="nm3"><b>'+esc(m.winner.name)+'</b> <s>vs</s> <em>'+esc(m.loser.name)+'</em></div>'
+    // По имени тоже открывается карточка игрока — раньше кликался только кружок.
+    +'<div class="mid"><div class="nm3">'
+      +'<b onclick="event.stopPropagation();openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+esc(m.winner.name)+'</b>'
+      +' <s>vs</s> '
+      +'<em onclick="event.stopPropagation();openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+esc(m.loser.name)+'</em></div>'
     +'<div class="sc">'+esc(m.score||'—')+'</div>'
     +(m.division?'<div style="margin-top:6px" onclick="event.stopPropagation();openDivFrom(\''+q(m.season||'')+'\',\''+q(m.division)+'\')">'+divChip(m.division)+'</div>':'')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+av(m.loser)+'</div>'
@@ -2022,13 +2048,20 @@ function eventCard(e){
     +evPeople(e)
     +'</div>';
 }
+// Кто чего заплатил — дело организатора. Игрокам показываем только участие:
+// подтверждён, записался или ждёт места.
+function evWhoStatus(p){
+  if(p.waitlist)return X.evWait;
+  if(evAdmin)return p.paid?X.evPaid:X.evPay;
+  return p.confirmed?'✅ '+X.evOk:X.evPending;
+}
 // Состав под спойлером: в карточке он мешает, но посмотреть, кто идёт, важно.
 function evPeople(e){
   var list=e.participants||[];
   var body=list.length?'<div class="evwho">'+list.map(function(p){
     return '<div class="evp'+(p.waitlist?' wait':'')+'">'
       +'<span class="nm">'+esc(p.name)+(p.guests?' <span class="sub">+'+p.guests+'</span>':'')+'</span>'
-      +'<span class="st">'+esc(p.waitlist?X.evWait:(p.paid?X.evPaid:X.evPay))+'</span>'
+      +'<span class="st">'+esc(evWhoStatus(p))+'</span>'
       +(evAdmin&&p.signup_id?'<span class="rm" onclick="evDrop(\''+q(p.signup_id)+'\')">✕</span>':'')
       +'</div>';
   }).join('')+'</div>':'<div class="hint">'+esc(X.evNobody)+'</div>';
@@ -2057,7 +2090,11 @@ function evCancel(sid){
 }
 function evDrop(sid){
   toast(X.evSending);
-  evPost('/api/league/event-roster',{action:'remove',signup_id:sid},function(){});
+  // Дальше бот спрашивает про возврат — но уже в теме игрока, а не в личке,
+  // поэтому говорим, куда смотреть.
+  evPost('/api/league/event-roster',{action:'remove',signup_id:sid},function(j){
+    toast(j&&j.ok?X.evToTopic:((j&&j.error)||'…'));
+  });
 }
 function evAddInput(el,eventId){
   var box=document.getElementById('evSug_'+eventId);
@@ -2079,7 +2116,9 @@ function evAddPick(eventId,name){
   box.classList.add('hidden');box.innerHTML='';
   var inp=document.getElementById('evAdd_'+eventId); if(inp)inp.value='';
   toast(X.evSending);
-  evPost('/api/league/event-roster',{action:'add',event_id:eventId,player_name:name},function(){});
+  evPost('/api/league/event-roster',{action:'add',event_id:eventId,player_name:name},function(j){
+    toast(j&&j.ok?X.evToTopic:((j&&j.error)||'…'));
+  });
 }
 var toastTimer=null;
 function toast(text){
@@ -2344,7 +2383,10 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
       })[0];
       wantPlayer=mine?String(mine.id):'';
     }
-    if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home'));
+    var backFor=VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home');
+    if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,backFor);
+    // Из бота приходит имя, а не id витрины: в сообщении о результате id нет.
+    else if((qs.get('player_name')||'').trim())openPlayerByName((qs.get('player_name')||'').trim(),backFor);
   }).catch(function(e){
     $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(e.message)+'</div>';
   });

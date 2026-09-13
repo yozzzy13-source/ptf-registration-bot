@@ -105,14 +105,31 @@ async function findExistingResultRow(p1, p2, dateSerial) {
   return null;
 }
 
-// Дивизионы обоих игроков по Players_Master. Нужны и для проверки «одна ли это
-// лига», и чтобы понять, в какую таблицу дивизиона писать счёт.
+// Дивизионы обоих игроков. Главный источник — составы дивизионов последнего
+// сезона: именно их организатор правит, когда переносит игрока, и именно в их
+// Match_Log стоит пара, куда пойдёт счёт. Players_Master остаётся запасным
+// вариантом — для игроков, которых в сетках сезона ещё нет.
 async function divisionPair(p1, p2) {
+  try {
+    const { seasonRoster, latestSeason } = await import('./division.js');
+    const season = await latestSeason();
+    const map = await seasonRoster(season);
+    const find = (n) => (map.players || []).find(p => norm(p.name) === norm(n));
+    const a = find(p1), b = find(p2);
+    if (a && b) {
+      return {
+        known: true, season, source: 'division_tracker',
+        a: { name: a.name, division: a.letter }, b: { name: b.name, division: b.letter },
+        d1: divisionLetter(a.letter), d2: divisionLetter(b.letter)
+      };
+    }
+  } catch (e) { console.error('divisionPair via rosters failed:', e.message); }
+
   const index = await playersIndex();
   const a = index[norm(p1)], b = index[norm(p2)];
   if (!a || !b) return { known: false, a, b, d1: '', d2: '' };
   return {
-    known: true, a, b,
+    known: true, source: 'players_master', a, b,
     d1: divisionLetter(a.division || ''),
     d2: divisionLetter(b.division || '')
   };
@@ -171,11 +188,18 @@ async function writeDivisionRow(p1, p2, parsed, known = null) {
   // строка со ссылкой, поэтому PRIME, W и любой будущий дивизион подключаются
   // добавлением строки, а не правкой переменных Railway. Переменные остались
   // запасным вариантом для A–D, если реестр ещё не заполнен.
-  const season = String(await getSetting('season_number').catch(() => '') || '').trim();
+  // Сезон берём тот же, в чьих составах нашли игроков, — иначе счёт уезжал в
+  // таблицу прошлого сезона, если в настройках забыли переставить номер.
+  let season = String(pair.season || '').trim();
+  if (!season) {
+    const { latestSeason } = await import('./division.js');
+    season = String(await latestSeason().catch(() => '') || '').trim()
+      || String(await getSetting('season_number').catch(() => '') || '').trim();
+  }
   const spreadsheetId = (await divisionSheetId(d1, season).catch(() => '')) || DIVISION_SPREADSHEETS[d1] || '';
   if (!spreadsheetId) return { status: 'config_missing', division: d1 };
   const info = await findDivisionRow(spreadsheetId, 'Match_Log', p1, p2);
-  if (!info) return { status: 'row_not_found', division: d1 };
+  if (!info) return { status: 'row_not_found', division: d1, season };
   const p = info.reversed ? reverseScore(parsed) : parsed;
   await batchUpdate(spreadsheetId, [
     { range: `Match_Log!F${info.row}:Q${info.row}`, values: [scoreValues(p).map(coerceNumber)] },
@@ -240,9 +264,12 @@ export function describeWrite(result) {
     return `в общем логе уже есть строка этой пары (строка ${result.row}) — вторую не добавлял, счёт дивизиона обновлён. Проверьте, совпадает ли счёт.`;
   }
   const d = result.division;
-  if (d?.status === 'saved') return `записано в Division ${d.division}`;
+  if (d?.status === 'saved') return `записано в общий лог и в таблицу Division ${d.division}, строка ${d.row}`;
   if (d?.status === 'cross_division') return 'междивизионный матч — только общий лог';
-  if (d?.status === 'row_not_found') return `в таблице Division ${d.division} нет строки этой пары`;
+  if (d?.status === 'row_not_found') {
+    return `в таблице Division ${d.division}${d.season ? ` (сезон ${d.season})` : ''} нет строки этой пары — счёт лёг только в общий лог`;
+  }
+  if (d?.status === 'player_not_found') return 'игроков нет в составах дивизионов — счёт лёг только в общий лог';
   if (d?.status === 'config_missing') return `не задан ID таблицы Division ${d.division}`;
   return 'записано в общий лог';
 }

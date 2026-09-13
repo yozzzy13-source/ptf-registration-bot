@@ -80,7 +80,8 @@ export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', 
   bytes.set(buffer);
   const form = new FormData();
   form.append('chat_id', String(chat_id));
-  for (const [k, v] of Object.entries(opts)) {
+  // Подписи у нас с HTML-разметкой, как и у всех остальных отправок.
+  for (const [k, v] of Object.entries({ parse_mode: 'HTML', ...opts })) {
     if (v === undefined || v === null || v === '') continue;
     form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
   }

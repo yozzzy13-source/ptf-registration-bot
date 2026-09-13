@@ -136,6 +136,15 @@
     .picked{display:inline-flex;align-items:center;gap:10px;margin-top:8px;padding:8px 12px;border-radius:999px;
       background:var(--card2);border:1px solid var(--line);font-size:13px}
     .picked .x{cursor:pointer;color:var(--muted);font-weight:800;padding:0 4px}
+    /* Переключатель «или-или»: кому шлём и кого из записанных берём. */
+    .seg{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+    .seg .s{flex:1 1 auto;min-width:96px;min-height:44px;display:flex;align-items:center;justify-content:center;
+      text-align:center;padding:8px 12px;border-radius:12px;background:var(--card2);border:1px solid var(--line);
+      font-size:13.5px;font-weight:700;color:var(--muted);cursor:pointer;user-select:none}
+    .seg .s.on{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
+    .seg .s:active{opacity:.75}
+    #bcWho{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;color:var(--muted)}
+    #bcWho span{padding:4px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line)}
     .codes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
     .codes span{padding:9px 12px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:13px;cursor:pointer}
     .prev{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:13px;margin:8px 0;font-size:14px;line-height:1.55}
@@ -200,7 +209,30 @@
     <div id="avResult" class="muted" style="margin-top:8px"></div>
   </div>
   <div id="tabPlayers" class="card"><h3>Игроки</h3><div class="tableWrap"><table id="playersTable"></table></div></div>
-  <div id="tabBroadcast" class="card hidden"><h3>Рассылка</h3><p class="muted">Отметь получателей в списке ниже. Если не отмечен никто — уйдёт всем, кто попал под фильтры.</p><div class="rcpbar"><button class="btn secondary" onclick="selectFiltered()">Выбрать всех</button><button class="btn secondary" onclick="clearSelection()">Снять выделение</button><span class="cnt" id="rcpCount"></span></div><div class="rcp" id="rcpList"></div><textarea id="broadcastText" placeholder="Текст рассылки. HTML-разметка работает."></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast()">Предпросмотр</button></div><div id="broadcastPreview" class="prev hidden"></div><label>Кнопка под сообщением</label><select id="broadcastButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendBroadcast()">Отправить рассылку</button></div><div id="broadcastResult" class="muted"></div></div>
+  <div id="tabBroadcast" class="card hidden"><h3>Рассылка</h3>
+    <label>Кому</label>
+    <div class="seg" id="bcMode">
+      <div class="s on" data-m="players" onclick="bcMode('players')">По игрокам</div>
+      <div class="s" data-m="event" onclick="bcMode('event')">По событию</div>
+    </div>
+    <div id="bcEventBox" class="hidden">
+      <label>Событие</label>
+      <select id="bcEvent" onchange="bcCount()"><option value="">— выбери событие —</option></select>
+      <label>Кто из записанных</label>
+      <div class="seg" id="bcScope">
+        <div class="s on" data-s="all" onclick="bcScope('all')">Все</div>
+        <div class="s" data-s="confirmed" onclick="bcScope('confirmed')">Участвуют</div>
+        <div class="s" data-s="waitlist" onclick="bcScope('waitlist')">Лист ожидания</div>
+        <div class="s" data-s="unpaid" onclick="bcScope('unpaid')">Не оплатили</div>
+      </div>
+      <div class="muted" id="bcCount" style="margin-top:8px">Выбери событие</div>
+      <details class="fold statFold" id="bcWhoFold"><summary>Кто получит</summary><div id="bcWho"></div></details>
+      <p class="muted" style="margin-top:8px">В тексте можно писать <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code> — подставятся из выбранного события.</p>
+    </div>
+    <div id="bcPlayersBox">
+      <p class="muted">Отметь получателей в списке ниже. Если не отмечен никто — уйдёт всем, кто попал под фильтры.</p><div class="rcpbar"><button class="btn secondary" onclick="selectFiltered()">Выбрать всех</button><button class="btn secondary" onclick="clearSelection()">Снять выделение</button><span class="cnt" id="rcpCount"></span></div><div class="rcp" id="rcpList"></div>
+    </div>
+    <textarea id="broadcastText" placeholder="Текст рассылки. HTML-разметка работает."></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast()">Предпросмотр</button></div><div id="broadcastPreview" class="prev hidden"></div><label>Кнопка под сообщением</label><select id="broadcastButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendBroadcast()">Отправить рассылку</button></div><div id="broadcastResult" class="muted"></div></div>
   <div id="tabDirect" class="card hidden"><h3>Личное сообщение</h3><p class="muted">Найди игрока по имени — Telegram ID вводить не нужно.</p><div class="pick"><input id="directPick" placeholder="Начни вводить имя или @ник" autocomplete="off" oninput="pickInput(this.value)" onkeydown="pickKey(event)" onblur="setTimeout(pickClose,150)"/><div class="sug hidden" id="directSug"></div></div><div id="directChosen"></div><input id="directId" class="hidden" placeholder="telegram_id"/><textarea id="directText" placeholder="Текст сообщения игроку"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="directButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Отправить</button></div><div id="directResult" class="muted"></div></div>
   <div id="tabSelfie" class="card hidden"><h3>Нет селфи</h3><p class="muted">Запросить селфи у активных игроков, у которых его ещё нет. Берём отмеченных или тех, кто попал под фильтры.</p><div class="actions"><button class="btn" onclick="requestSelfies()">Запросить селфи</button></div><div id="selfieResult" class="muted"></div></div>
   <div id="tabHistory" class="card hidden"><h3>История рассылок</h3><div class="toolbar"><input id="hSearch" placeholder="поиск по тексту, сегменту, админу" oninput="renderHistory()"/><label><input type="checkbox" id="hFailedOnly" onchange="renderHistory()"> только с ошибками</label><button class="btn secondary" onclick="loadHistory()">Обновить</button><span class="muted" id="hCount"></span></div><div class="tableWrap"><table id="historyTable" class="hist"></table></div></div>
@@ -331,8 +363,72 @@ async function reload(){try{status('Загружаю…');const j=await api('/ap
 function renderCodes(list){const html=list.map(c=>`<span onclick="insertCode('${esc(c.code)}')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('');$('codeChips').innerHTML=html;
   const d=$('directCodeChips');if(d)d.innerHTML=list.map(c=>`<span onclick="insertCode('${esc(c.code)}','directText')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('')}
 function insertCode(code,target){const t=$(target||'broadcastText');const tag='{'+code+'}';const a=t.selectionStart||t.value.length;const b=t.selectionEnd||a;t.value=t.value.slice(0,a)+(a&&t.value[a-1]!=='\n'?'\n\n':'')+tag+t.value.slice(b);t.focus();t.selectionStart=t.selectionEnd=a+tag.length+2}
-async function previewBroadcast(){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message:$('broadcastText').value,lang:'ru'});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`<div class="muted" style="margin-top:8px">ссылок в тексте: ${j.inline}</div>`:'')+((j.unknown||[]).length?`<div class="warn">⚠️ неизвестные коды: ${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
-async function sendBroadcast(){try{if(!confirm('Отправить рассылку?'))return;const message=$('broadcastText').value.trim();const useSelected=selected.size>0;const j=await api('/api/admin/broadcast',{message,button:$('broadcastButton').value,filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('broadcastResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b> — подробности во вкладке «История»`;history=[]}catch(e){$('broadcastResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+// --- Рассылка по событию ---------------------------------------------------
+// Одно событие за раз: конкретный ивент — конкретный пул записанных. На второй
+// ивент делается отдельная рассылка, поэтому подстановки в тексте однозначны.
+let bcTo='players',bcWhom='all',bcTimer=null;
+function bcMode(m){
+  bcTo=m;
+  document.querySelectorAll('#bcMode .s').forEach(s=>s.classList.toggle('on',s.dataset.m===m));
+  $('bcEventBox').classList.toggle('hidden',m!=='event');
+  $('bcPlayersBox').classList.toggle('hidden',m!=='players');
+  if(m==='event')bcFillEvents();
+}
+function bcScope(s){
+  bcWhom=s;
+  document.querySelectorAll('#bcScope .s').forEach(x=>x.classList.toggle('on',x.dataset.s===s));
+  bcCount();
+}
+async function bcFillEvents(){
+  const sel=$('bcEvent');if(!sel||sel.dataset.filled)return;
+  try{
+    // Список событий берём с сервера: вкладку «События» могли и не открывать.
+    const j=await api('/api/admin/events');
+    evData=j.events||evData||[];
+  }catch(e){}
+  const list=(evData||[]).filter(e=>e.event_id);
+  sel.innerHTML='<option value="">— выбери событие —</option>'+list.map(e=>{
+    const when=[e.date,e.time].filter(Boolean).join(' ');
+    const n=e.signups!==undefined?' · записано '+e.signups:'';
+    return `<option value="${esc(e.event_id)}">${esc(e.title_ru||e.title_en||e.event_id)}${when?' · '+esc(when):''}${esc(n)}</option>`;
+  }).join('');
+  sel.dataset.filled='1';
+}
+const BC_SCOPE_NAMES={all:'все записанные',confirmed:'участвуют',waitlist:'лист ожидания',unpaid:'не оплатили'};
+async function bcCount(){
+  const id=$('bcEvent').value;
+  const box=$('bcCount');
+  if(!id){box.textContent='Выбери событие';$('bcWho').innerHTML='';return}
+  box.textContent='Считаю…';
+  clearTimeout(bcTimer);
+  bcTimer=setTimeout(async()=>{
+    try{
+      const j=await api(`/api/admin/event-recipients?event_id=${encodeURIComponent(id)}&scope=${encodeURIComponent(bcWhom)}`);
+      const c=j.counts||{};
+      const tail=Object.keys(BC_SCOPE_NAMES).filter(k=>k!=='all'&&c[k]).map(k=>`${BC_SCOPE_NAMES[k]}: ${c[k]}`).join(' · ');
+      box.innerHTML=`Получателей: <b>${j.count}</b> (${esc(BC_SCOPE_NAMES[bcWhom]||bcWhom)})`+(tail?`<br><span class="muted">${esc(tail)}</span>`:'');
+      $('bcWho').innerHTML=(j.names||[]).map(n=>`<span>${esc(n)}</span>`).join('')||'<span>никого</span>';
+    }catch(e){box.innerHTML=`<span class="err">${esc(e.message)}</span>`}
+  },120);
+}
+async function previewBroadcast(){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message:$('broadcastText').value,lang:'ru',event_id:bcTo==='event'?$('bcEvent').value:''});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`<div class="muted" style="margin-top:8px">ссылок в тексте: ${j.inline}</div>`:'')+((j.unknown||[]).length?`<div class="warn">⚠️ неизвестные коды: ${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function sendBroadcast(){try{
+  const message=$('broadcastText').value.trim();
+  let body;
+  if(bcTo==='event'){
+    const id=$('bcEvent').value;
+    if(!id)throw new Error('Сначала выбери событие');
+    const who=$('bcEvent').selectedOptions[0]?.textContent||'';
+    if(!confirm(`Отправить записанным на «${who}» (${BC_SCOPE_NAMES[bcWhom]})?`))return;
+    body={message,button:$('broadcastButton').value,event_id:id,scope:bcWhom};
+  } else {
+    if(!confirm('Отправить рассылку?'))return;
+    const useSelected=selected.size>0;
+    body={message,button:$('broadcastButton').value,filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()};
+  }
+  const j=await api('/api/admin/broadcast',body);
+  $('broadcastResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b> — подробности во вкладке «История»`;history=[]
+}catch(e){$('broadcastResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function sendDirect(){try{const id=$('directId').value.trim()||[...selected][0];if(!id)throw new Error('Сначала выбери игрока');const message=$('directText').value.trim();const j=await api('/api/admin/direct-message',{telegram_id:id,message,button:$('directButton').value});$('directResult').innerHTML='✅ Отправлено'}catch(e){$('directResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function requestSelfies(){try{if(!confirm('Запросить селфи у отфильтрованных активных игроков?'))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-selfie',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('selfieResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b>`;await reload()}catch(e){$('selfieResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function requestRatings(){try{if(!confirm('Запросить рейтинг NTRP?'))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-rating',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('ratingResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b>`;await reload()}catch(e){$('ratingResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}

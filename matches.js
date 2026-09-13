@@ -10,7 +10,7 @@
 //
 // Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
 // дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
-import { sendMessage, sendPhoto } from './telegram.js';
+import { sendMessage, sendPhoto, sendPhotoBuffer } from './telegram.js';
 import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers, getWebsiteProfileUrl } from './sheets.js';
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
@@ -796,81 +796,101 @@ export function winnerFirstScore(slot) {
 }
 
 // Первое имя — всегда победитель, счёт развёрнут в его сторону.
-// Формат повторяет прежнюю ленту результатов: заголовок, дивизион и сезон,
-// одна строка «победитель — счёт — проигравший», имена ведут на профили сайта.
-async function feedCard(slot) {
+// Заголовок, дивизион и сезон, одна строка «победитель — счёт — проигравший».
+// Всё, что кликается, ведёт внутрь приложения: карточки игроков и таблица того
+// дивизиона, где сыгран матч. Ссылок на сайт в ленте больше нет.
+async function feedCard(slot, lang = 'ru') {
   const { winner, loser } = resultSides(slot);
-  const [winnerUrl, loserUrl, season, standings] = await Promise.all([
-    getWebsiteProfileUrl(winner.name),
-    getWebsiteProfileUrl(loser.name),
-    getSetting('season_number').catch(() => ''),
-    standingsUrl(slot.division)
-  ]);
-  const link = (name, url) => url
-    ? `<a href="${escapeHtml(url)}">${escapeHtml(name || '')}</a>`
-    : `<b>${escapeHtml(name || '')}</b>`;
-  const subtitle = [slot.division, season ? `Season ${season}` : ''].filter(Boolean).join(' ');
+  let season = '';
+  try {
+    const { latestSeason } = await import('./division.js');
+    season = String(await latestSeason().catch(() => '') || '').trim();
+  } catch { /* реестра может не быть */ }
+  if (!season) season = String(await getSetting('season_number').catch(() => '') || '').trim();
 
-  const text = `🎾 <b>Match Result</b>${subtitle ? `\n${escapeHtml(subtitle)}` : ''}
+  const ru = String(lang || 'ru').toLowerCase() !== 'en';
+  const subtitle = [slot.division, season ? `${ru ? 'Сезон' : 'Season'} ${season}` : ''].filter(Boolean).join(' · ');
 
-${link(winner.name, winnerUrl)}  <b>${escapeHtml(winnerFirstScore(slot))}</b>  ${link(loser.name, loserUrl)}${slot.result_set3_mode === 'Match TB' ? '\n<i>чемпионский тай-брейк</i>' : ''}`;
+  const text = `🎾 <b>${ru ? 'Результат матча' : 'Match Result'}</b>${subtitle ? `\n${escapeHtml(subtitle)}` : ''}
 
-  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || 'player';
-  const row = [];
-  if (winnerUrl) row.push({ text: `🏆 Profile ${firstName(winner.name)}`, url: winnerUrl });
-  if (loserUrl) row.push({ text: `👤 Profile ${firstName(loser.name)}`, url: loserUrl });
+<b>${escapeHtml(winner.name || '')}</b>  <b>${escapeHtml(winnerFirstScore(slot))}</b>  ${escapeHtml(loser.name || '')}${slot.result_set3_mode === 'Match TB' ? `\n<i>${ru ? 'чемпионский тай-брейк' : 'match tie-break'}</i>` : ''}`;
+
+  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || (ru ? 'игрок' : 'player');
+  const playerLink = (name) => `${PUBLIC_URL}/league?tab=players&player_name=${encodeURIComponent(String(name || ''))}`;
+  const letter = String(slot.division || '').replace(/^(division|дивизион)\s*/i, '').trim();
+  const tableLink = `${PUBLIC_URL}/league?tab=div`
+    + (letter ? `&division=${encodeURIComponent(letter)}` : '')
+    + (letter && season ? `&season=${encodeURIComponent(season)}` : '');
+
   const keyboard = [];
+  const row = [];
+  if (winner.name) row.push({ text: `🏆 ${firstName(winner.name)}`, web_app: { url: playerLink(winner.name) } });
+  if (loser.name) row.push({ text: `👤 ${firstName(loser.name)}`, web_app: { url: playerLink(loser.name) } });
   if (row.length) keyboard.push(row);
-  if (standings) keyboard.push([{ text: '📊 View standings', url: standings }]);
+  keyboard.push([{ text: ru ? '📊 Таблица дивизиона' : '📊 Division standings', web_app: { url: tableLink } }]);
   // В группе кнопка отписки бессмысленна — она только для личной рассылки.
-  const dmKeyboard = [...keyboard, [{ text: '🔕 Stop results', callback_data: 'results_mute' }]];
-  return {
-    text,
-    reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined,
-    dm_reply_markup: { inline_keyboard: dmKeyboard }
-  };
+  const dmKeyboard = [...keyboard, [{ text: ru ? '🔕 Не присылать результаты' : '🔕 Stop results', callback_data: 'results_mute' }]];
+  // Кнопки мини-приложения Telegram разрешает только в личных чатах: в группе
+  // такое сообщение он просто отклонит. Поэтому в ленту группы уходит один
+  // текст с фотографией, а кнопки — в личную рассылку.
+  return { text, reply_markup: undefined, dm_reply_markup: { inline_keyboard: dmKeyboard } };
 }
 
-// Ссылка на таблицу дивизиона на сайте — тем же шаблоном, что и кнопки в меню «О PTF».
-async function standingsUrl(division) {
+// Картинка для ленты. Приложил игрок своё фото — идёт оно. Не приложил —
+// собираем карточку матча: два портрета и счёт. Карточку рисуем ОДИН раз, а
+// дальше пересылаем по полученному от Telegram file_id: гонять один и тот же
+// файл на полсотни человек незачем.
+async function resultMedia(slot) {
+  if (slot.result_photo_file_id) return { fileId: slot.result_photo_file_id, kind: 'photo' };
   try {
-    const base = String(await getSetting('website_url') || WEBSITE_URL).replace(/\/$/, '');
-    if (!division) return `${base}/divisions`;
-    const template = await getSetting('website_division_url_template');
-    const season = await getSetting('season_number');
-    const letter = String(division).replace(/^(Division|Дивизион)\s*/i, '').trim();
-    const tpl = template || `${base}/divisions?division={division}`;
-    return tpl
-      .replace(/\{division\}/g, encodeURIComponent(division))
-      .replace(/\{letter\}/g, encodeURIComponent(letter))
-      .replace(/\{slug\}/g, encodeURIComponent(String(division).toLowerCase().replace(/\s+/g, '-')))
-      .replace(/\{season\}/g, encodeURIComponent(season || ''));
-  } catch (e) { return ''; }
+    const { cardForSlot } = await import('./matchcard.js');
+    const season = String(await getSetting('season_number').catch(() => '') || '').trim();
+    const buffer = await cardForSlot(slot, { winnerFirstScore, season });
+    return { buffer, kind: 'card' };
+  } catch (e) {
+    console.error('match card failed:', e.message);
+    return { kind: 'none' };
+  }
 }
 
 export async function broadcastResult(slot) {
-  const { text, reply_markup, dm_reply_markup } = await feedCard(slot);
+  const cards = { ru: await feedCard(slot, 'ru'), en: await feedCard(slot, 'en') };
+  const { text, reply_markup } = cards.ru;
   const skip = new Set([String(slot.from_telegram_id), String(slot.to_telegram_id)]);
+  const media = await resultMedia(slot);
+
+  // Первая отправка загружает файл, остальные — уже по file_id.
+  const sendWith = async (chatId, caption, opts) => {
+    if (media.fileId) return sendPhoto(chatId, media.fileId, { caption, ...opts });
+    if (media.buffer) {
+      const res = await sendPhotoBuffer(chatId, media.buffer, 'image/png', { caption, ...opts });
+      const id = (res?.photo || res?.result?.photo || []).slice(-1)[0]?.file_id;
+      if (id) media.fileId = id;
+      return res;
+    }
+    return sendMessage(chatId, caption, opts);
+  };
 
   // 1. Общая группа — одно сообщение вместо десятков личных.
   const chat = await resultsChat();
   if (chat) {
     const opts = { ...(chat.topicId ? { message_thread_id: chat.topicId } : {}), ...(reply_markup ? { reply_markup } : {}) };
-    try {
-      if (slot.result_photo_file_id) await sendPhoto(chat.chatId, slot.result_photo_file_id, { caption: text, ...opts });
-      else await sendMessage(chat.chatId, text, opts);
-    } catch (e) { console.error('results group post failed:', e.message); }
+    try { await sendWith(chat.chatId, text, opts); }
+    catch (e) { console.error('results group post failed:', e.message); }
   }
 
-  // 2. Личная рассылка всем живым пользователям бота.
-  const dmOpts = { reply_markup: dm_reply_markup };
+  // 2. Личная рассылка всем живым пользователям бота — на языке игрока и с той
+  // же картинкой.
   let sent = 0, failed = 0;
   try {
     const players = await getAllBotSubscribers();
     for (const p of players) {
       if (skip.has(String(p.telegram_id))) continue;
+      const card = String(p.language || '').toLowerCase() === 'en' ? cards.en : cards.ru;
+      const opts = { reply_markup: card.dm_reply_markup };
       try {
-        await sendMessage(p.telegram_id, text, dmOpts);
+        await sendWith(p.telegram_id, card.text, opts)
+          .catch(() => sendMessage(p.telegram_id, card.text, opts));
         sent++;
         await new Promise(r => setTimeout(r, 45));
       } catch (e) { failed++; }

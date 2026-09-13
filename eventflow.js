@@ -325,9 +325,13 @@ export async function notifyOrganizer(signup, event, adminChatId, extra = '') {
     const [cid, mid] = String(stored).split(':');
     try { await editMessageText(cid, Number(mid), text); return { edited: true }; } catch { /* сообщение могли удалить */ }
   }
-  const res = await sendMessage(adminChatId, text);
+  // Карточка записи — это разговор про конкретного игрока, поэтому она ложится
+  // в его тему, а не в общую ленту админского чата.
+  const res = await topicNote(adminChatId, signup.telegram_id, text)
+    || await sendMessage(adminChatId, text);
   const mid = res?.result?.message_id || res?.message_id;
-  if (mid) await setSetting(noteKey(signup.signup_id), `${adminChatId}:${mid}`, 'служебное: сообщение организатора по записи').catch(() => {});
+  const cid = res?.result?.chat?.id || res?.chat?.id || adminChatId;
+  if (mid) await setSetting(noteKey(signup.signup_id), `${cid}:${mid}`, 'служебное: сообщение организатора по записи').catch(() => {});
   return { edited: false };
 }
 
@@ -1271,6 +1275,12 @@ async function topicNote(adminChatId, telegramId, text) {
   return replyInPlayerTopic(chat, telegramId, text);
 }
 
+// Чей это игрок — нужно, чтобы ответ по снятию из состава лёг в его тему.
+export async function signupOwner(signupId) {
+  const all = await listSignups().catch(() => []);
+  return String(all.find(s => s.signup_id === String(signupId))?.telegram_id || '');
+}
+
 export async function deleteEvent({ eventId, refundMode = 'balance', adminChatId = '' }) {
   const event = await findEvent(eventId);
   if (!event) return { ok: false, message: 'Событие не найдено.' };
@@ -1347,7 +1357,10 @@ function participantsOf(all, eventId, isAdmin) {
       name: s.player_name || String(s.telegram_id),
       status: s.status,
       guests: s.guests || 0,
-      paid: s.status === SIGNUP_STATUS.paid || s.status === SIGNUP_STATUS.confirmed,
+      // Игрокам про чужие деньги знать незачем: им уходит только «участвует».
+      // Кто заплатил, а кто нет, видит один организатор.
+      confirmed: s.status === SIGNUP_STATUS.paid || s.status === SIGNUP_STATUS.confirmed,
+      paid: isAdmin ? (s.status === SIGNUP_STATUS.paid || s.status === SIGNUP_STATUS.confirmed) : undefined,
       waitlist: s.status === SIGNUP_STATUS.waitlist,
       signup_id: isAdmin ? s.signup_id : '',
       telegram_id: isAdmin ? String(s.telegram_id) : ''
