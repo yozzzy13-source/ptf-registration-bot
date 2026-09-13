@@ -856,7 +856,6 @@ async function resultMedia(slot) {
 export async function broadcastResult(slot) {
   const cards = { ru: await feedCard(slot, 'ru'), en: await feedCard(slot, 'en') };
   const { text, reply_markup } = cards.ru;
-  const skip = new Set([String(slot.from_telegram_id), String(slot.to_telegram_id)]);
   const media = await resultMedia(slot);
 
   // Первая отправка загружает файл, остальные — уже по file_id.
@@ -880,12 +879,26 @@ export async function broadcastResult(slot) {
   }
 
   // 2. Личная рассылка всем живым пользователям бота — на языке игрока и с той
-  // же картинкой.
+  // же картинкой. Самих участников матча НЕ пропускаем: своё подтверждение они
+  // уже получили, но карточку и ленту должны видеть наравне со всеми.
   let sent = 0, failed = 0;
   try {
-    const players = await getAllBotSubscribers();
+    // Копию, а не исходный массив: список подписчиков кешируется.
+    const players = [], seen = new Set();
+    for (const p of await getAllBotSubscribers()) {
+      if (!p?.telegram_id || seen.has(String(p.telegram_id))) continue;
+      seen.add(String(p.telegram_id));
+      players.push(p);
+    }
+    // Участники обязаны получить ленту, даже если в списке подписчиков их почему-то
+    // нет — дописываем вручную.
+    for (const id of [slot.from_telegram_id, slot.to_telegram_id]) {
+      if (!id || seen.has(String(id))) continue;
+      const who = await findApplicantByTelegramId(id).catch(() => null);
+      players.push({ telegram_id: id, language: who?.language || 'ru' });
+      seen.add(String(id));
+    }
     for (const p of players) {
-      if (skip.has(String(p.telegram_id))) continue;
       const card = String(p.language || '').toLowerCase() === 'en' ? cards.en : cards.ru;
       const opts = { reply_markup: card.dm_reply_markup };
       try {

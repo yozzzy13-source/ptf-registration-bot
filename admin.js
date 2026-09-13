@@ -235,6 +235,92 @@ export async function notifyAboutPlayer(telegramId, text, opts={}) {
   return replyInPlayerTopic(chatId, telegramId, text, opts);
 }
 
+// --------------------------------------------------------------------- лиды
+// Человек появился — значит, у него сразу есть своя тема. Раньше тема заводилась
+// только при первом «настоящем» событии (написал боту, подал заявку), и любой,
+// кто просто выбрал язык и ушёл заполнять анкету, из виду терялся.
+//
+// Ничего из этого не должно ломать то, что делает игрок: все вызовы падают в
+// лог и молчат. Не завелась тема сейчас — заведётся на следующем его действии.
+const leadCardSent = new Set();          // защита от двух карточек на один id
+function leadOnce(telegramId) {
+  const id = String(telegramId || '');
+  if (!id || leadCardSent.has(id)) return false;
+  leadCardSent.add(id);
+  if (leadCardSent.size > 3000) leadCardSent.clear();
+  return true;
+}
+
+const LEAD_REASONS = {
+  start: 'запустил бота',
+  language: 'выбрал язык',
+  webapp: 'открыл приложение',
+  message: 'написал в бот'
+};
+
+export async function notifyNewLead(profile = {}, { reason = 'start' } = {}) {
+  const telegramId = profile.telegram_id || profile.id;
+  if (!telegramId) return null;
+  if (!leadOnce(telegramId)) return null;
+  const chatId = await getAdminChatId();
+  if (!chatId) return null;
+  // Тема уже есть — значит, человек не новый: перезапуск процесса не должен
+  // присылать вторую карточку тому же лиду.
+  const known = await findApplicantByTelegramId(telegramId).catch(() => null);
+  if (String(known?.admin_topic_id || '').trim()) return null;
+  const username = String(profile.telegram_username || profile.username || known?.telegram_username || '').replace(/^@/, '');
+  const name = profile.name || known?.name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || '—';
+  const lines = [
+    '👋 <b>Новый лид</b>', '',
+    `Имя: <b>${escapeHtml(name)}</b>`,
+    username ? `Ник: @${escapeHtml(username)}` : 'Ник: —',
+    `TGID: <code>${escapeHtml(String(telegramId))}</code>`,
+    `Язык: ${escapeHtml(String(profile.language || known?.language || '—'))}`,
+    `Источник: ${escapeHtml(LEAD_REASONS[reason] || reason)}`,
+    '', 'Анкета пока не заполнена — следующие шаги придут сюда же.'
+  ];
+  return replyInPlayerTopic(chatId, telegramId, lines.join('\n'))
+    .catch(e => { console.error('notifyNewLead failed:', e.message); return null; });
+}
+
+// Анкета заполнена без привязки к событию (лист ожидания) — раньше это событие
+// не приходило вообще никуда.
+export async function notifyProfileFilled(profile = {}, { headline = '📝 <b>Анкета заполнена</b>' } = {}) {
+  const telegramId = profile.telegram_id || profile.id;
+  if (!telegramId) return null;
+  const chatId = await getAdminChatId();
+  if (!chatId) return null;
+  const username = String(profile.telegram_username || '').replace(/^@/, '');
+  const lines = [
+    headline, '',
+    `Игрок: <b>${escapeHtml(profile.name || '—')}</b>${username ? ` @${escapeHtml(username)}` : ''}`,
+    `TGID: <code>${escapeHtml(String(telegramId))}</code>`,
+    `Статус: <b>${escapeHtml(profile.status || '—')}</b>`,
+    '',
+    `NTRP: ${escapeHtml(profile.ntrp || '—')}`,
+    `Опыт: ${escapeHtml(profile.experience || '—')}`,
+    `Пол: ${escapeHtml(profile.gender || '—')}`,
+    `Возраст: ${escapeHtml(profile.age || '—')}`,
+    `Страна: ${escapeHtml(profile.country_of_origin || '—')}`,
+    `WhatsApp: ${escapeHtml(profile.whatsapp || '—')}`,
+    profile.notes ? `Заметки: ${escapeHtml(profile.notes)}` : ''
+  ].filter(Boolean);
+  return replyInPlayerTopic(chatId, telegramId, lines.join('\n'))
+    .catch(e => { console.error('notifyProfileFilled failed:', e.message); return null; });
+}
+
+// Короткая заметка о смене рейтинга: полная карточка тут была бы шумом.
+export async function notifyRatingChanged(profile = {}, { from = '', to = '' } = {}) {
+  const telegramId = profile.telegram_id || profile.id;
+  if (!telegramId) return null;
+  const chatId = await getAdminChatId();
+  if (!chatId) return null;
+  const was = String(from || '').trim();
+  return replyInPlayerTopic(chatId, telegramId,
+    `📊 <b>Рейтинг обновлён</b>\n\nИгрок: <b>${escapeHtml(profile.name || telegramId)}</b>\nNTRP: ${was ? `${escapeHtml(was)} → ` : ''}<b>${escapeHtml(String(to))}</b>`)
+    .catch(e => { console.error('notifyRatingChanged failed:', e.message); return null; });
+}
+
 export async function handleAdminInit(msg) {
   await setSetting('admin_chat_id', String(msg.chat.id), 'Telegram group chat for PTF Admin Inbox');
   await sendMessage(msg.chat.id, `✅ Admin inbox connected.\n\nchat_id: <code>${msg.chat.id}</code>`);
@@ -1018,6 +1104,97 @@ export async function adminTopicSync(msg) {
     await new Promise(res => setTimeout(res, 60));
   }
   return sendMessage(msg.chat.id, `<b>Topic sync</b>\n\nПривязано тем: <b>${done}</b>\nОшибок: <b>${failed}</b>\nadmin_chat_id: <code>${escapeHtml(chatId)}</code>`, msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
+}
+
+// ------------------------------------------------------------- добор тем
+// Заводит темы задним числом тем, кто уже как-то с нами взаимодействовал, но
+// темы не получил: раньше она создавалась только при некоторых событиях.
+//
+// Берём не всех подряд. Тот, кто просто запустил бота и ушёл, тему получит сам —
+// на следующем своём действии. Здесь только те, у кого есть хоть что-то помимо
+// запуска: заполненная анкета, рейтинг, статус не «lead», поданная заявка.
+//
+// Темы создаются с паузой: Telegram не любит пачку createForumTopic подряд, а
+// пересоздавать потом нечего — id уже записан в таблицу.
+const BACKFILL_PAUSE_MS = 1500;
+const BACKFILL_DEFAULT = 25;
+
+export function hasRealInteraction(row = {}, appIds = new Set()) {
+  const s = v => String(v ?? '').trim().toLowerCase();
+  if (s(row.profile_completed) === 'yes') return true;
+  if (s(row.ntrp)) return true;
+  if (Number(row.application_count || 0) > 0) return true;
+  if (appIds.has(String(row.telegram_id || '').trim())) return true;
+  const status = s(row.status);
+  if (status && status !== 'lead') return true;
+  // Анкету могли начать заполнять до появления статусов — смотрим на поля.
+  return Boolean(s(row.experience) || s(row.country_of_origin) || s(row.whatsapp));
+}
+
+export async function adminTopicBackfill(msg) {
+  const chatId = await getAdminChatId();
+  const reply = msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {};
+  if (!chatId) return sendMessage(msg.chat.id, '⚠️ admin_chat_id не задан. Выполните /admin_init внутри админской супергруппы.', reply);
+  await ensureApplicantAdminColumns().catch(() => {});
+
+  const limit = Math.max(1, Math.min(200, Number(String(msg.text || '').split(/\s+/)[1]) || BACKFILL_DEFAULT));
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const apps = await getRows(SHEETS.applications, { useCache:false }).then(r => r.rows).catch(() => []);
+  const appIds = new Set(apps.map(a => String(a.telegram_id || '').trim()).filter(Boolean));
+
+  const noTopic = rows.filter(r => String(r.telegram_id || '').trim() && !String(r.admin_topic_id || '').trim());
+  const wanted = noTopic.filter(r => hasRealInteraction(r, appIds));
+  const skipped = noTopic.length - wanted.length;
+
+  if (!wanted.length) {
+    return sendMessage(msg.chat.id, `<b>Добор тем</b>\n\nВсем, кто с нами взаимодействовал, темы уже заведены.\nБез темы осталось: <b>${skipped}</b> — это те, кто только запустил бота, им тема заведётся при первом действии.`, reply);
+  }
+
+  const batch = wanted.slice(0, limit);
+  await sendMessage(msg.chat.id, `<b>Добор тем</b>\n\nБез темы и с взаимодействием: <b>${wanted.length}</b>\nСейчас заведу: <b>${batch.length}</b>\nПропускаю как «только запустил бота»: <b>${skipped}</b>\n\nЭто займёт около ${Math.ceil(batch.length * BACKFILL_PAUSE_MS / 1000)} секунд.`, reply);
+
+  let done = 0, failed = 0;
+  const problems = [];
+  for (const r of batch) {
+    try {
+      const topic = await getOrCreatePlayerTopic({ ...r, telegram_id: r.telegram_id });
+      if (!topic?.message_thread_id) throw new Error('Telegram не вернул тему');
+      await sendMessage(chatId, backfillCard(r), withTopicOpts(topic, {}));
+      done++;
+    } catch (e) {
+      failed++;
+      if (problems.length < 5) problems.push(`${r.name || r.telegram_id}: ${e.message}`);
+      console.error('topic backfill failed for', r.telegram_id, e.message);
+    }
+    await new Promise(res => setTimeout(res, BACKFILL_PAUSE_MS));
+  }
+
+  const left = Math.max(0, wanted.length - batch.length);
+  const tail = [
+    `<b>Добор тем завершён</b>`, '',
+    `Заведено: <b>${done}</b>`,
+    failed ? `Ошибок: <b>${failed}</b>` : '',
+    left ? `Осталось: <b>${left}</b> — повторите <code>/topic_backfill ${Math.min(200, left)}</code>` : 'Все темы на месте.',
+    problems.length ? `\n${problems.map(p => `• ${escapeHtml(p)}`).join('\n')}` : ''
+  ].filter(Boolean).join('\n');
+  return sendMessage(msg.chat.id, tail, reply);
+}
+
+// Первое сообщение в доборной теме: чтобы тема не была пустой и сразу было видно,
+// на каком человек этапе.
+function backfillCard(r = {}) {
+  const username = String(r.telegram_username || '').replace(/^@/, '');
+  return [
+    '🗂 <b>Тема заведена задним числом</b>', '',
+    `Игрок: <b>${escapeHtml(r.name || '—')}</b>${username ? ` @${escapeHtml(username)}` : ''}`,
+    `TGID: <code>${escapeHtml(String(r.telegram_id || ''))}</code>`,
+    `Статус: <b>${escapeHtml(r.status || '—')}</b>`,
+    `Дивизион: ${escapeHtml(r.division || '—')}`,
+    `NTRP: ${escapeHtml(r.ntrp || '—')}`,
+    `Язык: ${escapeHtml(r.language || '—')}`,
+    r.created_at ? `Первый контакт: ${escapeHtml(String(r.created_at).slice(0, 16).replace('T', ' '))}` : '',
+    '', 'Дальше вся переписка и события по игроку идут сюда.'
+  ].filter(Boolean).join('\n');
 }
 
 // Admin diagnostic: verifies admin chat, forum mode and topic delivery for the admin's own topic.

@@ -194,6 +194,9 @@ app.post('/api/update-rating', async (req, res) => {
       await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
       updated = { ...existing, ...patch };
     }
+    import('./admin.js')
+      .then(({ notifyRatingChanged }) => notifyRatingChanged({ ...(updated || existing), telegram_id: user.id }, { from: existing?.ntrp, to: racketRating }))
+      .catch(e => console.error('notifyRatingChanged failed:', e.message));
     res.json({ ok:true, applicant: updated, rating: racketRating });
   } catch(e) {
     console.error(e);
@@ -212,6 +215,14 @@ app.post('/api/save-profile'
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en'; const username = user.username || '';
     const racketRating = requireRacketRating(profile);
     const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:withRatingSourceTag('ptf_waitlist,profile_completed', ratingSource(profile.ntrp_source)), increment_application_count:false });
+    // Анкета без события раньше не приходила никуда: человек заполнял всё,
+    // попадал в лист ожидания и пропадал из виду. Теперь это событие в его теме.
+    const wasCompleted = isProfileCompleted(existingProfile);
+    import('./admin.js')
+      .then(({ notifyProfileFilled }) => notifyProfileFilled({ ...applicant, telegram_id: user.id }, {
+        headline: wasCompleted ? '✏️ <b>Анкета обновлена</b>' : '📝 <b>Анкета заполнена</b> — лист ожидания'
+      }))
+      .catch(e => console.error('notifyProfileFilled failed:', e.message));
     res.json({ok:true,applicant,profileCompleted:true});
   } catch(e){ console.error(e); res.status(500).json({ok:false,error:e.message}); }
 });

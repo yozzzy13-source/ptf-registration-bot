@@ -11,7 +11,7 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -21,6 +21,22 @@ async function userLang(from) {
 function fallbackLang(lang) { return lang === 'ru' ? 'ru' : 'en'; }
 async function sendLanguageChoice(chatId) {
   return sendMessage(chatId, t('en','choose_language'), { reply_markup: languageKeyboard() });
+}
+
+// Регистрация лида: строка в анкетах + своя тема в админской группе. Запускаем
+// и не ждём — человек не должен смотреть в экран, пока мы пишем в таблицу.
+// Любая ошибка остаётся в логе: его первый ответ важнее нашей отчётности.
+function registerLead(from = {}, reason = 'start') {
+  const id = from.id || from.telegram_id;
+  if (!id) return;
+  (async () => {
+    const { ensureApplicantLead } = await import('./sheets.js');
+    const profile = await ensureApplicantLead({ ...from, id }).catch(e => {
+      console.error('registerLead: строка лида не завелась:', e.message); return null;
+    });
+    const { notifyNewLead } = await import('./admin.js');
+    await notifyNewLead({ ...(profile || {}), ...from, telegram_id: id }, { reason });
+  })().catch(e => console.error('registerLead failed:', e.message));
 }
 // Состояние игрока определяет и набор кнопок, и то, показывать ли рассказ про
 // PTF. Активному он не нужен — он уже всё знает, и повтор выглядит как спам.
@@ -708,6 +724,9 @@ export async function handleMessage(msg) {
 
   if (text.startsWith('/start')) {
     const param = text.split(/\s+/)[1] || '';
+    // Человек только что пришёл — заводим ему строку и тему сразу, не дожидаясь
+    // анкеты. Иначе он есть в таблице, но в админке его не видно.
+    if (isPrivate && !isAdminUser(from.id)) registerLead(from, 'start');
     if (!storedLang && isPrivate) {
       userState.set(String(chatId), { mode:'awaiting_language', pendingStartParam:param });
       return sendLanguageChoice(chatId);
@@ -776,6 +795,7 @@ export async function handleMessage(msg) {
     }
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/topic_sync') return adminTopicSync(msg);
+    if (text.startsWith('/topic_backfill')) return adminTopicBackfill(msg);
     if (text === '/match_test') return adminMatchTest(msg);
     if (text === '/overview' || text === '/matches') return adminMatchesOverview(msg);
     if (text === '/league') {
@@ -967,6 +987,9 @@ export async function handleCallback(q) {
     const selected = data.split(':')[1] === 'ru' ? 'ru' : 'en';
     const state = userState.get(String(chatId));
     await setUserLanguage(from, selected);
+    // Если /start прилетел не к нам (старая сессия, перезапуск) — тема заведётся
+    // здесь. Повторной карточки не будет: notifyNewLead смотрит на admin_topic_id.
+    if (!isAdminUser(from.id)) registerLead({ ...from, language: selected }, 'language');
     userState.delete(String(chatId));
     await sendMessage(chatId, t(selected, 'language_saved'));
     const param = state?.pendingStartParam || '';
