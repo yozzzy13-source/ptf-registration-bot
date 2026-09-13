@@ -1,0 +1,22 @@
+Добавлен: access.js
+Изменён: adminPanel.js
+Изменён: bot.js
+Изменён: division.js
+Изменён: index.js
+Изменён: matchcard.js
+Изменён: matches.js
+Изменён: matchesdb.js
+Изменён: package-lock.json
+Изменён: package.json
+Добавлен: public\admin-l10n.js
+Добавлен: public\admin-ui.js
+Изменён: public\admin.html
+Изменён: public\league.html
+Изменён: public\match.html
+Изменён: results.js
+Изменён: sheets.js
+Добавлен: tests\card.mjs
+Добавлен: tests\regression.mjs
+Добавлен: ui-errors.js
+
+matchposter.js: без изменений

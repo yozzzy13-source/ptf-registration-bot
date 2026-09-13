@@ -1,0 +1,29 @@
+🎾 Getting started with PTF
+
+League is your playing hub: division and group standings, results, detailed statistics, the match matrix, yearly ranking and player profiles. Tap a name to see their profile and match history. In Season 2, C and W each have two separate groups; cross-group matches will be announced later.
+
+🎯 Challenge a player
+Open Matches → New challenge. Pick an opponent in your group, suitable dates, a time window and courts. The bot sends the challenge privately. You can also tap a name under Still to play to start a challenge.
+
+🔓 Create an open slot
+Leave the opponent open and select all suitable days, times and venues. The bot sends your slot privately to opponents in your group. This is an invitation to play, not a confirmed booking.
+
+🤝 Agree on the match
+Received a challenge or found a slot? Tap I’m in, choose a specific date, time and court, then send your proposal. The other player can confirm or suggest different arrangements. The match is scheduled once both sides agree. Find incoming proposals and agreed matches under Matches.
+
+📲 Book the agreed court
+Tap Book court: the bot prepares a message and a WhatsApp link. Send the request to the venue yourself. Only tap Court confirmed after the venue confirms. You can also add the match to your calendar. If the time changes, send it to your opponent for confirmation. Cancelling a match does not cancel the venue booking — contact the venue yourself.
+
+📊 Submit the result
+After playing, open Result, choose the match and winner, then enter set scores with the winner’s score first. Include tie-breaks where needed; a photo and comment are optional. Your opponent receives a request to confirm or dispute the score. Once confirmed, the result updates the tables and is published. An English result card is always included; your match photo is sent as well. For a match arranged independently, choose Match outside the bot.
+
+🏟 Book a court separately
+In Court, select the date, start time, duration and venues. The bot sends you a prepared request for each venue to send through WhatsApp. This does not automatically create a league match.
+
+📅 Events and deposit
+In Events, check the details, price and participants, then sign up or join the waitlist. Follow the payment buttons: use an available deposit or send proof of payment as instructed. Before cancelling, review the refund terms shown by the bot. Your available balance and transactions appear in League.
+
+👤 Profile and help
+Upload an avatar from your profile, then choose a version using the buttons in the bot. Change your language with /language. You can stop other players’ result updates using the button below a result; messages about your own matches continue. Use Contact organiser for help.
+
+Already in the league but awaiting a group? You can use the other available sections. Challenges and match submission become available once you are assigned to a group.

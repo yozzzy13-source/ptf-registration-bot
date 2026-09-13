@@ -24,6 +24,9 @@ import { getUnplayedOpponents } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
+import { authorizeSlot } from './access.js';
+import { uiError } from './ui-errors.js';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -31,6 +34,29 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
+// Resolve the saved language before responding, including validation failures.
+app.use('/api', async (req,res,next) => {
+  let lang = 'en';
+  try {
+    const who = webAppUser(req.body?.initData || req.query.initData || '', req.body?.t || req.query.t || '');
+    if (who.ok) {
+      const profile = await findApplicantByTelegramIdentity(who.user);
+      lang = ['ru','en'].includes(profile?.language) ? profile.language : (String(who.user.language_code || '').startsWith('ru') ? 'ru' : 'en');
+    }
+  } catch (e) { console.error('UI language:',e.message); }
+  req.uiLang = lang;
+  const json = res.json.bind(res);
+  res.json = body => {
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      body = { ...body, lang:body.lang || lang };
+      if (body.error) { console.error('API error:',req.path,body.error); body.error = uiError(body.error,lang); }
+      if (body.warning) body.warning = uiError(body.warning,lang);
+    }
+    return json(body);
+  };
+  next();
+});
+app.get('/api/ui-language', (req,res) => res.json({ok:true,lang:req.uiLang}));
 
 app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
 function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
@@ -64,31 +90,44 @@ app.get('/ics', (req, res) => {
   res.set('Content-Disposition', 'attachment; filename="ptf-match.ics"');
   res.send(ics);
 });
-app.get('/cal', (req, res) => {
+app.get('/cal', async (req, res) => {
+  const params = {...req.query};
+  const lang = String(params.lang || (['ru','en'].includes(params.l) ? params.l : '') || 'en');
+  if (params.e && !params.s) {
+    try {
+      const {findEvent,eventStartMs} = await import('./events.js');
+      const event = await findEvent(String(params.e));
+      if (!event) return res.status(404).send(uiError('Событие не найдено',lang));
+      const start = eventStartMs(event);
+      params.t = (lang==='ru'?event.title_ru:event.title_en) || event.title_ru;
+      params.s = new Date(start).toISOString();params.e = new Date(start+2*60*60*1000).toISOString();params.l = event.place || '';
+    } catch(e) { return res.status(400).send(uiError(e.message,lang)); }
+  }
+  const ru = lang==='ru';
   noCache(res);
-  const q = new URLSearchParams({ t: req.query.t || 'PTF match', s: req.query.s || '', e: req.query.e || '', l: req.query.l || '' });
+  const q = new URLSearchParams({ t: params.t || 'PTF match', s: params.s || '', e: params.e || '', l: params.l || '' });
   const icsUrl = `${PUBLIC_URL}/ics?${q.toString()}`;
-  const title = String(req.query.t || 'PTF match').replace(/[&<>]/g, '');
-  const place = String(req.query.l || '').replace(/[&<>]/g, '');
+  const title = String(params.t || 'PTF match').replace(/[&<>]/g, '');
+  const place = String(params.l || '').replace(/[&<>]/g, '');
   const when = (() => {
-    const s = new Date(req.query.s || ''), e = new Date(req.query.e || '');
+    const s = new Date(params.s || ''), e = new Date(params.e || '');
     if (Number.isNaN(s.getTime())) return '';
     const opts = { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', weekday: 'short' };
-    const hm = (d) => d.toLocaleTimeString('ru-RU', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' });
-    return `${s.toLocaleDateString('ru-RU', opts)}, ${hm(s)}${Number.isNaN(e.getTime()) ? '' : '–' + hm(e)}`;
+    const hm = (d) => d.toLocaleTimeString(ru?'ru-RU':'en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' });
+    return `${s.toLocaleDateString(ru?'ru-RU':'en-GB', opts)}, ${hm(s)}${Number.isNaN(e.getTime()) ? '' : '–' + hm(e)}`;
   })();
-  res.send(`<!doctype html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>PTF — календарь</title>
+  res.send(`<!doctype html><html lang="${ru?'ru':'en'}"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>PTF — ${ru?'календарь':'calendar'}</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#0f0f0f,#1b1b1b);color:#f6f4ef;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center}
 .card{max-width:420px;width:100%;background:#202020;border:1px solid #3a3a3a;border-radius:20px;padding:26px}
 h1{font-size:20px;margin:0 0 10px}p{color:#a9a49b;font-size:14px;line-height:1.5;margin:0 0 6px}
 b{color:#f6f4ef}button{width:100%;border:0;border-radius:16px;padding:16px;font-size:16px;font-weight:900;margin-top:18px;cursor:pointer;background:linear-gradient(135deg,#ef5f00,#ff8a2a);color:#111}
 .hint{font-size:12px;margin-top:14px}</style></head><body>
-<div class="card"><h1>📅 Добавить в календарь</h1>
+<div class="card"><h1>📅 ${ru?'Добавить в календарь':'Add to calendar'}</h1>
 <p><b>${title}</b></p><p>${when}</p>${place ? `<p>📍 ${place}</p>` : ''}
-<button id="go">📲 Добавить событие</button>
-<p class="hint">Откроется системное окно календаря — подтвердите добавление.</p></div>
+<button id="go">📲 ${ru?'Добавить событие':'Add event'}</button>
+<p class="hint">${ru?'Откроется системное окно календаря — подтвердите добавление.':'Your calendar will open — confirm adding the event.'}</p></div>
 <script>
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var ICS=${JSON.stringify(icsUrl)};
@@ -405,53 +444,19 @@ function webAppUser(initData, token = '') {
   return { ok:false, code:400, error:'Telegram WebApp user not found' };
 }
 
-async function matchViewer(initData, token = '') {
-  const who = webAppUser(initData, token);
-  if (!who.ok) return who;
-  const user = who.user;
-  const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id);
-  if (!profile) return { ok:false, code:404, error:'Player profile not found. Complete the profile first.' };
-  if (user.id) await healApplicantId(profile, user.id).catch(() => {});
-  const lang = ['ru','en'].includes(String(profile.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : 'en';
-  // Матчи доступны только активным игрокам действующих дивизионов. Состав берётся
-  // из таблиц дивизионов последнего сезона. Проверка на сервере — скрытая кнопка
-  // меню это лишь удобство, а не защита.
-  const league = await getPlayerLeagueInfo({ ...profile, id: user.id });
-  if (!league.found) {
-    return { ok:false, code:403, error: lang === 'ru'
-      ? 'Матчи доступны игрокам действующих дивизионов. Вас пока нет ни в одном составе этого сезона.'
-      : 'Matches are for players in the current divisions. You are not in any division line-up this season yet.' };
-  }
-  if (String(league.status || '').toLowerCase() !== 'active') {
-    return { ok:false, code:403, error: lang === 'ru'
-      ? 'Матчи откроются, когда ваше участие станет активным. Сейчас статус: ' + (league.status || 'не указан') + '.'
-      : 'Matches unlock once your participation is active. Current status: ' + (league.status || 'not set') + '.' };
-  }
-  return { ok:true, user, profile, division: league.division, lang, isAdmin: ADMIN_IDS.includes(String(user.id)) };
-}
-
-// Таблицы, гонка и список игроков — открытая часть: те же данные лежат на сайте,
-// прятать их не от кого. Профиль и состав сезона здесь НЕ требуются, поэтому
-// отдельная проверка, а не matchViewer: тот сторожит матчи, бронь и результаты.
 async function leagueViewer(initData, token = '') {
   const who = webAppUser(initData, token);
   if (!who.ok) return who;
   const user = who.user;
-  const profile = await findApplicantByTelegramIdentity(user).catch(() => null)
-    || await findApplicantByTelegramId(user.id).catch(() => null);
-  // Узнали по нику, а id в строке нет — дописываем. Иначе из нижней клавиатуры,
-  // где в адресе только id, тот же человек приходит как посторонний.
-  if (profile && user.id) await healApplicantId(profile, user.id).catch(() => {});
-  const lang = ['ru','en'].includes(String(profile?.language || '').toLowerCase())
-    ? String(profile.language).toLowerCase()
-    : (['ru','en'].includes(String(user.language_code || '').toLowerCase()) ? String(user.language_code).toLowerCase() : 'en');
-  let division = '';
-  if (profile) {
-    const league = await getPlayerLeagueInfo({ ...profile, id: user.id }).catch(() => ({ found:false }));
-    if (league.found) division = league.division || '';
-  }
-  return { ok:true, user, profile: profile || {}, division, lang, isAdmin: ADMIN_IDS.includes(String(user.id)) };
+  const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id) || {};
+  if (profile._rowNumber && user.id) await healApplicantId(profile, user.id);
+  const lang = ['ru','en'].includes(profile.language) ? profile.language : (String(user.language_code || '').startsWith('ru') ? 'ru' : 'en');
+  const league = await getPlayerLeagueInfo({ ...profile, telegram_id:user.id });
+  if (!league.member && !league.admin) return { ok:false, code:403, lang, error:'league_access_denied' };
+  return { ok:true, user, profile, lang, division:league.division || '', season:league.season || '',
+    matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin };
 }
+async function matchViewer(initData, token = '') { return leagueViewer(initData, token); }
 
 // История матчей лиги для экрана матчей: плоская лента, по строке на матч.
 // В витрине она хранится по игрокам — один матч лежит в двух карточках, поэтому
@@ -497,8 +502,8 @@ app.get('/api/match/bootstrap', async (req, res) => {
     const counterId = String(req.query.counter || '');
     const [courts, opponents, openSlots, mySlots, resultTasks] = await Promise.all([
       getCourts(),
-      getDivisionOpponents(v.division, v.user.id),
-      listOpenSlots(v.division, v.user.id),
+      getDivisionOpponents(v.division, v.user.id, v.season, v.matchGroup),
+      listOpenSlots(v.division, v.user.id, v.season, v.matchGroup),
       listMySlots(v.user.id),
       listResultTasks(v.user.id)
     ]);
@@ -511,9 +516,10 @@ app.get('/api/match/bootstrap', async (req, res) => {
     });
     res.json({
       ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
+      can_match:v.canMatch, match_group:v.matchGroup, season:v.season,
       courts, opponents, duration_min: MATCH_DURATION_MIN, is_admin: v.isAdmin,
       can_book_court: COURT_BOOKING_OPEN || v.isAdmin,
-      unplayed: await getUnplayedOpponents(v.division, v.profile.name).catch(() => ({ known:false, names:[] })),
+      unplayed: await getUnplayedOpponents(v.division, v.profile.name, v.season, v.matchGroup).catch(() => ({ known:false, names:[] })),
       open_slots: openSlots.map(shape),
       my_matches: mySlots.map(shape),
       result_tasks: resultTasks.map(shape),
@@ -544,7 +550,7 @@ app.post('/api/match/create', async (req, res) => {
     const isDirect = String(b.match_type || 'open') === 'direct';
     let opponent = null;
     if (isDirect) {
-      const list = await getDivisionOpponents(v.division, v.user.id);
+      const list = await getDivisionOpponents(v.division, v.user.id, v.season, v.matchGroup);
       opponent = list.find(o => String(o.telegram_id) === String(b.to_telegram_id));
       if (!opponent) return res.status(400).json({ ok:false, error:'Opponent not found in your division' });
     }
@@ -552,7 +558,7 @@ app.post('/api/match/create', async (req, res) => {
       challenge_id: uid('match'),
       match_type: isDirect ? 'direct' : 'open',
       status: 'open',
-      division: v.division,
+      division: v.division, season:v.season, group:v.matchGroup,
       from_telegram_id: String(v.user.id),
       from_name: v.profile.name || [v.user.first_name, v.user.last_name].filter(Boolean).join(' '),
       from_username: v.user.username || v.profile.telegram_username || '',
@@ -576,6 +582,7 @@ app.post('/api/match/take', async (req, res) => {
   try {
     const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
     // Два корта на одно время — самая обидная накладка, ловим до согласования.
     const clash = await findTimeConflict(v.user.id, req.body.date, req.body.time, MATCH_DURATION_MIN, req.body.challenge_id)
       .catch(() => null);
@@ -606,6 +613,7 @@ app.post('/api/match/counter', async (req, res) => {
   try {
     const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
     const result = await counterSlot(req.body.challenge_id, { telegram_id: v.user.id, name: v.profile.name },
       { date: req.body.date, time: req.body.time, court: req.body.court });
     if (!result.ok) {
@@ -659,6 +667,7 @@ app.post('/api/match/result', async (req, res) => {
     const b = req.body || {};
     const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
 
     const slot = await findSlot(b.challenge_id);
     if (!slot) return res.status(404).json({ ok:false, error:'Match not found' });
@@ -705,7 +714,7 @@ app.post('/api/match/manual', async (req, res) => {
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.division) return res.status(400).json({ ok:false, error:'You are not assigned to a division yet.' });
 
-    const opponents = await getDivisionOpponents(v.division, v.user.id);
+    const opponents = await getDivisionOpponents(v.division, v.user.id, v.season, v.matchGroup);
     const opponent = opponents.find(o => String(o.telegram_id) === String(b.to_telegram_id));
     if (!opponent) return res.status(400).json({ ok:false, error:'Opponent not found in your division' });
 
@@ -732,7 +741,7 @@ app.post('/api/match/manual', async (req, res) => {
 
     const row = {
       challenge_id: uid('match'),
-      match_type: 'manual', status: 'accepted', division: v.division,
+      match_type: 'manual', status: 'accepted', division: v.division, season:v.season, group:v.matchGroup,
       from_telegram_id: String(v.user.id), from_name: v.profile.name, from_username: v.user.username || v.profile.telegram_username || '',
       to_telegram_id: String(opponent.telegram_id), to_name: opponent.name, to_username: opponent.username || '',
       // Корт у матча вне бота указывает тот, кто вносит счёт: без него такие
@@ -765,7 +774,7 @@ app.get('/api/league/events', async (req, res) => {
     const { getBalance } = await import('./events.js');
     const tg = v.user?.id || '';
     const applicant = tg ? await findApplicantByTelegramId(tg).catch(() => null) : null;
-    const isActive = String(applicant?.status || '').toLowerCase() === 'active';
+    const isActive = true; // leagueViewer already checked Players_Master membership.
     const [events, balance] = await Promise.all([
       eventsForViewer(tg, isActive, !!v.isAdmin).catch(() => []),
       tg ? getBalance(tg).catch(() => 0) : 0
@@ -873,19 +882,7 @@ app.post('/api/league/event-roster', async (req, res) => {
 // Страница для Apple Calendar: отдаёт .ics и сама его открывает. Telegram не
 // умеет прикреплять файл к кнопке, поэтому идём через маленькую web_app-страницу —
 // ровно как в тренерском боте.
-app.get('/cal', async (req, res) => {
-  try {
-    const { findEvent } = await import('./events.js');
-    const { icsForEvent } = await import('./eventflow.js');
-    const event = await findEvent(String(req.query.e || ''));
-    if (!event) return res.status(404).send('Событие не найдено');
-    res.set('content-type', 'text/html; charset=utf-8');
-    res.send(icsForEvent(event, String(req.query.l || 'ru') === 'ru' ? 'ru' : 'en'));
-  } catch (e) {
-    console.error('cal page failed:', e.message);
-    res.status(500).send('Ошибка');
-  }
-});
+
 
 app.get('/api/league/wallet', async (req, res) => {
   try {
@@ -942,9 +939,12 @@ app.get('/api/league/bootstrap', async (req, res) => {
     // таблице витрины: так мы не трогаем чужие формулы, а замена мгновенно
     // откатывается сменой статуса в анкете.
     const avatarOwners = await publishedAvatars().catch(() => new Map());
+    const masterPortraits = await getMasterPhotos();
+    const portraitKey = name => String(name || '').trim().toLowerCase();
+    const portrait = name => [...masterPortraits].find(([n]) => portraitKey(n) === portraitKey(name))?.[1] || '';
     const players = rawPlayers.map(pl => {
       const tg = avatarOwners.get(String(pl.name || '').trim().toLowerCase());
-      return tg ? { ...pl, photo: `${PUBLIC_URL}/avatar/${tg}.png` } : pl;
+      return { ...pl, photo:tg ? `${PUBLIC_URL}/avatar/${tg}.png` : portrait(pl.name) };
     });
     // Фото по имени для тех, кого нет в витрине: таблицы дивизионов собираются
     // в начале сезона и новых игроков не знают. Основа — Players_Master, поверх —
@@ -995,7 +995,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
           if (court) patch.court = court;
         }
         const photo = avatarUrlFor(m.opponent);
-        if (photo) patch.opponent_photo = photo;
+        patch.opponent_photo = photo || portrait(m.opponent);
         return Object.keys(patch).length ? { ...m, ...patch } : m;
       });
     }
@@ -1016,6 +1016,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
       season: current ? current.number : (await getSetting('season_number').catch(() => '')),
       seasons,
       me_division: v.division || '',
+      me_group:v.matchGroup, can_match:v.canMatch,
       group,
       view_as: viewAs,
       tabs,
@@ -1189,6 +1190,18 @@ async function buildSeasonsSummary() {
     const titles = await divisionTitles(season.number).catch(() => ({}));
     const divisions = [];
     for (const letter of letters) {
+      const groupDefs = await divisionGroups(letter,season.number);
+      if (groupDefs.length > 1) {
+        const groups = [];
+        for (const g of groupDefs) {
+          const data = await getDivisionTable(letter,season.number,g.group);
+          if (!data?.ok) continue;
+          groups.push({group:g.group,title:g.title,title_en:g.title_en,table:(data.players || []).map(p=>({...p,group:g.group}))});
+        }
+        divisions.push({letter,title:titles[letter]?.title || letter,groups,table:groups.flatMap(g=>g.table),
+          champion:null,runner_up:null,final:null,final_score:'',promoted:[],relegated:[]});
+        continue;
+      }
       const data = await getDivisionTable(letter, season.number).catch(() => null);
       if (!data?.ok) continue;
       const table = (data.players || []).map(pl => ({
@@ -1266,7 +1279,8 @@ app.get('/api/league/division', async (req, res) => {
       const parts = [];
       for (const g of groups) {
         const t = await getDivisionTable(letter, season, g.group).catch(() => null);
-        if (t?.ok) parts.push({ group: g.group, group_title: g.title, ...t });
+        if (!t?.ok) return res.status(503).json({ok:false,error:messages.no_access});
+        parts.push({ group: g.group, group_title: g.title, group_title_en:g.title_en, ...t });
       }
       if (!parts.length) return res.status(404).json({ ok:false, error: messages.not_configured });
       return res.json({ ok:true, ...parts[0], groups: parts });
@@ -1312,8 +1326,11 @@ app.post('/api/match/cancel', async (req, res) => {
   try {
     const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
     const slot = await findSlot(req.body.challenge_id);
     if (!slot) return res.status(404).json({ ok:false, error:'Slot not found' });
+    const access = await authorizeSlot(slot, {telegram_id:v.user.id});
+    if (!access.ok) return res.status(403).json({ok:false,error:access.reason});
     const status = String(slot.status).toLowerCase();
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
     if (status === 'accepted') {
@@ -1339,6 +1356,7 @@ app.post('/api/match/retime', async (req, res) => {
     const b = req.body || {};
     const v = await matchViewer(b.initData || '', String(b.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
     const r = await proposeTimeChange(b.challenge_id, { telegram_id: v.user.id, name: v.profile.name }, String(b.time || ''));
     if (!r.ok) {
       const messages = {
@@ -1406,7 +1424,7 @@ async function runDeadlineNudge() {
   let sent = 0;
   for (const p of players) {
     try {
-      const left = await getUnplayedOpponents(p.division, p.name);
+      const left = await getUnplayedOpponents(p.division, p.name, p.season, p.group);
       if (!left.known || !left.names.length) continue;
       await notifyDeadline(p.telegram_id, { names: left.names, daysLeft, division: p.division });
       sent++;

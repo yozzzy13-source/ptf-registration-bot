@@ -10,13 +10,29 @@
 //
 // Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
 // дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
-import { sendMessage, sendPhoto, sendPhotoBuffer } from './telegram.js';
+import { sendMessage as telegramSendMessage, sendPhoto, sendPhotoBuffer } from './telegram.js';
 import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers, getWebsiteProfileUrl } from './sheets.js';
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
+import { slotScope } from './access.js';
 import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
+
+const MATCH_BUTTON_EN = {"🎾 Играю":"🎾 I’m in","📲 Забронировать корт":"📲 Book court","💬 Написать сопернику":"💬 Message opponent","👤 Профиль игрока":"👤 Player profile","🎾 Мои матчи":"🎾 My matches","✅ Выбрать время и принять":"✅ Choose time and respond","❌ Отклонить":"❌ Decline","📲 Отменить бронь корта":"📲 Cancel court booking","🎾 Создать окно":"🎾 Create slot","✅ Принять":"✅ Accept","🕐 Другое время":"🕐 Different time","📍 Другой корт":"📍 Different court","✅ Корт подтвердил":"✅ Court confirmed","🕐 Изменить время":"🕐 Change time","📲 Открыть WhatsApp":"📲 Open WhatsApp","📅 Добавить в календарь":"📅 Add to calendar","🎾 Матчи":"🎾 Matches","✅ Подходит":"✅ Works for me","❌ Не могу":"❌ Cannot play","🕐 Предложить снова":"🕐 Propose again","✅ Подтверждаю":"✅ Confirm","❌ Не согласен":"❌ Disagree","📅 Обновить в календаре":"📅 Update calendar","🕐 Предложить другое время":"🕐 Suggest another time","📝 Внести результат":"📝 Submit result","✅ Записать всё равно":"✅ Record anyway","✖️ Отклонить":"✖️ Reject","📝 Внести заново":"📝 Resubmit"};
+async function sendMessage(chatId,text,opts={}) {
+  if (!opts.reply_markup || Number(chatId)<0) return telegramSendMessage(chatId,text,opts);
+  const lang = (await findApplicantByTelegramId(chatId).catch(()=>null))?.language === 'ru' ? 'ru' : 'en';
+  const markup = {...opts.reply_markup};
+  if (markup.inline_keyboard) markup.inline_keyboard = markup.inline_keyboard.map(row=>row.map(button=>{
+    const b = {...button, text:lang==='en'?(MATCH_BUTTON_EN[button.text] || button.text):button.text};
+    if (b.web_app?.url?.includes('/cal?')) {
+      const url = new URL(b.web_app.url);url.searchParams.set('lang',lang);b.web_app={url:url.toString()};
+    }
+    return b;
+  }));
+  return telegramSendMessage(chatId,text,{...opts,reply_markup:markup});
+}
 
 function playerLink(name, username) {
   const safeName = escapeHtml(name || 'Игрок');
@@ -27,7 +43,8 @@ const DAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 // Якорь ставим в полдень UTC: при чтении через getUTC* дата не съезжает на соседний
 // день, как это происходит с полуночью и офсетом +07:00.
-export function formatDate(iso) {
+export function formatDate(iso,lang='ru') {
+  if(lang==='en'){const d=new Date(`${iso}T12:00:00Z`);return Number.isNaN(d.getTime())?iso:d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});}
   const d = new Date(`${iso}T12:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
   return `${DAYS[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
@@ -97,7 +114,7 @@ function openSlotKeyboard(slot) {
 }
 
 export async function publishOpenSlot(slot) {
-  const recipients = await getDivisionOpponents(slot.division, slot.from_telegram_id).catch(e => {
+  const recipients = await getDivisionOpponents(slot.division, slot.from_telegram_id, slot.season, slot.group).catch(e => {
     console.error('division recipients failed:', e.message);
     return [];
   });
@@ -287,8 +304,15 @@ export function bookingMessage(slot, court) {
 }
 
 export async function sendBookingHelper(chatId, slot) {
+  const lang = (await findApplicantByTelegramId(chatId))?.language==='ru'?'ru':'en';
   const court = await courtByName(slot.agreed_court);
   const text = bookingMessage(slot, court);
+  if(lang==='en'){
+    const rows=[];
+    if(court?.whatsapp)rows.push([{text:'📲 Open WhatsApp',url:'https://wa.me/'+court.whatsapp+'?text='+encodeURIComponent(text)}]);
+    rows.push([{text:'✅ Court confirmed',callback_data:'match_court_ok:'+slot.challenge_id}],[{text:'🕐 Change time',callback_data:'match_retime:'+slot.challenge_id}]);
+    return sendMessage(chatId,'<b>📲 Court booking</b>\n\n'+escapeHtml(court?.name || slot.agreed_court || '')+'\n'+(court?.whatsapp?'Open WhatsApp and send the request. After the venue agrees, tap “Court confirmed”.':'Copy the message and send it to the venue. After confirmation, tap “Court confirmed”.')+'\n\n<code>'+escapeHtml(text)+'</code>',{reply_markup:{inline_keyboard:rows}});
+  }
   const confirmRow = [{ text: '✅ Корт подтвердил', callback_data: `match_court_ok:${slot.challenge_id}` }];
   // Площадка часто даёт соседний слот — время правится тут же, не выходя из диалога.
   const retimeRow = [{ text: '🕐 Изменить время', callback_data: `match_retime:${slot.challenge_id}` }];
@@ -569,7 +593,8 @@ export function timeChoiceKeyboard(slot) {
   return { inline_keyboard: rows };
 }
 
-export function timeChoiceText(slot) {
+export function timeChoiceText(slot,lang='ru') {
+  if(lang==='en')return '<b>🕐 New match time</b>\n\n'+escapeHtml(formatDate(slot.agreed_date,'en'))+' · '+escapeHtml(slot.agreed_court || '')+'\nCurrent: <b>'+escapeHtml(slot.agreed_time || '—')+'</b>\n\nChoose the time offered by the venue. Your opponent must confirm it.';
   return `<b>🕐 Новое время матча</b>
 
 ${escapeHtml(formatDate(slot.agreed_date))}${slot.agreed_court ? ` · ${escapeHtml(slot.agreed_court)}` : ''}
@@ -801,15 +826,15 @@ export function winnerFirstScore(slot) {
 // дивизиона, где сыгран матч. Ссылок на сайт в ленте больше нет.
 async function feedCard(slot, lang = 'ru') {
   const { winner, loser } = resultSides(slot);
-  let season = '';
+  let season = String(slot.season || '');
   try {
     const { latestSeason } = await import('./division.js');
-    season = String(await latestSeason().catch(() => '') || '').trim();
+    if (!season) season = String(await latestSeason().catch(() => '') || '').trim();
   } catch { /* реестра может не быть */ }
   if (!season) season = String(await getSetting('season_number').catch(() => '') || '').trim();
 
   const ru = String(lang || 'ru').toLowerCase() !== 'en';
-  const subtitle = [slot.division, season ? `${ru ? 'Сезон' : 'Season'} ${season}` : ''].filter(Boolean).join(' · ');
+  const subtitle = [slot.division, slot.group ? `${ru ? 'Группа' : 'Group'} ${slot.group}` : '', season ? `${ru ? 'Сезон' : 'Season'} ${season}` : ''].filter(Boolean).join(' · ');
 
   const text = `🎾 <b>${ru ? 'Результат матча' : 'Match Result'}</b>${subtitle ? `\n${escapeHtml(subtitle)}` : ''}
 
@@ -836,15 +861,12 @@ async function feedCard(slot, lang = 'ru') {
   return { text, reply_markup: undefined, dm_reply_markup: { inline_keyboard: dmKeyboard } };
 }
 
-// Картинка для ленты. Приложил игрок своё фото — идёт оно. Не приложил —
-// собираем карточку матча: два портрета и счёт. Карточку рисуем ОДИН раз, а
-// дальше пересылаем по полученному от Telegram file_id: гонять один и тот же
-// файл на полсотни человек незачем.
+// Карточка результата создаётся всегда. Фото матча отправляется дополнительно.
+// После первой загрузки карточки повторно используем Telegram file_id.
 async function resultMedia(slot) {
-  if (slot.result_photo_file_id) return { fileId: slot.result_photo_file_id, kind: 'photo' };
   try {
     const { cardForSlot } = await import('./matchcard.js');
-    const season = String(await getSetting('season_number').catch(() => '') || '').trim();
+    const season = String(slot.season || await getSetting('season_number').catch(() => '') || '').trim();
     const buffer = await cardForSlot(slot, { winnerFirstScore, season });
     return { buffer, kind: 'card' };
   } catch (e) {
@@ -854,9 +876,12 @@ async function resultMedia(slot) {
 }
 
 export async function broadcastResult(slot) {
+  const scope = await slotScope(slot);
+  slot = {...slot,season:scope.season,group:scope.group};
   const cards = { ru: await feedCard(slot, 'ru'), en: await feedCard(slot, 'en') };
   const { text, reply_markup } = cards.ru;
   const media = await resultMedia(slot);
+  const extraPhoto = slot.result_photo_file_id || '';
 
   // Первая отправка загружает файл, остальные — уже по file_id.
   const sendWith = async (chatId, caption, opts) => {
@@ -874,7 +899,10 @@ export async function broadcastResult(slot) {
   const chat = await resultsChat();
   if (chat) {
     const opts = { ...(chat.topicId ? { message_thread_id: chat.topicId } : {}), ...(reply_markup ? { reply_markup } : {}) };
-    try { await sendWith(chat.chatId, text, opts); }
+    try {
+      await sendWith(chat.chatId, text, opts);
+      if (extraPhoto) await sendPhoto(chat.chatId, extraPhoto, { ...(chat.topicId ? {message_thread_id:chat.topicId} : {}) });
+    }
     catch (e) { console.error('results group post failed:', e.message); }
   }
 
@@ -904,6 +932,7 @@ export async function broadcastResult(slot) {
       try {
         await sendWith(p.telegram_id, card.text, opts)
           .catch(() => sendMessage(p.telegram_id, card.text, opts));
+        if (extraPhoto) await sendPhoto(p.telegram_id, extraPhoto).catch(e => console.error('extra match photo failed:', e.message));
         sent++;
         await new Promise(r => setTimeout(r, 45));
       } catch (e) { failed++; }
@@ -941,8 +970,8 @@ export async function sendCourtRequests(chatId, lang, form, courtsList) {
   if (!chosen.length) return { sent: 0 };
 
   await sendMessage(chatId, ru
-    ? `<b>📲 Запросы на бронь готовы</b>\n\n📅 <b>${escapeHtml(formatDate(form.date))}</b>\n🕐 <b>${escapeHtml(form.time)}–${escapeHtml(endTime(form.time, form.durationMin))}</b>\n\nНиже — по сообщению на каждую площадку. Откройте WhatsApp и отправьте; текст уже подставлен.`
-    : `<b>📲 Booking requests ready</b>\n\n📅 <b>${escapeHtml(formatDate(form.date))}</b>\n🕐 <b>${escapeHtml(form.time)}–${escapeHtml(endTime(form.time, form.durationMin))}</b>\n\nBelow is one message per venue. Open WhatsApp and send — the text is prefilled.`);
+    ? `<b>📲 Запросы на бронь готовы</b>\n\n📅 <b>${escapeHtml(formatDate(form.date,lang))}</b>\n🕐 <b>${escapeHtml(form.time)}–${escapeHtml(endTime(form.time, form.durationMin))}</b>\n\nНиже — по сообщению на каждую площадку. Откройте WhatsApp и отправьте; текст уже подставлен.`
+    : `<b>📲 Booking requests ready</b>\n\n📅 <b>${escapeHtml(formatDate(form.date,lang))}</b>\n🕐 <b>${escapeHtml(form.time)}–${escapeHtml(endTime(form.time, form.durationMin))}</b>\n\nBelow is one message per venue. Open WhatsApp and send — the text is prefilled.`);
 
   let sent = 0;
   for (const court of chosen) {

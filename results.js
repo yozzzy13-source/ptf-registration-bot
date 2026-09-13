@@ -11,7 +11,8 @@ import { sheets as sheetsClient } from './google.js';
 import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, TIMEZONE } from './config.js';
 import { scoreValues, detectSet3Mode, reverseScore, cellToScore } from './tennis.js';
 import { divisionSheetId, divisionLetter } from './division.js';
-import { getSetting } from './sheets.js';
+import { getSetting, sameName } from './sheets.js';
+import { slotScope, sameScope } from './access.js';
 
 const DATA_START_ROW = 2;
 const MASTER_START_ROW = 4;
@@ -105,34 +106,18 @@ async function findExistingResultRow(p1, p2, dateSerial) {
   return null;
 }
 
-// Дивизионы обоих игроков. Главный источник — составы дивизионов последнего
-// сезона: именно их организатор правит, когда переносит игрока, и именно в их
-// Match_Log стоит пара, куда пойдёт счёт. Players_Master остаётся запасным
-// вариантом — для игроков, которых в сетках сезона ещё нет.
-async function divisionPair(p1, p2) {
-  try {
-    const { seasonRoster, latestSeason } = await import('./division.js');
-    const season = await latestSeason();
-    const map = await seasonRoster(season);
-    const find = (n) => (map.players || []).find(p => norm(p.name) === norm(n));
-    const a = find(p1), b = find(p2);
-    if (a && b) {
-      return {
-        known: true, season, source: 'division_tracker',
-        a: { name: a.name, division: a.letter }, b: { name: b.name, division: b.letter },
-        d1: divisionLetter(a.letter), d2: divisionLetter(b.letter)
-      };
-    }
-  } catch (e) { console.error('divisionPair via rosters failed:', e.message); }
-
-  const index = await playersIndex();
-  const a = index[norm(p1)], b = index[norm(p2)];
-  if (!a || !b) return { known: false, a, b, d1: '', d2: '' };
-  return {
-    known: true, source: 'players_master', a, b,
-    d1: divisionLetter(a.division || ''),
-    d2: divisionLetter(b.division || '')
-  };
+// Составы сезона определяют дивизион и группу для записи результата.
+// Междивизионные матчи сохраняют существующее ручное подтверждение админом.
+// Между группами одного дивизиона запись пока запрещена.
+async function divisionPair(p1, p2, slot = {}) {
+  const { seasonRoster } = await import('./division.js');
+  const scope = await slotScope(slot);
+  const map = await seasonRoster(scope.season);
+  const a = map.players.find(p => p.letter === scope.letter && String(p.group || '') === scope.group && sameName(p.name, p1));
+  const b = map.players.find(p => p.letter === scope.letter && String(p.group || '') === scope.group && sameName(p.name, p2))
+    || map.players.find(p => p.letter !== scope.letter && sameName(p.name, p2));
+  if (!a || !b) return { known:false, season:scope.season, group:scope.group, reason:'Players are not in the same division group' };
+  return { known:true, season:scope.season, group:scope.group, a, b, d1:divisionLetter(a.letter), d2:divisionLetter(b.letter) };
 }
 
 // Счёт в слоте всегда «от from_telegram_id», поэтому p1 = from_name.
@@ -149,7 +134,8 @@ export async function writeConfirmedResult(slot, { force = false } = {}) {
     // общий лог и портил историю; теперь не пишем никуда, пока организатор не
     // подтвердит. Если игрока нет в Players_Master, дивизион неизвестен —
     // блокировать по незнанию нельзя, пишем как раньше.
-    const pair = await divisionPair(p1, p2).catch(() => ({ known: false, d1: '', d2: '' }));
+    const pair = await divisionPair(p1, p2, slot);
+    if (!pair.known) return {status:'error',reason:pair.reason};
     if (!force && pair.known && pair.d1 && pair.d2 && pair.d1 !== pair.d2) {
       return { status: 'cross_division_blocked', d1: pair.d1, d2: pair.d2, p1, p2 };
     }
@@ -196,7 +182,7 @@ async function writeDivisionRow(p1, p2, parsed, known = null) {
     season = String(await latestSeason().catch(() => '') || '').trim()
       || String(await getSetting('season_number').catch(() => '') || '').trim();
   }
-  const spreadsheetId = (await divisionSheetId(d1, season).catch(() => '')) || DIVISION_SPREADSHEETS[d1] || '';
+  const spreadsheetId = (await divisionSheetId(d1, season, pair.group).catch(() => '')) || (!pair.group && DIVISION_SPREADSHEETS[d1]) || '';
   if (!spreadsheetId) return { status: 'config_missing', division: d1 };
   const info = await findDivisionRow(spreadsheetId, 'Match_Log', p1, p2);
   if (!info) return { status: 'row_not_found', division: d1, season };
@@ -214,13 +200,14 @@ async function writeDivisionRow(p1, p2, parsed, known = null) {
 const scheduleCache = new Map();
 const SCHEDULE_CACHE_MS = 120000;
 
-export async function getDivisionSchedule(division) {
-  const key = String(division || '').trim().toUpperCase().replace(/^(DIVISION|ДИВИЗИОН)\s*/, '');
+export async function getDivisionSchedule(division, season = '', group = '') {
+  const key = divisionLetter(division);
+  season = season || await (await import('./division.js')).latestSeason();
+  const cacheKey = [season,key,group].join(':');
   if (!key) return [];
-  const cached = scheduleCache.get(key);
+  const cached = scheduleCache.get(cacheKey);
   if (cached && Date.now() - cached.t < SCHEDULE_CACHE_MS) return cached.v;
-  const season = String(await getSetting('season_number').catch(() => '') || '').trim();
-  const spreadsheetId = (await divisionSheetId(key, season).catch(() => '')) || DIVISION_SPREADSHEETS[key] || '';
+  const spreadsheetId = (await divisionSheetId(key, season, group).catch(() => '')) || (!group && DIVISION_SPREADSHEETS[key]) || '';
   if (!spreadsheetId) return [];
   try {
     // C — первый игрок, E — второй, F.. — счёт, S — отметка «сыграно».
@@ -234,7 +221,7 @@ export async function getDivisionSchedule(division) {
       const hasScore = String(row[3] ?? '').trim() !== '' && String(row[4] ?? '').trim() !== '';
       out.push({ row: i + 2, p1, p2, played: hasScore });
     }
-    scheduleCache.set(key, { t: Date.now(), v: out });
+    scheduleCache.set(cacheKey, { t: Date.now(), v: out });
     return out;
   } catch (e) {
     console.error('getDivisionSchedule failed:', e.message);
@@ -243,8 +230,8 @@ export async function getDivisionSchedule(division) {
 }
 
 // Соперники игрока, с которыми матч ещё не сыгран.
-export async function getUnplayedOpponents(division, playerName) {
-  const schedule = await getDivisionSchedule(division);
+export async function getUnplayedOpponents(division, playerName, season = '', group = '') {
+  const schedule = await getDivisionSchedule(division, season, group);
   if (!schedule.length) return { known: false, names: [], total: 0, played: 0 };
   const me = norm(playerName);
   const mine = schedule.filter(m => norm(m.p1) === me || norm(m.p2) === me);

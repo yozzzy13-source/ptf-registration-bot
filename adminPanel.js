@@ -167,7 +167,7 @@ export function registerAdminRoutes(app) {
       const divisions = [...new Set(contacts.map(r => r.division).filter(Boolean))].sort();
       const statuses = [...new Set(contacts.map(r => r.status).filter(Boolean))].sort();
       res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses,
-        link_codes: DESTINATIONS.map(d => ({ code: d.aliases[0] || d.code, label: d.ru })) });
+        link_codes: DESTINATIONS.map(d => ({ code: d.aliases[0] || d.code, label: req.uiLang==='en'?d.en:d.ru })) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

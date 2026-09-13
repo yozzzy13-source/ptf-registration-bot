@@ -6,15 +6,14 @@
 //
 // Фото ищем по той же цепочке, что и везде в приложении:
 //   1) своя аватарка игрока (avatar_file_id, лежит в Telegram);
-//   2) фото из витрины сайта;
-//   3) фото из Players_Master;
-//   4) инициалы в кружке — если фото нет вовсе.
+//   2) фото из Players_Master;
+//   3) инициалы в кружке — если фото нет вовсе.
 //
 // Подписи на карточке английские: одна картинка уходит всем сразу, а имена у
 // нас латиницей. Кириллицу выбранный шрифт тянет плохо, поэтому не смешиваем.
 import sharp from 'sharp';
 import { getFileBuffer } from './telegram.js';
-import { findApplicantByTelegramId, getLeagueProfiles, getMasterPhotos } from './sheets.js';
+import { findApplicantByTelegramId, getMasterPhotos } from './sheets.js';
 
 const FONT = 'Poppins, DejaVu Sans, Arial, sans-serif';
 const W = 1200, H = 630, R = 300;
@@ -144,29 +143,25 @@ async function fromUrl(url) {
 // инициалы, это лучше, чем не отправить ничего.
 async function playerPhoto({ telegramId = '', name = '' } = {}) {
   const key = `p:${telegramId || name.toLowerCase()}`;
-  if (photoCache.has(key)) return photoCache.get(key);
+  
 
   if (telegramId) {
     const row = await findApplicantByTelegramId(telegramId).catch(() => null);
     const fileId = txt(row?.avatar_file_id);
     if (fileId) {
+      if (photoCache.has(fileId)) return photoCache.get(fileId);
       const hit = await getFileBuffer(fileId).then(f => f.buffer).catch(() => null);
-      if (hit) return remember(key, hit);
+      if (hit) return remember(fileId, hit);
     }
   }
   const wanted = txt(name).toLowerCase();
   if (wanted) {
-    const profiles = await getLeagueProfiles().catch(() => []);
-    const site = profiles.find(p => txt(p.name).toLowerCase() === wanted);
-    if (site?.photo) {
-      const hit = await fromUrl(site.photo).catch(() => null);
-      if (hit) return remember(key, hit);
-    }
     const master = await getMasterPhotos().catch(() => new Map());
     for (const [n, url] of master) {
       if (txt(n).toLowerCase() !== wanted || !url) continue;
+      if (photoCache.has(url)) return photoCache.get(url);
       const hit = await fromUrl(url).catch(() => null);
-      if (hit) return remember(key, hit);
+      if (hit) return remember(url, hit);
       break;
     }
   }
@@ -244,7 +239,7 @@ export async function cardForSlot(slot = {}, { winnerFirstScore, season = '' } =
     loser: winnerIsFrom ? slot.to_name : slot.from_name,
     winnerId: winnerIsFrom ? slot.from_telegram_id : slot.to_telegram_id,
     loserId: winnerIsFrom ? slot.to_telegram_id : slot.from_telegram_id,
-    score, division: slot.division, season,
+    score, division: [slot.division, slot.group ? `Group ${slot.group}` : ''].filter(Boolean).join(' · '), season,
     date: slot.agreed_date ? fmtDate(slot.agreed_date) : '',
     court: slot.agreed_court || ''
   });

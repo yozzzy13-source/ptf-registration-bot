@@ -1,5 +1,5 @@
 import { sheets as sheetsClient } from './google.js';
-import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID } from './config.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID, DIVISIONS_SPREADSHEET_ID, ADMIN_IDS } from './config.js';
 import { nowISO, safe, parseSeasonNumber, directPhotoUrl } from './util.js';
 
 const cache = new Map();
@@ -232,6 +232,7 @@ export async function getWebsitePlayers() {
   });
   if (headerRowIndex < 0) return [];
   const headers = values[headerRowIndex].map(normalizeHeader);
+  const masterPhotos = await getMasterPhotos();
   const players = [];
   for (let r = headerRowIndex + 1; r < values.length; r++) {
     const row = values[r] || [];
@@ -244,7 +245,7 @@ export async function getWebsitePlayers() {
       player_id: obj.player_id || '',
       slug: obj.player_slug || '',
       name: obj.player_name,
-      photo_url: obj.player_photo_url || '',
+      photo_url: [...masterPhotos].find(([name])=>sameName(name,obj.player_name))?.[1] || '',
       division: obj.current_division || '',
       profile_url: /^https?:\/\//i.test(rel) ? rel : `${WEBSITE_URL}${rel.startsWith('/') ? '' : '/'}${rel}`
     });
@@ -268,6 +269,7 @@ let profilesCache = { t: 0, v: null };
 // Сбрасывается, когда бот записал подтверждённый счёт: следующий, кто откроет
 // экран, увидит уже новые цифры, а не пятиминутной давности.
 export function invalidateLeagueCache() {
+  masterPlayersCache = {t:0,rows:null};
   profilesCache = { t: 0, v: null };
   eventsCache = { t: 0, v: null };
   achCache = { t: 0, v: null };
@@ -360,8 +362,8 @@ let masterPhotoCache = { t: 0, v: null };
 export async function getMasterPhotos() {
   if (masterPhotoCache.v && Date.now() - masterPhotoCache.t < PROFILES_CACHE_MS) return masterPhotoCache.v;
   const out = new Map();
-  if (!LEAGUE_RESULTS_SHEET_ID) return out;
-  const { rows } = await readNamedSheet(LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
+  if (!DIVISIONS_SPREADSHEET_ID && !LEAGUE_RESULTS_SHEET_ID) return out;
+  const { rows } = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
     .catch(() => ({ rows: [] }));
   // Колонку с фото ищем не по точному имени: в таблице она называлась и
   // player_photo, и photo_url, и просто «Фото». Берём первую подходящую, где
@@ -941,7 +943,7 @@ export async function publishedAvatars() {
   const { rows } = await getRows(SHEETS.applicants, { useCache: true });
   const out = new Map();
   for (const r of rows) {
-    if (String(r.avatar_status || '').toLowerCase() !== 'published') continue;
+    if (!String(r.avatar_file_id || '').trim()) continue;
     if (!r.telegram_id) continue;
     const name = String(r.name || '').trim().toLowerCase();
     if (name) out.set(name, String(r.telegram_id));
@@ -1367,28 +1369,30 @@ export function sameName(a = '', b = '') {
   return x.some(k => y.includes(k));
 }
 
+// Membership is independent of Applicants.status; identity still comes from Applicants.
+let masterPlayersCache = {t:0,rows:null};
+export async function getMasterPlayers() {
+  if (masterPlayersCache.rows && Date.now()-masterPlayersCache.t < CACHE_MS) return masterPlayersCache.rows;
+  const { rows } = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID,
+    ['Players_Master', 'Players Master'], 'player_name');
+  const players = rows.filter(r => String(r.player_name || '').trim());
+  masterPlayersCache = {t:Date.now(),rows:players};
+  return players;
+}
 export async function getPlayerLeagueInfo(profile = {}) {
   const telegramId = String(profile.telegram_id || profile.id || '').trim();
-  let row = null;
-  if (telegramId) row = await findApplicantByTelegramId(telegramId).catch(() => null);
+  const row = telegramId ? await findApplicantByTelegramId(telegramId) : null;
   const name = String(row?.name || profile.name || '').trim();
-  const status = String(row?.status || profile.status || '').trim();
-  if (!name) return { found:false, division:'', status:'', matched_by:'' };
-
-  let hit;
-  try {
-    const { findPlayerDivision } = await import('./division.js');
-    hit = await findPlayerDivision(name, sameName);
-  } catch (e) {
-    console.error('league info failed:', e.message);
-    return { found:false, division:'', status, matched_by:'' };
-  }
-  if (!hit?.found) return { found:false, division:'', status, matched_by:'', season: hit?.season || '' };
-  return {
-    found:true, division: hit.division, status, name: hit.name, matched_by:'division_table',
-    season: hit.season, letter: hit.letter, group: hit.group,
-    source: { sheet: hit.source, season: hit.season, row: hit.row, spreadsheet_id: hit.spreadsheet_id }
-  };
+  const admin = ADMIN_IDS.includes(telegramId);
+  const master = name ? (await getMasterPlayers()).find(p => sameName(p.player_name, name)) : null;
+  const base = { member: Boolean(master), admin, found:false, division:'', group:'', season:'',
+    name: master?.player_name || name, status: row?.status || profile.status || '', matched_by: master ? 'players_master' : '' };
+  if (!master && !admin) return base;
+  const { findPlayerDivision } = await import('./division.js');
+  const hit = name ? await findPlayerDivision(base.name, sameName) : null;
+  if (!hit?.found) return base;
+  return { ...base, found:true, division:hit.division, season:hit.season, letter:hit.letter, group:hit.group || '',
+    source:{sheet:hit.source,season:hit.season,row:hit.row,spreadsheet_id:hit.spreadsheet_id} };
 }
 
 export async function getPlayerDivision(profile = {}) {
@@ -1447,17 +1451,17 @@ export async function getAllActiveLeaguePlayers() {
   for (const p of (map.players || [])) {
     const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
     if (!hit) continue;
-    if (DEAD_SUBSCRIBER_STATUSES.includes(String(hit.status || '').trim().toLowerCase())) continue;
+    if (!(await getMasterPlayers()).some(m => sameName(m.player_name, hit.name))) continue;
     if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
     out.push({ telegram_id: String(hit.telegram_id), name: p.name,
-      division: p.division, language: hit.language || '' });
+      division: p.division, season: map.season, group: p.group || '', language: hit.language || '' });
   }
   return out;
 }
 
 // Группа игрока — одна на весь бот: по ней решается и доступ к событиям,
 // и набор вкладок в мини-приложении.
-//   active   — участие подтверждено;
+//   active   — игрок найден в Players_Master или является админом;
 //   waitlist — оплата принята, место в дивизионе ждёт;
 //   applied  — заявка есть, оплаты нет;
 //   guest    — все остальные, включая тех, кто просто открыл бота.
@@ -1465,7 +1469,8 @@ export const PLAYER_GROUPS = ['active', 'waitlist', 'applied', 'guest'];
 export async function playerGroup(telegramId, applicant = null) {
   const who = applicant || await findApplicantByTelegramId(telegramId).catch(() => null);
   const status = String(who?.status || '').toLowerCase();
-  if (status === 'active') return 'active';
+  const league = await getPlayerLeagueInfo({ ...(who || {}), telegram_id: telegramId });
+  if (league.member || league.admin) return 'active';
   const app = await findLatestApplicationByTelegramId(telegramId).catch(() => null);
   const paid = ['approved', 'payment_approved'].includes(String(app?.payment_status || '').toLowerCase());
   if (status === 'waitlist' && paid) return 'waitlist';
@@ -1591,22 +1596,23 @@ export async function keyboardForGroup(telegramId, applicant = null) {
 // Доступ к матчам — только у активных игроков текущего состава.
 export async function isActiveLeaguePlayer(profile = {}) {
   const info = await getPlayerLeagueInfo(profile);
-  return info.found && String(info.status || '').toLowerCase() === 'active' && Boolean(info.division);
+  return info.member || info.admin;
 }
 
 // Соперники: состав того же дивизиона из таблицы дивизиона, у кого есть анкета
 // с telegram_id. Имя в сетке связывается с анкетой по имени — другого ключа в
 // таблицах дивизионов нет.
-export async function getDivisionOpponents(division, excludeTelegramId = '', season = '') {
+export async function getDivisionOpponents(division, excludeTelegramId = '', season = '', group = '') {
   if (!division) return [];
-  const { seasonRoster } = await import('./division.js');
-  const letter = String(division).replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+  const { seasonRoster, divisionLetter } = await import('./division.js');
+  const letter = divisionLetter(division);
   // Составы сезона уже собраны и лежат в кэше — второй раз в таблицы не ходим.
   const [{ rows: applicants }, map] = await Promise.all([
     getRows(SHEETS.applicants),
     seasonRoster(season).catch(() => ({ players: [] }))
   ]);
-  const roster = (map.players || []).filter(p => p.letter === letter);
+  const master = await getMasterPlayers();
+  const roster = (map.players || []).filter(p => p.letter === letter && String(p.group || '') === String(group || ''));
   const byKey = new Map();
   for (const a of applicants) {
     if (!a.telegram_id) continue;
@@ -1623,7 +1629,7 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
       const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
       if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
       // Снятых и неактивных не показываем: статус живёт в анкете.
-      if (DEAD_SUBSCRIBER_STATUSES.includes(String(hit.status || '').trim().toLowerCase())) continue;
+      if (!master.some(m => sameName(m.player_name, hit.name))) continue;
       if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
       const sp = nameKeys(p.name).map(k => siteByKey.get(k)).find(Boolean) || {};
       out.push({
@@ -1632,8 +1638,9 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
         username: hit.telegram_username || '',
         rating: hit.ntrp || hit.rating || '',
         status: hit.status || '',
+        language: hit.language || '',
         profile_url: sp.profile_url || '',
-        photo_url: sp.photo_url || ''
+        photo_url: hit.avatar_file_id ? `${(await import('./config.js')).PUBLIC_URL}/avatar/${hit.telegram_id}.png` : sp.photo_url || ''
       });
     }
   }

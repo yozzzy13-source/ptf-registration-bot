@@ -1423,7 +1423,7 @@ function mvLine(pl,cls,arrow){
 function championsBlock(){
   var s=lastFinishedSeason();
   if(!s)return '';
-  var h='<div class="card"><h3>'+esc((s.label||('Season '+s.number))+' results')+'</h3>';
+  var h='<div class="card"><h3>'+esc((L?'Итоги сезона ':'Season ')+s.number+(L?'':' results'))+'</h3>';
   var any='';
   (s.divisions||[]).forEach(function(d){ any+=champCard(d) });
   h+=any||'<div class="hint">'+esc(X.noData)+'</div>';
@@ -1808,12 +1808,12 @@ function renderDiv(){
     h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in">'
       +'<div class="cl">'+esc(X.champion)+'</div>'+avL(po.champion)
       +'<div class="cn">'+esc(po.champion.name)+'</div>'
-      +'<div class="cd">'+esc(divLabel(d.division))+(divSeason?' · Season '+esc(divSeason):'')+'</div></div></div>';
+      +'<div class="cd">'+esc(divLabel(d.division))+(divSeason?(L?' · Сезон ':' · Season ')+esc(divSeason):'')+'</div></div></div>';
   }
   // Сетка идёт сразу под чемпионом; если плей-офф ещё не игрался — блока нет.
   var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played);
   if(hasPo){
-    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?'Season '+esc(divSeason):'')+'</div>'
+    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'
       +'<div class="tree"><div class="col">'
       +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
       +'</div><div class="conn"><i></i><u></u></div><div class="col">'
@@ -1827,14 +1827,16 @@ function renderDiv(){
     h=chips;
     for(var gi=0;gi<groups.length;gi++){
       var g=groups[gi];
-      h+=standingsBlock(g,divLabel(d.division)+' · '+(g.group_title||('Группа '+g.group)));
+      h+=standingsBlock(g,divLabel(d.division)+' · '+((L?g.group_title:g.group_title_en)||((L?'Группа ':'Group ')+g.group)));
     }
   }
   h+='<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
-    +(showExt?extTable(d):'')
+    +(showExt?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+extTable(g)}).join(''):extTable(d)):'')
     +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
-    +(showMx?mxTable(d):'')
-    +spoiler(X.howDivT,rulesDiv());
+    +(showMx?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+mxTable(g)}).join(''):mxTable(d)):'')
+    +spoiler(X.howDivT,groups.length>1?(L?
+      '<p>В каждой группе отдельная таблица: победа — 3 очка, поражение — 1. Порядок при равенстве: победы, разница сетов, разница геймов, выигранные сеты. Стыковые матчи и итоговые места дивизиона организатор объявит отдельно.</p>':
+      '<p>Each group has its own standings: 3 points for a win, 1 for a loss. Ties are ranked by wins, set difference, game difference, then sets won. The organiser will announce cross-group matches and final division places separately.</p>'):rulesDiv());
   $('viewDiv').innerHTML=h;
 }
 // Турнирная таблица одного состава: используется и для обычного дивизиона,
@@ -1845,19 +1847,19 @@ function standingsBlock(d,title){
     +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span></span></div>'
     +d.players.map(function(p){
       // ▲ только у первых двух — они поднимаются. 3–6 остаются, 7–8 вылетают.
-      var mk=p.place<=2?'▲':(p.zone==='relegation'?'▼':'—');
+      var mk=d.grouped?'':(p.place<=2?'▲':(p.zone==='relegation'?'▼':'—'));
       var zone=p.zone==='playoff'?'z-up':(p.zone==='relegation'?'z-down':'z-stay');
-      var promo=p.place<=2?' promo':'';
+      var promo=!d.grouped&&p.place<=2?' promo':'';
       return '<div class="drow '+zone+promo+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
         +'<span class="p">'+p.place+'</span>'
         +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em></span>'
         +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
         +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
     }).join('')+'</div>'
-    +'<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
+    +(d.grouped?'': '<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
     +'<span class="u"><i>▲</i> '+esc(X.zPromo)+'</span>'
     +'<span><i>—</i> '+esc(X.zStay)+'</span>'
-    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>';
+    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>');
 }
 function poBox(title,m,isFinal){
   if(!m)return '';
@@ -2194,7 +2196,7 @@ function seasonRows(p){
   return Object.keys(by).map(Number).sort(function(a,b){return b-a}).map(function(n){
     var k=known[n]||{};
     var isLast=n===Math.max.apply(null,Object.keys(by).map(Number));
-    return {n:n,name:k.name||('Season '+n),division:k.division||(isLast?p.division:''),
+    return {n:n,name:k.name||((L?'Сезон ':'Season ')+n),division:k.division||(isLast?p.division:''),
       g:by[n].g,w:by[n].w,
       place:k.position||k.regular_finish||(isLast?p.division_position:'')||'',
       points:k.points||0};
@@ -2224,7 +2226,7 @@ function seasonRowsWithLive(p,byTable){
   var s=seasonOf(now);
   // Очки гонки за идущий сезон появятся, когда организатор их проставит, —
   // выдумывать их из таблицы дивизиона нельзя, шкала другая.
-  rows.unshift({n:now,name:(s&&s.label)||('Season '+now),division:(hit&&hit.division)||p.division||'',
+  rows.unshift({n:now,name:(s&&s.label)||((L?'Сезон ':'Season ')+now),division:(hit&&hit.division)||p.division||'',
     g:0,w:0,place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
   return rows;
 }
@@ -2243,12 +2245,12 @@ function renderPlayer(p){
       +divChip(p.division, p.division_position)+'</span>'
       +(raceNo(p)?'<span class="badge g">'+esc(X.tRace)+' #'+raceNo(p)+'</span>':'')
       +statusBadge(p)+'</div>'
-    +(p.form&&p.form.length?'<div class="fline"><span class="lb">Form</span>'+formRow(p.form)+'</div>':'')
+    +(p.form&&p.form.length?'<div class="fline"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
       +stt(X.sPoints,p.points||'',true)+stt(X.sMatches,p.matches||'')
       +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0))+stt(X.sWR,w+'%')
       +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
-      +stt('Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''))
+      +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''))
     +'</div></div></div>';
 
   var byTable=seasonPlacesOf(p.name,p.id);
@@ -2321,7 +2323,7 @@ function matchRow(m){
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
   var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
-    +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result)+'</div>'
+    +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(L?(m.result==='WIN'?'ПОБЕДА':'ПОРАЖЕНИЕ'):m.result)+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
     +'</div></div>';
@@ -2340,27 +2342,26 @@ function toggleMatches(id){
 var asQ=(new URLSearchParams(location.search).get('as')||'').trim();
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
-    if(!j.ok)throw new Error(j.error||'Error');
-    if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
+    if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
+    if(!j.ok)throw new Error(j.error||(L?'Ошибка':'Error'));
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
     photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
-    seasons=j.seasons||[];
+    seasons=(j.seasons||[]).map(function(s){return Object.assign({},s,{label:(L?'Сезон ':'Season ')+s.number})});
     // Нижнее меню приходит с сервера: какие вкладки и в каком порядке видит
     // именно эта группа игроков.
-    if(j.tabs&&j.tabs.length){
+    if(Array.isArray(j.tabs)){
       VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
-      if(VIEWS.indexOf('home')<0)VIEWS.unshift('home');
     }
     buildTabs();
     $('title').textContent=X.title;
     // Видно, что это чужой набор вкладок, а не поломка.
     if(j.view_as){
-      var names={active:'активные',waitlist:'лист ожидания',applied:'заявка без оплаты',guest:'все остальные'};
+      var names=L?{active:'участники лиги',waitlist:'лист ожидания',applied:'заявка без оплаты',guest:'все остальные'}:{active:'league members',waitlist:'waitlist',applied:'unpaid application',guest:'others'};
       var b=document.createElement('div');
       b.className='hint';
       b.style.cssText='position:sticky;top:0;z-index:40;background:#E8A45C;color:#191512;font-weight:800;padding:8px 12px;text-align:center';
-      b.textContent='👁 Смотришь глазами группы: '+(names[j.view_as]||j.view_as);
+      b.textContent=(L?'👁 Смотришь глазами группы: ':'👁 Previewing group: ')+(names[j.view_as]||j.view_as);
       document.body.insertBefore(b,document.body.firstChild);
     }
     // ?tab=race / ?division=B — чтобы кнопка из меню или рассылки открывала

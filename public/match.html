@@ -162,22 +162,22 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
+var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
-      emptyOpen:'Сейчас нет открытых окон в твоём дивизионе. Создай своё — соперник увидит его в чате дивизиона.',
+      emptyOpen:'Сейчас нет открытых окон в твоей группе. Создай своё — бот отправит его соперникам лично.',
       emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
       modeOpen:'🔓 Открытое окно',modeDirect:'🎯 Конкретный соперник',
       court:'Корты (можно несколько)',courtAny:'Не важно — договоримся',courtOther:'Другая площадка',
       date:'Даты (можно несколько)',time:'Интервал, когда тебе удобно',from:'с',to:'до',dur:'Длительность',timeHint:'Укажи «с» и «до» — соперник выберет внутри этого интервала конкретный слот на 2 часа.',pickTime:'Время матча',durFixed:'Матч — 2 часа',needDate:'Выбери хотя бы одну дату',pickTitle:'Выбери дату, время и корт',pickDate:'Дата',pickCourt:'Корт',accept:'✅ Отправить предложение',anyCourt:'Договоримся на месте',multi:'вариантов: ',sent:'✅ Предложение отправлено. Соперник подтвердит или предложит своё — я сообщу.',counterTitle:'Встречное предложение',counterHint:'Предложи свои дату, время и корт — соперник подтвердит или ответит своим вариантом.',counterSend:'🔄 Отправить встречное',pendingLbl:'ждёт ответа',yourTurn:'твой ход',
       comment:'Комментарий (необязательно)',commentPh:'например: могу подвинуться на час',
       opp:'Соперник',send:'📲 Сформировать заявку',sending:'Отправляю…',
-      okOpen:'✅ Окно опубликовано в чате твоего дивизиона. Как только кто-то нажмёт «Играю», я пришлю контакты соперника.',
+      okOpen:'✅ Окно отправлено соперникам лично. После отклика подтверди предложенные дату, время и корт.',
       okDirect:'✅ Вызов отправлен. Я сообщу, когда соперник ответит.',
-      play:'🎾 Играю',cancel:'Снять окно',cancelAsk:'Снять это окно? Оно исчезнет из чата дивизиона.',
+      play:'🎾 Играю',cancel:'Снять окно',cancelAsk:'Снять это окно? На него больше нельзя будет откликнуться.',
       needOpp:'Выбери соперника',needRange:'Интервал короче длительности матча',
-      hintOpen:'Окно уйдёт в чат твоего дивизиона. Любой игрок дивизиона сможет его забрать.',
+      hintOpen:'Бот отправит окно лично игрокам твоей группы дивизиона. Они смогут предложить дату, время и корт.',
       hintDirect:'Вызов уйдёт лично выбранному игроку.',
       hintRange:'Отметь все удобные дни и корты — соперник выберет конкретные.',
       retime:'🕐 Перенести',cancelMatch:'✖️ Отменить',courtOk:'корт подтверждён',timePending:'ждёт подтверждения времени',
@@ -208,18 +208,18 @@ var T={
       h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
   en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
       tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
-      emptyOpen:'No open slots in your division right now. Create one — your division will see it in chat.',
+      emptyOpen:'No open slots in your group. Create one — the bot will send it privately to your opponents.',
       emptyMine:'No scheduled matches or open slots yet.',
       modeOpen:'🔓 Open slot',modeDirect:'🎯 Specific opponent',
       court:'Courts (multiple)',courtAny:'Any — we will agree',courtOther:'Other venue',
       date:'Dates (multiple)',time:'When it suits you',from:'from',to:'to',dur:'Duration',timeHint:'Set “from” and “to” — your opponent picks a concrete 2-hour slot inside it.',pickTime:'Match time',durFixed:'Match is 2 hours',needDate:'Pick at least one date',pickTitle:'Pick a date, time and court',pickDate:'Date',pickCourt:'Court',accept:'✅ Send proposal',anyCourt:'Agree on the spot',multi:'options: ',sent:'✅ Proposal sent. Your opponent will confirm or counter — I will let you know.',counterTitle:'Counter-proposal',counterHint:'Offer your date, time and court — the other player confirms or answers with their own.',counterSend:'🔄 Send counter',pendingLbl:'awaiting answer',yourTurn:'your turn',
       comment:'Comment (optional)',commentPh:'e.g. can shift by an hour',
       opp:'Opponent',send:'📲 Create request',sending:'Sending…',
-      okOpen:'✅ Slot published in your division chat. As soon as someone taps “I’m in”, I’ll send you their contact.',
+      okOpen:'✅ Slot sent privately to your opponents. When someone responds, confirm their date, time and court.',
       okDirect:'✅ Challenge sent. I’ll let you know when they reply.',
-      play:'🎾 I’m in',cancel:'Withdraw',cancelAsk:'Withdraw this slot? It disappears from the division chat.',
+      play:'🎾 I’m in',cancel:'Withdraw',cancelAsk:'Withdraw this slot? Players will no longer be able to respond.',
       needOpp:'Pick an opponent',needRange:'The window is shorter than the match duration',
-      hintOpen:'The slot goes to your division chat. Any player from the division can take it.',
+      hintOpen:'The bot sends the slot privately to your division group. Players can propose a date, time and court.',
       hintDirect:'The challenge goes privately to the selected player.',
       hintRange:'Mark every day and court that suits you — your opponent picks the exact ones.',
       retime:'🕐 Reschedule',cancelMatch:'✖️ Cancel',courtOk:'court confirmed',timePending:'new time pending',
@@ -332,6 +332,7 @@ function avatar(p){return p&&p.photo_url?'<img class="av" src="'+esc(p.photo_url
 // Вкладок четыре: Расписание, Вызовы, Корт, Результат. «Создать вызов» — это не
 // отдельная вкладка, а экран внутри «Вызовов»: подсветка остаётся на них.
 function showTab(t){
+  if (!canMatch && ['open','new','res'].includes(t)) { $('viewOpen').innerHTML='<div class="empty">'+esc(X.subNone)+'</div>'; t='open'; }
   mode=t;
   var onTab=(t==='new')?'open':t;
   ['open','new','mine','res','book'].forEach(function(k){
@@ -371,9 +372,10 @@ function unplayedBlock(){
 function challengeByName(name){
   var hit=opponents.filter(function(o){return String(o.name||'').toLowerCase()===String(name).toLowerCase()})[0];
   if(!hit){ if(tg&&tg.showAlert)tg.showAlert(X.noTelegram+' '+name); else alert(X.noTelegram+' '+name); return }
-  mode='direct';selOpp=String(hit.telegram_id);showTab('new');
+  newMode='direct';selOpp=String(hit.telegram_id);showTab('new');
 }
 function renderOpen(){
+  if (!canMatch) { $('viewOpen').innerHTML='<div class="empty">'+esc(X.subNone)+'</div>'; return; }
   // Создание вызова живёт здесь же, отдельной вкладкой его больше нет.
   var top='<button class="mini primary" style="width:100%;padding:12px;margin-bottom:10px" onclick="showTab(\'new\')">'+esc(X.tCreate)+'</button>'
     +waitingBlock()+unplayedBlock();
@@ -752,6 +754,7 @@ function onPhoto(input){
   reader.readAsDataURL(f);
 }
 function renderRes(){
+  if(!canMatch){$('viewRes').innerHTML='<div class="empty">'+esc(X.subNone)+'</div>';return;}
   var h='';
   if(resultSlotId){
     var s=resultTasks.filter(function(x){return x.challenge_id===resultSlotId})[0];
@@ -917,6 +920,7 @@ function submitBooking(btn){
   }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 function renderNew(){
+  if (!canMatch) { $('viewNew').innerHTML='<div class="empty">'+esc(X.subNone)+'</div>'; return; }
   if(counterSlotId)return renderCounter();
   var today=new Date();
   var todayIso=isoDate(today);
@@ -998,19 +1002,21 @@ function load(keepTab){
   var q=new URLSearchParams(location.search);var slotQ=q.get('slot')||'',cQ=q.get('counter')||'',rQ=q.get('result')||'';
   return fetch('/api/match/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(slotQ?'&slot='+encodeURIComponent(slotQ):'')+(cQ?'&counter='+encodeURIComponent(cQ):'')+(rQ?'&result='+encodeURIComponent(rQ):''),{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
-      if(!j.ok)throw new Error(j.error||'Error');
-      if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
-      me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
+      if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
+      if(!j.ok)throw new Error(j.error||(L?'Ошибка':'Error'));
+      me=j.user;division=j.division||'';canMatch=!!j.can_match;matchGroup=j.match_group||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
       unplayed=j.unplayed||{known:false,names:[]};
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
-      $('sub').textContent=division?(X.subDiv+division):X.subNone;
+      $('sub').textContent=division?(X.subDiv+division+(matchGroup?' · '+(L?'Группа ':'Group ')+matchGroup:'')):X.subNone;
+      $('tabRes').classList.toggle('hidden',!canMatch);
       $('tabOpen').textContent=X.tCalls;$('tabMine').textContent=X.tMine;$('tabRes').textContent=X.tRes;$('tabBook').textContent=X.tCourt;$('tabBook').classList.toggle('hidden',!canBookCourt);
       if(!keepTab){
         var want=new URLSearchParams(location.search).get('tab');
         // Пришли по кнопке «Другое время / Другой корт» — сразу экран встречного предложения.
-        if(counterSlotId){showTab('new');return}
-        if(resultSlotId){showTab('res');return}
+        if(counterSlotId&&canMatch){showTab('new');return}
+        var target=q.get('opponent');if(target&&canMatch&&opponents.some(function(o){return String(o.telegram_id)===target})){newMode='direct';selOpp=target;showTab('new');return}
+        if(resultSlotId&&canMatch){showTab('res');return}
         // ?tab= приходит из команд бота (/match, /result, /book) — открываем нужную вкладку сразу.
         var allowed=['open','new','mine','res'];
         if(canBookCourt)allowed.push('book');

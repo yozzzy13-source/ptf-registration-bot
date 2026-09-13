@@ -1,6 +1,6 @@
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST } from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
@@ -12,6 +12,9 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, send
 import { writeConfirmedResult, describeWrite } from './results.js';
 import { invalidateDivisionCache } from './division.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
+
+import { authorizeSlot, sameScope } from './access.js';
+import { uiError } from './ui-errors.js';
 
 export const userState = new Map();
 async function userLang(from) {
@@ -160,7 +163,7 @@ async function sendMain(chatId, lang, from=null) {
   let body;
   if (st.active) {
     const digest = await playerDigest(userId, l);
-    const hello = l === 'ru' ? `<b>${escapeHtml(st.profile?.name || '')}</b>, ты в составе сезона 🎾`.trim() : `<b>${escapeHtml(st.profile?.name || '')}</b>, you are in the season line-up 🎾`.trim();
+    const hello = l === 'ru' ? `<b>${escapeHtml(st.profile?.name || '')}</b>, ты в лиге 🎾`.trim() : `<b>${escapeHtml(st.profile?.name || '')}</b>, you are in the league 🎾`.trim();
     body = digest ? `${hello}\n\n${digest}` : hello;
   } else {
     const txt = await getBotText('welcome_main', l);
@@ -683,7 +686,16 @@ ${t(lang,'payment_already_proof')}`, await menuMarkup(lang, from.id));
   return sendMessage(chatId, `${t(lang,'payment_section')}${formatPaymentAmounts(lang, amountThb, amountUsdt)}`, { reply_markup: paymentKeyboard(lang, app.application_id) });
 }
 
-async function handleChallengeStart(chatId,from,lang,targetTelegramId){const challenger=await findApplicantByTelegramId(from.id); if(!isProfileCompleted(challenger)) return sendMessage(chatId,t(lang,'challenge_needs_profile'),{reply_markup:mainKeyboard(lang)}); if(String(from.id)===String(targetTelegramId)) return sendMessage(chatId,t(lang,'challenge_self')); const target=await findApplicantByTelegramId(targetTelegramId); if(!target?.telegram_id) return sendMessage(chatId,t(lang,'challenge_target_missing')); const challengeId=uid('challenge'); const profileUrl=challenger.player_profile_url || await getSetting('website_players') || await getSetting('website_url') || 'https://phukettennis.com/'; await createMatchChallenge({challenge_id:challengeId,from_telegram_id:challenger.telegram_id,from_name:challenger.name,from_username:challenger.telegram_username,from_player_profile_url:profileUrl,to_telegram_id:target.telegram_id,to_name:target.name,to_username:target.telegram_username,status:'pending',created_at:nowISO(),direct_chat_available:challenger.telegram_username?'yes':'no',match_chat_mode:challenger.telegram_username?'direct':'bot_fallback'}); const targetLang=target.language==='ru'?'ru':'en'; await sendMessage(target.telegram_id,tt(targetLang,'challenge_received',{name:challenger.name}),{reply_markup:challengeKeyboard(targetLang,challengeId,profileUrl)}); return sendMessage(chatId,t(lang,'challenge_sent'));}
+async function handleChallengeStart(chatId,from,lang,targetTelegramId) {
+  const mine = await getPlayerLeagueInfo({telegram_id:from.id});
+  const other = await getPlayerLeagueInfo({telegram_id:targetTelegramId});
+  if (!(mine.member || mine.admin) || !mine.found || !other.member || !other.found || !sameScope(mine,other)) {
+    return sendMessage(chatId,uiError('different_group',lang));
+  }
+  return sendMessage(chatId,lang==='ru'?'Выберите удобные даты, время и корты.':'Choose your dates, time window and courts.',{
+    reply_markup:{inline_keyboard:[[{text:lang==='ru'?'🎾 Создать вызов':'🎾 Create challenge',web_app:{url:PUBLIC_URL+'/match?tab=new&opponent='+encodeURIComponent(targetTelegramId)}}]]}
+  });
+}
 async function acceptChallenge(chatId,from,lang,challengeId){const ch=await updateMatchChallenge(challengeId,{status:'accepted',responded_at:nowISO()}); if(!ch) return sendMessage(chatId,'Challenge not found.'); const fromLang=(await findApplicantByTelegramId(ch.from_telegram_id))?.language||'en'; const targetName=ch.to_name||contactName(from); if(ch.from_username){ await sendMessage(chatId,t(lang,'challenge_accepted_to_target'),{reply_markup:directChatKeyboard(lang,ch.from_username)}); await sendMessage(ch.from_telegram_id,tt(fromLang,'challenge_accepted_to_from',{name:targetName}),ch.to_username?{reply_markup:directChatKeyboard(fromLang,ch.to_username)}:{});} else {userState.set(String(chatId),{mode:'challenge_chat',challengeId,peerId:ch.from_telegram_id}); userState.set(String(ch.from_telegram_id),{mode:'challenge_chat',challengeId,peerId:chatId}); await sendMessage(chatId,t(lang,'fallback_chat_opened')); await sendMessage(ch.from_telegram_id,tt(fromLang,'challenge_accepted_to_from',{name:targetName})+'\n\n'+t(fromLang,'fallback_chat_opened'));}}
 async function declineChallenge(chatId,from,lang,challengeId){const ch=await updateMatchChallenge(challengeId,{status:'declined',responded_at:nowISO()}); if(!ch) return sendMessage(chatId,'Challenge not found.'); const fromLang=(await findApplicantByTelegramId(ch.from_telegram_id))?.language||'en'; await sendMessage(chatId,t(lang,'challenge_declined_to_target')); await sendMessage(ch.from_telegram_id,tt(fromLang,'challenge_declined_to_from',{name:ch.to_name||contactName(from)}));}
 async function forwardChallengeChat(msg,state){const from=msg.from||{}; const text=msg.text||msg.caption||'[media]'; await sendMessage(state.peerId,`<b>💬 Message from ${escapeHtml(contactName(from)||from.username||from.id)}</b>\n\n${escapeHtml(text)}`); await logMessage({message_id:uid('msg'),telegram_id:from.id,name:contactName(from),direction:'challenge_chat',message_type:'text',message_text:text,timestamp:nowISO(),related_event:state.challengeId,status:'sent'});}
@@ -1001,19 +1013,32 @@ export async function handleCallback(q) {
     return sendLanguageChoice(chatId);
   }
 
+  // Every old Telegram button follows the same server policy as the mini app.
+  if (/^(match_|res_ok:|res_no:|mt_)/.test(data)) {
+    const slot = await findMatchSlot(data.split(':')[1]);
+    const access = await authorizeSlot(slot,{telegram_id:from.id});
+    if (!access.ok) return sendMessage(chatId,uiError(access.reason,lang));
+  }
+  if (/^challenge_(accept|decline):/.test(data)) {
+    const old = await findMatchChallenge(data.split(':')[1]);
+    if (!old || String(old.to_telegram_id)!==String(from.id)) return sendMessage(chatId,uiError('not_a_player',lang));
+    const mine = await getPlayerLeagueInfo({telegram_id:from.id});
+    const other = await getPlayerLeagueInfo({telegram_id:old.from_telegram_id});
+    if (!(mine.member || mine.admin) || !mine.found || !other.member || !sameScope(mine,other)) return sendMessage(chatId,uiError('different_group',lang));
+  }
   // Аватарка: выбор варианта и запрос ещё одного. Действует сам игрок.
   if (data.startsWith('avpick:')) {
     const res = await pickAvatarVariant(from.id, data.split(':')[1]);
     return sendMessage(chatId, res.ok
-      ? `✅ Вариант ${res.index} выбран — он уже стоит в твоём профиле лиги.`
-      : `Не получилось: ${res.error}`);
+      ? (lang==='ru'?`✅ Вариант ${res.index} выбран — он уже стоит в твоём профиле лиги.`:`✅ Option ${res.index} selected — it is now on your league profile.`)
+      : uiError(res.error,lang));
   }
   if (data === 'avmore') {
     const { requestAnotherAvatar } = await import('./avatars.js');
     const res = await requestAnotherAvatar(from.id);
     return sendMessage(chatId, res.ok
-      ? '🔄 Делаю ещё вариант — пришлю через минуту.'
-      : res.error);
+      ? (lang==='ru'?'🔄 Делаю ещё вариант — пришлю через минуту.':'🔄 Creating another option — I will send it shortly.')
+      : uiError(res.error,lang));
   }
   if (data === 'main') return sendMain(chatId, lang, from);
   // Раздел «О PTF» убран — старые сообщения с этой кнопкой ведут в главное меню.
@@ -1051,7 +1076,7 @@ export async function handleCallback(q) {
         not_pending: ru ? 'Предложение больше неактуально.' : 'No longer pending.',
         not_your_turn: ru ? 'Сейчас ход соперника.' : 'It is your opponent\'s turn.',
         not_found: ru ? 'Заявка не найдена.' : 'Not found.' };
-      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+      return answerCallbackQuery(q.id, texts[r.reason] || uiError(r.reason,lang), true).catch(() => {});
     }
     await notifyMatchAgreed(r.slot).catch(e => console.error('notifyMatchAgreed failed:', e.message));
     return null;
@@ -1080,11 +1105,15 @@ export async function handleCallback(q) {
         own_result: ru ? 'Подтверждает соперник, а не тот, кто вносил счёт.' : 'The opponent confirms, not the submitter.',
         not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
         not_found: ru ? 'Матч не найден.' : 'Not found.' };
-      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+      return answerCallbackQuery(q.id, texts[r.reason] || uiError(r.reason,lang), true).catch(() => {});
     }
     const write = await writeConfirmedResult(r.slot).catch(e => ({ status:'error', reason:e.message }));
     // Междивизионный матч в зачёт не идёт: счёт никуда не записан, решает организатор.
     // Игрокам про это не пишем — для них матч просто ждёт проверки.
+    if (write.status === 'error' || (write.division && write.division.status !== 'saved')) {
+      await notifyAdmin('Не удалось записать результат '+r.slot.challenge_id+': '+describeWrite(write));
+      return sendMessage(chatId,lang==='ru'?'Счёт подтверждён. Организатор проверит запись в таблицы.':'Score confirmed. The organiser will check the table update.');
+    }
     if (write.status === 'cross_division_blocked') {
       await notifyCrossDivision(r.slot, write).catch(e => console.error('notifyCrossDivision failed:', e.message));
       const ru = lang === 'ru';
@@ -1118,7 +1147,7 @@ export async function handleCallback(q) {
         not_accepted: ru ? 'Матч ещё не согласован.' : 'Match is not agreed yet.',
         not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
         not_found: ru ? 'Матч не найден.' : 'Not found.' };
-      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+      return answerCallbackQuery(q.id, texts[r.reason] || uiError(r.reason,lang), true).catch(() => {});
     }
     await notifyCourtConfirmed(r.slot).catch(e => console.error('notifyCourtConfirmed failed:', e.message));
     return null;
@@ -1130,7 +1159,7 @@ export async function handleCallback(q) {
   if (data === 'results_mute' || data === 'results_unmute') {
     const mute = data === 'results_mute';
     await setResultsOptOut(from.id, mute).catch(e => console.error('setResultsOptOut failed:', e.message));
-    await answerCallbackQuery(q.id, mute ? 'Результаты отключены' : 'Результаты включены').catch(() => {});
+    await answerCallbackQuery(q.id, lang==='ru'?(mute?'Результаты отключены':'Результаты включены'):(mute?'Results turned off':'Results turned on')).catch(() => {});
     return sendResultsSettings(chatId, lang, from.id, mute ? 'just_muted' : 'just_unmuted');
   }
 
@@ -1143,7 +1172,7 @@ export async function handleCallback(q) {
     if (slot.court_confirmed_by && String(slot.court_confirmed_by) !== String(from.id)) {
       return answerCallbackQuery(q.id, lang === 'ru' ? 'Время меняет тот, кто бронировал корт.' : 'Only the player who booked can change the time.', true).catch(() => {});
     }
-    return sendMessage(chatId, timeChoiceText(slot), { reply_markup: timeChoiceKeyboard(slot) }).catch(() => {});
+    return sendMessage(chatId, timeChoiceText(slot,lang), { reply_markup: timeChoiceKeyboard(slot) }).catch(() => {});
   }
   if (data.startsWith('mt_set:')) {
     const [, id, ...rest] = data.split(':');
@@ -1157,7 +1186,7 @@ export async function handleCallback(q) {
         bad_time: ru ? 'Некорректное время.' : 'Bad time.',
         not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
         not_found: ru ? 'Матч не найден.' : 'Not found.' };
-      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+      return answerCallbackQuery(q.id, texts[r.reason] || uiError(r.reason,lang), true).catch(() => {});
     }
     await notifyTimeChange(r.slot, newTime, from.id);
     return sendMessage(chatId, lang === 'ru'
@@ -1173,7 +1202,7 @@ export async function handleCallback(q) {
         own_proposal: ru ? 'Подтверждает соперник.' : 'The opponent confirms.',
         not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
         not_found: ru ? 'Матч не найден.' : 'Not found.' };
-      return answerCallbackQuery(q.id, texts[r.reason] || 'Unavailable', true).catch(() => {});
+      return answerCallbackQuery(q.id, texts[r.reason] || uiError(r.reason,lang), true).catch(() => {});
     }
     await notifyTimeChangeAccepted(r.slot, r.previousTime).catch(e => console.error('notifyTimeChangeAccepted failed:', e.message));
     return null;
@@ -1228,18 +1257,21 @@ export async function handleCallback(q) {
     if (data.startsWith('admin_reply:')) {
       const targetTelegramId = data.split(':')[1];
       adminState.set(String(from.id), { mode:'reply_waiting', targetTelegramId });
-      return sendMessage(chatId, `Write reply to TGID <code>${escapeHtml(targetTelegramId)}</code>.`);
+      return sendMessage(chatId, `${lang==='ru'?'Напиши ответ игроку':'Write a reply to'} <code>${escapeHtml(targetTelegramId)}</code>.`);
     }
     // Междивизионный матч: организатор решает, записывать его или нет.
     if (data.startsWith('res_force:')) {
       const slot = await findMatchSlot(data.split(':')[1]);
       if (!slot) return sendMessage(chatId, 'Матч не найден.');
       const write = await writeConfirmedResult(slot, { force: true }).catch(e => ({ status:'error', reason:e.message }));
+      if (write.status==='error' || (write.division && !['saved','cross_division'].includes(write.division.status))) {
+        return sendMessage(chatId,lang==='ru'?'Не удалось записать результат. '+escapeHtml(describeWrite(write)):'Could not save the result. Please check the table configuration.');
+      }
       invalidateLeagueCache();
       invalidateDivisionCache();
       await notifyResultConfirmed(slot, describeWrite(write)).catch(() => {});
       broadcastResult(slot).catch(e => console.error('broadcastResult failed:', e.message));
-      return sendMessage(chatId, `Записал: <i>${escapeHtml(describeWrite(write))}</i>`);
+      return sendMessage(chatId,lang==='ru'?`Записал: <i>${escapeHtml(describeWrite(write))}</i>`:'Result saved.');
     }
     if (data.startsWith('res_drop:')) {
       const r = await rejectResultByAdmin(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });

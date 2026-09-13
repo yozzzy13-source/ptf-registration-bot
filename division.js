@@ -10,10 +10,9 @@
 // проигравшего (0 или 1), у соперника ячейка пустая — он получает техническую
 // победу и 3 очка. Заполнены обе — двойное техническое, победителя нет.
 import { sheets as sheetsClient } from './google.js';
-import { DIVISION_SPREADSHEETS } from './config.js';
-import { getSetting } from './sheets.js';
+import { DIVISION_SPREADSHEETS, PUBLIC_URL } from './config.js';
+import { getSetting, getMasterPhotos, publishedAvatars } from './sheets.js';
 import { divisionRegistry } from './matchesdb.js';
-import { directPhotoUrl } from './util.js';
 
 const WIN_POINTS = 3;
 const LOSS_POINTS = 1;
@@ -34,12 +33,13 @@ function filled(v) { return v !== null && v !== undefined && String(v).trim() !=
 function yes(v) { return txt(v).toLowerCase() === 'yes'; }
 
 export function divisionLetter(division = '') {
-  return String(division || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+  const key = String(division || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+  return ({ P:'PRIME', WOMAN:'W', WOMEN:'W' })[key] || key;
 }
 
 // Как дивизион называется в интерфейсе. Держим те же подписи, что и раньше:
 // PRIME и женский дивизион пишутся не по шаблону «Division X».
-const LETTER_TO_NAME = { P:'PRIME', PRIME:'PRIME', W:'Division Woman', WOMAN:'Division Woman', WOMEN:'Division Woman' };
+const LETTER_TO_NAME = { P:'PRIME', PRIME:'PRIME', W:'Division W', WOMAN:'Division W', WOMEN:'Division W' };
 export function divisionDisplayName(division = '') {
   const key = divisionLetter(division);
   if (!key) return '';
@@ -84,6 +84,7 @@ export async function divisionSheetId(letter, season = '', group = '') {
     ? rows.find(r => String(r.group) === String(group))
     : rows[0];
   if (hit) return hit.spreadsheet_id;
+  if (group) return ''; // Never send group 2 to a legacy group-1 fallback.
   if (season && reg.some(r => String(r.season) === String(season))) return '';
   if (season) {
     const perSeason = await getSetting(`division_${low}_s${season}_sheet_id`).catch(() => '');
@@ -100,7 +101,7 @@ export async function divisionGroups(letter, season = '') {
   const key = divisionLetter(letter);
   const reg = await divisionRegistry().catch(() => []);
   const rows = reg.filter(r => r.letter === key && (!season || String(r.season) === String(season)) && r.group);
-  return rows.map(r => ({ group: r.group, title: r.group_title || `Группа ${r.group}` }));
+  return rows.map(r => ({ group: r.group, title: r.group_title || '', title_en: r.group_title_en || '' }));
 }
 
 // Как называть дивизион в интерфейсе. Берём из реестра, если там задано имя,
@@ -304,19 +305,23 @@ export async function getDivisionTable(letter, season = '', group = '') {
     return { ok: false, reason: 'no_access', division: key };
   }
 
-  // Фото игроков лежат сбоку отдельным списком: имя → ссылка.
-  const photos = new Map();
-  for (const r of rows) {
-    const n = txt(r.name1), u = directPhotoUrl(txt(r.url || r.pic));
-    if (n && u) photos.set(n, u);
-  }
+  // Shared portrait priority: Applicants.avatar_file_id, then Players_Master.
+  const photos = await getMasterPhotos().catch(() => new Map());
+  const avatars = await publishedAvatars().catch(() => new Map());
+  const portrait = name => {
+    const key = txt(name).toLowerCase();
+    const id = avatars.get(key);
+    return id ? PUBLIC_URL+'/avatar/'+encodeURIComponent(id)+'.png'
+      : [...photos].find(([n]) => txt(n).toLowerCase()===key)?.[1] || '';
+  };
+  const grouped = (await divisionGroups(key,season)).length > 1;
 
   const players = new Map();
   const ensure = (id, name) => {
     if (!id) return;
     if (!players.has(id)) {
       players.set(id, {
-        id, name, photo: photos.get(name) || '',
+        id, name, photo: portrait(name),
         matches: 0, wins: 0, losses: 0, points: 0,
         setsWon: 0, setsLost: 0, gamesWon: 0, gamesLost: 0
       });
@@ -324,7 +329,7 @@ export async function getDivisionTable(letter, season = '', group = '') {
     }
     const ex = players.get(id);
     if (!ex.name && name) ex.name = name;
-    if (!ex.photo && photos.get(name)) ex.photo = photos.get(name);
+    if (!ex.photo) ex.photo = portrait(name);
   };
 
   const withNums = rows.filter(r => num(r.match) > 0);
@@ -394,7 +399,7 @@ export async function getDivisionTable(letter, season = '', group = '') {
     ...p,
     place: i + 1,
     // Зоны те же, что прописаны в таблице: 1–4 плей-офф, 5–6 добор, 7–8 вылет.
-    zone: i < 4 ? 'playoff' : (i < 6 ? 'extra' : 'relegation')
+    zone: grouped ? '' : (i < 4 ? 'playoff' : (i < 6 ? 'extra' : 'relegation'))
   }));
 
   // Плей-офф: три матча сразу после группового этапа.
@@ -422,8 +427,8 @@ export async function getDivisionTable(letter, season = '', group = '') {
   }
 
   const value = {
-    ok: true, division: key, season, players: table, matrix,
-    playoff: { sf1, sf2, final, champion },
+    ok: true, division: key, season, grouped, players: table, matrix,
+    playoff: grouped ? {sf1:null,sf2:null,final:null,champion:null} : { sf1, sf2, final, champion },
     regular_matches: regularMax
   };
   cache.set(cacheId, { t: Date.now(), v: value });

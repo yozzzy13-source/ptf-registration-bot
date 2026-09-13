@@ -9,10 +9,11 @@
     "dev": "node index.js",
     "setup:payments": "node scripts/setup-payments.js",
     "setup:events": "node scripts/setup-events.js",
-    "setup:courts": "node scripts/setup-courts.js"
+    "setup:courts": "node scripts/setup-courts.js",
+    "test": "node --experimental-vm-modules tests/regression.mjs && node --experimental-vm-modules tests/card.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9"
   },
   "dependencies": {
     "express": "^4.19.2",

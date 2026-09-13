@@ -14,9 +14,10 @@
 import { sheets as sheetsClient } from './google.js';
 import { MATCHES_SPREADSHEET_ID, DIVISIONS_SPREADSHEET_ID, MATCH_SHEETS, TIMEZONE } from './config.js';
 import { nowISO, safe } from './util.js';
+import { authorizeSlot, slotScope, sameScope } from './access.js';
 
 const SLOT_HEADERS = [
-  'challenge_id', 'match_type', 'status', 'division',
+  'challenge_id', 'match_type', 'status', 'division', 'season', 'group',
   'from_telegram_id', 'from_name', 'from_username',
   'to_telegram_id', 'to_name', 'to_username',
   'dates', 'time_from', 'time_to', 'duration_min', 'courts', 'comment',
@@ -191,6 +192,7 @@ export async function divisionRegistry() {
       // номерами групп, у каждой своя таблица. Пустая группа — обычный дивизион.
       group: safe(r.group),
       group_title: safe(r.group_title),
+      group_title_en: safe(r.group_title_en),
       title: safe(r.title),
       title_en: safe(r.title_en || r.title),
       spreadsheet_id: spreadsheetIdFromUrl(r.sheet_url || r.url || r.link || r.sheet_id),
@@ -282,6 +284,12 @@ export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {})
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, taker, { joining: true });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     const status = String(slot.status || '').toLowerCase();
     if (status === 'accepted') {
       return { ok: false, reason: String(slot.to_telegram_id) === String(taker.telegram_id) ? 'already_yours' : 'taken', slot };
@@ -340,14 +348,17 @@ export function isSlotPast(slot = {}) {
   return ms > 0 && ms < Date.now();
 }
 
-export async function listOpenSlots(division, viewerTelegramId = '') {
-  const rows = await allSlots();
-  return rows
-    .filter(r => String(r.status || '').toLowerCase() === 'open')
-    .filter(r => !division || !r.division || r.division === division)
+export async function listOpenSlots(division, viewerTelegramId = '', season = '', group = '') {
+  if (!division) return [];
+  const rows = (await allSlots()).filter(r => String(r.status).toLowerCase() === 'open')
     .filter(r => !r.to_telegram_id || String(r.to_telegram_id) === String(viewerTelegramId))
-    .filter(r => !isSlotPast(r))
-    .sort((a, b) => firstDateMillis(a) - firstDateMillis(b));
+    .filter(r => !isSlotPast(r));
+  const out = [];
+  for (const r of rows) {
+    const scope = await slotScope(r);
+    if (sameScope(scope, { division, season, group })) out.push(r);
+  }
+  return out.sort((a,b) => firstDateMillis(a) - firstDateMillis(b));
 }
 
 export async function listMySlots(telegramId) {
@@ -381,6 +392,12 @@ export async function counterSlot(challengeId, actor = {}, offer = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
     const waiting = awaitingSide(slot);
     if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
@@ -406,6 +423,12 @@ export async function acceptProposal(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     const status = String(slot.status || '').toLowerCase();
     if (status === 'accepted') return { ok: false, reason: 'already_accepted', slot };
     if (status !== 'pending') return { ok: false, reason: 'not_pending', slot };
@@ -424,6 +447,12 @@ export async function rejectProposal(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
     const waiting = awaitingSide(slot);
     if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
@@ -443,6 +472,12 @@ export async function confirmCourt(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
     if (slot.court_confirmed_at) return { ok: false, reason: 'already_confirmed', slot };
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
@@ -714,6 +749,12 @@ export async function proposeTimeChange(challengeId, actor = {}, newTime = '') {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
     const me = String(actor.telegram_id || '');
@@ -737,6 +778,12 @@ export async function acceptTimeChange(challengeId, actor = {}, expectedTime = '
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     const proposal = parseTimeChange(slot.time_change);
     if (!proposal) return { ok: false, reason: 'stale', slot };
     if (expectedTime && proposal.time !== String(expectedTime)) return { ok: false, reason: 'stale', slot };
@@ -758,6 +805,12 @@ export async function rejectTimeChange(challengeId, actor = {}, expectedTime = '
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     const proposal = parseTimeChange(slot.time_change);
     if (!proposal) return { ok: false, reason: 'stale', slot };
     if (expectedTime && proposal.time !== String(expectedTime)) return { ok: false, reason: 'stale', slot };
@@ -821,6 +874,12 @@ export async function submitResult(challengeId, actor = {}, result = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
     if (String(slot.result_status || '').toLowerCase() === 'confirmed') return { ok: false, reason: 'already_confirmed', slot };
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
@@ -847,6 +906,12 @@ export async function confirmResult(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
     // Подтверждает всегда ВТОРАЯ сторона — не та, что вносила счёт.
     if (String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
@@ -864,6 +929,12 @@ export async function disputeResult(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining: false });
+    if (!access.ok) return access;
+    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
+      Object.assign(slot, { season:access.scope.season, group:access.scope.group });
+    }
     if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
     if (String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
     const previous = { ...slot };
