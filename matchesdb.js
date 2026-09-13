@@ -26,7 +26,8 @@ const SLOT_HEADERS = [
   'created_at', 'responded_at', 'cancelled_at',
   'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
   'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
-  'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge'
+  'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge',
+  'court_pending_at', 'court_nudge', 'score_nudge'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -79,7 +80,20 @@ async function ensureSheet(title, headers) {
     const current = first[0] || [];
     const merged = [...current];
     for (const h of headers) if (!merged.includes(h)) merged.push(h);
-    if (merged.join('|') !== current.join('|')) await valuesUpdate(`'${title}'!A1:${colToA1(merged.length)}1`, [merged]);
+    if (merged.join('|') !== current.join('|')) {
+      const props = (meta.data.sheets || []).find(s => s.properties?.title === title)?.properties;
+      // Existing Match Slots may have exactly the old number of columns.
+      if (props && merged.length > Number(props.gridProperties?.columnCount || current.length)) {
+        await sheetsClient().spreadsheets.batchUpdate({
+          spreadsheetId: MATCHES_SPREADSHEET_ID,
+          requestBody: { requests: [{ updateSheetProperties: {
+            properties: { sheetId: props.sheetId, gridProperties: { columnCount: merged.length } },
+            fields: 'gridProperties.columnCount'
+          } }] }
+        });
+      }
+      await valuesUpdate(`'${title}'!A1:${colToA1(merged.length)}1`, [merged]);
+    }
     return merged;
   })().catch(e => { ready.delete(title); throw e; });
   ready.set(title, task);
@@ -320,7 +334,7 @@ export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {})
       to_name: safe(taker.name),
       to_username: safe(taker.username),
       agreed_date: date, agreed_court: court, agreed_time: time,
-      pending_by: String(taker.telegram_id || ''), round: '1',
+      pending_by: String(taker.telegram_id || ''), round: '1', nudge_sent: '',
       responded_at: nowISO()
     };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
@@ -408,7 +422,7 @@ export async function counterSlot(challengeId, actor = {}, offer = {}) {
       agreed_time: String(offer.time || slot.agreed_time || '').trim(),
       agreed_court: String(offer.court ?? slot.agreed_court ?? '').trim(),
       pending_by: String(actor.telegram_id || ''),
-      round: String(round),
+      round: String(round), nudge_sent: '',
       responded_at: nowISO()
     };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
@@ -434,7 +448,7 @@ export async function acceptProposal(challengeId, actor = {}) {
     if (status !== 'pending') return { ok: false, reason: 'not_pending', slot };
     const waiting = awaitingSide(slot);
     if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
-    const patch = { status: 'accepted', responded_at: nowISO() };
+    const patch = { status: 'accepted', responded_at: nowISO(), court_pending_at: nowISO(), court_nudge: '', reminder_sent: '', score_nudge: '' };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
     await logMatchEvent('accepted', merged, actor, `${slot.agreed_date} ${slot.agreed_time}${slot.agreed_court ? ' · ' + slot.agreed_court : ''}`);
@@ -459,7 +473,7 @@ export async function rejectProposal(challengeId, actor = {}) {
     const wasDirect = String(slot.match_type) === 'direct';
     const patch = wasDirect
       ? { status: 'declined', responded_at: nowISO() }
-      : { status: 'open', to_telegram_id: '', to_name: '', to_username: '', agreed_date: '', agreed_time: '', agreed_court: '', pending_by: '', round: '', responded_at: nowISO() };
+      : { status: 'open', to_telegram_id: '', to_name: '', to_username: '', agreed_date: '', agreed_time: '', agreed_court: '', pending_by: '', round: '', nudge_sent: '', responded_at: nowISO() };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
     await logMatchEvent('rejected', { ...slot }, actor);
@@ -619,116 +633,125 @@ export async function matchesOverview(now = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// Подталкивание застрявших заявок.
-//
-// Ход всегда за конкретным человеком: ответить на вызов, подтвердить дату,
-// согласиться на новое время, подтвердить счёт. Если он молчит, всё висит.
-// Цепочка: через 2 часа напоминание, ещё через 2 — второе с предупреждением,
-// ещё через сутки заявка закрывается сама. Часы обычные, без тихих окон.
+// Незавершённые этапы: 20 минут, 2 часа, 4 часа, сутки; завершение через 28 часов.
+// n1/n2 сохранены для совместимости с уже отправленными напоминаниями.
 export const NUDGE_FIRST_H = 2;
 export const NUDGE_SECOND_H = 4;
 export const NUDGE_CLOSE_H = 28;
-
-export function hoursBetween(fromMs, toMs) {
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return 0;
-  return (toMs - fromMs) / 3600000;
+const NUDGE_STAGES = [['m20',1/3],['n1',2],['n2',4],['d1',24]];
+const marks = cell => String(cell || '').split(',').filter(Boolean);
+export function hoursBetween(fromMs,toMs) {
+  return Number.isFinite(fromMs)&&Number.isFinite(toMs)?(toMs-fromMs)/3600000:0;
 }
-
-function stageFor(hours, done = []) {
-  // 'close' тоже помечаем: для счёта закрытия не происходит, и без отметки
-  // эскалация организатору повторялась бы каждые 15 минут.
-  if (hours >= NUDGE_CLOSE_H) return done.includes('close') ? '' : 'close';
-  if (hours >= NUDGE_SECOND_H && !done.includes('n2')) return 'n2';
-  if (hours >= NUDGE_FIRST_H && !done.includes('n1')) return 'n1';
-  return '';
+export function stageFor(hours,done=[]) {
+  if(hours>=NUDGE_CLOSE_H)return done.includes('close')?'':'close';
+  // Only the latest due stage: no burst of old reminders after the night hold.
+  const due=NUDGE_STAGES.filter(([,h])=>hours>=h).at(-1);
+  return due&&!done.includes(due[0])?due[0]:'';
 }
-function marks(cell = '') { return String(cell || '').split(',').filter(Boolean); }
-
-// Все заявки, где кто-то молчит дольше положенного.
-// scope: negotiation — вызов, отклик или встречное предложение;
-//        time — предложенное новое время; result — счёт без подтверждения.
-export async function listStuck(now = Date.now()) {
-  // Это всё повторные уведомления по таймеру — ночью не будим, ждём восьми утра.
-  if (isNightHold(now)) return [];
-  const rows = await allSlots();
-  const out = [];
-  for (const r of rows) {
-    const status = String(r.status || '').toLowerCase();
-
-    if (status === 'pending') {
-      const since = Date.parse(r.responded_at || r.created_at || '');
-      const stage = stageFor(hoursBetween(since, now), marks(r.nudge_sent));
-      if (stage) out.push({ slot: r, scope: 'negotiation', stage, waiting: awaitingSide(r), proposer: proposerSide(r) });
-      continue;
-    }
-    if (status !== 'accepted') continue;
-
-    const proposal = parseTimeChange(r.time_change);
-    if (proposal) {
-      const done = marks(String(r.time_change).split('|')[3] || '');
-      const stage = stageFor(hoursBetween(Date.parse(proposal.at || ''), now), done);
-      if (stage) {
-        const waitingId = String(proposal.by) === String(r.from_telegram_id) ? r.to_telegram_id : r.from_telegram_id;
-        out.push({ slot: r, scope: 'time', stage, proposal, waitingId });
-      }
-      continue;
-    }
-    if (String(r.result_status || '').toLowerCase() === 'pending') {
-      const stage = stageFor(hoursBetween(Date.parse(r.result_submitted_at || ''), now), marks(r.result_nudge));
-      if (stage) {
-        const waitingId = String(r.result_by) === String(r.from_telegram_id) ? r.to_telegram_id : r.from_telegram_id;
-        out.push({ slot: r, scope: 'result', stage, waitingId });
-      }
+function markedThrough(done,stage) {
+  const pos=NUDGE_STAGES.findIndex(([name])=>name===stage);
+  return [...new Set([...done,...(stage==='close'?NUDGE_STAGES:NUDGE_STAGES.slice(0,pos+1)).map(([name])=>name),stage])].join(',');
+}
+const nudgeField = scope => ({result:'result_nudge',court:'court_nudge',score:'score_nudge'})[scope]||'nudge_sent';
+function courtReset(slot) {
+  return slot.court_confirmed_at?{}:{court_pending_at:nowISO(),court_nudge:''};
+}
+export function reminderStep(slot,scope) {
+  const base=[slot.status,slot.result_status,scope];
+  if(scope==='negotiation')base.push(slot.responded_at||slot.created_at,slot.pending_by,slot.round,slot.to_telegram_id);
+  if(scope==='time')base.push(...String(slot.time_change||'').split('|').slice(0,3));
+  if(scope==='court')base.push(slot.court_pending_at||slot.responded_at||slot.created_at,slot.court_confirmed_at,slot.result_status,slot.agreed_date,slot.agreed_time,slot.time_change);
+  if(scope==='result')base.push(slot.result_status,slot.result_submitted_at,slot.result_by,slot.result_score);
+  if(scope==='score')base.push(slot.result_status,slot.result_prompt_sent_at,slot.agreed_date,slot.agreed_time);
+  return JSON.stringify(base.map(v=>String(v??'')));
+}
+export function stuckItem(slot,now=Date.now()) {
+  const status=String(slot.status||'').toLowerCase();
+  let item=null,since='',done=[];
+  if(status==='pending'||(status==='open'&&slot.match_type==='direct'&&slot.to_telegram_id)) {
+    const first=status==='open';
+    item={slot,scope:'negotiation',initial:first,
+      waiting:first?{id:String(slot.to_telegram_id),name:slot.to_name,username:slot.to_username}:awaitingSide(slot),
+      proposer:first?{id:String(slot.from_telegram_id),name:slot.from_name,username:slot.from_username}:proposerSide(slot)};
+    since=slot.responded_at||slot.created_at;done=marks(slot.nudge_sent);
+  } else if(status==='accepted'&&slot.result_status!=='confirmed') {
+    const waitingFor=id=>String(id)===String(slot.from_telegram_id)?slot.to_telegram_id:slot.from_telegram_id;
+    const proposal=parseTimeChange(slot.time_change);
+    if(slot.result_status==='pending') {
+      item={slot,scope:'result',waitingId:waitingFor(slot.result_by)};
+      since=slot.result_submitted_at;done=marks(slot.result_nudge);
+    } else if(proposal) {
+      item={slot,scope:'time',proposal,waitingId:waitingFor(proposal.by)};
+      since=proposal.at;done=marks(String(slot.time_change).split('|')[3]);
+    } else if(!slot.court_confirmed_at&&slot.match_type!=='manual'&&!slot.result_status) {
+      item={slot,scope:'court'};since=slot.court_pending_at||slot.responded_at||slot.created_at;done=marks(slot.court_nudge);
+    } else if(slot.result_prompt_sent_at&&!slot.result_status) {
+      item={slot,scope:'score'};since=slot.result_prompt_sent_at;done=marks(slot.score_nudge);
     }
   }
-  return out;
+  if(!item)return null;
+  const stage=stageFor(hoursBetween(Date.parse(since||''),now),done);
+  return stage?{...item,stage,step:reminderStep(slot,item.scope)}:null;
 }
-
-export async function markStuckNudge(challengeId, scope, stage) {
-  const slot = await findSlot(challengeId);
-  if (!slot) return null;
-  if (scope === 'time') {
-    const [time, by, at] = String(slot.time_change || '').split('|');
-    if (!time) return null;
-    const done = marks(String(slot.time_change).split('|')[3] || '');
-    if (!done.includes(stage)) done.push(stage);
-    return updateSlot(challengeId, { time_change: `${time}|${by}|${at}|${done.join(',')}` });
-  }
-  const field = scope === 'result' ? 'result_nudge' : 'nudge_sent';
-  const done = marks(slot[field]);
-  if (!done.includes(stage)) done.push(stage);
-  return updateSlot(challengeId, { [field]: done.join(',') });
+export async function listStuck(now=Date.now()) {
+  if(isNightHold(now))return [];
+  return (await allSlots()).map(s=>stuckItem(s,now)).filter(Boolean);
 }
-
-// Закрытие по молчанию. Отклик на открытое окно не убиваем — возвращаем окно
-// в открытые: автор не ответил, но само окно живое и его может забрать другой.
-export async function closeStuckSlot(challengeId) {
-  return withClaimLock(challengeId, async () => {
-    const slot = await findSlot(challengeId);
-    if (!slot) return { ok: false, reason: 'not_found' };
-    if (String(slot.status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
-    const backToOpen = String(slot.match_type) !== 'direct';
-    const patch = backToOpen
-      ? { status: 'open', to_telegram_id: '', to_name: '', to_username: '', agreed_date: '', agreed_time: '',
-          agreed_court: '', pending_by: '', round: '', nudge_sent: '', responded_at: nowISO() }
-      : { status: 'expired', cancelled_at: nowISO() };
-    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
-    const merged = { ...slot, ...patch };
-    await logMatchEvent(backToOpen ? 'claim_expired' : 'challenge_expired', merged,
-      { telegram_id: slot.from_telegram_id, name: slot.from_name }, 'без ответа');
-    return { ok: true, slot: merged, previous: slot, backToOpen };
+export async function isStuckCurrent(item) {
+  const slot=await findSlot(item.slot.challenge_id);
+  return !!slot&&reminderStep(slot,item.scope)===item.step;
+}
+export async function markStuckNudge(challengeId,scope,stage,expected=null) {
+  return withClaimLock(challengeId,async()=>{
+    const slot=await findSlot(challengeId);
+    if(!slot||(expected&&reminderStep(slot,scope)!==expected.step))return null;
+    if(scope==='time') {
+      const [time,by,at,sent]=String(slot.time_change||'').split('|');
+      if(!time)return null;
+      return updateSlot(challengeId,{time_change:[time,by,at,markedThrough(marks(sent),stage)].join('|')});
+    }
+    const field=nudgeField(scope);
+    return updateSlot(challengeId,{[field]:markedThrough(marks(slot[field]),stage)});
   });
 }
-
-// Молчание в ответ на новое время: предложение снимаем, время матча не трогаем.
-export async function dropStuckTimeChange(challengeId) {
-  const slot = await findSlot(challengeId);
-  if (!slot) return { ok: false };
-  const proposal = parseTimeChange(slot.time_change);
-  if (!proposal) return { ok: false };
-  await updateSlot(challengeId, { time_change: '' });
-  await logMatchEvent('time_change_expired', slot, { telegram_id: proposal.by, name: '' }, proposal.time);
-  return { ok: true, slot: { ...slot, time_change: '' }, proposal };
+// Unconfirmed matchmaking may close; played results are never auto-cancelled.
+export async function closeStuckSlot(challengeId,{scope='negotiation',expected=null,now=Date.now()}={}) {
+  return withClaimLock(challengeId,async()=>{
+    const slot=await findSlot(challengeId);
+    if(!slot)return {ok:false,reason:'not_found'};
+    if(expected&&reminderStep(slot,scope)!==expected.step)return {ok:false,reason:'stale'};
+    const eligible=scope==='court'
+      ?slot.status==='accepted'&&!slot.court_confirmed_at&&!slot.result_status&&!slot.time_change
+      :slot.status==='pending'||(slot.status==='open'&&slot.match_type==='direct');
+    if(!eligible)return {ok:false,reason:'not_pending',slot};
+    const dates=cellToList(slot.dates).filter(d=>{
+      const end=Date.parse(d+'T'+(slot.time_to||'23:59')+':00+07:00');
+      return Number.isFinite(end)&&end>now;
+    });
+    const backToOpen=slot.match_type==='open'&&dates.length>0;
+    const patch=backToOpen?{
+      status:'open',dates:listToCell(dates),to_telegram_id:'',to_name:'',to_username:'',
+      agreed_date:'',agreed_time:'',agreed_court:'',pending_by:'',round:'',nudge_sent:'',
+      court_pending_at:'',court_nudge:'',court_confirmed_at:'',court_confirmed_by:'',
+      time_change:'',reminder_sent:'',result_prompt_sent_at:'',score_nudge:'',responded_at:nowISO()
+    }:{status:'expired',cancelled_at:nowISO()};
+    await updateRow(MATCH_SHEETS.slots,SLOT_HEADERS,slot._rowNumber,patch);
+    await logMatchEvent(backToOpen?'claim_expired':'challenge_expired',slot,
+      {telegram_id:slot.from_telegram_id,name:slot.from_name},scope==='court'?'корт не подтверждён':'без ответа');
+    return {ok:true,slot:{...slot,...patch},previous:slot,backToOpen,scope};
+  });
+}
+export async function dropStuckTimeChange(challengeId,expected=null) {
+  return withClaimLock(challengeId,async()=>{
+    const slot=await findSlot(challengeId);
+    if(!slot||(expected&&reminderStep(slot,'time')!==expected.step))return {ok:false};
+    const proposal=parseTimeChange(slot.time_change);if(!proposal)return {ok:false};
+    const patch={time_change:'',...courtReset(slot)};
+    await updateSlot(challengeId,patch);
+    await logMatchEvent('time_change_expired',slot,{telegram_id:proposal.by,name:''},proposal.time);
+    return {ok:true,slot:{...slot,...patch},proposal};
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -793,7 +816,7 @@ export async function acceptTimeChange(challengeId, actor = {}, expectedTime = '
     // Подтверждает всегда вторая сторона — не тот, кто перенёс.
     if (String(proposal.by) === me) return { ok: false, reason: 'own_proposal', slot };
     const previousTime = slot.agreed_time || '';
-    const patch = { agreed_time: proposal.time, time_change: '' };
+    const patch = { agreed_time: proposal.time, time_change: '', reminder_sent:'', ...courtReset(slot) };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
     await logMatchEvent('time_changed', merged, actor, `${previousTime || '—'} → ${proposal.time}`);
@@ -816,8 +839,9 @@ export async function rejectTimeChange(challengeId, actor = {}, expectedTime = '
     if (expectedTime && proposal.time !== String(expectedTime)) return { ok: false, reason: 'stale', slot };
     const me = String(actor.telegram_id || '');
     if (String(proposal.by) === me) return { ok: false, reason: 'own_proposal', slot };
-    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { time_change: '' });
-    const merged = { ...slot, time_change: '' };
+    const patch = {time_change:'',...courtReset(slot)};
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
     await logMatchEvent('time_change_rejected', merged, actor, proposal.time);
     return { ok: true, slot: merged, rejectedTime: proposal.time };
   });
@@ -834,7 +858,7 @@ export async function listMatchesNeedingResultPrompt() {
   const rows = await allSlots();
   return rows.filter(r => {
     if (String(r.status || '').toLowerCase() !== 'accepted') return false;
-    if (r.result_status) return false;
+    if (r.result_status || r.time_change || (!r.court_confirmed_at && r.match_type!=='manual')) return false;
     if (r.result_prompt_sent_at) return false;
     const end = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
     if (Number.isNaN(end)) return false;
@@ -893,7 +917,7 @@ export async function submitResult(challengeId, actor = {}, result = {}) {
       result_photo_file_id: String(result.photoFileId || slot.result_photo_file_id || ''),
       result_note: String(result.note || ''),
       result_submitted_at: nowISO(),
-      result_confirmed_at: ''
+      result_confirmed_at: '', result_nudge: '', score_nudge: ''
     };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };

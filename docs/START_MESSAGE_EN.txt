@@ -27,3 +27,5 @@ In Events, check the details, price and participants, then sign up or join the w
 Upload an avatar from your profile, then choose a version using the buttons in the bot. Change your language with /language. You can stop other players’ result updates using the button below a result; messages about your own matches continue. Use Contact organiser for help.
 
 Already in the league but awaiting a group? You can use the other available sections. Challenges and match submission become available once you are assigned to a group.
+
+⏳ If a step is unfinished, the bot reminds you after 20 minutes, 2 hours, 4 hours and 24 hours. This covers challenge replies, match arrangements, court confirmation and results. After 28 hours an unconfirmed proposal expires; an original open slot becomes available again. Result issues go to the organiser.

@@ -13,11 +13,11 @@ import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as 
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
-  notifyStuckResult, notifyResultStalled } from './matches.js';
+  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
 import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
-  listStuck, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage,
+  listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage,
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
@@ -1376,27 +1376,31 @@ app.post('/api/match/retime', async (req, res) => {
 
 // Заявки, где кто-то молчит: два напоминания и закрытие.
 // Счёт исключение — его не закрываем, а отдаём организатору.
-async function runStuckNudges() {
-  const stuck = await listStuck().catch(e => { console.error('listStuck failed:', e.message); return []; });
+export async function runStuckNudges(now=Date.now()) {
+  const stuck = await listStuck(now).catch(e => { console.error('listStuck failed:', e.message); return []; });
   for (const item of stuck) {
     try {
+      if (!await isStuckCurrent(item)) continue;
       if (item.stage === 'close') {
-        if (item.scope === 'negotiation') {
-          const r = await closeStuckSlot(item.slot.challenge_id);
-          if (r.ok) await notifyNegotiationExpired(r.previous, { backToOpen: r.backToOpen });
+        if (item.scope === 'negotiation' || item.scope === 'court') {
+          const r = await closeStuckSlot(item.slot.challenge_id,{scope:item.scope,expected:item,now});
+          if (r.ok) await notifyNegotiationExpired(r.previous, { backToOpen: r.backToOpen, scope:item.scope });
         } else if (item.scope === 'time') {
-          const r = await dropStuckTimeChange(item.slot.challenge_id);
+          const r = await dropStuckTimeChange(item.slot.challenge_id,item);
           if (r.ok) await notifyTimeChangeExpired(r.slot, r.proposal);
         } else {
-          await notifyResultStalled(item.slot);
-          await markStuckNudge(item.slot.challenge_id, 'result', 'close');
+          if(item.scope==='score') await notifyScoreStalled(item.slot);
+          else await notifyResultStalled(item.slot);
+          await markStuckNudge(item.slot.challenge_id,item.scope,'close',item);
         }
         continue;
       }
       if (item.scope === 'negotiation') await notifyStuckNegotiation(item);
       else if (item.scope === 'time') await notifyStuckTimeChange(item);
+      else if(item.scope==='court') await notifyStuckCourt(item);
+      else if(item.scope==='score') await notifyStuckScore(item);
       else await notifyStuckResult(item);
-      await markStuckNudge(item.slot.challenge_id, item.scope, item.stage);
+      await markStuckNudge(item.slot.challenge_id, item.scope, item.stage,item);
     } catch (e) {
       console.error(`stuck nudge ${item.scope}/${item.stage} failed:`, e.message);
     }
@@ -1441,6 +1445,16 @@ app.listen(PORT, async () => {
   if (!PUBLIC_URL) console.warn('PUBLIC_URL is empty. Set it in Railway Variables.');
   // Раз в 15 минут: напоминания о матчах, просьба внести счёт, закрытие протухших окон.
   // Всё в одном проходе — таблица одна, лишний раз её дёргать незачем.
+  // Five-minute checks keep the 20-minute reminder within 20–25 minutes.
+  // Other scans retain their existing 15-minute schedule.
+  let stuckSweepBusy = false;
+  setInterval(async()=>{
+    if(stuckSweepBusy)return;
+    stuckSweepBusy=true;
+    try { await runStuckNudges(); }
+    catch(e) { console.error('stuck nudges failed:',e.message); }
+    finally { stuckSweepBusy=false; }
+  },5*60*1000).unref?.();
   let resultSweepBusy = false;
   setInterval(async () => {
     if (resultSweepBusy) return;
@@ -1457,7 +1471,6 @@ app.listen(PORT, async () => {
         await markResultPromptSent(slot.challenge_id).catch(e => console.error('mark result prompt failed:', e.message));
       }
       await expireStaleSlots().catch(e => console.error('expire slots failed:', e.message));
-      await runStuckNudges().catch(e => console.error('stuck nudges failed:', e.message));
       await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));
       // Напоминания по событиям идут тем же проходом: за сутки, за два часа и
       // про неоплаченный счёт.
