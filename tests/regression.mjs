@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
@@ -7,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // In-memory Sheets and Telegram. No credentials, network, bot startup or writes
 // to real spreadsheets are involved. Run: node --experimental-vm-modules tests/regression.mjs
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+let telegramFailureId='';
 const tables = new Map(), writes = [], messages = [], routes = [], middleware = [], sheetEdits = [];
 const put = (id,title,rows) => tables.set(id+'|'+title,structuredClone(rows));
 put('crm','Applicants',[
@@ -23,6 +25,7 @@ put('master','Players_Master',[[],[],['Player ID','Player Name','Division','Phot
  ...['Alice One','Bob Two','Carol Three','Dan Four','No Division','Wendy One','Wendy Two','Wendy Three','Wendy Four'].map((n,i)=>[i+1,n,'','https://photos.test/'+i+'.png'])]);
 put('master','Divisions',[
  ['season','letter','title','title_en','sheet_url','status','order','group'],
+ ['2','A','Division A','Division A','https://docs.google.com/spreadsheets/d/a-test','On',1,''],
  ...[['C','1','c1'],['C','2','c2'],['W','1','w1'],['W','2','w2']].map(([d,g,id])=>['2',d,'Division '+d,'Division '+d,'https://docs.google.com/spreadsheets/d/'+id,'On',d==='C'?4:6,g])
 ]);
 put('master','Cross_Division_Match_Log',[['Match','Date']]);
@@ -34,6 +37,8 @@ for(const [id,names] of Object.entries({c1:['Alice One','Bob Two'],c2:['Carol Th
  ]);
 }
 put('matches','Match Slots',[['challenge_id','match_type','status','division','from_telegram_id','from_name']]);
+put('a-test','Division_Tracker',[['Player'],...Array.from({length:8},(_,i)=>['A Player '+(i+1)])]);
+put('a-test','Match_Log',[['match','id1','player1','id2','player2'],...Array.from({length:7},(_,i)=>[i+1,1,'A Player 1',i+2,'A Player '+(i+2)]),[1,1,'A Player 1',2,'A Player 2'],[29,1,'A Player 1',3,'A Player 3',6,0]]);
 put('matches','Courts',[['name','address','whatsapp'],['Court A','Phuket','661234']]);
 const col = letters => [...letters].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
 function rangeInfo(id,range){
@@ -69,7 +74,7 @@ function synthetic(key,values){const m=new vm.SyntheticModule(Object.keys(values
 synthetic(path.join(root,'google.js'),{sheets:()=>google});
 const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
-synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{messages.push({method:n,args});if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
+synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');messages.push({method:n,args});if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card')});
 async function getModule(spec,ref){
@@ -106,7 +111,8 @@ check((await db.claimSlot('old',{telegram_id:'2'},{date:'2099-09-14',time:'10:00
 check((await db.findSlot('old')).group==='1','Legacy scope persisted on interaction');
 check((await db.acceptProposal('old',{telegram_id:'1'})).ok,'Inactive master member confirms proposal');
 check(!(await db.confirmCourt('old',{telegram_id:'6'})).ok,'Outsider cannot confirm court');
-check((await db.confirmCourt('old',{telegram_id:'2'})).ok,'Opponent confirms court');
+check(!(await db.confirmCourt('old',{telegram_id:'2'})).ok,'Opponent cannot confirm court');
+check((await db.confirmCourt('old',{telegram_id:'1'})).ok,'Creator confirms court');
 check((await db.submitResult('old',{telegram_id:'1'},{winner:'1',score:'6:4 6:3'})).ok,'Score accepted');
 check(!(await db.disputeResult('old',{telegram_id:'3'})).ok,'Unrelated player cannot dispute result');
 check(!(await db.confirmResult('old',{telegram_id:'1'})).ok,'Submitter cannot confirm own score');
@@ -218,7 +224,7 @@ await db.updateSlot('remind',{...scopes.court,time_change:'',court_nudge:''});
 messages.length=0;
 await server.runStuckNudges(started+20*60000);
 check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&m.args[1].includes('booking is incomplete')),'Court reminder sent in EN to first player');
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Бронирование матча не завершено')),'Court reminder sent in RU to second player');
+check(!messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Бронирование матча не завершено')),'No court reminder sent to responding player');
 item=db.stuckItem(await db.findSlot('remind'),started+28*hour);
 check((await db.confirmCourt('remind',{telegram_id:'1'})).ok,'Court confirmation remains available');
 check(!(await db.closeStuckSlot('remind',{scope:'court',expected:item,now:started+28*hour})).ok,'Sweep cannot cancel a court confirmed in the meantime');
@@ -250,4 +256,103 @@ check(!(await db.findSlot('remind')).result_nudge,'Revised result gets its own r
 await db.updateSlot('remind',{...scopes.score,result_nudge:'',score_nudge:'',time_change:''});
 await server.runStuckNudges(started+28*hour);
 check((await db.findSlot('remind')).score_nudge.includes('close')&&(await db.findSlot('remind')).status==='accepted','Missing result is escalated without deleting the match');
+
+// Recipient language and booking ownership across the complete match lifecycle.
+const languageSlot={...base,challenge_id:'language',status:'accepted',comment:'',result_winner:'1',result_by:'2',result_score:'6:4 6:3',result_set3_mode:'Match TB',pending_by:'2',from_username:'outdated',to_username:'bob'};
+const actions=[
+ ['agreed',()=>matches.notifyMatchAgreed(languageSlot)],
+ ['court',()=>matches.notifyCourtConfirmed(languageSlot)],
+ ['reminder',()=>matches.notifyMatchReminder(languageSlot)],
+ ['proposal',()=>matches.notifyProposal(languageSlot)],
+ ['counter',()=>matches.notifyProposal(languageSlot,{isCounter:true})],
+ ['direct',()=>matches.sendDirectChallenge({...languageSlot,from_telegram_id:'2',to_telegram_id:'1'})],
+ ['cancel',()=>matches.notifyMatchCancelled(languageSlot,{telegram_id:'2'})],
+ ['proposal declined',()=>matches.notifyProposalRejected({...languageSlot,status:'open'},{...languageSlot,pending_by:'1'})],
+ ['new time',()=>matches.notifyTimeChange(languageSlot,'12:00','2')],
+ ['time accepted',()=>matches.notifyTimeChangeAccepted(languageSlot,'11:00')],
+ ['time rejected',()=>matches.notifyTimeChangeRejected(languageSlot,'12:00','1')],
+ ['time expired',()=>matches.notifyTimeChangeExpired(languageSlot,{by:'1',time:'12:00'})],
+ ['result prompt',()=>matches.notifyResultPrompt(languageSlot)],
+ ['verify photo',()=>matches.notifyResultForVerification({...languageSlot,result_photo_file_id:'photo'})],
+ ['result rejected',()=>matches.notifyResultRejected(languageSlot)],
+ ['result recorded',()=>matches.notifyResultConfirmed(languageSlot)],
+ ['result disputed',()=>matches.notifyResultDisputed({...languageSlot,result_by:'1'})],
+ ['deadline',()=>matches.notifyDeadline('1',{names:['Bob Two'],daysLeft:2,division:'C'})]
+];
+for(const [label,action]of actions){messages.length=0;await action();const english=messages.filter(m=>String(m.args[0])==='1'&&['sendPhoto','sendMessage'].includes(m.method));check(english.length>0,label+' reaches English recipient');for(const m of english){const opts=m.method==='sendPhoto'?m.args[2]:m.args[2];const text=m.method==='sendPhoto'?opts.caption:m.args[1];check(!/[а-яё]/i.test(text+' '+JSON.stringify(opts?.reply_markup||{})),label+' body and buttons use EN');}}
+messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author',season:'2',group:'1',from_telegram_id:'2',from_name:'Bob Two'});
+check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
+messages.length=0;await matches.notifyMatchAgreed(languageSlot);
+for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);const buttons=m.args[2].reply_markup.inline_keyboard.flat();check(buttons.some(b=>b.url&&/t.me|tg:\/\//.test(b.url)),'Contact button on agreement for '+id);check(buttons.some(b=>b.callback_data?.startsWith('match_book:'))===(id==='1'),'Only creator gets booking button '+id);}
+messages.length=0;telegramFailureId='1';await matches.notifyMatchAgreed(languageSlot);telegramFailureId='';check(messages.some(m=>String(m.args[0])==='2'),'Blocked creator does not prevent notifying second player');
+check((await matches.matchContact(languageSlot,'2')).url==='https://t.me/alice','Contact refreshes Applicants username before stale slot value');
+check((await matches.matchContact({...languageSlot,to_telegram_id:'12345',to_username:''},'1')).url==='tg://user?id=12345','No username falls back to Telegram user link');
+messages.length=0;await matches.sendBookingHelper('2',languageSlot);
+check(!messages.some(m=>m.args[2]?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data?.includes('court_ok'))),'Noncreator cannot use old booking helper');
+await db.updateSlot('remind',{...base,status:'accepted',court_confirmed_at:'',court_confirmed_by:'',time_change:'',result_status:''});
+check((await request('post','/api/match/booking','2',{challenge_id:'remind'})).code===403,'Booking API blocks noncreator');
+check((await request('post','/api/match/booking','1',{challenge_id:'remind'})).body.ok,'Booking API permits creator');
+check(!(await db.proposeTimeChange('remind',{telegram_id:'2'},'12:00')).ok,'Noncreator cannot reschedule court');
+const count=(id,s)=>db.pendingActionsFor(id,[{...base,...s}],started).total;
+check(count('2',{status:'open',match_type:'direct'})===1&&count('1',{status:'open',match_type:'direct'})===0,'Only recipient owes initial challenge response');
+check(count('1',{status:'pending',pending_by:'2'})===1&&count('2',{status:'pending',pending_by:'2'})===0,'Only waiting party owes proposal response');
+check(count('1',{status:'accepted'})===1&&count('2',{status:'accepted'})===0,'Only creator owes court confirmation');
+check(count('1',{status:'accepted',court_confirmed_at:iso(started)})===0,'Future confirmed court clears action count');
+check(count('2',{status:'accepted',time_change:'12:00|1|'+iso(started)})===1&&count('1',{status:'accepted',time_change:'12:00|1|'+iso(started)})===0,'Time change pauses booking and awaits other player only');
+check(count('1',{status:'accepted',result_status:'pending',result_by:'2'})===1&&count('2',{status:'accepted',result_status:'pending',result_by:'2'})===0,'Result badge counts verifier only');
+check(count('1',{status:'accepted',result_status:'confirmed'})===0&&count('1',{status:'cancelled'})===0,'Completed and cancelled matches clear badge');
+const attention=(await request('get','/api/match/attention','1')).body.attention;check(Number.isInteger(attention.total)&&Array.isArray(attention.items),'Attention API returns shared action projection');
+const kb=await load('keyboards.js');const decorated=kb.persistentKeyboard('en','active','1',['matches','events'],2);
+check(decorated.keyboard.flat()[0].text==='🔴 My matches · 2','Telegram badge shows pending total');
+check(kb.menuAction(decorated.keyboard.flat()[0].text)==='matches','Decorated text button still routes');
+check(decorated.keyboard.flat()[1].web_app.url.includes('/league?tab=events'),'Standalone Events opens events, not season application');
+check(sheets.BOT_MENU_BUTTONS.includes('events')&&sheets.KEYBOARD_BUTTONS.includes('events'),'Events configurable in both admin menus');
+const changed=[];db.setMatchChangeHandler(ids=>changed.push(...ids));await db.updateSlot('remind',{court_confirmed_at:iso(started)});check(changed.includes('1'),'Court confirmation refreshes creator keyboard');changed.length=0;await db.updateSlot('remind',{court_nudge:'m20'});check(!changed.length,'Nudge metadata does not refresh keyboard');db.setMatchChangeHandler(null);
+// Repeated schedule rows must not inflate round-robin totals or count playoff scores.
+const wlog=tables.get('w1|Match_Log');wlog.push(['1','2','Wendy Two','1','Wendy One']);wlog.push(['2','1','Wendy One','2','Wendy Two',6,0]);
+const unique=await results.getUnplayedOpponents('W','Wendy One','2','1');check(unique.total===1&&unique.names.length===1&&unique.played===0,'Repeated and playoff rows do not inflate or complete regular opponent');
+const eight=await results.getUnplayedOpponents('A','A Player 1','2','');check(eight.total===7&&eight.names.length===7,'Eight-player division with nine schedule entries yields seven opponents');
+const ev=await load('events.js'),flow=await load('eventflow.js');
+const event={event_id:'past',status:'published',date:'14.09.2099',time:'10:00',signup_deadline:'30.09.2099'};
+const start=Date.parse('2099-09-14T03:00:00Z');
+check(ev.eventStartMs(event)===start&&ev.eventStartMs({...event,date:'2099-09-14'})===start,'Event dates accept table and ISO formats in Phuket time');
+check(!ev.eventHasEnded(event,start-1)&&ev.eventHasEnded(event,start),'Without end time Past starts at exact start time');
+check(!flow.isSignupOpen(event,start),'Future deadline cannot keep started event signup active');
+check(!ev.eventHasEnded({...event,end_time:'12:00'},start+3600000)&&ev.eventHasEnded({...event,end_time:'12:00'},start+7200000),'Optional end time controls Past label');
+check(ev.eventEndMs({...event,time:'23:00',end_time:'01:00'})===Date.parse('2099-09-14T18:00:00Z'),'Overnight event end rolls to next local date');
+put('crm','Event_Registry',[ev.REGISTRY_HEADERS,ev.REGISTRY_HEADERS.map(h=>({...event,date:'01.01.2000',audience:'all'})[h]||'')]);
+check(!(await flow.joinEvent({telegramId:'1',name:'Alice One',lang:'en',eventId:'past',group:'active'})).ok,'Old event signup callback cannot join past event');
+put('crm','Event_Signups',[['signup_id','event_id','telegram_id','status','amount_thb'],['past-signup','past','1','invoiced',100]]);
+check(!(await flow.payFromDeposit({signupId:'past-signup',telegramId:'1',lang:'en'})).ok,'Past event cannot charge a new deposit payment');
+check(!(await flow.cancelSignup({signupId:'past-signup',telegramId:'1',lang:'en'})).ok,'Past event cannot cancel attendance using an old button');
+
+const links=await load('links.js');
+const two=links.parseTemplate(links.panelBroadcastText({message_ru:'Привет! {matches}',message_en:'Hello! {matches}'}));
+check(links.renderText(two,'en')==='Hello!'&&links.renderText(two,'ru')==='Привет!','Broadcast selects complete text by recipient language');
+check(links.renderButtons(two,'en').inline_keyboard[0][0].text.includes('Matches'),'Broadcast buttons use same language as text');
+links.validateBroadcastLanguages(two,[{language:'ru'},{language:'en'}]);
+for(const body of [{message_ru:'Только русский',message_en:''},{message_ru:'',message_en:'English only'}]){
+ let rejected=false;try{links.validateBroadcastLanguages(links.parseTemplate(links.panelBroadcastText(body)),[{language:'ru'},{language:'en'}])}catch{rejected=true}check(rejected,'Missing translation stops mixed broadcast before delivery');
+}
+let legacyBlocked=false;try{links.validateBroadcastLanguages(links.parseTemplate('Привет всем {matches}'),[{language:'en'}])}catch{legacyBlocked=true}check(legacyBlocked,'Legacy Russian-only broadcast cannot reach EN recipient');
+const params=new URLSearchParams({auth_date:String(Math.floor(Date.now()/1000)),user:JSON.stringify({id:99,first_name:'Admin'})});
+const secret=crypto.createHmac('sha256','WebAppData').update('test-token').digest();params.set('hash',crypto.createHmac('sha256',secret).update([...params.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>k+'='+v).join('\n')).digest('hex'));
+const adminInit=params.toString();
+const preview=await request('post','/api/admin/broadcast-preview','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',lang:'en'});
+check(preview.body.ok&&preview.body.text==='Hello'&&preview.body.buttons[0].includes('Matches'),'Panel preview renders EN body and EN buttons');
+messages.length=0;const missing=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'',filters:{selected_ids:['1','2']}});
+check(!missing.body.ok&&!messages.some(m=>m.method==='sendMessage'&&['1','2'].includes(String(m.args[0]))),'Panel refuses all delivery if one recipient language is missing');
+put('crm','Broadcasts',[['broadcast_id','message_text','sent_count']]);put('crm','Broadcast Logs',[['broadcast_id','telegram_id','status','language']]);
+messages.length=0;const delivered=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',filters:{selected_ids:['1','2']}});
+check(delivered.body.ok&&delivered.body.sent===2,'Bilingual panel broadcast reaches both language groups');
+check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&messages.some(m=>String(m.args[0])==='2'&&m.args[1]==='Привет'),'Recipients receive only selected text, not both variants');
+messages.length=0;await flow.reviewTopup({telegramId:'1',approve:false});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Top-up not confirmed')),'Top-up rejection follows player language');
+const futureEvent={...event,date:'16.09.2099',title_ru:'Турнир',title_en:'Tournament',audience:'all'};
+put('crm','Event_Registry',[ev.REGISTRY_HEADERS,ev.REGISTRY_HEADERS.map(h=>futureEvent[h]||'')]);
+put('crm','Event_Signups',[['signup_id','event_id','telegram_id','status','amount_thb'],['en-event','past','1','confirmed',0],['ru-event','past','2','confirmed',0]]);
+messages.length=0;await flow.runEventReminders(started);
+check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Tomorrow')&&!/[а-яё]/i.test(m.args[1])),'Scheduled event reminder uses EN body');
+check(messages.some(m=>String(m.args[0])==='2'&&m.args[1].includes('Завтра')),'Scheduled event reminder uses RU body');
+messages.length=0;await flow.notifyEventChanged(futureEvent,['Время: 09:00 → 10:00']);check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Time:')&&!/[а-яё]/i.test(m.args[1])),'Event change translates field labels and title');
+messages.length=0;await flow.reviewEventProof({signupId:'en-event',approve:true});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Payment for')&&!/[а-яё]/i.test(m.args[1])),'Event payment approval uses recipient language');
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

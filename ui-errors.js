@@ -1,6 +1,9 @@
 // Only interface responses are translated here. Broadcast bodies and entered
 // event descriptions are never passed through this function.
 const pairs = [
+ ['Missing broadcast text: EN','Заполните английский текст рассылки: среди получателей есть игроки с языком EN.','Fill in the English broadcast text: there are EN recipients.'],
+ ['Missing broadcast text: RU','Заполните русский текст рассылки: среди получателей есть игроки с языком RU.','Fill in the Russian broadcast text: there are RU recipients.'],
+  ['not_booker','Корт бронирует и подтверждает автор вызова.','Only the challenge creator books and confirms the court.'],
   ['league_access_denied','Для доступа к лиге организатор должен добавить вас в список игроков.','Ask the organiser to add you to the league player list for access.'],
   ['division_required','Матчи станут доступны после включения в дивизион и группу.','Matches become available once you are assigned to a division and group.'],
   ['different_group','Матч доступен только игрокам одной группы дивизиона.','This match is only available to players in the same division group.'],

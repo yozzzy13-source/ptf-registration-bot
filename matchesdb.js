@@ -114,6 +114,7 @@ async function readObjects(title, headers) {
 async function appendObject(title, headers, obj) {
   const head = await ensureSheet(title, headers);
   await valuesAppend(`'${title}'!A:BZ`, [head.map(h => obj[h] ?? '')]);
+  if(title===MATCH_SHEETS.slots)emitMatchChange(null,obj);
 }
 
 async function updateRow(title, headers, rowNumber, patch) {
@@ -122,6 +123,7 @@ async function updateRow(title, headers, rowNumber, patch) {
   const current = rows.find(r => r._rowNumber === rowNumber) || {};
   const merged = { ...current, ...patch };
   await valuesUpdate(`'${title}'!A${rowNumber}:${colToA1(head.length)}${rowNumber}`, [head.map(h => merged[h] ?? '')]);
+  if(title===MATCH_SHEETS.slots)emitMatchChange(current,merged);
 }
 
 // --- корты -------------------------------------------------------------------
@@ -495,7 +497,7 @@ export async function confirmCourt(challengeId, actor = {}) {
     if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok: false, reason: 'not_accepted', slot };
     if (slot.court_confirmed_at) return { ok: false, reason: 'already_confirmed', slot };
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
-    if (!sides.includes(String(actor.telegram_id))) return { ok: false, reason: 'not_a_player', slot };
+    if (String(actor.telegram_id)!==String(slot.from_telegram_id)) return {ok:false,reason:'not_booker',slot};
     const patch = { court_confirmed_at: nowISO(), court_confirmed_by: String(actor.telegram_id || '') };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
@@ -784,7 +786,7 @@ export async function proposeTimeChange(challengeId, actor = {}, newTime = '') {
     if (!sides.includes(me)) return { ok: false, reason: 'not_a_player', slot };
     // Корт бронирует один человек — он же и переносит. До подтверждения корта
     // кнопка есть только у него, после — только у того, кто подтвердил.
-    if (slot.court_confirmed_by && String(slot.court_confirmed_by) !== me) {
+    if (String(slot.from_telegram_id) !== me) {
       return { ok: false, reason: 'not_booker', slot };
     }
     if (!/^\d{2}:\d{2}$/.test(String(newTime))) return { ok: false, reason: 'bad_time', slot };
@@ -1058,4 +1060,34 @@ export async function courtsByPlayedMatch() {
 export function courtKey(date, nameA, nameB) {
   const norm = (v) => String(v || '').trim().toLowerCase();
   return `${String(date || '').trim()}|${[norm(nameA), norm(nameB)].sort().join('|')}`;
+}
+
+// The same action projection drives Telegram and the mini app.
+export function pendingActionsFor(telegramId,rows,now=Date.now()) {
+ const id=String(telegramId),items=[],seen=new Set();
+ for(const s of rows||[]) {
+  if(!s.challenge_id||seen.has(s.challenge_id)||![String(s.from_telegram_id),String(s.to_telegram_id)].includes(id))continue;
+  const status=String(s.status||'').toLowerCase();let tab='';
+  if(status==='open'&&s.match_type==='direct'&&String(s.to_telegram_id)===id&&!isSlotPast(s))tab='open';
+  else if(status==='pending'&&String(awaitingSide(s).id)===id&&!isSlotPast(s))tab='open';
+  else if(status==='accepted'&&s.result_status!=='confirmed') {
+   const proposal=parseTimeChange(s.time_change);
+   if(s.result_status==='pending') {if(String(s.result_by)!==id)tab='res';}
+   else if(s.result_status==='disputed') {if(String(s.result_by)===id)tab='res';}
+   else if(proposal) {if(String(proposal.by)!==id)tab='mine';}
+   else if(!s.court_confirmed_at&&s.match_type!=='manual') {if(String(s.from_telegram_id)===id)tab='mine';}
+   else if(slotEndMs(s)!==null&&slotEndMs(s)<=now)tab='res';
+  }
+  if(tab){seen.add(s.challenge_id);items.push({challenge_id:s.challenge_id,tab});}
+ }
+ return {total:items.length,open:items.filter(x=>x.tab==='open').length,mine:items.filter(x=>x.tab==='mine').length,res:items.filter(x=>x.tab==='res').length,items};
+}
+let matchChangeHandler=null;
+export function setMatchChangeHandler(handler){matchChangeHandler=handler;}
+function emitMatchChange(before,after){
+ if(!matchChangeHandler)return;
+ const ids=[...new Set([before?.from_telegram_id,before?.to_telegram_id,after?.from_telegram_id,after?.to_telegram_id].filter(Boolean).map(String))];
+ // Nudge timestamps and log writes do not trigger keyboard refreshes.
+ if(ids.every(id=>JSON.stringify(pendingActionsFor(id,before?[before]:[]))===JSON.stringify(pendingActionsFor(id,[after]))))return;
+ try{matchChangeHandler(ids,Object.fromEntries(ids.map(id=>[id,pendingActionsFor(id,before?[before]:[]).total])));}catch(e){console.error('match attention:',e.message);}
 }

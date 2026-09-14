@@ -3,7 +3,7 @@ import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from '
 import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck } from './sheets.js';
 import { sendMessage, sendPhotoBuffer } from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
-import { parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
+import { panelBroadcastText, broadcastVariant, validateBroadcastLanguages, parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
 
 function isAdminId(id) {
   if (!ADMIN_IDS.length) return false;
@@ -186,7 +186,7 @@ export function registerAdminRoutes(app) {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
       const lang = String(req.body.lang || 'ru').toLowerCase() === 'en' ? 'en' : 'ru';
-      const parsed = parseTemplate(String(req.body.message || ''));
+      const parsed = broadcastVariant(parseTemplate(panelBroadcastText(req.body)),lang);
       // В предпросмотре подставляем данные выбранного события — чтобы было
       // видно, во что превратятся {событие}, {дата}, {время}, {место}.
       let event = null;
@@ -225,7 +225,7 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const message = String(req.body.message || '').trim();
+      const message = panelBroadcastText(req.body);
       if (!message) return res.status(400).json({ ok:false, error:'Message is empty' });
       const button = String(req.body.button || '').trim();
       // Рассылка по событию идёт своим списком: записанные на него, а не срез
@@ -249,6 +249,7 @@ export function registerAdminRoutes(app) {
       // Коды разделов в тексте ({оплата}, {состав}, {!гонка}) превращаются
       // в кнопки под сообщением с названием на языке получателя.
       const parsed = parseTemplate(message);
+      validateBroadcastLanguages(parsed,contacts);
       const username = await getBotUsername();
       const broadcastId = uid('broadcast');
       let sent = 0, failed = 0;
@@ -406,11 +407,11 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.query.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { listEvents, listSignups } = await import('./events.js');
+      const { listEvents, listSignups, eventHasEnded } = await import('./events.js');
       const events = await listEvents({ includeDrafts:true });
       const signups = await listSignups();
       res.json({ ok:true, events: events.map(e => ({
-        ...e,
+        ...e,past:eventHasEnded(e),
         signups: signups.filter(s => s.event_id === e.event_id && s.status !== 'cancelled').length,
         seats: signups.filter(s => s.event_id === e.event_id && s.status !== 'cancelled')
           .reduce((n, s) => n + 1 + (s.guests || 0), 0)
@@ -442,7 +443,7 @@ export function registerAdminRoutes(app) {
         ? await updateEvent(body.event_id, {
             title_ru:body.title_ru, title_en:body.title_en,
             description_ru:body.description_ru, description_en:body.description_en,
-            date:body.date, time:body.time, place:body.place, place_url:body.place_url || '',
+            date:body.date, time:body.time, end_time:body.end_time || '', place:body.place, place_url:body.place_url || '',
             price_thb:body.price_thb ?? '', guest_price_thb:body.guest_price_thb ?? '',
             capacity:body.capacity ?? '', signup_deadline:body.signup_deadline || '',
             payment_required: body.payment_required ? 'TRUE' : 'FALSE',

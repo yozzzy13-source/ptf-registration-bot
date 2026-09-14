@@ -1,3 +1,4 @@
+import {allSlots,pendingActionsFor} from './matchesdb.js';
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST } from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
 import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
@@ -70,6 +71,7 @@ async function playerState(userId) {
 // поставить один раз и обновлять только при смене состояния. Сигнатуру держим
 // в памяти: лишняя перестановка на каждое сообщение мигает у человека экраном.
 const menuSignature = new Map();
+const attentionCounts=new Map();
 // Матчи, результат и бронь корта имеют смысл только игроку из действующего
 // состава: остальным эти экраны всё равно откажут. Поэтому набор из админки
 // пересекаем с тем, что человеку реально доступно.
@@ -84,9 +86,11 @@ async function keyboardFor(chatId, lang, kind, userId) {
   // В сигнатуру входит версия раскладки, набор кнопок и наличие персонального
   // токена: после деплоя или правки в админке клавиатура обязана обновиться у
   // всех, иначе люди остаются со старой и жмут кнопки, которых уже нет.
-  const kb = persistentKeyboard(lang, kind, userId, allow);
+  const count=pendingActionsFor(userId,await allSlots()).total;
+  attentionCounts.set(String(userId),count);
+  const kb = persistentKeyboard(lang, kind, userId, allow,count);
   const oneTap = kb.keyboard.flat().some(b => b.web_app) ? 'app' : 'txt';
-  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}:${(allow || []).join('.')}`;
+  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}:${count}:${(allow || []).join('.')}`;
   if (menuSignature.get(key) === sig) return null;
   menuSignature.set(key, sig);
   return kb.keyboard.length ? kb : null;
@@ -887,6 +891,7 @@ export async function handleMessage(msg) {
     if (act === 'court') return sendMatchShortcut(chatId, lang, from, 'book');
     // Открытые разделы: одно короткое сообщение с inline-кнопкой запуска.
     if (act === 'league') return sendOpenApp(chatId, lang, 'league');
+    if (act === 'events') return openDestination(chatId,lang,from,'events');
     if (act === 'squad') return sendOpenApp(chatId, lang, 'squad');
     if (act === 'apply') return sendOpenApp(chatId, lang, 'apply');
   }
@@ -1143,7 +1148,7 @@ export async function handleCallback(q) {
     const r = await confirmCourt(data.split(':')[1], { telegram_id: from.id, name: from.first_name || '' });
     if (!r.ok) {
       const ru = lang === 'ru';
-      const texts = { already_confirmed: ru ? 'Корт уже подтверждён.' : 'Already confirmed.',
+      const texts = { not_booker: ru ? 'Бронь подтверждает автор вызова.' : 'Only the challenge creator confirms the booking.', already_confirmed: ru ? 'Корт уже подтверждён.' : 'Already confirmed.',
         not_accepted: ru ? 'Матч ещё не согласован.' : 'Match is not agreed yet.',
         not_a_player: ru ? 'Вы не участник этого матча.' : 'Not your match.',
         not_found: ru ? 'Матч не найден.' : 'Not found.' };
@@ -1169,7 +1174,7 @@ export async function handleCallback(q) {
     const slot = await findMatchSlot(data.split(':')[1]);
     if (!slot) return answerCallbackQuery(q.id, lang === 'ru' ? 'Матч не найден.' : 'Not found.', true).catch(() => {});
     if (![String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(String(from.id))) return null;
-    if (slot.court_confirmed_by && String(slot.court_confirmed_by) !== String(from.id)) {
+    if (String(slot.from_telegram_id) !== String(from.id)) {
       return answerCallbackQuery(q.id, lang === 'ru' ? 'Время меняет тот, кто бронировал корт.' : 'Only the player who booked can change the time.', true).catch(() => {});
     }
     return sendMessage(chatId, timeChoiceText(slot,lang), { reply_markup: timeChoiceKeyboard(slot) }).catch(() => {});
@@ -1363,4 +1368,25 @@ export async function sendPaymentStart(chatId, lang, applicationId) {
   const app = await findApplication(applicationId).catch(() => null);
   const amounts = app ? await paymentAmountsForApplication(app) : { amountThb:'', amountUsdt:'' };
   await sendMessage(chatId, `${t(lang,'application_received')}${formatPaymentAmounts(lang, amounts.amountThb, amounts.amountUsdt)}`, { reply_markup: paymentKeyboard(lang, applicationId) });
+}
+
+const attentionQueue=new Set();let attentionTimer=null;
+export function queueMatchAttention(ids,previous={}) {
+ for(const id of ids)if(!attentionCounts.has(String(id))&&previous[id]!==undefined)attentionCounts.set(String(id),previous[id]);
+ ids.forEach(id=>attentionQueue.add(String(id)));
+ if(attentionTimer)return;
+ attentionTimer=setTimeout(async()=>{
+  attentionTimer=null;const batch=[...attentionQueue];attentionQueue.clear();
+  for(const id of batch) {
+   const previousCount=attentionCounts.get(id);
+   try {
+    const p=await findApplicantByTelegramId(id);if(!p)continue;
+    const n=pendingActionsFor(id,await allSlots()).total;
+    if(n===(attentionCounts.get(id)??0))continue;
+    const lang=p.language==='ru'?'ru':'en',st=await playerState(id);
+    const kb=await keyboardFor(id,lang,st.kind,id);if(!kb)continue;
+    await sendMessage(id,n?(lang==='ru'?'🔴 Мои матчи: ждут вашего действия — '+n:'🔴 My matches: actions waiting for you — '+n):(lang==='ru'?'✅ В матчах нет действий, ожидающих вашего ответа.':'✅ No match actions are waiting for your response.'),{reply_markup:kb,disable_notification:true});
+   }catch(e){if(previousCount===undefined)attentionCounts.delete(id);else attentionCounts.set(id,previousCount);menuSignature.delete(id);console.error('attention refresh:',e.message);}
+  }
+ },1500);
 }

@@ -211,18 +211,33 @@ export async function getDivisionSchedule(division, season = '', group = '') {
   if (!spreadsheetId) return [];
   try {
     // C — первый игрок, E — второй, F.. — счёт, S — отметка «сыграно».
-    const values = await getValues(spreadsheetId, 'Match_Log!C2:S');
+    const values = await getValues(spreadsheetId, 'Match_Log!A2:S');
     const out = [];
     for (let i = 0; i < values.length; i++) {
       const row = values[i] || [];
-      const p1 = String(row[0] || '').trim();
-      const p2 = String(row[2] || '').trim();
+      const p1 = String(row[2] || '').trim();
+      const p2 = String(row[4] || '').trim();
       if (!p1 || !p2) continue;
-      const hasScore = String(row[3] ?? '').trim() !== '' && String(row[4] ?? '').trim() !== '';
-      out.push({ row: i + 2, p1, p2, played: hasScore });
+      const hasScore = String(row[5] ?? '').trim() !== '' && String(row[6] ?? '').trim() !== '';
+      out.push({ row: i + 2, match:Number(row[0]), p1, p2, played: hasScore });
     }
-    scheduleCache.set(cacheKey, { t: Date.now(), v: out });
-    return out;
+    const {divisionRoster}=await import('./division.js');
+    const roster=await divisionRoster(key,season,group);
+    const names=(roster.players||[]).map(p=>norm(p.name));
+    const count=new Set(names).size;
+    const regularMax=count*(count-1)/2;
+    const unique=new Map();
+    for(const m of out) {
+      if(count && (!names.includes(norm(m.p1))||!names.includes(norm(m.p2))))continue;
+      if(regularMax && m.match>regularMax)continue;
+      if(norm(m.p1)===norm(m.p2))continue;
+      const pair=[norm(m.p1),norm(m.p2)].sort().join('|');
+      if(!unique.has(pair))unique.set(pair,m);
+      else if(m.played)unique.get(pair).played=true;
+    }
+    const clean=[...unique.values()];
+    scheduleCache.set(cacheKey, { t: Date.now(), v: clean });
+    return clean;
   } catch (e) {
     console.error('getDivisionSchedule failed:', e.message);
     return [];

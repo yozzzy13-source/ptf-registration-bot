@@ -580,6 +580,7 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
 .hdr .meplate .t1{max-width:88px}
 
 html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturate(.6)}
+.event-past{opacity:.7;border-style:dashed}.event-past h3{color:var(--dim)}
 </style>
 </head>
 <body>
@@ -2000,7 +2001,9 @@ function loadEvents(){
       if(mode==='events')renderEvents();
     }).catch(function(){});
 }
+setInterval(function(){if(document.hidden||!evList)return;var changed=false;evList.forEach(function(e){if(e.ends_at&&Date.now()>=e.ends_at&&!e.past){e.past=true;changed=true}if(e.starts_at&&Date.now()>=e.starts_at&&e.open_now){e.open_now=false;changed=true}});if(changed){buildTabs();if(mode==='events')renderEvents()}},30000);
 function evStatusBadge(e){
+  if(e.past)return '<span class="badge">'+(L?'Прошло':'Past')+'</span>';
   if(!e.my_status)return '';
   var map={waitlist:X.evWait,invoiced:X.evPay,paid:X.evPaid,confirmed:X.evYouIn,pending:X.evPay};
   var text=map[e.my_status]||e.my_status;
@@ -2016,6 +2019,8 @@ function dayLabel(v){
   return DOW[L?0:1][d.getUTCDay()]+', '+m[1]+'.'+m[2];
 }
 function eventCard(e){
+  if(e.ends_at&&Date.now()>=e.ends_at)e.past=true;
+  if(e.starts_at&&Date.now()>=e.starts_at)e.open_now=false;
   var title=L?(e.title_ru||e.title_en):(e.title_en||e.title_ru);
   var desc=L?(e.description_ru||e.description_en):(e.description_en||e.description_ru);
   var when=[dayLabel(e.date),e.time].filter(Boolean).join(' · ');
@@ -2036,11 +2041,12 @@ function eventCard(e){
   var full=!mine&&e.capacity&&e.seats_left<=0;
   var closed=!mine&&!e.open_now&&!full;
   var btn='';
-  if(canJoin)btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>';
+  if(e.past)btn='';
+  else if(canJoin)btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>';
   else if(mine)btn='<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
   else if(full)btn='<div class="hint" style="margin-top:11px;color:var(--lose)">'+esc(X.evFull)+'</div>';
   else if(closed)btn='<div class="hint" style="margin-top:11px">'+esc(X.evClosed)+'</div>';
-  return '<div class="card">'
+  return '<div class="card'+(e.past?' event-past':'')+'">'
     +'<h3>'+esc(title)+'</h3>'
     // Описание сразу под заголовком: сперва о чём событие, потом детали.
     +(desc?'<div class="hint" style="margin:0 0 9px">'+esc(desc)+'</div>':'')

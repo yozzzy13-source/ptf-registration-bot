@@ -3,18 +3,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
-import { handleMessage, handleCallback, sendPaymentStart } from './bot.js';
+import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
-import { publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
+import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
-import { createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
+import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage,
@@ -495,6 +495,7 @@ app.get('/api/match/history', async (req, res) => {
   }
 });
 
+app.get('/api/match/attention',async(req,res)=>{try{const v=await matchViewer(req.query.initData||'',String(req.query.t||''));if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});res.json({ok:true,attention:pendingActionsFor(v.user.id,await allSlots())});}catch(e){res.status(500).json({ok:false,error:e.message});}});
 app.get('/api/match/bootstrap', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
@@ -507,16 +508,19 @@ app.get('/api/match/bootstrap', async (req, res) => {
       listMySlots(v.user.id),
       listResultTasks(v.user.id)
     ]);
+    const contacts=new Map(await Promise.all(mySlots.map(async s=>[s.challenge_id,await matchContact(s,v.user.id)])));
     const byId = new Map(opponents.map(o => [String(o.telegram_id), o]));
     const shape = (s) => ({
       ...s,
       dates: cellToList(s.dates),
       courts: cellToList(s.courts),
-      from: byId.get(String(s.from_telegram_id)) || null
+      from: byId.get(String(s.from_telegram_id)) || null,
+      contact:contacts.get(s.challenge_id)||null
     });
     res.json({
       ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
       can_match:v.canMatch, match_group:v.matchGroup, season:v.season,
+      attention:pendingActionsFor(v.user.id,await allSlots()),
       courts, opponents, duration_min: MATCH_DURATION_MIN, is_admin: v.isAdmin,
       can_book_court: COURT_BOOKING_OPEN || v.isAdmin,
       unplayed: await getUnplayedOpponents(v.division, v.profile.name, v.season, v.matchGroup).catch(() => ({ known:false, names:[] })),
@@ -1351,6 +1355,11 @@ app.post('/api/match/cancel', async (req, res) => {
 
 // Перенос времени согласованного матча из карточки в мини-приложении.
 // Дальше всё то же, что и по кнопке в чате: соперник подтверждает или отказывается.
+app.post('/api/match/booking',async(req,res)=>{try{
+ const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+ const slot=await findSlot(b.challenge_id);if(!slot||slot.status!=='accepted'||String(slot.from_telegram_id)!==String(v.user.id))return res.status(403).json({ok:false,error:'not_booker'});
+ await sendBookingHelper(v.user.id,slot);res.json({ok:true});
+}catch(e){res.status(500).json({ok:false,error:e.message});}});
 app.post('/api/match/retime', async (req, res) => {
   try {
     const b = req.body || {};
@@ -1439,6 +1448,9 @@ async function runDeadlineNudge() {
 }
 
 app.listen(PORT, async () => {
+  setMatchChangeHandler(queueMatchAttention);
+  // Time can create a result task without a player pressing a button.
+  setInterval(async()=>{try{const rows=await allSlots();queueMatchAttention([...new Set(rows.filter(s=>s.status==='accepted').flatMap(s=>[s.from_telegram_id,s.to_telegram_id]).filter(Boolean))]);}catch(e){console.error('attention sweep:',e.message);}},5*60*1000).unref();
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);
   if (!BOT_TOKEN) console.warn('BOT_TOKEN is empty. Set it in Railway Variables.');

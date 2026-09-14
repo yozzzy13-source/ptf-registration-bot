@@ -27,6 +27,7 @@ export function mainKeyboard(lang, opts={}) {
   const allow = Array.isArray(opts.allow) ? new Set(opts.allow) : null;
   const on = (code) => !allow || allow.has(code);
   const btn = {
+    events: () => app(lang==='ru'?'📆 События':'📆 Events','/league?tab=events'),
     join_event: () => app(t(lang,'join_event'),'/apply?mode=event'),
     matches: () => app(t(lang,'matches'),'/match'),
     participants: () => app(t(lang,'participants'),'/participants'),
@@ -42,6 +43,7 @@ export function mainKeyboard(lang, opts={}) {
   const pair = (a, b) => [a, b].filter(code => on(code)).map(code => btn[code]());
   const rows = [
     on('join_event') ? [btn.join_event()] : null,
+    on('events') ? [btn.events()] : null,
     (opts.matches && on('matches')) ? [btn.matches()] : null,
     on('participants') ? [btn.participants()] : null,
     on('league') ? [btn.league()] : null,
@@ -109,10 +111,10 @@ export function adminPanelKeyboard(lang) { return inlineKeyboard([[{ text:'🛠 
 // Набор кнопок зависит от состояния игрока: новичку не нужен «Результат»,
 // активному — «Оплатить».
 export const MENU_LABELS = {
-  ru: { matches:'🎾 Мои матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига',
+  ru: { events:'📆 События', matches:'🎾 Мои матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига',
         pay:'💳 Оплатить', apply:'🎾 Заявка', squad:'👥 Состав',
         menu:'🏠 Меню', contact:'💬 Связаться' },
-  en: { matches:'🎾 My matches', result:'📊 Result', court:'📅 Court', league:'🏆 League',
+  en: { events:'📆 Events', matches:'🎾 My matches', result:'📊 Result', court:'📅 Court', league:'🏆 League',
         pay:'💳 Pay', apply:'🎾 Apply', squad:'👥 Line-up',
         menu:'🏠 Menu', contact:'💬 Contact' }
 };
@@ -124,7 +126,7 @@ export const MENU_LABELS = {
 // конкретного человека, токен подписан секретом бота и живёт 90 дней.
 // Так раздел открывается в ОДИН тап и при этом знает, кто пришёл.
 const MENU_PATHS = {
-  matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
+  events:'/league?tab=events', matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
   league:'/league', apply:'/apply?mode=event', squad:'/participants'
 };
 
@@ -143,17 +145,17 @@ const MENU_LAYOUTS = {
 // Значит после любой правки набора кнопок или адресов номер надо поднять —
 // иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
 // без мгновенного открытия мини-приложения).
-export const MENU_VERSION = 5;
+export const MENU_VERSION = 6;
 
 // allow — набор кнопок для группы игрока (настраивается в админке). Не задан —
 // берём прежнюю раскладку по состоянию. Кнопки раскладываем по две в ряд, а
 // нечётную последнюю оставляем во всю ширину: так ничего не висит половинкой.
-export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null) {
+export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null, pendingCount=0) {
   const l = lang === 'ru' ? 'ru' : 'en';
   const labels = MENU_LABELS[l];
   const token = telegramId ? signWebAppToken(telegramId) : '';
   const make = (key) => {
-    const text = labels[key];
+    const text = key==='matches'&&pendingCount>0 ? '🔴 '+labels[key].replace(/^🎾\s*/,'')+' · '+pendingCount : labels[key];
     if (!text) return null;
     const path = MENU_PATHS[key];
     // Без токена (нет BOT_TOKEN или id) кнопка остаётся текстовой — бот ответит
@@ -187,6 +189,8 @@ const LEGACY_LABELS = { '🎾 матчи': 'matches', '🎾 matches': 'matches' 
 for (const [text, key] of Object.entries(LEGACY_LABELS)) {
   if (!ACTION_BY_LABEL.has(text)) ACTION_BY_LABEL.set(text, key);
 }
+ACTION_BY_LABEL.set('мои матчи','matches');
+ACTION_BY_LABEL.set('my matches','matches');
 export function menuAction(text='') {
-  return ACTION_BY_LABEL.get(String(text).trim().toLowerCase()) || '';
+  return ACTION_BY_LABEL.get(String(text).trim().replace(/^🔴\s*/, '').replace(/\s*·\s*\d+$/, '').toLowerCase()) || '';
 }

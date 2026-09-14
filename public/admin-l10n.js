@@ -1,4 +1,7 @@
 window.ADMIN_EN={
+ "Текст RU":"RU text","Текст EN":"EN text","Предпросмотр RU":"Preview RU","Предпросмотр EN":"Preview EN","Для смешанной аудитории заполните оба языка. Каждый игрок получит только свой вариант.":"Fill in both languages for a mixed audience. Each player receives only their language.",
+  "Окончание (необязательно)":"End time (optional)",
+  "Прошло":"Past","📆 События":"📆 Events",
   "События": "Events",
   "<option value=\"\">Все</option>": "<option value=\"\">All</option>",
   "Найдено: ": "Found: ",

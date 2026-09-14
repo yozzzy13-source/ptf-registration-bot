@@ -74,7 +74,7 @@ async function bcCount(){
     }catch(e){box.innerHTML=`<span class="err">${esc(e.message)}</span>`}
   },120);
 }
-async function previewBroadcast(){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message:$('broadcastText').value,lang:'ru',event_id:bcTo==='event'?$('bcEvent').value:''});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`${AUI("<div class=\"muted\" style=\"margin-top:8px\">ссылок в тексте: ")}${j.inline}</div>`:'')+((j.unknown||[]).length?`${AUI("<div class=\"warn\">⚠️ неизвестные коды: ")}${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function previewBroadcast(lang='ru'){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message_ru:$('broadcastText').value,message_en:$('broadcastTextEn').value,lang,event_id:bcTo==='event'?$('bcEvent').value:''});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`${AUI("<div class=\"muted\" style=\"margin-top:8px\">ссылок в тексте: ")}${j.inline}</div>`:'')+((j.unknown||[]).length?`${AUI("<div class=\"warn\">⚠️ неизвестные коды: ")}${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function sendBroadcast(){try{
   const message=$('broadcastText').value.trim();
   let body;
@@ -89,6 +89,7 @@ async function sendBroadcast(){try{
     const useSelected=selected.size>0;
     body={message,button:$('broadcastButton').value,filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()};
   }
+  body.message_ru=$('broadcastText').value.trim();body.message_en=$('broadcastTextEn').value.trim();
   const j=await api('/api/admin/broadcast',body);
   $('broadcastResult').innerHTML=`${AUI("✅ Ушло: <b>")}${j.sent}${AUI("</b>, ошибок: <b>")}${j.failed}${AUI("</b>, получателей: <b>")}${j.recipients}${AUI("</b> — подробности во вкладке «История»")}`;history=[]
 }catch(e){$('broadcastResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
@@ -198,7 +199,7 @@ function evForm(){return{
   event_id:evEditing,
   title_ru:$('evTitleRu').value.trim(),title_en:$('evTitleEn').value.trim(),
   description_ru:$('evDescRu').value.trim(),description_en:$('evDescEn').value.trim(),
-  date:$('evDate').value.trim(),time:$('evTime').value.trim(),
+  date:$('evDate').value.trim(),time:$('evTime').value.trim(),end_time:$('evEndTime').value, 
   place:$('evPlace').value.trim(),place_url:$('evPlaceUrl').value.trim(),
   price_thb:$('evPrice').value||'',guest_price_thb:$('evGuestPrice').value||'',
   capacity:$('evCapacity').value||'',signup_deadline:$('evDeadline').value.trim(),
@@ -211,7 +212,7 @@ function evForm(){return{
 }}
 function newEvent(){
   evEditing='';
-  ['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evPlace','evPlaceUrl','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');
+  ['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evEndTime','evPlace','evPlaceUrl','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');
   $('evAudience').value='all';$('evDivision').value='';$('evInviteOnly').checked=false;
   evInvited=new Map();evRenderInvited();evAudienceChanged();
   $('evResult').textContent=AUI("Новая карточка");
@@ -238,7 +239,7 @@ function editEvent(id){
   evEditing=id;
   $('evTitleRu').value=e.title_ru||'';$('evTitleEn').value=e.title_en||'';
   $('evDescRu').value=e.description_ru||'';$('evDescEn').value=e.description_en||'';
-  evSetSelect('evDate',e.date||'');evSetSelect('evTime',e.time||'');
+  evSetSelect('evDate',e.date||'');evSetSelect('evTime',e.time||'');$('evEndTime').value=e.end_time||'';
   $('evPlace').value=e.place||'';$('evPlaceUrl').value=e.place_url||'';
   $('evPrice').value=e.price_thb||'';$('evGuestPrice').value=e.guest_price_thb==null?'':e.guest_price_thb;
   $('evCapacity').value=e.capacity||'';evSetSelect('evDeadline',e.signup_deadline||'');
@@ -261,11 +262,11 @@ async function loadEvents(){
   try{const j=await api('/api/admin/events');evData=j.events||[];
     $('eventsTable').innerHTML=AUI("<tr><th>Событие</th><th>Когда</th><th>Статус</th><th>Мест</th><th class=\"lo\">Записей</th><th></th></tr>")
       +evData.map(e=>'<tr><td class="grow"><b>'+esc(e.title_ru||e.title_en||e.event_id)+'</b></td><td>'+esc([e.date,e.time].filter(Boolean).join(' '))+'</td>'
-        +'<td><span class="pill">'+esc(e.status)+'</span></td><td class="num">'+(e.capacity?e.seats+' / '+e.capacity:e.seats)+'</td>'
+        +'<td><span class="pill">'+esc(e.past?AUI('Прошло'):e.status)+'</span></td><td class="num">'+(e.capacity?e.seats+' / '+e.capacity:e.seats)+'</td>'
         +'<td class="num lo">'+e.signups+'</td>'
         +'<td><button class="btn secondary" onclick="editEvent(\''+e.event_id+AUI("')\">Править</button> ")
         +'<button class="btn danger" onclick="deleteEvent(\''+e.event_id+AUI("')\">Удалить</button> ")
-        +(e.status==='published'?'<button class="btn secondary" onclick="nudgeEvent(\''+e.event_id+AUI("')\">Напомнить</button>"):'')
+        +(e.status==='published'&&!e.past?'<button class="btn secondary" onclick="nudgeEvent(\''+e.event_id+AUI("')\">Напомнить</button>"):'')
         +'</td></tr>').join('')}
   catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
 }
@@ -326,10 +327,10 @@ async function refundSent(id){
 // сообщением бота. Одна группа на экране — на телефоне четыре колонки галочек
 // читать невозможно. Содержание кнопок не меняем, только видимость и порядок.
 const TAB_NAMES={home:AUI("Лига"),div:AUI("Дивизионы"),race:AUI("Гонка"),players:AUI("Игроки"),matches:AUI("Матчи"),events:AUI("События"),about:AUI("О лиге")};
-const BTN_NAMES={join_event:AUI("🎾 Заявка на событие"),matches:AUI("🎾 Мои матчи"),participants:AUI("👥 Состав"),league:AUI("🏆 Лига"),
+const BTN_NAMES={events:AUI("📆 События"),join_event:AUI("🎾 Заявка на событие"),matches:AUI("🎾 Мои матчи"),participants:AUI("👥 Состав"),league:AUI("🏆 Лига"),
   about:AUI("ℹ️ О лиге"),how:AUI("📖 Как работает лига"),yearly:AUI("⭐ Гонка года"),pass:AUI("💳 Оплатить взнос"),contact:AUI("💬 Связаться")};
 const GROUP_NAMES={active:AUI("Активные"),waitlist:AUI("Лист ожидания"),applied:AUI("Заявка без оплаты"),guest:AUI("Все остальные")};
-const KB_NAMES={matches:AUI("🎾 Мои матчи"),result:AUI("📊 Результат"),court:AUI("📅 Корт"),league:AUI("🏆 Лига"),
+const KB_NAMES={events:AUI("📆 События"),matches:AUI("🎾 Мои матчи"),result:AUI("📊 Результат"),court:AUI("📅 Корт"),league:AUI("🏆 Лига"),
   squad:AUI("👥 Состав"),apply:AUI("🎾 Заявка"),pay:AUI("💳 Оплатить"),contact:AUI("💬 Связаться"),menu:AUI("🏠 Меню")};
 let tabsState={},btnsState={},kbState={},tabsAll=[],btnsAll=[],kbAll=[],tabsAlways=[];
 function menuGroup(){return $('menuGroup').value||'active'}

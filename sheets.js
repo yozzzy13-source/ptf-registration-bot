@@ -1522,7 +1522,7 @@ export async function allGroupTabs() {
 //
 // То самое стартовое меню, которое человек видит в переписке с ботом. Тексты и
 // адреса кнопок не меняются никогда — настраивается только то, кто их видит.
-export const BOT_MENU_BUTTONS = ['join_event', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
+export const BOT_MENU_BUTTONS = ['events', 'join_event', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
 const buttonsKey = (group) => `btns_${group}`;
 
 export async function getGroupButtons(group) {
@@ -1556,7 +1556,7 @@ export async function buttonsFor(telegramId, applicant = null) {
 // Третий набор кнопок и единственный, который человек видит всегда. Раскладка
 // раньше была жёстко зашита по состоянию игрока — теперь она тоже настраивается
 // по группам, иначе галочки в панели расходятся с тем, что на экране.
-export const KEYBOARD_BUTTONS = ['matches', 'result', 'court', 'league', 'squad', 'apply', 'pay', 'contact', 'menu'];
+export const KEYBOARD_BUTTONS = ['events', 'matches', 'result', 'court', 'league', 'squad', 'apply', 'pay', 'contact', 'menu'];
 // Что показываем, пока организатор ничего не настроил. У активного «Меню» нет:
 // под сообщением у него кнопок и так нет, и нажатие выдавало пустую строку.
 export const DEFAULT_KEYBOARD = {

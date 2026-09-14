@@ -51,21 +51,21 @@ export function formatDate(iso,lang='ru') {
 }
 
 // Несколько дат показываем компактно, но полностью — соперник должен видеть весь выбор.
-function datesLine(slot) {
+function datesLine(slot,lang="ru") {
   const list = cellToList(slot.dates);
   if (!list.length) return '';
-  return list.map(formatDate).join(' · ');
+  return list.map(d=>formatDate(d,lang)).join(' · ');
 }
 function courtsLine(slot) {
   const list = cellToList(slot.courts);
   if (!list.length) return '';
   return list.join(' · ');
 }
-function offerBlock(slot) {
+function offerBlock(slot,lang="ru") {
   const time = slot.time_to && slot.time_to !== slot.time_from ? `${escapeHtml(slot.time_from)}–${escapeHtml(slot.time_to)}` : escapeHtml(slot.time_from);
-  const dur = ` · матч ${Number(slot.duration_min || 120) / 60} ч`;
+  const dur = lang==="ru" ? ` · матч ${Number(slot.duration_min || 120)/60} ч` : ` · ${Number(slot.duration_min || 120)/60}h match`;
   const courts = courtsLine(slot);
-  return `📅 <b>${escapeHtml(datesLine(slot))}</b>\n🕐 <b>${time}</b>${dur}${courts ? `\n📍 ${escapeHtml(courts)}` : ''}`;
+  return `📅 <b>${escapeHtml(datesLine(slot,lang))}</b>\n🕐 <b>${time}</b>${dur}${courts ? `\n📍 ${escapeHtml(courts)}` : ''}`;
 }
 function isToday(isoDate) {
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
@@ -78,29 +78,29 @@ function endTime(start, durationMin) {
   const total = h * 60 + (m || 0) + Number(durationMin || 120);
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
-function agreedBlock(slot) {
+function agreedBlock(slot,lang="ru") {
   const start = slot.agreed_time || slot.time_from || '';
   const end = endTime(start, slot.duration_min);
-  return `📅 <b>${escapeHtml(formatDate(slot.agreed_date))}</b>\n🕐 <b>${escapeHtml(start)}${end ? '–' + escapeHtml(end) : ''}</b>${slot.agreed_court ? `\n📍 ${escapeHtml(slot.agreed_court)}` : ''}`;
+  return `📅 <b>${escapeHtml(formatDate(slot.agreed_date,lang))}</b>\n🕐 <b>${escapeHtml(start)}${end ? '–' + escapeHtml(end) : ''}</b>${slot.agreed_court ? `\n📍 ${escapeHtml(slot.agreed_court)}` : ''}`;
 }
 
-export function openSlotText(slot) {
+export function openSlotText(slot,lang="ru") {
   const multi = cellToList(slot.dates).length > 1 || cellToList(slot.courts).length > 1;
-  return `<b>🎾 Ищу соперника на матч</b>
+  return `<b>🎾 ${lang==="ru"?"Ищу соперника на матч":"Looking for a match"}</b>
 
 👤 ${playerLink(slot.from_name, slot.from_username)}${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
-${offerBlock(slot)}${slot.comment ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}
+${offerBlock(slot,lang)}${slot.comment ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}
 
-${multi ? 'Нажми «Играю» и выбери дату, время и корт из предложенных.' : 'Нажми «Играю», и я свяжу вас напрямую.'}`;
+${lang==='en' ? 'Tap “I’m in” and choose a date, time and court from the available options.' : multi ? 'Нажми «Играю» и выбери дату, время и корт из предложенных.' : 'Нажми «Играю», и я свяжу вас напрямую.'}`;
 }
 
-export function takenSlotText(slot) {
-  return `<b>✅ Матч назначен</b>
+export function takenSlotText(slot,lang="ru") {
+  return `<b>✅ ${lang==="ru"?"Матч назначен":"Match agreed"}</b>
 
 ${playerLink(slot.from_name, slot.from_username)} — ${playerLink(slot.to_name, slot.to_username)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
-${agreedBlock(slot)}
+${agreedBlock(slot,lang)}
 
-Окно закрыто.`;
+${lang==="ru"?"Окно закрыто.":"This slot is closed."}`;
 }
 
 // Окна больше не уходят в общий чат: бот рассылает их в личку каждому активному
@@ -123,7 +123,7 @@ export async function publishOpenSlot(slot) {
   let sent = 0, failed = 0;
   for (const r of recipients) {
     try {
-      await sendMessage(r.telegram_id, text, opts);
+      await sendMessage(r.telegram_id, openSlotText(slot,await nudgeLang(r.telegram_id)), opts);
       sent++;
       await new Promise(res => setTimeout(res, 45)); // мягкий темп, чтобы не упереться в лимит Telegram
     } catch (e) {
@@ -135,7 +135,8 @@ export async function publishOpenSlot(slot) {
     `дивизион ${slot.division}: отправлено ${sent}, ошибок ${failed}`);
 
   // Автору — сводка, сколько игроков увидели окно.
-  await sendMessage(slot.from_telegram_id, sent
+  const ru=(await nudgeLang(slot.from_telegram_id))==='ru';
+  await sendMessage(slot.from_telegram_id, !ru ? (sent ? `📣 Your slot was sent to <b>${sent}</b> division players. I’ll notify you when someone responds.` : '📣 There are no eligible opponents with Telegram in your group yet.') : sent
     ? `📣 Окно отправлено игрокам дивизиона: <b>${sent}</b>.\nКак только кто-то откликнется, я пришлю предложение.`
     : `📣 В вашем дивизионе пока некому отправить окно — нет активных игроков с Telegram.`).catch(() => {});
 
@@ -163,38 +164,34 @@ async function profileUrlFor(telegramId) {
 }
 
 export async function notifyMatchAgreed(slot) {
-  await closeSlotCard(slot);
-  const [fromUrl, toUrl] = await Promise.all([profileUrlFor(slot.from_telegram_id), profileUrlFor(slot.to_telegram_id)]);
-  const card = (oppName, oppUsername) => `<b>🎾 Матч назначен!</b>
-
-Соперник: ${playerLink(oppName, oppUsername)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
-${agreedBlock(slot)}
-
-Нажмите «Забронировать корт», и я подготовлю сообщение для площадки. После игры передайте счёт организатору.`;
-
-  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: contactsKeyboard(slot.to_username, toUrl, slot) }).catch(e => console.error('notify author failed:', e.message));
-  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: contactsKeyboard(slot.from_username, fromUrl, slot) }).catch(e => console.error('notify taker failed:', e.message));
-
-  await adminMatchCopy(slot, `<b>🎾 Матч назначен</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${agreedBlock(slot)}`);
+ for(const id of [slot.from_telegram_id,slot.to_telegram_id]) {
+  if(!id)continue;const lang=await nudgeLang(id),ru=lang==='ru',author=String(id)===String(slot.from_telegram_id),opp=opponentOf(slot,id);
+  const rows=[];if(author)rows.push([{text:ru?'📲 Забронировать корт':'📲 Book court',callback_data:'match_book:'+slot.challenge_id}]);
+  rows.push(await contactRow(slot,id,lang),[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]);
+  await sendMessage(id,(ru?'<b>🎾 Матч согласован!</b>':'<b>🎾 Match agreed!</b>')+'\n\n'+playerLink(opp.name,opp.username)+'\n'+agreedBlock(slot,lang)+'\n\n'+(author?(ru?'Забронируйте корт и нажмите «Корт подтвердил» после ответа площадки.':'Book the court and tap “Court confirmed” after the venue agrees.'):(ru?'Автор вызова бронирует корт. Я сообщу вам, когда бронь будет подтверждена.':'The challenge creator will book the court. I’ll notify you when it is confirmed.')),{reply_markup:{inline_keyboard:rows.filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
+ }
+ await adminMatchCopy(slot,'<b>🎾 Матч согласован</b>\n'+takenSlotText(slot));
 }
 
 // Адресный вызов: соперник выбирает дату/корт в мини-приложении, поэтому кнопка ведёт туда.
 export async function sendDirectChallenge(slot) {
+  const lang=await nudgeLang(slot.to_telegram_id),ru=lang==='ru';
   const url = await profileUrlFor(slot.from_telegram_id);
   const rows = [[{ text: '✅ Выбрать время и принять', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slot.challenge_id)}` } }],
                 [{ text: '❌ Отклонить', callback_data: `match_decline:${slot.challenge_id}` }]];
   if (url) rows.push([{ text: '👤 Профиль игрока', url }]);
-  const text = `<b>🎾 Вызов на матч</b>
+  const text = `<b>🎾 ${ru?"Вызов на матч":"Match challenge"}</b>
 
-${playerLink(slot.from_name, slot.from_username)} предлагает сыграть${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
-${offerBlock(slot)}${slot.comment ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}`;
+${playerLink(slot.from_name, slot.from_username)} ${ru?"предлагает сыграть":"invites you to play"}${slot.division ? ` · ${escapeHtml(slot.division)}` : ''}
+${offerBlock(slot,lang)}${slot.comment ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}`;
   return sendMessage(slot.to_telegram_id, text, { reply_markup: { inline_keyboard: rows } });
 }
 
 export async function declineDirectChallenge(slot, actor = {}) {
   await updateSlot(slot.challenge_id, { status: 'declined', responded_at: nowISO() });
   await logMatchEvent('declined', slot, actor);
-  await sendMessage(slot.from_telegram_id, `❌ ${escapeHtml(slot.to_name || 'Игрок')} отклонил вызов на ${escapeHtml(datesLine(slot))}.`).catch(() => {});
+  const lang=await nudgeLang(slot.from_telegram_id);
+  await sendMessage(slot.from_telegram_id, lang==='en'?`❌ ${escapeHtml(slot.to_name || 'Player')} declined your challenge for ${escapeHtml(datesLine(slot,lang))}.` : `❌ ${escapeHtml(slot.to_name || 'Игрок')} отклонил вызов на ${escapeHtml(datesLine(slot))}.`).catch(() => {});
 }
 
 export async function cancelSlot(slot, actor = {}) {
@@ -216,6 +213,7 @@ export async function notifyMatchCancelled(slot, actor = {}) {
   const bookerId = String(slot.court_confirmed_by || '');
   for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
     if (!side) continue;
+    const lang=await nudgeLang(side),ru=lang==='ru';
     const mine = String(side) === byId;
     const opp = opponentOf(slot, side);
     const rows = [];
@@ -223,12 +221,12 @@ export async function notifyMatchCancelled(slot, actor = {}) {
       rows.push([{ text: '📲 Отменить бронь корта', url: `https://wa.me/${court.whatsapp}?text=${encodeURIComponent(cancelText)}` }]);
     }
     rows.push([{ text: '🎾 Создать окно', web_app: { url: `${PUBLIC_URL}/match?tab=new` } }]);
-    await sendMessage(side, `<b>✖️ Матч отменён</b>
+    await sendMessage(side, `<b>✖️ ${ru?"Матч отменён":"Match cancelled"}</b>
 
-${mine ? 'Вы отменили матч' : `${escapeHtml(byName || 'Соперник')} отменил матч`}: ${playerLink(opp.name, opp.username)}
-${agreedBlock(slot)}${bookedNote}${court?.whatsapp && String(side) === bookerId ? `\n\n<code>${escapeHtml(cancelText)}</code>` : ''}
+${ru?(mine?'Вы отменили матч':escapeHtml(byName||'Соперник')+' отменил матч'):(mine?'You cancelled the match':escapeHtml(byName||'Opponent')+' cancelled the match')}: ${playerLink(opp.name, opp.username)}
+${agreedBlock(slot,lang)}${ru?bookedNote:(slot.court_confirmed_at?'\n\n⚠️ The court was booked. Cancel the reservation with the venue.':'')}${court?.whatsapp && String(side) === bookerId ? `\n\n<code>${escapeHtml(cancelText)}</code>` : ''}
 
-Договоритесь заново — создайте новое окно, когда будете готовы.`, {
+${ru?"Договоритесь заново — создайте новое окно, когда будете готовы.":"Create a new slot when you are ready to arrange another match."}`, {
       reply_markup: { inline_keyboard: rows }
     }).catch(() => {});
   }
@@ -253,13 +251,14 @@ export async function notifyProposal(slot, { isCounter = false } = {}) {
   const to = awaitingSide(slot);
   const by = proposerSide(slot);
   if (!to.id) return null;
-  const head = isCounter ? '<b>🔄 Встречное предложение</b>' : '<b>🎾 Отклик на твоё окно</b>';
+  const lang=await nudgeLang(to.id),ru=lang==='ru';
+  const head = !ru?(isCounter?'<b>🔄 Counterproposal</b>':'<b>🎾 Response to your slot</b>'): isCounter ? '<b>🔄 Встречное предложение</b>' : '<b>🎾 Отклик на твоё окно</b>';
   const text = `${head}
 
-${playerLink(by.name, by.username)} предлагает сыграть:
-${agreedBlock(slot)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
+${playerLink(by.name, by.username)} ${ru?"предлагает сыграть:":"proposes a match:"}
+${agreedBlock(slot,lang)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
 
-Подтверди или предложи своё.`;
+${ru?"Подтверди или предложи своё.":"Accept or suggest an alternative."}`;
   return sendMessage(to.id, text, { reply_markup: proposalKeyboard(slot) }).catch(e => console.error('notifyProposal failed:', e.message));
 }
 
@@ -267,7 +266,8 @@ export async function notifyProposalRejected(slot, previous = {}) {
   const rejectedFor = String(previous.pending_by || '');
   if (!rejectedFor) return null;
   const reopened = String(slot.status || '').toLowerCase() === 'open';
-  const text = reopened
+  const lang=await nudgeLang(rejectedFor);
+  const text = lang==='en'?(reopened?`❌ The proposal for ${escapeHtml(formatDate(previous.agreed_date,'en'))} was declined. The slot is available again; you can propose another time.`:'❌ Your challenge was declined.'):reopened
     ? `❌ Предложение на ${escapeHtml(formatDate(previous.agreed_date))} отклонено. Окно снова свободно — можно предложить другое время.`
     : `❌ ${escapeHtml(previous.from_name || 'Игрок')} отклонил вызов.`;
   return sendMessage(rejectedFor, text).catch(() => {});
@@ -305,6 +305,7 @@ export function bookingMessage(slot, court) {
 
 export async function sendBookingHelper(chatId, slot) {
   const lang = (await findApplicantByTelegramId(chatId))?.language==='ru'?'ru':'en';
+  if(String(chatId)!==String(slot.from_telegram_id)||slot.status!=='accepted')return sendMessage(chatId,lang==='ru'?'Корт бронирует автор согласованного вызова.':'The creator of the agreed challenge handles court booking.');
   const court = await courtByName(slot.agreed_court);
   const text = bookingMessage(slot, court);
   if(lang==='en'){
@@ -353,24 +354,13 @@ export function matchCalendarUrl(slot) {
 }
 
 export async function notifyCourtConfirmed(slot) {
-  const cal = matchCalendarUrl(slot);
-  const card = (oppName, oppUsername) => `<b>✅ Матч активен — корт забронирован</b>
-
-Соперник: ${playerLink(oppName, oppUsername)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
-${agreedBlock(slot)}
-
-Оба игрока уведомлены. Добавьте матч в календарь, чтобы не забыть.`;
-  // Кнопка переноса — только у того, кто подтверждал корт: он разговаривает с площадкой.
-  const booker = String(slot.court_confirmed_by || '');
-  const kb = (username, side) => ({ inline_keyboard: [
-    [{ text: '📅 Добавить в календарь', web_app: { url: cal } }],
-    ...(String(side) === booker ? [[{ text: '🕐 Изменить время', callback_data: `match_retime:${slot.challenge_id}` }]] : []),
-    ...(username ? [[{ text: '💬 Написать сопернику', url: `https://t.me/${String(username).replace(/^@/, '')}` }]] : [])
-  ] });
-  await sendMessage(slot.from_telegram_id, card(slot.to_name, slot.to_username), { reply_markup: kb(slot.to_username, slot.from_telegram_id) }).catch(e => console.error('confirm notify author failed:', e.message));
-  await sendMessage(slot.to_telegram_id, card(slot.from_name, slot.from_username), { reply_markup: kb(slot.from_username, slot.to_telegram_id) }).catch(e => console.error('confirm notify taker failed:', e.message));
-
-  await adminMatchCopy(slot, `<b>✅ Матч активен (корт подтверждён)</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}`);
+ for(const id of [slot.from_telegram_id,slot.to_telegram_id]) {
+  if(!id)continue;const lang=await nudgeLang(id),ru=lang==='ru';
+  const rows=[[{text:ru?'📅 Добавить в календарь':'📅 Add to calendar',web_app:{url:matchCalendarUrl(slot)}}],await contactRow(slot,id,lang)];
+  if(String(id)===String(slot.from_telegram_id))rows.push([{text:ru?'🕐 Изменить время':'🕐 Change time',callback_data:'match_retime:'+slot.challenge_id}]);
+  await sendMessage(id,(ru?'<b>✅ Корт забронирован — матч подтверждён</b>':'<b>✅ Court booked — match confirmed</b>')+'\n\n'+agreedBlock(slot,lang)+'\n\n'+(ru?'Оба игрока уведомлены. Добавьте матч в календарь.':'Both players have been notified. Add the match to your calendar.'),{reply_markup:{inline_keyboard:rows.filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
+ }
+ await adminMatchCopy(slot,'<b>✅ Корт подтверждён</b>\n'+takenSlotText(slot));
 }
 
 // Текст отмены брони — тем же языком и форматом, что и запрос на бронь.
@@ -395,31 +385,20 @@ export function courtCancelMessage(slot) {
 // Бот и так знает время — молчать до самого конца и вспоминать только «внесите
 // счёт» неправильно, большая часть неявок именно от забывчивости.
 // ---------------------------------------------------------------------------
-export async function notifyMatchReminder(slot, kind = 'day') {
-  const start = slot.agreed_time || slot.time_from || '';
-  // «Завтра» или «сегодня» — по календарной дате Пхукета, а не по числу часов:
-  // матч в 09:00 может быть и завтрашним, и сегодняшним.
-  const head = kind === 'day' ? `🎾 <b>${isToday(slot.agreed_date) ? 'Сегодня матч' : 'Завтра матч'}</b>` : '⏰ <b>Матч через 3 часа</b>';
-  const tail = !slot.court_confirmed_at ? 'Корт ещё не подтверждён — проверьте ответ площадки и нажмите «Корт подтвердил».'
-    : kind==='day'?'Корт подтверждён. До встречи!':'Пора собираться. Если что-то поменялось — предупредите соперника.';
-  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
-    if (!side) continue;
-    const opp = opponentOf(slot, side);
-    const rows = [[{ text: '🎾 Мои матчи', web_app: { url: `${PUBLIC_URL}/match?tab=mine` } }]];
-    if (opp.username) rows.push([{ text: '💬 Написать сопернику', url: `https://t.me/${String(opp.username).replace(/^@/, '')}` }]);
-    await sendMessage(side, `${head}
-
-Соперник: ${playerLink(opp.name, opp.username)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
-${agreedBlock(slot)}
-
-${tail}`, { reply_markup: { inline_keyboard: rows } }).catch(() => {});
-  }
-  return { start };
+export async function notifyMatchReminder(slot,kind='day') {
+ for(const id of [slot.from_telegram_id,slot.to_telegram_id]) {
+ if(!id)continue;const lang=await nudgeLang(id),ru=lang==='ru',author=String(id)===String(slot.from_telegram_id);
+ const head=kind==='day'?(isToday(slot.agreed_date)?(ru?'Сегодня матч':'Match today'):(ru?'Завтра матч':'Match tomorrow')):(ru?'Матч через 3 часа':'Match in 3 hours');
+ const tail=slot.court_confirmed_at?(ru?'Корт подтверждён. Если планы изменились — предупредите соперника.':'Court confirmed. Let your opponent know if your plans change.'):(author?(ru?'Проверьте ответ площадки и подтвердите бронь корта.':'Check the venue’s reply and confirm your court booking.'):(ru?'Ожидается подтверждение брони от автора вызова.':'Waiting for the challenge creator to confirm the court booking.'));
+ await sendMessage(id,'<b>🎾 '+head+'</b>\n\n'+agreedBlock(slot,lang)+'\n\n'+tail,{reply_markup:{inline_keyboard:[await contactRow(slot,id,lang),[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]].filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
+ }return {start:slot.agreed_time||slot.time_from||''};
 }
 
 // Напоминание о дедлайне сезона: сколько матчей осталось и сколько дней.
 export async function notifyDeadline(telegramId, { names = [], daysLeft = null, division = '' } = {}) {
   if (!telegramId || !names.length) return null;
+  const ru=(await nudgeLang(telegramId))==='ru';
+  if(!ru)return sendMessage(telegramId,`<b>🎾 Remaining matches${division?' · '+escapeHtml(division):''}</b>\n\nStill to play: <b>${names.length}</b>\n${names.map(n=>'• '+escapeHtml(n)).join('\n')}${daysLeft===null?'':'\n\n'+(daysLeft>0?'Days left in the season: '+daysLeft:'The deadline has passed. Please arrange your matches.')}\n\nCreate a slot so opponents can respond.`,{reply_markup:{inline_keyboard:[[{text:'🎾 Create slot',web_app:{url:PUBLIC_URL+'/match?tab=new'}}]]}});
   const list = names.slice(0, 8).map(n => `• ${escapeHtml(n)}`).join('\n');
   const more = names.length > 8 ? `\n…и ещё ${names.length - 8}` : '';
   const when = daysLeft === null ? '' : (daysLeft > 0
@@ -501,7 +480,7 @@ export async function notifyNegotiationExpired(slot,{backToOpen=false,scope='neg
   }
 }
 export async function notifyStuckCourt({slot,stage}) {
-  for(const id of [slot.from_telegram_id,slot.to_telegram_id]) {
+  for(const id of [slot.from_telegram_id]) {
     if(!id)continue;const ru=(await nudgeLang(id))==='ru';
     await sendMessage(id,(ru?'<b>📲 Бронирование матча не завершено</b>':'<b>📲 Your match booking is incomplete</b>')+'\n\n'
       +nudgeDetails(slot,ru?'ru':'en')+'\n\n'
@@ -527,7 +506,8 @@ export async function notifyStuckTimeChange({slot,stage,proposal,waitingId}) {
 export async function notifyTimeChangeExpired(slot, proposal) {
   const by = String(proposal?.by || '');
   if (!by) return null;
-  return sendMessage(by, `<b>⌛ Соперник не ответил на новое время</b>
+  const ru=(await nudgeLang(by))==='ru';
+  return sendMessage(by,!ru?`<b>⌛ No response to the proposed time</b>\n\nThe proposal for <b>${escapeHtml(proposal.time)}</b> has expired. The match remains at <b>${escapeHtml(slot.agreed_time||'—')}</b>.`: `<b>⌛ Соперник не ответил на новое время</b>
 
 Предложение <b>${escapeHtml(proposal.time)}</b> снято, время матча осталось прежним: <b>${escapeHtml(slot.agreed_time || '—')}</b>.`, {
     reply_markup: { inline_keyboard: [[{ text: '🕐 Предложить снова', callback_data: `match_retime:${slot.challenge_id}` }]] }
@@ -632,17 +612,18 @@ ${escapeHtml(formatDate(slot.agreed_date))}${slot.agreed_court ? ` · ${escapeHt
 export async function notifyTimeChange(slot, newTime, proposerId) {
   const to = opponentOf(slot, proposerId);
   if (!to.id) return null;
+  const lang=await nudgeLang(to.id),ru=lang==='ru';
   const by = opponentOf(slot, to.id);
   const end = endTime(newTime, slot.duration_min);
-  return sendMessage(to.id, `<b>🕐 Площадка предлагает другое время</b>
+  return sendMessage(to.id, `<b>🕐 ${ru?"Площадка предлагает другое время":"The venue offers a different time"}</b>
 
-${playerLink(by.name, by.username)} бронирует корт${slot.agreed_court ? ` «${escapeHtml(slot.agreed_court)}»` : ''} и просит перенести:
+${playerLink(by.name, by.username)} ${ru?"бронирует корт":"is booking the court"}${slot.agreed_court ? ` «${escapeHtml(slot.agreed_court)}»` : ''} ${ru?"и просит перенести:":"and proposes:"}
 
-📅 ${escapeHtml(formatDate(slot.agreed_date))}
-Было: <b>${escapeHtml(slot.agreed_time || '—')}</b>
-Станет: <b>${escapeHtml(newTime)}${end ? '–' + escapeHtml(end) : ''}</b>
+📅 ${escapeHtml(formatDate(slot.agreed_date,lang))}
+${ru?"Было:":"Previous:"} <b>${escapeHtml(slot.agreed_time || '—')}</b>
+${ru?"Станет:":"Proposed:"} <b>${escapeHtml(newTime)}${end ? '–' + escapeHtml(end) : ''}</b>
 
-Корт и дата те же — меняется только время.`, {
+${ru?"Корт и дата те же — меняется только время.":"The date and court stay the same; only the time changes."}`, {
     reply_markup: { inline_keyboard: [[
       { text: '✅ Подходит', callback_data: `mt_ok:${slot.challenge_id}:${newTime}` },
       { text: '❌ Не могу', callback_data: `mt_no:${slot.challenge_id}:${newTime}` }
@@ -651,28 +632,20 @@ ${playerLink(by.name, by.username)} бронирует корт${slot.agreed_cou
 }
 
 // Соперник согласился: время новое, матч остаётся активным, календарь пересобираем.
-export async function notifyTimeChangeAccepted(slot, previousTime = '') {
-  const cal = matchCalendarUrl(slot);
-  const confirmed = Boolean(slot.court_confirmed_at);
-  const card = (oppName, oppUsername) => `<b>✅ Время матча изменено</b>
-
-Соперник: ${playerLink(oppName, oppUsername)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}
-${agreedBlock(slot)}${previousTime ? `\n\n<i>Было: ${escapeHtml(previousTime)}</i>` : ''}
-
-${confirmed ? 'Обновите событие в календаре — старое время больше не действует.' : 'Когда площадка подтвердит бронь, нажмите «Корт подтвердил».'}`;
-  const kb = { inline_keyboard: [[{ text: '📅 Обновить в календаре', web_app: { url: cal } }]] };
-  for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
-    if (!side) continue;
-    const opp = opponentOf(slot, side);
-    await sendMessage(side, card(opp.name, opp.username), { reply_markup: kb }).catch(() => {});
-  }
-  await adminMatchCopy(slot, `<b>🕐 Время матча изменено</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}\n${agreedBlock(slot)}${previousTime ? `\n<i>было ${escapeHtml(previousTime)}</i>` : ''}`);
+export async function notifyTimeChangeAccepted(slot,previousTime='') {
+ for(const id of [slot.from_telegram_id,slot.to_telegram_id]) {
+ if(!id)continue;const lang=await nudgeLang(id),ru=lang==='ru',author=String(id)===String(slot.from_telegram_id);
+ const tail=slot.court_confirmed_at?(ru?'Обновите матч в календаре.':'Update the match in your calendar.'):(author?(ru?'После ответа площадки подтвердите бронь корта.':'Confirm the court booking after the venue agrees.'):(ru?'Ожидайте подтверждения брони от автора вызова.':'Wait for the challenge creator to confirm the court booking.'));
+ const rows=[await contactRow(slot,id,lang)];if(slot.court_confirmed_at)rows.push([{text:ru?'📅 Обновить в календаре':'📅 Update calendar',web_app:{url:matchCalendarUrl(slot)}}]);else if(author)rows.push([{text:ru?'📲 Забронировать корт':'📲 Book court',callback_data:'match_book:'+slot.challenge_id}]);
+ await sendMessage(id,(ru?'<b>✅ Время матча изменено</b>':'<b>✅ Match time updated</b>')+'\n\n'+agreedBlock(slot,lang)+(previousTime?'\n'+(ru?'Было: ':'Previous: ')+escapeHtml(previousTime):'')+'\n\n'+tail,{reply_markup:{inline_keyboard:rows.filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
+ }await adminMatchCopy(slot,'<b>🕐 Время изменено</b>\n'+takenSlotText(slot));
 }
 
 // Соперник не может: время остаётся прежним, бронирующий пробует другой слот.
 export async function notifyTimeChangeRejected(slot, rejectedTime, toId) {
   if (!toId) return null;
-  return sendMessage(toId, `<b>❌ Соперник не может в ${escapeHtml(rejectedTime)}</b>
+  const ru=(await nudgeLang(toId))==='ru';
+  return sendMessage(toId,!ru?`<b>❌ Your opponent cannot play at ${escapeHtml(rejectedTime)}</b>\n\nThe match time stays at <b>${escapeHtml(slot.agreed_time||'—')}</b>. Ask the venue for another slot and propose it again.`: `<b>❌ Соперник не может в ${escapeHtml(rejectedTime)}</b>
 
 Время матча осталось прежним: <b>${escapeHtml(slot.agreed_time || '—')}</b>.
 Спросите у площадки другой слот и предложите его снова.`, {
@@ -694,13 +667,14 @@ export async function notifyResultPrompt(slot) {
   const kb = { inline_keyboard: [[{ text: '📝 Внести результат', web_app: { url: `${PUBLIC_URL}/match?result=${encodeURIComponent(slot.challenge_id)}` } }]] };
   for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
     if (!side) continue;
+    const lang=await nudgeLang(side),ru=lang==='ru';
     const opp = opponentOf(slot, side);
-    await sendMessage(side, `<b>🎾 Матч сыгран?</b>
+    await sendMessage(side, `<b>🎾 ${ru?"Матч сыгран?":"Match played?"}</b>
 
-Соперник: ${playerLink(opp.name, opp.username)}
-${resultDateBlock(slot)}
+${ru?"Соперник:":"Opponent:"} ${playerLink(opp.name, opp.username)}
+${resultDateBlock(slot,lang)}
 
-Внесите счёт — соперник подтвердит, и матч попадёт в статистику лиги.`, { reply_markup: kb }).catch(e => console.error('result prompt failed:', e.message));
+${ru?"Внесите счёт — соперник подтвердит, и матч попадёт в статистику лиги.":"Enter the score. Your opponent will confirm it before it is recorded in the league standings."}`, { reply_markup: kb }).catch(e => console.error('result prompt failed:', e.message));
   }
 }
 
@@ -719,14 +693,14 @@ function resultLine(slot) {
   return `<b>${escapeHtml(winner.name || '')}</b>  ${escapeHtml(winnerFirstScore(slot))}  ${escapeHtml(loser.name || '')}`;
 }
 
-function resultBlock(slot) {
-  return `🏆 ${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? '\n<i>чемпионский тай-брейк</i>' : ''}`;
+function resultBlock(slot,lang="ru") {
+  return `🏆 ${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? (lang==='ru'?'\n<i>чемпионский тай-брейк</i>':'\n<i>match tie-break</i>') : ''}`;
 }
 
 // В карточках результата время и корт не показываем: матч уже сыгран,
 // а при ручном вводе их вообще не спрашиваем.
-function resultDateBlock(slot) {
-  return slot.agreed_date ? `📅 ${escapeHtml(formatDate(slot.agreed_date))}` : '';
+function resultDateBlock(slot,lang="ru") {
+  return slot.agreed_date ? `📅 ${escapeHtml(formatDate(slot.agreed_date,lang))}` : '';
 }
 
 // Счёт внесён одной стороной — вторая подтверждает или оспаривает.
@@ -736,17 +710,18 @@ export async function notifyResultForVerification(slot) {
     ? { name: slot.from_name, username: slot.from_username }
     : { name: slot.to_name, username: slot.to_username };
   if (!to.id) return null;
-  const text = `<b>📊 Подтвердите результат матча</b>
+  const lang=await nudgeLang(to.id),ru=lang==='ru';
+  const text = `<b>📊 ${ru?"Подтвердите результат матча":"Confirm the match result"}</b>
 
-${playerLink(by.name, by.username)} внёс счёт:
-${resultDateBlock(slot)}
+${playerLink(by.name, by.username)} ${ru?"внёс счёт:":"submitted the score:"}
+${resultDateBlock(slot,lang)}
 
-${resultBlock(slot)}
+${resultBlock(slot,lang)}
 
-Если всё верно — подтвердите. Если нет — нажмите «Не согласен» и внесите свой вариант.`;
+${ru?"Если всё верно — подтвердите. Если нет — нажмите «Не согласен» и внесите свой вариант.":"Confirm if correct. Otherwise, tap “Disagree” and submit your version."}`;
   const kb = { inline_keyboard: [
-    [{ text: '✅ Подтверждаю', callback_data: `res_ok:${slot.challenge_id}` }],
-    [{ text: '❌ Не согласен', callback_data: `res_no:${slot.challenge_id}` }]
+    [{ text: ru?'✅ Подтверждаю':'✅ Confirm', callback_data: `res_ok:${slot.challenge_id}` }],
+    [{ text: ru?'❌ Не согласен':'❌ Disagree', callback_data: `res_no:${slot.challenge_id}` }]
   ] };
   if (slot.result_photo_file_id) {
     return sendPhoto(to.id, slot.result_photo_file_id, { caption: text, reply_markup: kb })
@@ -788,24 +763,25 @@ ${resultBlock(slot)}
 export async function notifyResultRejected(slot) {
   for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
     if (!side) continue;
-    await sendMessage(side, `<b>⚠️ Результат не засчитан</b>
+    const lang=await nudgeLang(side),ru=lang==='ru';
+    await sendMessage(side, `<b>⚠️ ${ru?"Результат не засчитан":"Result not recorded"}</b>
 
-${resultBlock(slot)}
+${resultBlock(slot,lang)}
 
-Организатор не принял этот матч в зачёт. Свяжитесь с ним, если это ошибка.`).catch(() => {});
+${ru?"Организатор не принял этот матч в зачёт. Свяжитесь с ним, если это ошибка.":"The organiser did not accept this match for the standings. Contact them if this is a mistake."}`).catch(() => {});
   }
 }
 
 export async function notifyResultConfirmed(slot, writeInfo = '') {
-  const text = (opp) => `<b>✅ Результат засчитан</b>
+  const text = (opp,lang) => `<b>✅ ${lang==="ru"?"Результат засчитан":"Result recorded"}</b>
 
-Соперник: ${escapeHtml(opp.name || '')}
-${resultDateBlock(slot)}
+${lang==="ru"?"Соперник:":"Opponent:"} ${escapeHtml(opp.name || '')}
+${resultDateBlock(slot,lang)}
 
-${resultBlock(slot)}`;
+${resultBlock(slot,lang)}`;
   for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
     if (!side) continue;
-    await sendMessage(side, text(opponentOf(slot, side))).catch(() => {});
+    await sendMessage(side, text(opponentOf(slot, side),await nudgeLang(side))).catch(() => {});
   }
   await adminMatchCopy(slot, `<b>✅ Результат матча</b>\n\n${escapeHtml(slot.from_name)} — ${escapeHtml(slot.to_name)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${resultDateBlock(slot)}\n\n${resultBlock(slot)}${writeInfo ? `\n\n<i>${escapeHtml(writeInfo)}</i>` : ''}`, { photo: slot.result_photo_file_id || '' });
 }
@@ -813,13 +789,14 @@ ${resultBlock(slot)}`;
 export async function notifyResultDisputed(slot) {
   const to = String(slot.result_by || '');
   if (!to) return null;
+  const lang=await nudgeLang(to),ru=lang==='ru';
   const opp = opponentOf(slot, to);
-  return sendMessage(to, `<b>❌ Соперник не согласен со счётом</b>
+  return sendMessage(to, `<b>❌ ${ru?"Соперник не согласен со счётом":"Your opponent disputes the score"}</b>
 
-${escapeHtml(opp.name || 'Соперник')} оспорил результат:
-${resultBlock(slot)}
+${escapeHtml(opp.name || 'Соперник')} ${ru?"оспорил результат:":"disputed the result:"}
+${resultBlock(slot,lang)}
 
-Свяжитесь и внесите согласованный счёт заново.`, {
+${ru?"Свяжитесь и внесите согласованный счёт заново.":"Contact each other and resubmit the agreed score."}`, {
     reply_markup: { inline_keyboard: [[{ text: '📝 Внести заново', web_app: { url: `${PUBLIC_URL}/match?result=${encodeURIComponent(slot.challenge_id)}` } }]] }
   }).catch(() => {});
 }
@@ -1015,3 +992,11 @@ export async function sendCourtRequests(chatId, lang, form, courtsList) {
 }
 
 export { findSlot };
+
+export async function matchContact(slot,viewerId) {
+ const opp=opponentOf(slot,viewerId);if(!opp.id)return null;
+ const applicant=await findApplicantByTelegramId(opp.id).catch(()=>null);
+ const username=String(applicant?.telegram_username || applicant?.username || opp.username || "").replace(/^@/,"");
+ return {id:opp.id,name:opp.name,username,url:username?`https://t.me/${username}`:`tg://user?id=${encodeURIComponent(opp.id)}`};
+}
+async function contactRow(slot,id,lang) {const c=await matchContact(slot,id);return c?[{text:lang==="ru"?"💬 Написать":"💬 Message",url:c.url}]:[];}

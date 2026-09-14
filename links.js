@@ -14,6 +14,7 @@ import { getMe } from './telegram.js';
 // kind:'webapp' — открывает мини-приложение по пути path.
 // kind:'callback' — открывает экран внутри бота (то же, что нажать кнопку меню).
 export const DESTINATIONS = [
+  {code:'events',aliases:['события','событие'],ru:'📆 События',en:'📆 Events',kind:'webapp',path:'/league?tab=events'},
   { code:'pay',          aliases:['оплата','оплатить','взнос','payment'], ru:'💳 Оплатить взнос',      en:'💳 Pay the fee',        kind:'callback', action:'payment_entry' },
   { code:'apply',        aliases:['заявка','записаться','join'],          ru:'🎾 Заявка на сезон',     en:'🎾 Join the season',    kind:'webapp',   path:'/apply?mode=event' },
   { code:'avatar',       aliases:['аватар','аватарка','селфи','photo'],     ru:'🖼 Сделать аватарку',    en:'🖼 Create my avatar',   kind:'webapp',   path:'/league?player=me' },
@@ -26,7 +27,7 @@ export const DESTINATIONS = [
   { code:'divisions',    aliases:['дивизионы','дивизион','division'],     ru:'🏆 Дивизионы',           en:'🏆 Divisions',          kind:'webapp',   path:'/league?tab=div' },
   { code:'race',         aliases:['гонка','рейтинг','ranking'],           ru:'⭐ Годовая гонка',       en:'⭐ Yearly Race',        kind:'webapp',   path:'/league?tab=race' },
   { code:'players',      aliases:['игроки','список'],                     ru:'👥 Игроки лиги',         en:'👥 League players',     kind:'webapp',   path:'/league?tab=players' },
-  { code:'schedule',     aliases:['расписание','календарь','events'],     ru:'📆 Матчи лиги',          en:'📆 League matches',     kind:'webapp',   path:'/league?tab=matches' },
+  { code:'schedule',     aliases:['расписание','календарь'],     ru:'📆 Матчи лиги',          en:'📆 League matches',     kind:'webapp',   path:'/league?tab=matches' },
   { code:'participants', aliases:['состав','участники'],                  ru:'👥 Состав сезона',       en:'👥 Season line-up',     kind:'webapp',   path:'/participants' },
   { code:'rules',        aliases:['правила','как','how'],                 ru:'📖 Как работает лига',   en:'📖 How the league works',kind:'callback',action:'text:how_league_works' },
   { code:'contact',      aliases:['связаться','вопрос','support'],        ru:'💬 Связаться с нами',    en:'💬 Contact us',         kind:'callback', action:'contact' },
@@ -65,6 +66,12 @@ const TAG = /\{(!)?\s*([^{}|]+?)\s*(?:\|\s*([^{}]*?)\s*)?\}/g;
 // и для отправки, но НЕ решает, на каком языке показывать — это делается
 // отдельно для каждого получателя.
 export function parseTemplate(raw = '') {
+  const source=String(raw).trimStart();
+  if(/^\[(RU|EN)\]\s*\n/i.test(source)){
+    const variants={};const pattern=/(?:^|\n)\[(RU|EN)\][ \t]*(?:\r?\n|$)([\s\S]*?)(?=\r?\n\[(?:RU|EN)\][ \t]*(?:\r?\n|$)|$)/gi;
+    for(const m of source.matchAll(pattern))variants[m[1].toLowerCase()]=parseTemplate(m[2]);
+    return {variants,text:source,buttons:[],inline:[],unknown:[],hasLinks:true};
+  }
   const buttons = [];
   const inline = [];
   const unknown = [];
@@ -89,6 +96,7 @@ export function parseTemplate(raw = '') {
 
 // Текст под конкретного получателя: подставляем названия разделов на его языке.
 export function renderText(parsed, lang, username = '') {
+  if(parsed.variants)return renderText(broadcastVariant(parsed,lang),lang,username);
   return parsed.text.replace(/«§(\d+)§»/g, (_, i) => {
     const item = parsed.inline[Number(i)];
     if (!item) return '';
@@ -103,6 +111,7 @@ export function renderText(parsed, lang, username = '') {
 // Кнопки под конкретного получателя. По одной в ряд: названия длинные,
 // в два столбца обрезаются на узких экранах.
 export function renderButtons(parsed, lang) {
+  if(parsed.variants)return renderButtons(broadcastVariant(parsed,lang),lang);
   if (!parsed.buttons.length) return null;
   const rows = parsed.buttons.map(({ dest, custom }) => {
     const text = custom || destinationLabel(dest, lang);
@@ -132,4 +141,30 @@ export function linksCheatSheet() {
 Название на кнопке подставляется на языке получателя.
 
 ${lines.join('\n')}`;
+}
+
+export function broadcastVariant(parsed,lang){
+ const key=lang==='ru'?'ru':'en';if(!parsed.variants)return parsed;
+ const variant=parsed.variants[key];if(!variant||!variant.text.trim())throw Error('Missing broadcast text: '+key.toUpperCase());
+ return variant;
+}
+export function validateBroadcastLanguages(parsed,contacts){
+ const langs=new Set(contacts.map(c=>String(c.language||'').toLowerCase()==='ru'?'ru':'en'));
+ for(const lang of langs){
+  if(parsed.variants){broadcastVariant(parsed,lang);continue;}
+  // Legacy messages have no language field: do not send their single-language
+  // text to a mixed audience. Media with no caption carries no template text.
+  if(!parsed.text.trim())continue;
+  const detected=/[а-яё]/i.test(parsed.text)?'ru':'en';
+  if(lang!==detected)throw Error('Missing broadcast text: '+lang.toUpperCase());
+ }
+}
+export function panelBroadcastText(body={}){
+ if(Object.hasOwn(body,'message_ru')||Object.hasOwn(body,'message_en'))return '[RU]\n'+String(body.message_ru||'').trim()+'\n[EN]\n'+String(body.message_en||'').trim();
+ return String(body.message||'').trim();
+}
+
+export function broadcastPreview(parsed,username=''){
+ if(!parsed.variants)return renderText(parsed,'ru',username);
+ return ['ru','en'].filter(lang=>parsed.variants[lang]?.text.trim()).map(lang=>'<b>'+lang.toUpperCase()+'</b>\n'+renderText(parsed,lang,username)).join('\n\n');
 }

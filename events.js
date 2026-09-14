@@ -26,7 +26,7 @@ export const EVENT_SHEETS = {
 
 export const REGISTRY_HEADERS = [
   'event_id', 'status', 'title_ru', 'title_en', 'description_ru', 'description_en',
-  'date', 'time', 'place', 'place_url', 'price_thb', 'guest_price_thb', 'capacity', 'signup_deadline',
+  'date', 'time', 'end_time', 'place', 'place_url', 'price_thb', 'guest_price_thb', 'capacity', 'signup_deadline',
   'payment_required', 'guests_allowed', 'max_guests', 'refund_hours',
   // Кому уходит карточка: all — всем в боте, active — только активным игрокам,
   // personal — поимённо тем, кто перечислен в invited_ids. Плюс необязательный
@@ -78,7 +78,7 @@ function mapEvent(r) {
     status: safe(r.status).toLowerCase() || 'draft',
     title_ru: safe(r.title_ru), title_en: safe(r.title_en || r.title_ru),
     description_ru: safe(r.description_ru), description_en: safe(r.description_en || r.description_ru),
-    date: safe(r.date), time: safe(r.time), place: safe(r.place), place_url: safe(r.place_url),
+    date: safe(r.date), time: safe(r.time), end_time:safe(r.end_time), place: safe(r.place), place_url: safe(r.place_url),
     price_thb: num(r.price_thb),
     guest_price_thb: String(r.guest_price_thb ?? '').trim() === '' ? null : num(r.guest_price_thb),
     capacity: num(r.capacity),
@@ -121,7 +121,7 @@ export async function createEvent(data, createdBy = '') {
     status: 'draft',
     title_ru: safe(data.title_ru), title_en: safe(data.title_en),
     description_ru: safe(data.description_ru), description_en: safe(data.description_en),
-    date: safe(data.date), time: safe(data.time), place: safe(data.place), place_url: safe(data.place_url),
+    date: safe(data.date), time: safe(data.time), end_time:safe(data.end_time), place: safe(data.place), place_url: safe(data.place_url),
     price_thb: data.price_thb ?? '', guest_price_thb: data.guest_price_thb ?? '',
     capacity: data.capacity ?? '', signup_deadline: safe(data.signup_deadline),
     payment_required: data.payment_required ? 'TRUE' : 'FALSE',
@@ -348,11 +348,21 @@ async function refreshBalanceRow(telegramId, name, balance) {
 const PHUKET_OFFSET_H = 7;
 
 export function eventStartMs(event) {
-  const [d, m, y] = String(event?.date || '').split(/[.\-/]/).map(Number);
-  if (!d || !m) return null;
-  const [hh, mm] = String(event?.time || '').split(':').map(Number);
-  const year = y > 2000 ? y : new Date().getFullYear();
-  return Date.UTC(year, m - 1, d, (hh || 0) - PHUKET_OFFSET_H, mm || 0);
+  const parts=String(event?.date||'').split(/[.\-/]/).map(Number);
+  let [d,m,y]=parts;if(d>2000)[y,m,d]=parts;
+  if(!d||!m)return null;
+  const [hh,mm]=String(event?.time||'').split(':').map(Number);
+  return Date.UTC(y>2000?y:new Date().getFullYear(),m-1,d,(hh||0)-PHUKET_OFFSET_H,mm||0);
+}
+export function eventEndMs(event) {
+  const start=eventStartMs(event);if(start===null)return null;
+  if(!/^\d{2}:\d{2}$/.test(event.end_time||''))return start;
+  let end=eventStartMs({...event,time:event.end_time});
+  if(end<start)end+=86400000;
+  return end;
+}
+export function eventHasEnded(event,now=Date.now()) {
+  const end=eventEndMs(event);return event?.status==='finished'||(end!==null&&now>=end);
 }
 
 export function hoursUntil(event, now = Date.now()) {
