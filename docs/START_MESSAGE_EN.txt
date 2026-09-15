@@ -1,6 +1,6 @@
 🎾 Getting started with PTF
 
-League is your playing hub: division and group standings, results, detailed statistics, the match matrix, yearly ranking and player profiles. Tap a name to see their profile and match history. In Season 2, C and W each have two separate groups; cross-group matches will be announced later.
+League is your playing hub: division and group standings, results, detailed statistics, the match matrix, yearly ranking and player profiles. Tap a name to see their profile and match history. Divisions with two groups show separate standings. Cross-group matches count toward each player’s group total and appear in the same section. The organiser confirms the playoff pairings.
 
 🎯 Challenge a player
 Open Matches → New challenge, or tap a name under Still to play. Choose an opponent to see their available dates first, then pick a slot, time and court. Nothing suitable? Tap Propose your own slot. Challenges and replies arrive privately in each recipient’s language.

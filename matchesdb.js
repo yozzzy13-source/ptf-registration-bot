@@ -25,7 +25,7 @@ const SLOT_HEADERS = [
   'chat_id', 'message_thread_id', 'message_id',
   'created_at', 'responded_at', 'cancelled_at',
   'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
-  'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
+  'result_kind', 'result_points_from', 'result_points_to', 'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
   'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge',
   'court_pending_at', 'court_nudge', 'score_nudge'
 ];
@@ -948,6 +948,9 @@ export async function submitResult(challengeId, actor = {}, result = {}) {
       result_winner: String(result.winner || ''),
       result_score: String(result.score || ''),
       result_set3_mode: String(result.set3Mode || ''),
+      result_kind: String(result.kind || 'played'),
+      result_points_from: result.pointsFrom === '' || result.pointsFrom === undefined ? '' : String(result.pointsFrom),
+      result_points_to: result.pointsTo === '' || result.pointsTo === undefined ? '' : String(result.pointsTo),
       result_photo_file_id: String(result.photoFileId || slot.result_photo_file_id || ''),
       result_note: String(result.note || ''),
       result_submitted_at: nowISO(),
@@ -957,6 +960,30 @@ export async function submitResult(challengeId, actor = {}, result = {}) {
     const merged = { ...slot, ...patch };
     await logMatchEvent('result_submitted', merged, actor, `${patch.result_score} · победил ${patch.result_winner}`);
     return { ok: true, slot: merged };
+  });
+}
+
+export async function submitResultByAdmin(challengeId, actor = {}, result = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok:false, reason:'not_found' };
+    if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok:false, reason:'not_accepted', slot };
+    const submitter = [String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(String(result.submitter))
+      ? String(result.submitter) : String(slot.from_telegram_id);
+    const patch = {
+      result_status:'pending', result_by:submitter,
+      result_winner:String(result.winner || ''), result_score:String(result.score || ''),
+      result_set3_mode:String(result.set3Mode || ''), result_kind:String(result.kind || 'played'),
+      result_points_from:result.pointsFrom === '' || result.pointsFrom === undefined ? '' : String(result.pointsFrom),
+      result_points_to:result.pointsTo === '' || result.pointsTo === undefined ? '' : String(result.pointsTo),
+      result_photo_file_id:String(result.photoFileId || slot.result_photo_file_id || ''),
+      result_note:String(result.note || ''), result_submitted_at:nowISO(),
+      result_confirmed_at:'', result_nudge:'', score_nudge:''
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged={...slot,...patch};
+    await logMatchEvent('result_submitted_admin', merged, actor, patch.result_score + ' · ' + patch.result_kind);
+    return {ok:true,slot:merged};
   });
 }
 

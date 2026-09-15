@@ -707,12 +707,16 @@ function resultSides(slot) {
 
 // Одна строка: победитель, счёт, проигравший — как это выглядело в старом боте.
 function resultLine(slot) {
+  if (String(slot.result_kind || '') === 'technical' && !slot.result_winner) {
+    return `<b>${escapeHtml(slot.from_name || '')}</b>  L/L  <b>${escapeHtml(slot.to_name || '')}</b>`;
+  }
   const { winner, loser } = resultSides(slot);
   return `<b>${escapeHtml(winner.name || '')}</b>  ${escapeHtml(winnerFirstScore(slot))}  ${escapeHtml(loser.name || '')}`;
 }
 
 function resultBlock(slot,lang="ru") {
-  return `🏆 ${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? (lang==='ru'?'\n<i>чемпионский тай-брейк</i>':'\n<i>match tie-break</i>') : ''}`;
+  const note=String(slot.result_note||'').trim();
+  return `🏆 ${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? (lang==='ru'?'\n<i>чемпионский тай-брейк</i>':'\n<i>match tie-break</i>') : ''}${note?`\n💬 <i>${escapeHtml(note)}</i>`:''}`;
 }
 
 // В карточках результата время и корт не показываем: матч уже сыгран,
@@ -836,8 +840,10 @@ async function resultsChat() {
 export function winnerFirstScore(slot) {
   const raw = String(slot.result_score || '');
   if (!raw) return '';
-  if (String(slot.result_winner) === String(slot.from_telegram_id)) return raw;
-  return formatScore(reverseScore(cellToScore(raw)));
+  if (String(slot.result_kind || '') === 'technical') return slot.result_winner ? 'W/L' : 'L/L';
+  const retired=/\bRET\b/i.test(raw);
+  const score=String(slot.result_winner) === String(slot.from_telegram_id) ? formatScore(cellToScore(raw)) : formatScore(reverseScore(cellToScore(raw)));
+  return score+(retired?' RET':'');
 }
 
 // Первое имя — всегда победитель, счёт развёрнут в его сторону.
@@ -858,7 +864,7 @@ async function feedCard(slot, lang = 'ru') {
 
   const text = `🎾 <b>${ru ? 'Результат матча' : 'Match Result'}</b>${subtitle ? `\n${escapeHtml(subtitle)}` : ''}
 
-<b>${escapeHtml(winner.name || '')}</b>  <b>${escapeHtml(winnerFirstScore(slot))}</b>  ${escapeHtml(loser.name || '')}${slot.result_set3_mode === 'Match TB' ? `\n<i>${ru ? 'чемпионский тай-брейк' : 'match tie-break'}</i>` : ''}`;
+${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? `\n<i>${ru ? 'чемпионский тай-брейк' : 'match tie-break'}</i>` : ''}${slot.result_note?`\n💬 <i>${escapeHtml(slot.result_note)}</i>`:''}`;
 
   const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || (ru ? 'игрок' : 'player');
   const playerLink = (name) => `${PUBLIC_URL}/league?tab=players&player_name=${encodeURIComponent(String(name || ''))}`;

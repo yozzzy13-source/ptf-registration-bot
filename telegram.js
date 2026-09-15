@@ -91,6 +91,29 @@ export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', 
   if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
   return json.result;
 }
+export async function sendPhotoAlbumBuffers(chat_id, items = []) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  if (!Array.isArray(items) || items.length < 2 || items.length > 10) throw new Error('sendMediaGroup: нужно от 2 до 10 фотографий');
+  const form = new FormData();
+  form.append('chat_id', String(chat_id));
+  const media = [];
+  items.forEach((item, index) => {
+    const buffer = item?.buffer;
+    if (!buffer?.length) throw new Error('sendMediaGroup: пустой файл');
+    const mimeType = String(item.mimeType || 'image/jpeg');
+    const ext = mimeType.split('/')[1] || 'jpg';
+    const bytes = new Uint8Array(buffer.length);
+    bytes.set(buffer);
+    const field = 'photo' + index;
+    media.push({ type:'photo', media:'attach://' + field });
+    form.append(field, new Blob([bytes], { type:mimeType }), field + '.' + ext);
+  });
+  form.append('media', JSON.stringify(media));
+  const res = await globalThis.fetch(API + '/sendMediaGroup', { method:'POST', body:form });
+  const json = await res.json().catch(() => ({}));
+  if (!json.ok) throw new Error('sendMediaGroup: ' + JSON.stringify(json));
+  return json.result;
+}
 export const getMe = () => call('getMe', {});
 export const sendPoll = (chat_id, question, options, opts={}) => call('sendPoll', { chat_id, question, options, ...opts });
 

@@ -1,4 +1,12 @@
 window.ADMIN_EN={
+  "Фотографии — до 10":"Photos — up to 10",
+  "Сначала получатель увидит текст, затем фотографию или альбом.":"The recipient sees the text first, then the photo or album.",
+  "Добавить кнопки к сообщению":"Add buttons to the message",
+  "Разделы бота — нажми, чтобы вставить в текст":"Bot sections — tap to insert",
+  "Кнопка под сообщением":"Button below the message",
+  "Не удалось прочитать фотографию":"Could not read the photo",
+  "Не удалось открыть фотографию":"Could not open the photo",
+  "Фотографии слишком большие для одной рассылки":"The photos are too large for one broadcast",
  "Текст RU":"RU text","Текст EN":"EN text","Предпросмотр RU":"Preview RU","Предпросмотр EN":"Preview EN","Для смешанной аудитории заполните оба языка. Каждый игрок получит только свой вариант.":"Fill in both languages for a mixed audience. Each player receives only their language.",
   "Окончание (необязательно)":"End time (optional)",
   "Прошло":"Past","📆 События":"📆 Events",

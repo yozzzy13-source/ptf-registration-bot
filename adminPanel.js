@@ -1,7 +1,7 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
 import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck } from './sheets.js';
-import { sendMessage, sendPhotoBuffer } from './telegram.js';
+import { sendMessage, sendPhotoBuffer, sendPhotoAlbumBuffers } from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 import { panelBroadcastText, broadcastVariant, validateBroadcastLanguages, parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
 
@@ -20,6 +20,16 @@ function adminFromInitData(initData='') {
 }
 
 function norm(v) { return String(v || '').trim().toLowerCase(); }
+function panelPhotos(value) {
+  const list = Array.isArray(value) ? value.slice(0, 10) : [];
+  return list.map((data, index) => {
+    const m = String(data || '').match(/^data:(image\/(?:jpeg|jpg|png));base64,([A-Za-z0-9+/=]+)$/i);
+    if (!m) throw new Error(`Фото ${index + 1}: поддерживаются JPG и PNG`);
+    const buffer = Buffer.from(m[2], 'base64');
+    if (!buffer.length || buffer.length > 7 * 1024 * 1024) throw new Error(`Фото ${index + 1}: файл слишком большой`);
+    return { buffer, mimeType: m[1].toLowerCase().replace('image/jpg','image/jpeg') };
+  });
+}
 function publicContact(row) {
   return {
     row: row._rowNumber,
@@ -227,6 +237,7 @@ export function registerAdminRoutes(app) {
       if (!auth.ok) return res.status(403).json(auth);
       const message = panelBroadcastText(req.body);
       if (!message) return res.status(400).json({ ok:false, error:'Message is empty' });
+      const photos = panelPhotos(req.body.photos);
       const button = String(req.body.button || '').trim();
       // Рассылка по событию идёт своим списком: записанные на него, а не срез
       // по фильтрам игроков. Одно событие за раз — на второе будет отдельная.
@@ -264,7 +275,10 @@ export function registerAdminRoutes(app) {
           const fromPicker = broadcastButtonMarkup(button, lang);
           const rows = [...(fromCodes?.inline_keyboard || []), ...(fromPicker?.inline_keyboard || [])];
           const markup = rows.length ? { inline_keyboard: rows } : null;
+          // Сначала всегда идёт локализованный текст с кнопками, затем фото.
           await sendMessage(c.telegram_id, body, markup ? { reply_markup: markup } : {});
+          if (photos.length === 1) await sendPhotoBuffer(c.telegram_id, photos[0].buffer, photos[0].mimeType);
+          else if (photos.length > 1) await sendPhotoAlbumBuffers(c.telegram_id, photos);
           await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:segment });
           sent++;
         } catch (e) {
@@ -272,7 +286,7 @@ export function registerAdminRoutes(app) {
           failed++;
         }
       }
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:segment, language:'mixed', message_text:message, media_type: button ? `text+button:${button}` : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:segment, language:'mixed', message_text:message, media_type: photos.length > 1 ? `album:${photos.length}` : photos.length === 1 ? 'photo' : (button ? `text+button:${button}` : 'text'), recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });

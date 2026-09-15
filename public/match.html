@@ -168,7 +168,7 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
+var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
@@ -194,7 +194,7 @@ var T={
       noTelegram:'У этого игрока пока нет Telegram в базе:',
       you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.',
       tRes:'Результат',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
-      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',
+      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',resultType:'Тип результата',playedType:'Обычный',retiredType:'RET · матч не доигран',technicalType:'W/L · технический',bothTechnical:'Обоим',pointsFor:'Очки в таблицу',editResult:'Изменить результат',
       set3mode:'Решающий сет',full:'Полный сет',mtb:'Чемпионский тай-брейк',noSet3:'Не игрался',
       winnerFirst:'Сначала отметьте победителя — счёт пишется от него.',
       scoreOrder:'Первым идёт счёт победителя.',
@@ -236,7 +236,7 @@ var T={
       noTelegram:'This player has no Telegram on file yet:',
       you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.',
       tRes:'Result',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
-      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',
+      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',resultType:'Result type',playedType:'Played',retiredType:'RET · retired',technicalType:'W/L · technical',bothTechnical:'Both',pointsFor:'Standings points',editResult:'Edit result',
       set3mode:'Deciding set',full:'Full set',mtb:'Match tie-break',noSet3:'Not played',
       winnerFirst:'Pick the winner first — the score is written from their side.',
       scoreOrder:'The winner’s score comes first.',
@@ -801,7 +801,7 @@ function renderRes(){
   }
   if(!resultTasks.length)h+='<div class="empty">'+esc(X.emptyRes)+'</div>';
   else h+=resultTasks.map(function(s){
-    var opp=String(s.from_telegram_id)===String(me&&me.id)?{n:s.to_name}:{n:s.from_name};
+    var opp=isAdmin?{n:(s.from_name||'')+' — '+(s.to_name||'')}:(String(s.from_telegram_id)===String(me&&me.id)?{n:s.to_name}:{n:s.from_name});
     var pending=s.result_status==='pending';
     var mine=String(s.result_by)===String(me&&me.id);
     return '<div class="slot'+(pending?' agreed':'')+'">'
@@ -818,99 +818,101 @@ function renderRes(){
 }
 function openResult(id){resultSlotId=id;renderRes()}
 function backToRes(){resultSlotId='';resultMode='';resPhoto='';renderRes()}
+function resultKindPicker(prefix){
+  return '<label>'+esc(X.resultType)+'</label><div class="seg resultKind"><div class="s on" data-k="played" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.playedType)+'</div><div class="s" data-k="retired" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.retiredType)+'</div>'+(isAdmin?'<div class="s" data-k="technical" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.technicalType)+'</div>':'')+'</div>';
+}
+function pointsEditor(prefix,p1,p2){
+  if(!isAdmin)return '';
+  var opts=[0,1,3].map(function(v){return '<option value="'+v+'">'+v+'</option>'}).join('');
+  return '<div id="'+prefix+'Points"><label>'+esc(X.pointsFor)+'</label><div class="two"><div><span class="hint">'+esc(p1.n||'')+'</span><select id="'+prefix+'Pts1">'+opts+'</select></div><div><span class="hint">'+esc(p2.n||'')+'</span><select id="'+prefix+'Pts2">'+opts+'</select></div></div></div>';
+}
+function pickResultKind(node,prefix){
+  resultKind=node.dataset.k||'played';
+  [].forEach.call(node.parentNode.querySelectorAll('.s'),function(x){x.classList.toggle('on',x===node)});
+  var score=$(prefix+'ScoreBox');if(score)score.classList.toggle('hidden',resultKind==='technical');
+  var both=$(prefix+'Both');if(both)both.classList.toggle('hidden',resultKind!=='technical');
+  if(resultKind!=='technical'&&selWinner==='both'){selWinner='';if(both)both.classList.remove('on')}
+  syncPointDefaults(prefix);
+}
+function syncPointDefaults(prefix){
+  if(!isAdmin)return;
+  var p1=$(prefix+'Pts1'),p2=$(prefix+'Pts2');if(!p1||!p2)return;
+  if(selWinner==='both'){p1.value='0';p2.value='0';return}
+  var first=$(prefix+'WinSeg')&&$(prefix+'WinSeg').querySelector('.s:first-child');
+  var firstId=first&&first.dataset.w;
+  var firstWon=selWinner&&selWinner===firstId;
+  p1.value=firstWon?'3':(resultKind==='retired'?'1':'0');
+  p2.value=firstWon?(resultKind==='retired'?'1':'0'):'3';
+}
 function renderResultForm(s){
-  var meId=String(me&&me.id);
-  var oppIsFrom=String(s.from_telegram_id)!==meId;
-  var opp=oppIsFrom?{id:s.from_telegram_id,n:s.from_name}:{id:s.to_telegram_id,n:s.to_name};
-  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.resTitle)+'</h3>'
-    +'<div class="hint">'+esc(me.name||'')+' '+esc(X.vs)+' '+esc(opp.n||'')+' · '+esc(fmtDay(s.agreed_date))+'</div>'
-    +'<label>'+esc(X.winner)+'</label>'
-    +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
-    +'<div class="seg"><div class="s" data-w="'+esc(meId)+'" data-n="'+esc(me.name||'')+'" onclick="pickWinner(this,\'r\')">'+esc(me.name||'')+'</div>'
-    +'<div class="s" data-w="'+esc(opp.id)+'" data-n="'+esc(opp.n||'')+'" onclick="pickWinner(this,\'r\')">'+esc(opp.n||'')+'</div></div>'
-    +renderScoreEditor('r')
-    +photoField('rPhoto')
-    +'<label>'+esc(X.note)+'</label><textarea id="rNote"></textarea>'
-    +'<button class="primary" onclick="submitResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.sendRes)+'</button>'
-    +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
-    +'<div id="rRes" class="res"></div></div>';
-  selWinner='';bindScore('r');setScoreNames('r','','');
+  var p1={id:String(s.from_telegram_id||''),n:s.from_name||''},p2={id:String(s.to_telegram_id||''),n:s.to_name||''};
+  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(s.result_status==='confirmed'&&isAdmin?X.editResult:X.resTitle)+'</h3>'
+    +'<div class="hint">'+esc(p1.n)+' '+esc(X.vs)+' '+esc(p2.n)+' · '+esc(fmtDay(s.agreed_date))+'</div>'
+    +resultKindPicker('r')+'<label>'+esc(X.winner)+'</label><div class="hint">'+esc(X.winnerFirst)+'</div>'
+    +'<div class="seg" id="rWinSeg"><div class="s" data-w="'+esc(p1.id)+'" data-n="'+esc(p1.n)+'" onclick="pickWinner(this,\'r\')">'+esc(p1.n)+'</div>'
+    +'<div class="s" data-w="'+esc(p2.id)+'" data-n="'+esc(p2.n)+'" onclick="pickWinner(this,\'r\')">'+esc(p2.n)+'</div>'
+    +(isAdmin?'<div class="s hidden" id="rBoth" data-w="both" data-n="'+esc(X.bothTechnical)+'" onclick="pickWinner(this,\'r\')">'+esc(X.bothTechnical)+'</div>':'')+'</div>'
+    +'<div id="rScoreBox">'+renderScoreEditor('r')+'</div>'+pointsEditor('r',p1,p2)+photoField('rPhoto')
+    +'<label>'+esc(X.note)+'</label><textarea id="rNote">'+esc(s.result_note||'')+'</textarea>'
+    +'<button class="primary" onclick="submitResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.sendRes)+'</button><button onclick="backToRes()">'+esc(X.back)+'</button><div id="rRes" class="res"></div></div>';
+  resultKind='played';selWinner='';bindScore('r');setScoreNames('r','','');
 }
 var selWinner='';
+var resultKind='played';
 // Победитель выбирается ДО счёта: от него зависит, чьё имя стоит слева.
 function pickWinner(node,prefix){
-  var box=node.parentNode;
-  var loser='';
-  Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){
-    if(s!==node){s.classList.remove('on');loser=s.dataset.n||''}
-  });
-  node.classList.add('on');
-  selWinner=node.dataset.w;
-  setScoreNames(prefix||'r',node.dataset.n||'',loser);
-  syncScore(prefix||'r');
+  var box=node.parentNode,loser='';
+  Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){if(s!==node){s.classList.remove('on');if(s.dataset.w!=='both')loser=s.dataset.n||''}});
+  node.classList.add('on');selWinner=node.dataset.w;
+  if(selWinner!=='both')setScoreNames(prefix||'r',node.dataset.n||'',loser);
+  syncScore(prefix||'r');syncPointDefaults(prefix||'r');
 }
 function submitResult(id,btn){
-  var res=$('rRes');res.className='res';
-  var sets=collectSets('r');
+  var res=$('rRes');res.className='res';var sets=collectSets('r');
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,t:linkToken,challenge_id:id,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim()
-  })}).then(function(r){return r.json()}).then(function(j){
-    btn.disabled=false;
-    if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;
-    selWinner='';resPhoto='';resultSlotId='';load(true);
-  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+    initData:initData,t:linkToken,challenge_id:id,kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim(),
+    points_from:$('rPts1')?$('rPts1').value:'',points_to:$('rPts2')?$('rPts2').value:''
+  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;selWinner='';resPhoto='';resultSlotId='';load(true)})
+  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 function openManual(){
-  var today=new Date();
-  var opts=opponents.map(function(o){return '<option value="'+esc(o.telegram_id)+'">'+esc(o.name)+'</option>'}).join('');
-  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
-    +'<div class="hint">'+esc(X.manualHint)+'</div>'
-    +'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>'
-    +'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
-    // Корт можно выбрать из известных или вписать свой — площадок больше, чем в списке.
-    +'<label>'+esc(X.pickCourt)+'</label>'
-    +'<input id="mCourt" list="mCourtList" placeholder="'+esc(X.courtManual)+'">'
-    +'<datalist id="mCourtList">'+courts.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
-    +'<label>'+esc(X.winner)+'</label>'
-    +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
-    +'<div class="seg" id="mWinSeg"></div>'
-    +renderScoreEditor('m')
-    +photoField('mPhoto')
-    +'<button class="primary" onclick="submitManual(this)">'+esc(X.sendRes)+'</button>'
-    +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
-    +'<div id="mResBox" class="res"></div></div>';
-  var oppSel=$('mOpp');
-  if(oppSel)oppSel.onchange=renderManualWinner;
-  renderManualWinner();
+  var today=new Date(),list=isAdmin?adminPlayers:opponents;
+  var opts=list.map(function(o){return '<option value="'+esc(o.telegram_id)+'">'+esc(o.name)+(o.division?' · '+esc(o.division)+(o.group?' / '+esc(o.group):''):'')+'</option>'}).join('');
+  var playersHtml=isAdmin?'<label>'+esc(L?'Первый игрок':'First player')+'</label><select id="mFrom">'+opts+'</select><label>'+esc(L?'Второй игрок':'Second player')+'</label><select id="mOpp">'+opts+'</select>':'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>';
+  var roundHtml=isAdmin?'<label>'+esc(L?'Этап матча':'Match stage')+'</label><select id="mRound"><option value="">'+esc(L?'Регулярный матч':'Regular match')+'</option><option value="QF">'+esc(L?'Четвертьфинал':'Quarterfinal')+'</option><option value="SF">'+esc(L?'Полуфинал':'Semifinal')+'</option><option value="Final">'+esc(L?'Финал':'Final')+'</option><option value="3rd">'+esc(L?'Матч за 3-е место':'Third-place match')+'</option></select>':'';
+  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3><div class="hint">'+esc(X.manualHint)+'</div>'+playersHtml
+    +roundHtml+'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
+    +'<label>'+esc(X.pickCourt)+'</label><input id="mCourt" list="mCourtList" placeholder="'+esc(X.courtManual)+'"><datalist id="mCourtList">'+courts.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
+    +resultKindPicker('m')+'<label>'+esc(X.winner)+'</label><div class="hint">'+esc(X.winnerFirst)+'</div><div class="seg" id="mWinSeg"></div>'
+    +'<div id="mScoreBox">'+renderScoreEditor('m')+'</div><div id="mPointsHost"></div>'+photoField('mPhoto')
+    +'<label>'+esc(X.note)+'</label><textarea id="mNote"></textarea><button class="primary" onclick="submitManual(this)">'+esc(X.sendRes)+'</button><button onclick="backToRes()">'+esc(X.back)+'</button><div id="mResBox" class="res"></div></div>';
+  if($('mFrom'))$('mFrom').onchange=renderManualWinner;if($('mOpp'))$('mOpp').onchange=renderManualWinner;
+  resultKind='played';renderManualWinner();
 }
-// Кнопки победителя для ручного матча перерисовываются при смене соперника.
+function manualPerson(id){return (isAdmin?adminPlayers:opponents).filter(function(p){return String(p.telegram_id)===String(id)})[0]||{}}
 function renderManualWinner(){
   var seg=$('mWinSeg');if(!seg)return;
-  var oppSel=$('mOpp');
-  var oppName='';
-  if(oppSel&&oppSel.selectedIndex>=0&&oppSel.options[oppSel.selectedIndex])oppName=oppSel.options[oppSel.selectedIndex].text;
-  var meId=String(me&&me.id||'');
-  seg.innerHTML='<div class="s" data-w="'+esc(meId)+'" data-n="'+esc(me&&me.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(me&&me.name||'')+'</div>'
-    +'<div class="s" data-w="'+esc(oppSel?oppSel.value:'')+'" data-n="'+esc(oppName)+'" onclick="pickWinner(this,\'m\')">'+esc(oppName||'—')+'</div>';
-  selWinner='';setScoreNames('m','','');bindScore('m');
+  var from=isAdmin?manualPerson($('mFrom').value):{telegram_id:String(me&&me.id||''),name:me&&me.name||''};
+  var to=manualPerson($('mOpp').value);
+  seg.innerHTML='<div class="s" data-w="'+esc(from.telegram_id||'')+'" data-n="'+esc(from.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(from.name||'—')+'</div>'
+    +'<div class="s" data-w="'+esc(to.telegram_id||'')+'" data-n="'+esc(to.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(to.name||'—')+'</div>'
+    +(isAdmin?'<div class="s hidden" id="mBoth" data-w="both" data-n="'+esc(X.bothTechnical)+'" onclick="pickWinner(this,\'m\')">'+esc(X.bothTechnical)+'</div>':'');
+  if($('mPointsHost'))$('mPointsHost').innerHTML=pointsEditor('m',{n:from.name},{n:to.name});
+  var both=$('mBoth');if(both)both.classList.toggle('hidden',resultKind!=='technical');
+  selWinner='';setScoreNames('m','','');bindScore('m');syncPointDefaults('m');
 }
 function submitManual(btn){
-  var res=$('mResBox');res.className='res';
-  var sets=collectSets('m');
+  var res=$('mResBox');res.className='res';var sets=collectSets('m');
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,t:linkToken,to_telegram_id:$('mOpp').value,date:$('mDate').value,
-    court:(($('mCourt')&&$('mCourt').value)||'').trim(),
-    sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto
-  })}).then(function(r){return r.json()}).then(function(j){
-    btn.disabled=false;
-    if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;resPhoto='';load(true);
-  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+    initData:initData,t:linkToken,from_telegram_id:$('mFrom')?$('mFrom').value:'',to_telegram_id:$('mOpp').value,date:$('mDate').value,
+    court:(($('mCourt')&&$('mCourt').value)||'').trim(),round:$('mRound')?$('mRound').value:'',kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:(($('mNote')&&$('mNote').value)||'').trim(),
+    points_from:$('mPts1')?$('mPts1').value:'',points_to:$('mPts2')?$('mPts2').value:''
+  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;resPhoto='';load(true)})
+  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 function renderBook(){
   var today=new Date(),todayIso=isoDate(today);
@@ -1068,7 +1070,7 @@ function load(keepTab){
       me=j.user;division=j.division||'';canMatch=!!j.can_match;matchGroup=j.match_group||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
       attention=j.attention||{total:0,open:0,mine:0,res:0};
       unplayed=j.unplayed||{known:false,names:[]};
-      openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
+      openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];adminPlayers=j.admin_players||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
       $('sub').textContent=division?(X.subDiv+division+(matchGroup?' · '+(L?'Группа ':'Group ')+matchGroup:'')):X.subNone;
       $('tabRes').classList.toggle('hidden',!canMatch);

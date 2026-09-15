@@ -9,14 +9,14 @@ import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, 
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
-import { registerFantasyRoutes } from './fantasy.js';
+import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
 import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
-  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
+  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
@@ -531,7 +531,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
       getDivisionOpponents(v.division, v.user.id, v.season, v.matchGroup),
       listOpenSlots(v.division, v.user.id, v.season, v.matchGroup),
       listMySlots(v.user.id),
-      listResultTasks(v.user.id)
+      v.isAdmin ? allSlots().then(rows => rows.filter(r => String(r.status || '').toLowerCase() === 'accepted').slice(-300).reverse()) : listResultTasks(v.user.id)
     ]);
     const contacts=new Map(await Promise.all(mySlots.map(async s=>[s.challenge_id,await matchContact(s,v.user.id)])));
     const byId = new Map(opponents.map(o => [String(o.telegram_id), o]));
@@ -552,6 +552,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
       open_slots: openSlots.map(shape),
       my_matches: mySlots.map(shape),
       result_tasks: resultTasks.map(shape),
+      admin_players: v.isAdmin ? await getAllActiveLeaguePlayers().catch(() => []) : [],
       result_slot: String(req.query.result || ''),
       focus_slot: String(req.query.slot || ''),
       counter_slot: String(req.query.counter || '')
@@ -693,101 +694,116 @@ async function uploadResultPhoto(chatId, dataUrl) {
 
 app.post('/api/match/result', async (req, res) => {
   try {
-    const b = req.body || {};
-    const v = await matchViewer(b.initData || '', String(b.t || ''));
-    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
-
-    const slot = await findSlot(b.challenge_id);
-    if (!slot) return res.status(404).json({ ok:false, error:'Match not found' });
-    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
-    if (!sides.includes(String(v.user.id))) return res.status(403).json({ ok:false, error:'Not your match' });
-
-    let score = scoreFromBody(b.sets);
-    // Мини-приложение присылает счёт ОТ ПОБЕДИТЕЛЯ (perspective:'winner') — так игрок
-    // не путает стороны. Старые клиенты слали «от себя»; эту ветку оставляем на всякий.
-    if (String(b.perspective) === 'winner') {
-      if (!sides.includes(String(b.winner || ''))) return res.status(400).json({ ok:false, error:'Выберите победителя' });
-      if (String(b.winner) !== String(slot.from_telegram_id)) score = reverseScoreSafe(score);
-    } else if (String(v.user.id) !== String(slot.from_telegram_id)) {
-      score = reverseScoreSafe(score);
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    if(!v.canMatch&&!v.isAdmin)return res.status(403).json({ok:false,error:'division_required'});
+    const slot=await findSlot(b.challenge_id);
+    if(!slot)return res.status(404).json({ok:false,error:'Match not found'});
+    const sides=[String(slot.from_telegram_id),String(slot.to_telegram_id)],participant=sides.includes(String(v.user.id));
+    if(!participant&&!v.isAdmin)return res.status(403).json({ok:false,error:'Not your match'});
+    const kind=['retired','technical'].includes(String(b.kind||'').toLowerCase())?String(b.kind).toLowerCase():'played';
+    if(kind==='technical'&&!v.isAdmin)return res.status(403).json({ok:false,error:'Only the organiser can record W/L'});
+    const requestedWinner=String(b.winner||'');
+    let winnerId='',storedScore='',set3Mode='';
+    if(kind==='technical'){
+      if(requestedWinner!=='both'&&!sides.includes(requestedWinner))return res.status(400).json({ok:false,error:'Выберите победителя или результат для обоих'});
+      winnerId=requestedWinner==='both'?'':requestedWinner;
+      storedScore=requestedWinner==='both'?'L/L':requestedWinner===String(slot.from_telegram_id)?'W/L':'L/W';
+    }else{
+      let score=scoreFromBody(b.sets);
+      if(!sides.includes(requestedWinner))return res.status(400).json({ok:false,error:'Выберите победителя'});
+      if(String(b.perspective)==='winner'){
+        if(requestedWinner!==String(slot.from_telegram_id))score=reverseScoreSafe(score);
+      }else if(participant&&String(v.user.id)!==String(slot.from_telegram_id))score=reverseScoreSafe(score);
+      if(kind==='played'){
+        const check=validateMatchScore(score);
+        if(!check.ok)return res.status(400).json({ok:false,error:check.message});
+        winnerId=check.winner==='p1'?String(slot.from_telegram_id):String(slot.to_telegram_id);
+        if(requestedWinner!==winnerId)return res.status(400).json({ok:false,error:'Указанный победитель не совпадает со счётом'});
+      }else{
+        if(!Array.isArray(b.sets)||!b.sets.length)return res.status(400).json({ok:false,error:'Для RET укажите сыгранный счёт'});
+        winnerId=requestedWinner;
+      }
+      storedScore=formatScore(score)+(kind==='retired'?' RET':'');
+      set3Mode=detectSet3Mode(score);
     }
-    const check = validateMatchScore(score);
-    if (!check.ok) return res.status(400).json({ ok:false, error: check.message });
-
-    const winnerId = check.winner === 'p1' ? String(slot.from_telegram_id) : String(slot.to_telegram_id);
-    if (b.winner && String(b.winner) !== winnerId) {
-      return res.status(400).json({ ok:false, error:'Указанный победитель не совпадает со счётом' });
-    }
-
-    let photo = { fileId: '', warning: '' };
-    try { photo = await uploadResultPhoto(v.user.id, b.photo); }
-    catch (e) { return res.status(400).json({ ok:false, error:e.message }); }
-
-    const saved = await submitResult(b.challenge_id, { telegram_id: v.user.id, name: v.profile.name },
-      { winner: winnerId, score: formatScore(score), set3Mode: detectSet3Mode(score), photoFileId: photo.fileId, note: safe(b.note) });
-    if (!saved.ok) {
-      const messages = { not_found:'Match not found.', not_accepted:'Match is not agreed.', already_confirmed:'Result already confirmed.', not_a_player:'Not your match.' };
-      return res.status(409).json({ ok:false, error: messages[saved.reason] || 'Cannot save result' });
-    }
-    await notifyResultForVerification(saved.slot).catch(e => console.error('notifyResultForVerification failed:', e.message));
-    res.json({ ok:true, score: saved.slot.result_score, warning: photo.warning || '' });
-  } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
+    const validPoint=x=>['0','1','3'].includes(String(x));
+    const fromWon=winnerId===String(slot.from_telegram_id),both=!winnerId&&kind==='technical';
+    const pointsFrom=v.isAdmin&&validPoint(b.points_from)?Number(b.points_from):(both?0:fromWon?3:kind==='played'?'':kind==='retired'?1:0);
+    const pointsTo=v.isAdmin&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
+    let photo={fileId:'',warning:''};
+    try{photo=await uploadResultPhoto(v.user.id,b.photo)}catch(e){return res.status(400).json({ok:false,error:e.message})}
+    const payload={winner:winnerId,score:storedScore,set3Mode,kind,pointsFrom,pointsTo,photoFileId:photo.fileId,note:safe(b.note),submitter:String(slot.from_telegram_id)};
+    const saved=v.isAdmin
+      ?await submitResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload)
+      :await submitResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload);
+    if(!saved.ok){const messages={not_found:'Match not found.',not_accepted:'Match is not agreed.',already_confirmed:'Result already confirmed.',not_a_player:'Not your match.'};return res.status(409).json({ok:false,error:messages[saved.reason]||'Cannot save result'})}
+    await notifyResultForVerification(saved.slot).catch(e=>console.error('notifyResultForVerification failed:',e.message));
+    res.json({ok:true,score:saved.slot.result_score,warning:photo.warning||''});
+  }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
 });
 
-// Матч, о котором договорились вне бота: соперник, дата, счёт. Тоже с подтверждением.
-app.post('/api/match/manual', async (req, res) => {
-  try {
-    const b = req.body || {};
-    const v = await matchViewer(b.initData || '', String(b.t || ''));
-    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    if (!v.division) return res.status(400).json({ ok:false, error:'You are not assigned to a division yet.' });
-
-    const opponents = await getDivisionOpponents(v.division, v.user.id, v.season, v.matchGroup);
-    const opponent = opponents.find(o => String(o.telegram_id) === String(b.to_telegram_id));
-    if (!opponent) return res.status(400).json({ ok:false, error:'Opponent not found in your division' });
-
-    const date = String(b.date || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok:false, error:'Date is required' });
-
-    // Автор ручного матча = from. Счёт из мини-приложения приходит от победителя.
-    let score = scoreFromBody(b.sets);
-    if (String(b.perspective) === 'winner') {
-      const w = String(b.winner || '');
-      if (w !== String(v.user.id) && w !== String(opponent.telegram_id)) {
-        return res.status(400).json({ ok:false, error:'Выберите победителя' });
-      }
-      if (w !== String(v.user.id)) score = reverseScoreSafe(score);
+// Матч, сыгранный вне бота. Игрок выбирает соперника своей группы; организатор
+// может выбрать любую пару одного дивизиона. В обоих случаях второй игрок
+// подтверждает результат до записи в таблицы.
+app.post('/api/match/manual', async (req,res)=>{
+  try{
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    let from,to,division,season,group;
+    if(v.isAdmin&&b.from_telegram_id){
+      const all=await getAllActiveLeaguePlayers(),byId=new Map(all.map(p=>[String(p.telegram_id),p]));
+      from=byId.get(String(b.from_telegram_id));to=byId.get(String(b.to_telegram_id));
+      if(!from||!to||String(from.telegram_id)===String(to.telegram_id))return res.status(400).json({ok:false,error:'Выберите двух разных игроков'});
+      if(String(from.division).toUpperCase()!==String(to.division).toUpperCase())return res.status(400).json({ok:false,error:'Игроки должны быть из одного дивизиона'});
+      division=from.division;season=from.season||to.season;group=String(from.group||'')===String(to.group||'')?from.group:'cross';
+    }else{
+      if(!v.division)return res.status(400).json({ok:false,error:'You are not assigned to a division yet.'});
+      const opponents=await getDivisionOpponents(v.division,v.user.id,v.season,v.matchGroup);
+      to=opponents.find(o=>String(o.telegram_id)===String(b.to_telegram_id));
+      if(!to)return res.status(400).json({ok:false,error:'Opponent not found in your division'});
+      from={telegram_id:String(v.user.id),name:v.profile.name,username:v.user.username||v.profile.telegram_username||''};
+      division=v.division;season=v.season;group=v.matchGroup;
     }
-    const check = validateMatchScore(score);
-    if (!check.ok) return res.status(400).json({ ok:false, error: check.message });
-
-    let photo = { fileId: '', warning: '' };
-    try { photo = await uploadResultPhoto(v.user.id, b.photo); }
-    catch (e) { return res.status(400).json({ ok:false, error:e.message }); }
-
-    const manualCourt = safe(b.court).slice(0, 60);
-
-    const row = {
-      challenge_id: uid('match'),
-      match_type: 'manual', status: 'accepted', division: v.division, season:v.season, group:v.matchGroup,
-      from_telegram_id: String(v.user.id), from_name: v.profile.name, from_username: v.user.username || v.profile.telegram_username || '',
-      to_telegram_id: String(opponent.telegram_id), to_name: opponent.name, to_username: opponent.username || '',
-      // Корт у матча вне бота указывает тот, кто вносит счёт: без него такие
-      // игры выпадали из статистики по кортам, а их немало.
-      dates: date, time_from: '', time_to: '', duration_min: MATCH_DURATION_MIN, courts: manualCourt, comment: '',
-      agreed_date: date, agreed_time: safe(b.time), agreed_court: manualCourt,
-      pending_by: '', round: '',
-      result_status: 'pending', result_by: String(v.user.id),
-      result_winner: check.winner === 'p1' ? String(v.user.id) : String(opponent.telegram_id),
-      result_score: formatScore(score), result_set3_mode: detectSet3Mode(score),
-      result_photo_file_id: photo.fileId, result_note: safe(b.note), result_submitted_at: nowISO(),
-      created_at: nowISO(), responded_at: nowISO()
-    };
-    await createManualMatch(row);
-    await notifyResultForVerification(row).catch(e => console.error('notifyResultForVerification failed:', e.message));
-    res.json({ ok:true, challenge_id: row.challenge_id, warning: photo.warning || '' });
-  } catch (e) { console.error(e); res.status(500).json({ ok:false, error:e.message }); }
+    const date=String(b.date||'').trim();
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return res.status(400).json({ok:false,error:'Date is required'});
+    const sides=[String(from.telegram_id),String(to.telegram_id)],kind=['retired','technical'].includes(String(b.kind||'').toLowerCase())?String(b.kind).toLowerCase():'played';
+    if(kind==='technical'&&!v.isAdmin)return res.status(403).json({ok:false,error:'Only the organiser can record W/L'});
+    const requestedWinner=String(b.winner||'');
+    let winnerId='',storedScore='',set3Mode='';
+    if(kind==='technical'){
+      if(requestedWinner!=='both'&&!sides.includes(requestedWinner))return res.status(400).json({ok:false,error:'Выберите победителя или результат для обоих'});
+      winnerId=requestedWinner==='both'?'':requestedWinner;
+      storedScore=requestedWinner==='both'?'L/L':requestedWinner===sides[0]?'W/L':'L/W';
+    }else{
+      let score=scoreFromBody(b.sets);
+      if(!sides.includes(requestedWinner))return res.status(400).json({ok:false,error:'Выберите победителя'});
+      if(requestedWinner!==sides[0])score=reverseScoreSafe(score);
+      if(kind==='played'){
+        const check=validateMatchScore(score);if(!check.ok)return res.status(400).json({ok:false,error:check.message});
+        winnerId=check.winner==='p1'?sides[0]:sides[1];
+        if(winnerId!==requestedWinner)return res.status(400).json({ok:false,error:'Указанный победитель не совпадает со счётом'});
+      }else{
+        if(!Array.isArray(b.sets)||!b.sets.length)return res.status(400).json({ok:false,error:'Для RET укажите сыгранный счёт'});
+        winnerId=requestedWinner;
+      }
+      storedScore=formatScore(score)+(kind==='retired'?' RET':'');set3Mode=detectSet3Mode(score);
+    }
+    const validPoint=x=>['0','1','3'].includes(String(x)),fromWon=winnerId===sides[0],both=!winnerId&&kind==='technical';
+    const pointsFrom=v.isAdmin&&validPoint(b.points_from)?Number(b.points_from):(both?0:fromWon?3:kind==='played'?'':kind==='retired'?1:0);
+    const pointsTo=v.isAdmin&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
+    let photo={fileId:'',warning:''};try{photo=await uploadResultPhoto(v.user.id,b.photo)}catch(e){return res.status(400).json({ok:false,error:e.message})}
+    const row={challenge_id:uid('match'),match_type:'manual',status:'accepted',division,season,group,
+      from_telegram_id:sides[0],from_name:from.name,from_username:from.username||'',
+      to_telegram_id:sides[1],to_name:to.name,to_username:to.username||'',
+      dates:date,time_from:'',time_to:'',duration_min:MATCH_DURATION_MIN,courts:safe(b.court).slice(0,60),comment:'',
+      agreed_date:date,agreed_time:safe(b.time),agreed_court:safe(b.court).slice(0,60),pending_by:'',round:v.isAdmin?safe(b.round):'',
+      result_status:'pending',result_by:sides[0],result_winner:winnerId,result_score:storedScore,result_set3_mode:set3Mode,
+      result_kind:kind,result_points_from:pointsFrom,result_points_to:pointsTo,
+      result_photo_file_id:photo.fileId,result_note:safe(b.note),result_submitted_at:nowISO(),created_at:nowISO(),responded_at:nowISO()};
+    await createManualMatch(row);await notifyResultForVerification(row).catch(e=>console.error('notifyResultForVerification failed:',e.message));
+    res.json({ok:true,challenge_id:row.challenge_id,warning:photo.warning||''});
+  }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
 });
 
 
@@ -1038,6 +1054,10 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const tabs = (v.isAdmin && !viewAs)
       ? MINIAPP_TABS.slice()
       : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
+    const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:true }).catch(() => ({ allowed:false }));
+    const fantasy = fantasyAccess.allowed
+      ? await getFantasyBootstrap(v.user.id, v.profile.name || '', v.lang, fantasyAccess.mode).catch(e => { console.error('league fantasy:', e.message); return null; })
+      : null;
     res.json({
       ok: true,
       lang: v.lang,
@@ -1053,7 +1073,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
       photos: photoByName,
       matches,
       events,
-      divisions
+      divisions,
+      fantasy
     });
   } catch (e) {
     console.error('league bootstrap failed:', e.message);

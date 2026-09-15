@@ -31,12 +31,14 @@ export async function authorizeSlot(slot, actor, { joining = false } = {}) {
   if (!info.member) return { ok: false, reason: 'league_access_denied' };
   if (!info.found) return { ok: false, reason: 'division_required' };
   const scope = await slotScope(slot);
-  if (!sameScope(info, scope)) return { ok: false, reason: 'different_group' };
+  const crossGroup = scope.group === 'cross';
+  const sameDivision = x => String(x.season) === String(scope.season) && divisionLetter(x.letter || x.division) === divisionLetter(scope.letter);
+  if (crossGroup ? !sameDivision(info) : !sameScope(info, scope)) return { ok: false, reason: 'different_group' };
   // A removed/moved opponent cannot keep receiving new match proposals.
   const otherId = String(slot.from_telegram_id) === id ? slot.to_telegram_id : slot.from_telegram_id;
   if (otherId && !isLeagueAdmin(otherId)) {
     const other = await getPlayerLeagueInfo({ telegram_id: otherId });
-    if (!other.member || !other.found || !sameScope(other, scope)) return { ok: false, reason: 'different_group' };
+    if (!other.member || !other.found || (crossGroup ? !sameDivision(other) : !sameScope(other, scope))) return { ok: false, reason: 'different_group' };
   }
   return { ok: true, scope };
 }

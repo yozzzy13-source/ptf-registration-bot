@@ -1,5 +1,5 @@
 import { sheets as sheetsClient } from './google.js';
-import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID, DIVISIONS_SPREADSHEET_ID, ADMIN_IDS } from './config.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID, DIVISIONS_SPREADSHEET_ID, ADMIN_IDS, PUBLIC_URL } from './config.js';
 import { nowISO, safe, parseSeasonNumber, directPhotoUrl } from './util.js';
 
 const cache = new Map();
@@ -448,6 +448,8 @@ export async function getLeagueProfiles() {
     const i = headers.indexOf(key);
     return i < 0 ? '' : String(row[i] ?? '').trim();
   };
+  const [avatarIds, masterPhotos] = await Promise.all([publishedAvatars().catch(() => new Map()), getMasterPhotos().catch(() => new Map())]);
+  const masterPhotoFor = name => [...masterPhotos].find(([n]) => sameName(n, name))?.[1] || '';
   const out = [];
   for (let r = headerRowIndex + 1; r < values.length; r++) {
     const row = values[r] || [];
@@ -457,7 +459,7 @@ export async function getLeagueProfiles() {
       id: at(row, 'player_id'),
       slug: at(row, 'player_slug'),
       name,
-      photo: directPhotoUrl(at(row, 'player_photo_url')),
+      photo: avatarIds.get(name.toLowerCase()) ? PUBLIC_URL+'/avatar/'+encodeURIComponent(avatarIds.get(name.toLowerCase()))+'.png' : masterPhotoFor(name),
       division: at(row, 'current_division'),
       position: pickNumber(at(row, 'position')),
       points: pickNumber(at(row, 'total_ranking_points')),

@@ -122,7 +122,8 @@ const before=writes.length;const write=await results.writeConfirmedResult(result
 check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
 check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
 const dup=await results.writeConfirmedResult(result2);check(dup.status==='duplicate','Repeat result does not append duplicate');
-const mixed=await results.writeConfirmedResult({...result2,to_name:'Alice One',to_telegram_id:'1'});check(mixed.status==='error','Group mismatch cannot be recorded');
+const mixed=await results.writeConfirmedResult({...result2,group:'cross',to_name:'Alice One',to_telegram_id:'1'});check(mixed.status==='saved'&&mixed.division?.cross_group,'Same-division cross-group result is stored centrally');
+check(tables.has('master|Cross_Group_Match_Log'),'Cross-group journal is created in MatchLog');
 check((await results.getUnplayedOpponents('C','Alice One','2','1')).names.includes('Bob Two'),'Schedule uses group 1');
 check((await results.getUnplayedOpponents('C','Carol Three','2','2')).played===1,'Schedule uses group 2 result');
 const server=await load('index.js');
@@ -139,6 +140,19 @@ check((await request('get','/api/match/bootstrap','5')).body.can_match===false,'
 check((await request('post','/api/match/create','5',{})).code===400,'Unassigned member cannot create slot');
 check((await request('get','/api/match/bootstrap','6')).code===403,'Nonmember API denied');
 check((await request('get','/api/match/bootstrap','99')).code===200,'Admin API access without roster');
+const techApi=await request('post','/api/match/manual','99',{from_telegram_id:'7',to_telegram_id:'9',date:'2099-09-18',court:'Court A',kind:'technical',winner:'7',points_from:'3',points_to:'0',note:'no show'});
+check(techApi.body.ok,'Admin can submit a technical result for a cross-group pair');
+const techSlot=await db.findSlot(techApi.body.challenge_id);
+check(techSlot.result_score==='W/L'&&techSlot.result_kind==='technical'&&String(techSlot.result_points_from)==='3'&&String(techSlot.result_points_to)==='0','Technical notation and manual points are stored');
+check((await db.confirmResult(techApi.body.challenge_id,{telegram_id:'9'})).ok,'Second player confirms admin-entered technical result');
+const techBefore=writes.length;const techWrite=await results.writeConfirmedResult({...techSlot,result_status:'confirmed'});
+check(techWrite.status==='saved'&&techWrite.division?.cross_group,'Confirmed technical cross-group result reaches central cross-group log');
+check(writes.slice(techBefore).some(w=>/!AB\d+$/.test(w.range)&&w.values[0][0]==='W/L')&&writes.slice(techBefore).some(w=>/!AN\d+:AO\d+$/.test(w.range)&&String(w.values[0])==='3,0'),'Technical marker and points are written to AB and AN:AO');
+const qfApi=await request('post','/api/match/manual','99',{from_telegram_id:'8',to_telegram_id:'10',date:'2099-09-19',court:'Court A',round:'QF',kind:'played',winner:'8',sets:[{a:6,b:2},{a:6,b:3}],points_from:'3',points_to:'1'});
+check(qfApi.body.ok,'Admin can mark a manual result as a quarterfinal');const qfSlot=await db.findSlot(qfApi.body.challenge_id);check(qfSlot.round==='QF','Playoff stage is stored in the match slot');check((await db.confirmResult(qfApi.body.challenge_id,{telegram_id:'10'})).ok,'Playoff result still requires the second player confirmation');const qfWrite=await results.writeConfirmedResult({...qfSlot,result_status:'confirmed'});check(qfWrite.division?.playoff&&tables.has('master|Playoff'),'Confirmed grouped quarterfinal is stored in the Playoff sheet');
+const retApi=await request('post','/api/match/manual','3',{to_telegram_id:'4',date:'2099-09-18',court:'Court A',kind:'retired',winner:'3',sets:[{a:6,b:4},{a:2,b:1}],note:'injury'});
+check(retApi.body.ok,'Player can submit a RET result');
+const retSlot=await db.findSlot(retApi.body.challenge_id);check(retSlot.result_kind==='retired'&&/RET$/.test(retSlot.result_score),'RET keeps the played score and label');
 check((await request('get','/api/league/division','1')).code!==403,'Inactive master member may view league');
 const errorRu=await request('post','/api/match/create','2',{});check(/[а-я]/i.test(errorRu.body.error),'RU validation error');
 const errorEn=await request('post','/api/match/create','1',{});check(!/[а-я]/i.test(errorEn.body.error),'EN validation error');
@@ -146,7 +160,8 @@ check(routes.filter(r=>r.p==='/cal').length===1,'Only one calendar route');
 for(const letter of ['C','W']) {
  const view=await request('get','/api/league/division','1',{letter,season:'2'});
  check(view.body.groups?.length===2,letter+' API returns both groups');
- check(view.body.groups.every(g=>g.grouped&&!g.playoff.champion&&g.players.every(p=>!p.zone)),letter+' groups do not award final promotion or playoffs');
+ check(view.body.groups.every(g=>g.grouped&&!g.playoff.champion&&g.players.every(p=>p.zone==='playoff')),letter+' groups mark their top four as playoff seeds without declaring a champion');
+ if(letter==='W')check((view.body.playoff?.qf||[]).length===1,'Grouped division API exposes the quarterfinal bracket');
 }
 const cross=await results.writeConfirmedResult({...result2,to_name:'Wendy Three',to_telegram_id:'9'});
 check(cross.status==='cross_division_blocked','Existing admin approval for cross-division results preserved');

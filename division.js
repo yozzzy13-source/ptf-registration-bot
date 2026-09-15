@@ -10,7 +10,8 @@
 // проигравшего (0 или 1), у соперника ячейка пустая — он получает техническую
 // победу и 3 очка. Заполнены обе — двойное техническое, победителя нет.
 import { sheets as sheetsClient } from './google.js';
-import { DIVISION_SPREADSHEETS, PUBLIC_URL } from './config.js';
+import { DIVISION_SPREADSHEETS, PUBLIC_URL, LEAGUE_RESULTS_SHEET_ID } from './config.js';
+import { cellToScore, getSets, reverseScore } from './tennis.js';
 import { getSetting, getMasterPhotos, publishedAvatars } from './sheets.js';
 import { divisionRegistry } from './matchesdb.js';
 
@@ -289,6 +290,20 @@ async function readMatchLog(spreadsheetId) {
   return { headers, rows };
 }
 
+async function readCrossGroupRows(letter, season) {
+  if (!LEAGUE_RESULTS_SHEET_ID) return [];
+  try {
+    const res=await sheetsClient().spreadsheets.values.get({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:'Cross_Group_Match_Log!A:O'});
+    const values=res.data.values||[],headers=(values[0]||[]).map(norm);
+    return values.slice(1).map(r=>{const o={};headers.forEach((h,i)=>{if(h)o[h]=r[i]??''});return o})
+      .filter(r=>String(r.season)===String(season)&&divisionLetter(r.division)===divisionLetter(letter));
+  } catch { return []; }
+}
+
+async function readPlayoffRows(letter,season){
+  if(!LEAGUE_RESULTS_SHEET_ID)return[];try{const res=await sheetsClient().spreadsheets.values.get({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:'Playoff!A:Q'}),values=res.data.values||[],headers=(values[0]||[]).map(norm);return values.slice(1).map(r=>{const o={};headers.forEach((h,i)=>{if(h)o[h]=r[i]??''});return o}).filter(r=>String(r.season)===String(season)&&divisionLetter(r.division)===divisionLetter(letter))}catch{return[]}
+}
+
 export async function getDivisionTable(letter, season = '', group = '') {
   const key = divisionLetter(letter);
   const cacheId = `${season || '-'}:${key}:${group || '-'}`;
@@ -383,6 +398,25 @@ export async function getDivisionTable(letter, season = '', group = '') {
 
   // Строка без имени — незаполненное место в расписании дивизиона. Показывать
   // её незачем: в таблице она выглядела как игрок «?» с нулями.
+  const crossMatches = grouped ? await readCrossGroupRows(key, season) : [];
+  const byName = name => [...players.values()].find(p => txt(p.name).toLowerCase() === txt(name).toLowerCase());
+  for (const r of crossMatches.filter(x => txt(x.status).toLowerCase() === 'confirmed')) {
+    const first=byName(r.player_1),second=byName(r.player_2),local=first||second;
+    if(!local)continue;
+    const localFirst=Boolean(first),winner=txt(r.winner),kind=txt(r.result_kind).toLowerCase();
+    local.matches++;
+    const won=winner&&txt(winner).toLowerCase()===txt(local.name).toLowerCase();
+    if(won)local.wins++;else local.losses++;
+    const explicit=localFirst?r.player_1_points:r.player_2_points;
+    local.points+=filled(explicit)?num(explicit):(won?WIN_POINTS:LOSS_POINTS);
+    if(kind==='technical')continue;
+    let parsed=cellToScore(r.score);if(!localFirst)parsed=reverseScore(parsed);
+    for(const set of getSets(parsed)){
+      if(set.a>set.b)local.setsWon++;else if(set.b>set.a)local.setsLost++;
+      const mtb=set.a>=10||set.b>=10;if(!mtb){local.gamesWon+=num(set.a);local.gamesLost+=num(set.b)}
+    }
+  }
+
   const table = [...players.values()].filter(p => txt(p.name)).map(p => ({
     ...p,
     setDiff: p.setsWon - p.setsLost,
@@ -399,7 +433,7 @@ export async function getDivisionTable(letter, season = '', group = '') {
     ...p,
     place: i + 1,
     // Зоны те же, что прописаны в таблице: 1–4 плей-офф, 5–6 добор, 7–8 вылет.
-    zone: grouped ? '' : (i < 4 ? 'playoff' : (i < 6 ? 'extra' : 'relegation'))
+    zone: grouped ? (i < 4 ? 'playoff' : '') : (i < 4 ? 'playoff' : (i < 6 ? 'extra' : 'relegation'))
   }));
 
   // Плей-офф: три матча сразу после группового этапа.
@@ -420,15 +454,24 @@ export async function getDivisionTable(letter, season = '', group = '') {
   const sf1 = pair(byNum(regularMax + 1));
   const sf2 = pair(byNum(regularMax + 2));
   const final = pair(byNum(regularMax + 3));
+  const third = pair(byNum(regularMax + 4));
   let champion = null;
   if (final?.winner_id) {
     const c = players.get(final.winner_id);
     if (c) champion = { id: c.id, name: c.name, photo: c.photo };
   }
+  let playoff={qf:[],sf:[sf1,sf2].filter(Boolean),sf1,sf2,final,third,champion};
+  if(grouped){
+    const raw=await readPlayoffRows(key,season),make=r=>{const firstName=txt(r.player_1),secondName=txt(r.player_2),winner=txt(r.winner);return{first:firstName?{id:firstName,name:firstName,photo:portrait(firstName)}:null,second:secondName?{id:secondName,name:secondName,photo:portrait(secondName)}:null,score:txt(r.score),winner_id:winner,played:txt(r.status).toLowerCase()==='confirmed'||Boolean(txt(r.score)),slot:txt(r.slot),stage:txt(r.stage)}};
+    const stage=x=>raw.filter(r=>txt(r.stage).toLowerCase()===x).sort((a,b)=>num(a.slot)-num(b.slot)).map(make);
+    const qf=stage('qf'),sf=stage('sf'),fin=stage('final')[0]||null,bronze=stage('3rd')[0]||null;
+    const champ=fin&&fin.winner_id?{id:fin.winner_id,name:fin.winner_id,photo:portrait(fin.winner_id)}:null;
+    playoff={qf,sf,sf1:sf[0]||null,sf2:sf[1]||null,final:fin,third:bronze,champion:champ};
+  }
 
   const value = {
-    ok: true, division: key, season, grouped, players: table, matrix,
-    playoff: grouped ? {sf1:null,sf2:null,final:null,champion:null} : { sf1, sf2, final, champion },
+    ok: true, division: key, season, grouped, players: table, matrix, cross_matches: crossMatches,
+    playoff,
     regular_matches: regularMax
   };
   cache.set(cacheId, { t: Date.now(), v: value });

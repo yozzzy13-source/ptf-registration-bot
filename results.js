@@ -17,6 +17,10 @@ import { slotScope, sameScope } from './access.js';
 const DATA_START_ROW = 2;
 const MASTER_START_ROW = 4;
 const COL_P1_NAME = 9; // колонка I в Cross_Division_Match_Log
+const CROSS_GROUP_SHEET = 'Cross_Group_Match_Log';
+const CROSS_GROUP_HEADERS = ['match_id','season','division','player_1_group','player_1','player_2_group','player_2','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
+const PLAYOFF_SHEET = 'Playoff';
+const PLAYOFF_HEADERS = ['match_id','season','division','stage','slot','player_1','player_2','player_1_group','player_2_group','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
 
 function norm(s = '') {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -51,6 +55,94 @@ async function batchUpdate(spreadsheetId, data) {
     spreadsheetId, requestBody: { valueInputOption: 'USER_ENTERED', data }
   });
 }
+function resultKind(slot = {}) { return String(slot.result_kind || 'played').toLowerCase(); }
+function resultMarker(slot = {}, reversed = false) {
+  const kind = resultKind(slot);
+  if (kind === 'retired') return 'RET';
+  if (kind !== 'technical') return '';
+  const raw = String(slot.result_score || (slot.result_winner ? 'W/L' : 'L/L')).toUpperCase();
+  if (!reversed) return raw;
+  return raw === 'W/L' ? 'L/W' : raw === 'L/W' ? 'W/L' : raw;
+}
+function resultPoints(slot = {}, reversed = false) {
+  const a = slot.result_points_from === '' || slot.result_points_from == null ? '' : coerceNumber(slot.result_points_from);
+  const b = slot.result_points_to === '' || slot.result_points_to == null ? '' : coerceNumber(slot.result_points_to);
+  return reversed ? [b, a] : [a, b];
+}
+function centralWrites(row, slot, parsed) {
+  const kind = resultKind(slot), completed = kind === 'technical' ? '' : 'Yes';
+  return [
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!K${row}:V${row}`, values: [scoreValues(parsed).map(coerceNumber)] },
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!W${row}:X${row}`, values: [[detectSet3Mode(parsed), completed]] },
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!AB${row}`, values: [[resultMarker(slot)]] },
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!AN${row}:AO${row}`, values: [resultPoints(slot)] }
+  ];
+}
+async function matchLogHeaders(spreadsheetId) {
+  const values = await getValues(spreadsheetId, 'Match_Log!A1:BZ5');
+  const rowIndex = values.findIndex(r => (r || []).map(norm).includes('p1_id'));
+  if (rowIndex < 0) return { row: 1, headers: [] };
+  return { row: rowIndex + 1, headers: (values[rowIndex] || []).map(norm) };
+}
+function namedWrite(headers, row, names, value) {
+  for (const name of names) {
+    const i = headers.indexOf(norm(name));
+    if (i >= 0) return { range: `Match_Log!${colToLetter(i + 1)}${row}`, values: [[value]] };
+  }
+  return null;
+}
+async function ensureCrossGroupSheet() {
+  const api = sheetsClient();
+  const meta = await api.spreadsheets.get({ spreadsheetId: LEAGUE_RESULTS_SHEET_ID });
+  const exists = (meta.data.sheets || []).some(x => x.properties?.title === CROSS_GROUP_SHEET);
+  if (!exists) await api.spreadsheets.batchUpdate({ spreadsheetId: LEAGUE_RESULTS_SHEET_ID, requestBody:{ requests:[{ addSheet:{ properties:{ title:CROSS_GROUP_SHEET } } }] } });
+  let values = [];
+  try { values = await getValues(LEAGUE_RESULTS_SHEET_ID, CROSS_GROUP_SHEET+'!A1:O1'); } catch {}
+  if (!(values[0] || []).length) await api.spreadsheets.values.update({ spreadsheetId:LEAGUE_RESULTS_SHEET_ID, range:CROSS_GROUP_SHEET+'!A1:O1', valueInputOption:'RAW', requestBody:{ values:[CROSS_GROUP_HEADERS] } });
+}
+function playoffStage(v='') {
+  const x=String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'');
+  if(['qf','quarterfinal','quarterfinals'].includes(x))return 'QF';
+  if(['sf','semifinal','semifinals'].includes(x))return 'SF';
+  if(['final','f'].includes(x))return 'Final';
+  if(['3rd','third','thirdplace','bronze'].includes(x))return '3rd';
+  return '';
+}
+async function ensurePlayoffSheet() {
+  const api=sheetsClient(),meta=await api.spreadsheets.get({spreadsheetId:LEAGUE_RESULTS_SHEET_ID});
+  const exists=(meta.data.sheets||[]).some(x=>x.properties?.title===PLAYOFF_SHEET);
+  if(!exists)await api.spreadsheets.batchUpdate({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,requestBody:{requests:[{addSheet:{properties:{title:PLAYOFF_SHEET}}}]}});
+  let values=[];try{values=await getValues(LEAGUE_RESULTS_SHEET_ID,PLAYOFF_SHEET+'!A1:Q1')}catch{}
+  if(!(values[0]||[]).length)await api.spreadsheets.values.update({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:PLAYOFF_SHEET+'!A1:Q1',valueInputOption:'RAW',requestBody:{values:[PLAYOFF_HEADERS]}});
+}
+async function writePlayoffResult(pair,slot,stage) {
+  await ensurePlayoffSheet();const values=await getValues(LEAGUE_RESULTS_SHEET_ID,PLAYOFF_SHEET+'!A1:Q'),rows=values.slice(1);
+  const p1=String(slot.from_name||pair.a?.name||'').trim(),p2=String(slot.to_name||pair.b?.name||'').trim();let found=-1;
+  for(let i=0;i<rows.length;i++){const r=rows[i]||[],same=String(r[1]||'')===String(pair.season)&&divisionLetter(r[2])===pair.d1&&String(r[3]||'').toLowerCase()===String(stage).toLowerCase();const names=(sameName(r[5],p1)&&sameName(r[6],p2))||(sameName(r[5],p2)&&sameName(r[6],p1));if(same&&names){found=i+2;break}}
+  const winner=!slot.result_winner?'':String(slot.result_winner)===String(slot.from_telegram_id)?p1:p2;
+  const row=[String(slot.challenge_id||''),String(pair.season||''),pair.d1,stage,String(slot.round_slot||''),p1,p2,String(pair.groupA||pair.a?.group||''),String(pair.groupB||pair.b?.group||''),resultKind(slot),String(slot.result_score||''),winner,...resultPoints(slot),String(slot.result_note||''),'confirmed',String(slot.agreed_date||'')];
+  const api=sheetsClient();if(found>0)await api.spreadsheets.values.update({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:PLAYOFF_SHEET+'!A'+found+':Q'+found,valueInputOption:'USER_ENTERED',requestBody:{values:[row]}});else await api.spreadsheets.values.append({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:PLAYOFF_SHEET+'!A:Q',valueInputOption:'USER_ENTERED',insertDataOption:'INSERT_ROWS',requestBody:{values:[row]}});
+  return{status:'saved',division:pair.d1,playoff:true,stage,row:found>0?found:rows.length+2,sheet:PLAYOFF_SHEET};
+}
+
+async function writeCrossGroupResult(pair, slot) {
+  await ensureCrossGroupSheet();
+  const values = await getValues(LEAGUE_RESULTS_SHEET_ID, CROSS_GROUP_SHEET+'!A1:O');
+  const rows = values.slice(1), p1=String(slot.from_name||pair.a?.name||'').trim(), p2=String(slot.to_name||pair.b?.name||'').trim();
+  let found = -1;
+  for (let i=0;i<rows.length;i++) {
+    const r=rows[i]||[], sameSeason=String(r[1]||'')===String(pair.season), sameDivision=divisionLetter(r[2])===pair.d1;
+    const samePlayers=(sameName(r[4],p1)&&sameName(r[6],p2))||(sameName(r[4],p2)&&sameName(r[6],p1));
+    if (sameSeason&&sameDivision&&samePlayers) { found=i+2; break; }
+  }
+  const winnerName=!slot.result_winner?'':String(slot.result_winner)===String(slot.from_telegram_id)?p1:p2;
+  const row=[String(slot.challenge_id||''),String(pair.season||''),pair.d1,String(pair.groupA||''),p1,String(pair.groupB||''),p2,resultKind(slot),String(slot.result_score||''),winnerName,...resultPoints(slot),String(slot.result_note||''),'confirmed',String(slot.agreed_date||'')];
+  const api=sheetsClient();
+  if(found > 0) await api.spreadsheets.values.update({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:CROSS_GROUP_SHEET+'!A'+found+':O'+found,valueInputOption:'USER_ENTERED',requestBody:{values:[row]}});
+  else await api.spreadsheets.values.append({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:CROSS_GROUP_SHEET+'!A:O',valueInputOption:'USER_ENTERED',insertDataOption:'INSERT_ROWS',requestBody:{values:[row]}});
+  return {status:'saved',division:pair.d1,cross_group:true,row:found > 0 ? found : rows.length+2,sheet:CROSS_GROUP_SHEET};
+}
+
 async function nextEmptyRow(spreadsheetId, sheetName, col, startRow) {
   const letter = colToLetter(col);
   const values = await getValues(spreadsheetId, `${sheetName}!${letter}${startRow}:${letter}`);
@@ -113,11 +205,13 @@ async function divisionPair(p1, p2, slot = {}) {
   const { seasonRoster } = await import('./division.js');
   const scope = await slotScope(slot);
   const map = await seasonRoster(scope.season);
-  const a = map.players.find(p => p.letter === scope.letter && String(p.group || '') === scope.group && sameName(p.name, p1));
-  const b = map.players.find(p => p.letter === scope.letter && String(p.group || '') === scope.group && sameName(p.name, p2))
+  const cross = scope.group === 'cross';
+  const a = map.players.find(p => p.letter === scope.letter && (cross || String(p.group || '') === scope.group) && sameName(p.name, p1));
+  const b = map.players.find(p => p.letter === scope.letter && (cross || String(p.group || '') === scope.group) && sameName(p.name, p2))
     || map.players.find(p => p.letter !== scope.letter && sameName(p.name, p2));
-  if (!a || !b) return { known:false, season:scope.season, group:scope.group, reason:'Players are not in the same division group' };
-  return { known:true, season:scope.season, group:scope.group, a, b, d1:divisionLetter(a.letter), d2:divisionLetter(b.letter) };
+  if (!a || !b) return { known:false, season:scope.season, group:scope.group, reason:cross?'Players are not in the same division':'Players are not in the same division group' };
+  const crossGroup = a.letter === b.letter && String(a.group || '') !== String(b.group || '');
+  return { known:true, season:scope.season, group:crossGroup?'cross':scope.group, groupA:String(a.group||''), groupB:String(b.group||''), crossGroup, a, b, d1:divisionLetter(a.letter), d2:divisionLetter(b.letter) };
 }
 
 // Счёт в слоте всегда «от from_telegram_id», поэтому p1 = from_name.
@@ -146,18 +240,18 @@ export async function writeConfirmedResult(slot, { force = false } = {}) {
     // обоими игроками, поэтому расхождение стоит проверить руками.
     const existing = await findExistingResultRow(p1, p2, dateSerial);
     if (existing) {
-      const division = await writeDivisionRow(p1, p2, parsed, pair).catch(e => ({ status: 'error', reason: e.message }));
+      await batchUpdate(LEAGUE_RESULTS_SHEET_ID, centralWrites(existing.row, slot, parsed));
+      const division = await writeDivisionRow(p1, p2, parsed, pair, slot).catch(e => ({ status: 'error', reason: e.message }));
       return { status: 'duplicate', row: existing.row, division };
     }
     const row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
     await batchUpdate(LEAGUE_RESULTS_SHEET_ID, [
       { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[dateSerial]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
-      { range: `${LEAGUE_RESULTS_SHEETS.log}!K${row}:V${row}`, values: [scoreValues(parsed).map(coerceNumber)] },
-      { range: `${LEAGUE_RESULTS_SHEETS.log}!W${row}:X${row}`, values: [[detectSet3Mode(parsed), 'Yes']] }
+      ...centralWrites(row, slot, parsed)
     ]);
 
-    const division = await writeDivisionRow(p1, p2, parsed, pair).catch(e => ({ status: 'error', reason: e.message }));
+    const division = await writeDivisionRow(p1, p2, parsed, pair, slot).catch(e => ({ status: 'error', reason: e.message }));
     return { status: 'saved', row, division };
   } catch (e) {
     console.error('writeConfirmedResult failed:', e.message);
@@ -165,11 +259,14 @@ export async function writeConfirmedResult(slot, { force = false } = {}) {
   }
 }
 
-async function writeDivisionRow(p1, p2, parsed, known = null) {
+async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}) {
   const pair = known && known.known !== undefined ? known : await divisionPair(p1, p2);
   if (!pair.known) return { status: 'player_not_found' };
   const { d1, d2 } = pair;
   if (!d1 || d1 !== d2) return { status: 'cross_division', d1, d2 };
+  const stage=playoffStage(slot.round);
+  const playoff=stage?await writePlayoffResult(pair,slot,stage):null;
+  if (pair.crossGroup) return playoff || writeCrossGroupResult(pair, slot);
   // Таблицу берём из реестра Divisions: там на каждый дивизион сезона своя
   // строка со ссылкой, поэтому PRIME, W и любой будущий дивизион подключаются
   // добавлением строки, а не правкой переменных Railway. Переменные остались
@@ -185,13 +282,33 @@ async function writeDivisionRow(p1, p2, parsed, known = null) {
   const spreadsheetId = (await divisionSheetId(d1, season, pair.group).catch(() => '')) || (!pair.group && DIVISION_SPREADSHEETS[d1]) || '';
   if (!spreadsheetId) return { status: 'config_missing', division: d1 };
   const info = await findDivisionRow(spreadsheetId, 'Match_Log', p1, p2);
-  if (!info) return { status: 'row_not_found', division: d1, season };
+  if (!info) return playoff || { status: 'row_not_found', division: d1, season };
   const p = info.reversed ? reverseScore(parsed) : parsed;
-  await batchUpdate(spreadsheetId, [
+  const kind = resultKind(slot), points = resultPoints(slot, info.reversed), marker = resultMarker(slot, info.reversed);
+  const writes = [
     { range: `Match_Log!F${info.row}:Q${info.row}`, values: [scoreValues(p).map(coerceNumber)] },
-    { range: `Match_Log!R${info.row}:S${info.row}`, values: [[detectSet3Mode(p), 'Yes']] }
-  ]);
-  return { status: 'saved', division: d1, row: info.row, reversed: info.reversed };
+    { range: `Match_Log!R${info.row}:S${info.row}`, values: [[detectSet3Mode(p), kind === 'technical' ? '' : 'Yes']] }
+  ];
+  const { headers } = await matchLogHeaders(spreadsheetId).catch(() => ({ headers: [] }));
+  const extra = [
+    namedWrite(headers, info.row, ['result_kind','match_result_kind'], kind),
+    namedWrite(headers, info.row, ['result_status','technical_result','result_marker'], marker),
+    namedWrite(headers, info.row, ['p1_result_points','p1_points','player_1_points'], points[0]),
+    namedWrite(headers, info.row, ['p2_result_points','p2_points','player_2_points'], points[1]),
+    namedWrite(headers, info.row, ['result_note','comment'], String(slot.result_note || ''))
+  ].filter(Boolean);
+  if (kind === 'technical') {
+    const winner = info.reversed
+      ? (String(slot.result_winner) === String(slot.from_telegram_id) ? 'p2' : String(slot.result_winner) ? 'p1' : '')
+      : (String(slot.result_winner) === String(slot.from_telegram_id) ? 'p1' : String(slot.result_winner) ? 'p2' : '');
+    const p1Loss = winner === 'p2' || !winner ? points[0] : '';
+    const p2Loss = winner === 'p1' || !winner ? points[1] : '';
+    const a = namedWrite(headers, info.row, ['p1_techloss'], p1Loss);
+    const b = namedWrite(headers, info.row, ['p2_techloss'], p2Loss);
+    if (a) extra.push(a); if (b) extra.push(b);
+  }
+  await batchUpdate(spreadsheetId, writes.concat(extra));
+  return { status: 'saved', division: d1, row: info.row, reversed: info.reversed, playoff:playoff||null };
 }
 
 // Расписание дивизиона: кто с кем должен сыграть и что уже сыграно.

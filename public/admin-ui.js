@@ -75,6 +75,31 @@ async function bcCount(){
   },120);
 }
 async function previewBroadcast(lang='ru'){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message_ru:$('broadcastText').value,message_en:$('broadcastTextEn').value,lang,event_id:bcTo==='event'?$('bcEvent').value:''});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`${AUI("<div class=\"muted\" style=\"margin-top:8px\">ссылок в тексте: ")}${j.inline}</div>`:'')+((j.unknown||[]).length?`${AUI("<div class=\"warn\">⚠️ неизвестные коды: ")}${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+let broadcastPhotos=[];
+function bcResizePhoto(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(new Error(AUI("Не удалось прочитать фотографию")));
+    reader.onload=()=>{const img=new Image();img.onerror=()=>reject(new Error(AUI("Не удалось открыть фотографию")));img.onload=()=>{
+      const max=1200,scale=Math.min(1,max/Math.max(img.width,img.height)),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale));
+      const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);resolve(canvas.toDataURL('image/jpeg',.82));
+    };img.src=String(reader.result)};reader.readAsDataURL(file);
+  });
+}
+async function bcPhotoPick(input){
+  try{
+    const files=[...(input.files||[])].slice(0,10);
+    if(!files.length)return;
+    const next=await Promise.all(files.map(bcResizePhoto));
+    const merged=broadcastPhotos.concat(next).slice(0,10);
+    if(merged.reduce((n,x)=>n+x.length,0)>8.5*1024*1024)throw new Error(AUI("Фотографии слишком большие для одной рассылки"));
+    broadcastPhotos=merged;bcRenderPhotos();
+  }catch(e){$('broadcastResult').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+  input.value='';
+}
+function bcRemovePhoto(i){broadcastPhotos.splice(i,1);bcRenderPhotos()}
+function bcClearPhotos(){broadcastPhotos=[];bcRenderPhotos();const i=$('broadcastPhotoInput');if(i)i.value=''}
+function bcRenderPhotos(){const box=$('broadcastPhotoPreview');if(!box)return;box.innerHTML=broadcastPhotos.map((src,i)=>'<div class="pv"><img src="'+src+'" alt=""><button type="button" onclick="bcRemovePhoto('+i+')">✕</button></div>').join('')}
 async function sendBroadcast(){try{
   const message=$('broadcastText').value.trim();
   let body;
@@ -89,9 +114,9 @@ async function sendBroadcast(){try{
     const useSelected=selected.size>0;
     body={message,button:$('broadcastButton').value,filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()};
   }
-  body.message_ru=$('broadcastText').value.trim();body.message_en=$('broadcastTextEn').value.trim();
+  body.message_ru=$('broadcastText').value.trim();body.message_en=$('broadcastTextEn').value.trim();body.photos=broadcastPhotos.slice();
   const j=await api('/api/admin/broadcast',body);
-  $('broadcastResult').innerHTML=`${AUI("✅ Ушло: <b>")}${j.sent}${AUI("</b>, ошибок: <b>")}${j.failed}${AUI("</b>, получателей: <b>")}${j.recipients}${AUI("</b> — подробности во вкладке «История»")}`;history=[]
+  $('broadcastResult').innerHTML=`${AUI("✅ Ушло: <b>")}${j.sent}${AUI("</b>, ошибок: <b>")}${j.failed}${AUI("</b>, получателей: <b>")}${j.recipients}${AUI("</b> — подробности во вкладке «История»")}`;history=[];bcClearPhotos()
 }catch(e){$('broadcastResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function sendDirect(){try{const id=$('directId').value.trim()||[...selected][0];if(!id)throw new Error(AUI("Сначала выбери игрока"));const message=$('directText').value.trim();const j=await api('/api/admin/direct-message',{telegram_id:id,message,button:$('directButton').value});$('directResult').innerHTML=AUI("✅ Отправлено")}catch(e){$('directResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
 async function requestSelfies(){try{if(!confirm(AUI("Запросить селфи у отфильтрованных активных игроков?")))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-selfie',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('selfieResult').innerHTML=`${AUI("✅ Ушло: <b>")}${j.sent}${AUI("</b>, ошибок: <b>")}${j.failed}${AUI("</b>, получателей: <b>")}${j.recipients}</b>`;await reload()}catch(e){$('selfieResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}

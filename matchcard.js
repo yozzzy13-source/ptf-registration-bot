@@ -44,6 +44,8 @@ function fit(name = '', max = 22) {
 // пикселей, и «7:6 (7:4) 3:6 10:8» одной строкой уезжает прямо на портреты.
 // Столбиком это ещё и читается как табло.
 function scoreLines(score = '') {
+  const raw = txt(score).toUpperCase();
+  if (/^(W\/L|L\/W|L\/L)$/.test(raw)) return [raw];
   const s = txt(score).replace(/\s*\/\s*/g, ' ');
   const out = [];
   for (const tok of s.split(/\s+/).filter(Boolean)) {
@@ -174,7 +176,7 @@ export async function renderMatchCard(match = {}) {
   const m = {
     winner: txt(match.winner), loser: txt(match.loser), score: txt(match.score),
     division: txt(match.division), season: txt(match.season),
-    date: txt(match.date), court: txt(match.court)
+    date: txt(match.date), court: txt(match.court), label:txt(match.label || 'WINNER')
   };
   const chip = [m.division, m.season ? `Season ${m.season}` : ''].filter(Boolean).join(' · ');
   const chipW = Math.max(200, chip.length * 11 + 48);
@@ -206,7 +208,7 @@ export async function renderMatchCard(match = {}) {
     <text x="280" y="540" text-anchor="middle" font-family="${FONT}" font-size="34" font-weight="800"
       fill="${C.text}">${esc(fit(m.winner))}</text>
     <text x="280" y="578" text-anchor="middle" font-family="${FONT}" font-size="20" font-weight="700"
-      fill="${C.win}" letter-spacing="4">WINNER</text>
+      fill="${C.win}" letter-spacing="4">${esc(m.label)}</text>
     <text x="920" y="540" text-anchor="middle" font-family="${FONT}" font-size="34" font-weight="700"
       fill="${C.dim}">${esc(fit(m.loser))}</text>
     ${foot ? `<text x="${W / 2}" y="600" text-anchor="middle" font-family="${FONT}" font-size="19"
@@ -232,13 +234,15 @@ export async function renderMatchCard(match = {}) {
 // Карточка по слоту матча из таблицы матчей. Победитель всегда первым, счёт
 // развёрнут в его сторону — так же, как в тексте ленты.
 export async function cardForSlot(slot = {}, { winnerFirstScore, season = '' } = {}) {
-  const winnerIsFrom = String(slot.result_winner) === String(slot.from_telegram_id);
+  const bothTechnical=String(slot.result_kind||'')==='technical'&&!slot.result_winner;
+  const winnerIsFrom = bothTechnical || String(slot.result_winner) === String(slot.from_telegram_id);
   const score = typeof winnerFirstScore === 'function' ? winnerFirstScore(slot) : txt(slot.result_score);
   return renderMatchCard({
     winner: winnerIsFrom ? slot.from_name : slot.to_name,
     loser: winnerIsFrom ? slot.to_name : slot.from_name,
     winnerId: winnerIsFrom ? slot.from_telegram_id : slot.to_telegram_id,
     loserId: winnerIsFrom ? slot.to_telegram_id : slot.from_telegram_id,
+    label:bothTechnical?'TECHNICAL RESULT':'WINNER',
     score, division: [slot.division, slot.group ? `Group ${slot.group}` : ''].filter(Boolean).join(' · '), season,
     date: slot.agreed_date ? fmtDate(slot.agreed_date) : '',
     court: slot.agreed_court || ''
