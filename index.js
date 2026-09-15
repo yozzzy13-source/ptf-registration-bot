@@ -9,6 +9,7 @@ import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, 
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
+import { registerFantasyRoutes } from './fantasy.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
@@ -62,6 +63,7 @@ function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revali
 app.get('/participants', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'participants.html')); });
 app.get('/match', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'match.html')); });
 app.get('/league', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
+app.get('/fantasy', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'fantasy.html')); });
 
 // --- Календарь -------------------------------------------------------------
 // /ics отдаёт сам файл события, /cal — страница мини-приложения с кнопкой:
@@ -456,6 +458,8 @@ async function leagueViewer(initData, token = '') {
     matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin };
 }
 async function matchViewer(initData, token = '') { return leagueViewer(initData, token); }
+
+registerFantasyRoutes(app,{ viewer: leagueViewer });
 
 // История матчей лиги для экрана матчей: плоская лента, по строке на матч.
 // В витрине она хранится по игрокам — один матч лежит в двух карточках, поэтому

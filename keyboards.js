@@ -111,10 +111,10 @@ export function adminPanelKeyboard(lang) { return inlineKeyboard([[{ text:'🛠 
 // Набор кнопок зависит от состояния игрока: новичку не нужен «Результат»,
 // активному — «Оплатить».
 export const MENU_LABELS = {
-  ru: { events:'📆 События', matches:'🎾 Мои матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига',
+  ru: { events:'📆 События', matches:'🎾 Мои матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига', fantasy:'✨ Fantasy',
         pay:'💳 Оплатить', apply:'🎾 Заявка', squad:'👥 Состав',
         menu:'🏠 Меню', contact:'💬 Связаться' },
-  en: { events:'📆 Events', matches:'🎾 My matches', result:'📊 Result', court:'📅 Court', league:'🏆 League',
+  en: { events:'📆 Events', matches:'🎾 My matches', result:'📊 Result', court:'📅 Court', league:'🏆 League', fantasy:'✨ Fantasy',
         pay:'💳 Pay', apply:'🎾 Apply', squad:'👥 Line-up',
         menu:'🏠 Menu', contact:'💬 Contact' }
 };
@@ -127,7 +127,7 @@ export const MENU_LABELS = {
 // Так раздел открывается в ОДИН тап и при этом знает, кто пришёл.
 const MENU_PATHS = {
   events:'/league?tab=events', matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
-  league:'/league', apply:'/apply?mode=event', squad:'/participants'
+  league:'/league', fantasy:'/fantasy', apply:'/apply?mode=event', squad:'/participants'
 };
 
 // «Состав» нужен всем без исключения, в том числе тем, кто уже в сезоне: люди
@@ -145,12 +145,12 @@ const MENU_LAYOUTS = {
 // Значит после любой правки набора кнопок или адресов номер надо поднять —
 // иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
 // без мгновенного открытия мини-приложения).
-export const MENU_VERSION = 6;
+export const MENU_VERSION = 7;
 
 // allow — набор кнопок для группы игрока (настраивается в админке). Не задан —
 // берём прежнюю раскладку по состоянию. Кнопки раскладываем по две в ряд, а
 // нечётную последнюю оставляем во всю ширину: так ничего не висит половинкой.
-export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null, pendingCount=0) {
+export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null, pendingCount=0, showFantasy=false) {
   const l = lang === 'ru' ? 'ru' : 'en';
   const labels = MENU_LABELS[l];
   const token = telegramId ? signWebAppToken(telegramId) : '';
@@ -167,10 +167,12 @@ export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null,
   let rows;
   if (Array.isArray(allow)) {
     const keys = allow.filter(k => labels[k]);
+    if (showFantasy && !keys.includes('fantasy')) keys.push('fantasy');
     rows = [];
     for (let i = 0; i < keys.length; i += 2) rows.push(keys.slice(i, i + 2).map(make).filter(Boolean));
   } else {
     rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(make).filter(Boolean));
+    if (showFantasy) rows.splice(Math.max(0,rows.length-1),0,[make('fantasy')].filter(Boolean));
   }
   rows = rows.filter(r => r.length);
   return { keyboard: rows, resize_keyboard: true, is_persistent: true };

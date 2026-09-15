@@ -5,6 +5,7 @@ import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods,
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
+import { canAccessFantasyByTelegramId } from './fantasy.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
 import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, cancelMatchmaking, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
 import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
@@ -88,9 +89,10 @@ async function keyboardFor(chatId, lang, kind, userId) {
   // всех, иначе люди остаются со старой и жмут кнопки, которых уже нет.
   const count=pendingActionsFor(userId,await allSlots()).total;
   attentionCounts.set(String(userId),count);
-  const kb = persistentKeyboard(lang, kind, userId, allow,count);
+  const showFantasy = await canAccessFantasyByTelegramId(userId).catch(e => { console.error('fantasy button access:',e.message); return false; });
+  const kb = persistentKeyboard(lang, kind, userId, allow,count,showFantasy);
   const oneTap = kb.keyboard.flat().some(b => b.web_app) ? 'app' : 'txt';
-  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}:${count}:${(allow || []).join('.')}`;
+  const sig = `v${MENU_VERSION}:${lang}:${kind}:${oneTap}:${count}:${showFantasy?'fantasy':''}:${(allow || []).join('.')}`;
   if (menuSignature.get(key) === sig) return null;
   menuSignature.set(key, sig);
   return kb.keyboard.length ? kb : null;
@@ -240,6 +242,8 @@ async function openDestination(chatId, lang, from, code) {
 // не передаёт в него initData. Поэтому отвечаем сообщением с inline-кнопкой —
 // у неё авторизация работает.
 const OPEN_APP = {
+  fantasy:{ path:'/fantasy', ru:'✨ Открыть Fantasy', en:'✨ Open Fantasy',
+            tru:'Тестовая Fantasy League: соберите команду и проверьте правила.', ten:'Fantasy League test: build a squad and try the rules.' },
   league: { path:'/league',            ru:'🏆 Открыть лигу',      en:'🏆 Open the league',
             tru:'Таблицы, годовая гонка, игроки и история матчей.', ten:'Tables, Yearly Race, players and match history.' },
   squad:  { path:'/participants',      ru:'👥 Открыть состав',    en:'👥 Open the line-up',
@@ -891,6 +895,7 @@ export async function handleMessage(msg) {
     if (act === 'court') return sendMatchShortcut(chatId, lang, from, 'book');
     // Открытые разделы: одно короткое сообщение с inline-кнопкой запуска.
     if (act === 'league') return sendOpenApp(chatId, lang, 'league');
+    if (act === 'fantasy') return sendOpenApp(chatId, lang, 'fantasy');
     if (act === 'events') return openDestination(chatId,lang,from,'events');
     if (act === 'squad') return sendOpenApp(chatId, lang, 'squad');
     if (act === 'apply') return sendOpenApp(chatId, lang, 'apply');
