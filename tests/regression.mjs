@@ -167,6 +167,22 @@ const hour=3600000;
 const base={...slot,challenge_id:'remind',season:'2',group:'1',created_at:iso(started),responded_at:iso(started),
  dates:'2099-09-20',agreed_date:'2099-09-20',agreed_time:'10:00',agreed_court:'Court A',
  to_telegram_id:'2',to_name:'Bob Two',to_username:'bob',court_pending_at:iso(started),result_status:'',nudge_sent:'',court_nudge:''};
+const directCancel={...base,challenge_id:'cancel-direct',status:'pending',match_type:'direct',pending_by:'1'};
+await db.createSlot(directCancel);
+check((await db.cancelMatchmaking('cancel-direct',{telegram_id:'2'})).ok,'Either participant can cancel a direct request');
+check((await db.findSlot('cancel-direct')).status==='cancelled','Cancelled direct request is closed');
+const openCancel={...base,challenge_id:'cancel-open',status:'pending',match_type:'open',pending_by:'2',dates:'2099-09-20,2099-09-21'};
+await db.createSlot(openCancel);
+const returned=await db.cancelMatchmaking('cancel-open',{telegram_id:'2'});
+check(returned.ok&&returned.backToOpen,'Claimant can cancel and return an open window');
+const returnedSlot=await db.findSlot('cancel-open');
+check(returnedSlot.status==='open'&&!returnedSlot.to_telegram_id&&returnedSlot.dates.includes('2099-09-20'),'Returned window preserves future availability and clears opponent');
+await db.updateSlot('cancel-direct',{status:'accepted',result_status:'pending'});
+check((await db.cancelMatchmaking('cancel-direct',{telegram_id:'1'})).reason==='result_started','A match with submitted result cannot be cancelled');
+check((await request('get','/api/match/admin-active','1')).code===403,'Admin active-request list rejects a player');
+const adminActive=await request('get','/api/match/admin-active','99');
+check(adminActive.body.ok&&adminActive.body.items.some(x=>x.challenge_id==='cancel-open'),'Admin sees active requests across divisions');
+
 const scopes={
  initial:{...base,status:'open',match_type:'direct'},
  negotiation:{...base,status:'pending',pending_by:'2'},
@@ -284,6 +300,7 @@ messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author
 check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
 messages.length=0;await matches.notifyMatchAgreed(languageSlot);
 for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);const buttons=m.args[2].reply_markup.inline_keyboard.flat();check(buttons.some(b=>b.url&&/t.me|tg:\/\//.test(b.url)),'Contact button on agreement for '+id);check(buttons.some(b=>b.callback_data?.startsWith('match_book:'))===(id==='1'),'Only creator gets booking button '+id);}
+for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);check(m.args[2].reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='match_cancel:language'),'Both players get a chat cancel button '+id);}
 messages.length=0;telegramFailureId='1';await matches.notifyMatchAgreed(languageSlot);telegramFailureId='';check(messages.some(m=>String(m.args[0])==='2'),'Blocked creator does not prevent notifying second player');
 check((await matches.matchContact(languageSlot,'2')).url==='https://t.me/alice','Contact refreshes Applicants username before stale slot value');
 check((await matches.matchContact({...languageSlot,to_telegram_id:'12345',to_username:''},'1')).url==='tg://user?id=12345','No username falls back to Telegram user link');
@@ -355,4 +372,7 @@ check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Tomorrow')&&
 check(messages.some(m=>String(m.args[0])==='2'&&m.args[1].includes('Завтра')),'Scheduled event reminder uses RU body');
 messages.length=0;await flow.notifyEventChanged(futureEvent,['Время: 09:00 → 10:00']);check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Time:')&&!/[а-яё]/i.test(m.args[1])),'Event change translates field labels and title');
 messages.length=0;await flow.reviewEventProof({signupId:'en-event',approve:true});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Payment for')&&!/[а-яё]/i.test(m.args[1])),'Event payment approval uses recipient language');
+const matchHtml=await fs.readFile(path.join(root,'public/match.html'),'utf8');
+check(matchHtml.includes('function renderAdmin()')&&matchHtml.includes("'/api/match/admin-active"),'Match miniapp includes protected admin list UI');
+check(matchHtml.includes("esc(opp.name||X.waiting)")&&matchHtml.includes('function requestActions'),'Schedule displays named opponents with contact and cancel actions');
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

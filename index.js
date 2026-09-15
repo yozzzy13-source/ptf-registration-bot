@@ -9,7 +9,7 @@ import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, 
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
-import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, cancelSlot as cancelMatchSlot, setBotUsername,
+import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
@@ -17,14 +17,13 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
 import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
-  listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, dropStuckTimeChange, agreedSchedule, courtUsage,
+  listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
-import { authorizeSlot } from './access.js';
 import { uiError } from './ui-errors.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -496,6 +495,28 @@ app.get('/api/match/history', async (req, res) => {
 });
 
 app.get('/api/match/attention',async(req,res)=>{try{const v=await matchViewer(req.query.initData||'',String(req.query.t||''));if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});res.json({ok:true,attention:pendingActionsFor(v.user.id,await allSlots())});}catch(e){res.status(500).json({ok:false,error:e.message});}});
+app.get('/api/match/admin-active', async (req, res) => {
+  try {
+    const v=await matchViewer(req.query.initData||'',String(req.query.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    if(!v.isAdmin)return res.status(403).json({ok:false,error:'admin_required'});
+    const rows=(await allSlots()).filter(function(slot){
+      return ['open','pending','accepted'].includes(String(slot.status||'').toLowerCase()) && String(slot.result_status||'').toLowerCase()!=='confirmed';
+    });
+    const ids=[...new Set(rows.flatMap(function(slot){return [slot.from_telegram_id,slot.to_telegram_id]}).filter(Boolean).map(String))];
+    const people=new Map(await Promise.all(ids.map(async function(id){
+      const p=await findApplicantByTelegramId(id).catch(function(){return null});
+      const username=String(p?.telegram_username||p?.username||'').replace(/^@/,'');
+      return [id,{telegram_id:id,name:p?.name||p?.full_name||'',username:username,url:username?'https://t.me/'+username:'tg://user?id='+encodeURIComponent(id)}];
+    })));
+    const items=rows.map(function(slot){
+      const from=people.get(String(slot.from_telegram_id))||{};const to=people.get(String(slot.to_telegram_id))||{};
+      return {...slot,dates:cellToList(slot.dates),courts:cellToList(slot.courts),from_contact:{...from,name:slot.from_name||from.name,username:slot.from_username||from.username,url:slot.from_username?'https://t.me/'+String(slot.from_username).replace(/^@/,''):from.url},to_contact:slot.to_telegram_id?{...to,name:slot.to_name||to.name,username:slot.to_username||to.username,url:slot.to_username?'https://t.me/'+String(slot.to_username).replace(/^@/,''):to.url}:null};
+    }).sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))});
+    res.json({ok:true,items:items});
+  } catch(e){res.status(500).json({ok:false,error:e.message})}
+});
+
 app.get('/api/match/bootstrap', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
@@ -1331,25 +1352,14 @@ app.post('/api/match/cancel', async (req, res) => {
     const v = await matchViewer(req.body?.initData || '', String(req.body?.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
-    const slot = await findSlot(req.body.challenge_id);
-    if (!slot) return res.status(404).json({ ok:false, error:'Slot not found' });
-    const access = await authorizeSlot(slot, {telegram_id:v.user.id});
-    if (!access.ok) return res.status(403).json({ok:false,error:access.reason});
-    const status = String(slot.status).toLowerCase();
-    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
-    if (status === 'accepted') {
-      if (!sides.includes(String(v.user.id))) return res.status(403).json({ ok:false, error:'Not your match' });
-      if (String(slot.result_status || '').toLowerCase() === 'confirmed') {
-        return res.status(409).json({ ok:false, error:'Результат уже засчитан — матч не отменить.' });
-      }
-      await cancelMatchSlot(slot, { telegram_id: v.user.id, name: v.profile.name });
-      await notifyMatchCancelled(slot, { telegram_id: v.user.id, name: v.profile.name })
-        .catch(e => console.error('notifyMatchCancelled failed:', e.message));
-      return res.json({ ok:true, cancelled:'match' });
+    const result = await cancelMatchmaking(req.body.challenge_id, { telegram_id:v.user.id, name:v.profile.name });
+    if (!result.ok) {
+      const code = result.reason === 'not_found' ? 404 : result.reason === 'not_a_player' ? 403 : 409;
+      return res.status(code).json({ok:false,error:result.reason});
     }
-    if (String(slot.from_telegram_id) !== String(v.user.id)) return res.status(403).json({ ok:false, error:'Not your slot' });
-    await cancelMatchSlot(slot, { telegram_id: v.user.id, name: v.profile.name });
-    res.json({ ok:true, cancelled:'slot' });
+    await notifyMatchCancelled(result.previous, {telegram_id:v.user.id,name:v.profile.name}, {backToOpen:result.backToOpen})
+      .catch(e => console.error('notifyMatchCancelled failed:',e.message));
+    res.json({ok:true,cancelled:result.backToOpen?'reopened':'request'});
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 

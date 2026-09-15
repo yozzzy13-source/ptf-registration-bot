@@ -744,6 +744,38 @@ export async function closeStuckSlot(challengeId,{scope='negotiation',expected=n
     return {ok:true,slot:{...slot,...patch},previous:slot,backToOpen,scope};
   });
 }
+
+export async function cancelMatchmaking(challengeId,actor={},now=Date.now()) {
+  return withClaimLock(challengeId,async()=>{
+    const slot=await findSlot(challengeId);
+    if(!slot)return {ok:false,reason:'not_found'};
+    const access=await authorizeSlot(slot,actor,{joining:false});
+    if(!access.ok)return access;
+    const me=String(actor.telegram_id||'');
+    const sides=[String(slot.from_telegram_id||''),String(slot.to_telegram_id||'')].filter(Boolean);
+    if(!sides.includes(me))return {ok:false,reason:'not_a_player',slot};
+    const status=String(slot.status||'').toLowerCase();
+    if(!['open','pending','accepted'].includes(status))return {ok:false,reason:'not_pending',slot};
+    if(String(slot.result_status||'').toLowerCase())return {ok:false,reason:'result_started',slot};
+    const dates=cellToList(slot.dates).filter(d=>{
+      const end=Date.parse(d+'T'+(slot.time_to||'23:59')+':00+07:00');
+      return Number.isFinite(end)&&end>now;
+    });
+    const claimed=Boolean(slot.to_telegram_id);
+    const backToOpen=slot.match_type==='open'&&claimed&&dates.length>0;
+    const patch=backToOpen?{
+      status:'open',dates:listToCell(dates),to_telegram_id:'',to_name:'',to_username:'',
+      agreed_date:'',agreed_time:'',agreed_court:'',pending_by:'',round:'',nudge_sent:'',
+      court_pending_at:'',court_nudge:'',court_confirmed_at:'',court_confirmed_by:'',
+      time_change:'',reminder_sent:'',result_prompt_sent_at:'',score_nudge:'',responded_at:nowISO(),cancelled_at:''
+    }:{status:'cancelled',cancelled_at:nowISO()};
+    await updateRow(MATCH_SHEETS.slots,SLOT_HEADERS,slot._rowNumber,patch);
+    await logMatchEvent(backToOpen?'matchmaking_cancelled_reopened':'matchmaking_cancelled',slot,actor,
+      backToOpen?'окно возвращено':'запрос закрыт');
+    return {ok:true,slot:{...slot,...patch},previous:slot,backToOpen};
+  });
+}
+
 export async function dropStuckTimeChange(challengeId,expected=null) {
   return withClaimLock(challengeId,async()=>{
     const slot=await findSlot(challengeId);

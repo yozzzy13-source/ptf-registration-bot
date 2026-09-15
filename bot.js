@@ -6,8 +6,8 @@ import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
-import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
-import { declineDirectChallenge, notifyMatchAgreed, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
+import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, cancelMatchmaking, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
+import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
   notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, broadcastResult,
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite } from './results.js';
@@ -1222,6 +1222,17 @@ export async function handleCallback(q) {
     return sendMessage(chatId, lang === 'ru'
       ? 'Понял, время осталось прежним. Сообщил сопернику.'
       : 'Got it — the time stays as it was. Your opponent has been told.').catch(() => {});
+  }
+
+  if (data.startsWith('match_cancel:')) {
+    const id=data.split(':')[1];
+    const result=await cancelMatchmaking(id,{telegram_id:from.id,name:from.first_name||''});
+    if(!result.ok){
+      const errors={not_found:lang==='ru'?'Запрос не найден.':'Request not found.',not_a_player:lang==='ru'?'Это не ваш запрос.':'This is not your request.',already_closed:lang==='ru'?'Запрос уже закрыт.':'Request is already closed.',result_started:lang==='ru'?'Результат уже внесён.':'A result has already been submitted.'};
+      return answerCallbackQuery(q.id,errors[result.reason]||uiError(result.reason,lang),true).catch(()=>{});
+    }
+    await notifyMatchCancelled(result.previous,{telegram_id:from.id,name:from.first_name||''},{backToOpen:result.backToOpen}).catch(e=>console.error('notifyMatchCancelled failed:',e.message));
+    return answerCallbackQuery(q.id,result.backToOpen?(lang==='ru'?'Запрос отменён, окно снова открыто.':'Request cancelled; the slot is open again.'):(lang==='ru'?'Запрос отменён.':'Request cancelled.')).catch(()=>{});
   }
 
   if (data.startsWith('match_decline:')) {
