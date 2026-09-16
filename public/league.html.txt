@@ -102,6 +102,11 @@ border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28);margin
 .psug .pi{padding:10px 13px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line4)}
 .psug .pi:last-child{border-bottom:0}
 .psug .pi:hover,.psug .pi:active{background:var(--card)}
+.fanmine{display:inline-block;margin-left:5px;font-size:11px;line-height:1;vertical-align:middle;font-weight:900}
+.fanmine.t1{color:var(--gold,#e8a45c)}
+.fanmine.t2{color:#7aa8d6}
+.fanhomebanner{display:flex;gap:13px;align-items:center;cursor:pointer}
+.fanhomebanner .fhb-ico{font-size:28px;flex:0 0 auto}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .chip{padding:7px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);font-size:11px;
 font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
@@ -854,6 +859,19 @@ function fantasyPlayer(p){
   var row=(fantasyData&&fantasyData.player_leaderboard||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0]||{};
   return {points:Number(source.score&&source.score.total||row.points||0),teams:Number(source.selected_by||row.selected_by||0),place:row.place||'—'};
 }
+// Подсветка игроков из собственных Fantasy-команд — везде, где встречается их
+// имя (Игроки, Дивизион, Race, Матчи). Разные иконки для команды 1 и команды 2.
+function myFantasyMarks(name){
+  if(!fantasyData||!(fantasyData.teams||[]).length)return '';
+  var key=nameKey(name),out='';
+  (fantasyData.teams||[]).forEach(function(t){
+    var slot=Number(t.team_slot||1);
+    if((t.picks||[]).some(function(pk){return nameKey(pk.name)===key})){
+      out+='<span class="fanmine t'+slot+'" title="'+esc((L?'Моя Fantasy-команда ':'My Fantasy team ')+slot)+'">'+(slot===1?'①':'②')+'</span>';
+    }
+  });
+  return out;
+}
 function fantasyBadges(p){
   var f=fantasyPlayer(p);if(!f)return '';
   return '<div class="fanbadges"><span class="fanbadge">✨ FP '+esc(f.points)+' · Teams '+esc(f.teams)+' · Rank #'+esc(f.place)+'</span></div>';
@@ -1494,6 +1512,16 @@ function championsBlock(){
   if(up)h+='<div class="lab" style="margin-top:14px">'+esc(X.promoted)+'</div>'+up;
   return h+'</div>';
 }
+// Короткий баннер-приглашение в Fantasy на главной — виден только тем, у кого
+// вообще есть доступ (лига-игроки), сразу ведёт на вкладку Fantasy.
+function homeFantasyBanner(){
+  if(!fantasyData)return '';
+  var have=(fantasyData.teams||[]).length;
+  var text=have
+    ?(L?('У вас '+have+(have===1?' команда':' команды')+' в игре — загляните за очками и составом.'):('You have '+have+' Fantasy '+(have===1?'team':'teams')+' in play — check your points and squad.'))
+    :(L?'Соберите команду из реальных игроков PTF — их матчи в сезоне принесут вам очки. Бесплатно, до двух команд.':'Build a squad of real PTF players — their real matches earn you points. Free, up to two squads.');
+  return '<div class="card fanhomebanner" onclick="showTab(\'fantasy\')"><div class="fhb-ico">✨</div><div><h3 style="margin:0 0 4px">PTF Fantasy</h3><div class="hint">'+esc(text)+'</div></div></div>';
+}
 function renderHome(){
   var h='';
   // Блок «Твой сезон» убран: своя карточка открывается плашкой в шапке.
@@ -1504,6 +1532,7 @@ function renderHome(){
     +'<div class="venue"><img src="/public/img/peak.jpg" alt="">'
     +'<div><div class="vt">'+esc(X.sVenueV)+'</div><div class="vd">'+esc(X.sVenue)+'</div></div></div></div>';
   loadSummary();
+  h+=homeFantasyBanner();
   h+=championsBlock();
   h+='<div class="card"><h3>'+esc(X.title)+'</h3><div class="hint">'+esc(X.sub)+'</div>'
     +'<div class="chips" style="margin-top:11px;margin-bottom:0">'
@@ -1688,7 +1717,7 @@ function renderRace(){
     var w=pct(p);
     return '<div class="trw'+(p.position&&p.position<=3?' top':'')+'" onclick="openPlayer(\''+q(p.id)+'\',\'race\')">'
       +'<span class="p">'+(raceNo(p)||'—')+'</span>'+av(p)
-      +'<span class="n"><div class="nm">'+esc(p.name)+'</div><div style="margin-top:3px">'+divChip(p.division)+'</div></span>'
+      +'<span class="n"><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div><div style="margin-top:3px">'+divChip(p.division)+'</div></span>'
       +'<span>'+p.matches+'</span>'
       +'<span>'+(p.wins||0)+'</span>'
       +'<span>'+w+'%<div class="bar"><i style="width:'+w+'%"></i></div></span>'
@@ -1807,7 +1836,7 @@ function playerRow(p){
   var w=pct(p);
   return '<div class="pr" onclick="openPlayer(\''+q(p.id)+'\',\'players\')"><div class="top">'
     +'<div class="ph">'+av(p)+'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p)+'</div>'
-    +'<div><div class="nm">'+esc(p.name)+'</div>'
+    +'<div><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
     +'<div class="rw">'+divChip(p.division)+statusBadge(p)+'</div>'
     +'<div class="meta">'+(p.ntrp?'<span>'+esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b></span>':'')
       +(p.nationality?'<span>'+flag(p.nationality)+' <b>'+esc(p.nationality)+'</b></span>':'')
@@ -1826,7 +1855,7 @@ function playerTile(p){
   var w=pct(p);
   return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'players\')">'+av(p)
     +'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p,'ach2')
-    +'<div class="bd"><div class="nm">'+esc(p.name)+'</div>'
+    +'<div class="bd"><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
     +'<div class="rw">'+divChip(p.division)+'</div>'
     +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
       +(p.ntrp?esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b> · ':'')+'WR <b>'+w+'%</b></div>'+fantasyBadges(p)
@@ -1946,7 +1975,7 @@ function standingsBlock(d,title){
       var promo=!d.grouped&&p.place<=2?' promo':'';
       return '<div class="drow '+zone+promo+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
         +'<span class="p">'+p.place+'</span>'
-        +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em></span>'
+        +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em>'+myFantasyMarks(p.name)+'</span>'
         +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
         +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
     }).join('')+'</div>'
@@ -2075,9 +2104,9 @@ function feedCard(m){
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
     // По имени тоже открывается карточка игрока — раньше кликался только кружок.
     +'<div class="mid"><div class="nm3">'
-      +'<b onclick="event.stopPropagation();openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+esc(m.winner.name)+'</b>'
+      +'<b onclick="event.stopPropagation();openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+esc(m.winner.name)+'</b>'+myFantasyMarks(m.winner.name)
       +' <s>vs</s> '
-      +'<em onclick="event.stopPropagation();openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+esc(m.loser.name)+'</em></div>'
+      +'<em onclick="event.stopPropagation();openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+esc(m.loser.name)+'</em>'+myFantasyMarks(m.loser.name)+'</div>'
     +'<div class="sc">'+esc(m.score||'—')+'</div>'
     +(m.division?'<div style="margin-top:6px" onclick="event.stopPropagation();openDivFrom(\''+q(m.season||'')+'\',\''+q(m.division)+'\')">'+divChip(m.division)+'</div>':'')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+av(m.loser)+'</div>'

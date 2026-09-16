@@ -49,6 +49,17 @@ border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28)}
 padding:10px 13px;font:inherit;font-size:13px;color:var(--text);cursor:pointer}
 .psug .pi:last-child{border-bottom:0}
 .psug .pi:hover,.psug .pi:active{background:var(--panel)}
+.intro-backdrop{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;padding:0}
+html[data-theme=light] .intro-backdrop{background:rgba(20,25,20,.4)}
+.intro-card{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--line);border-top-left-radius:22px;border-top-right-radius:22px;
+padding:22px 20px calc(20px + env(safe-area-inset-bottom));box-shadow:0 -20px 50px rgba(0,0,0,.35)}
+.intro-card h2{margin:10px 0 8px;font-size:21px}
+.intro-card p{color:var(--muted);line-height:1.5;margin:0 0 12px}
+.intro-card p.sub{font-size:12px}
+.intro-steps{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:8px}
+.intro-steps li{background:var(--panel2);border:1px solid var(--line2);border-radius:13px;padding:10px 12px;font-size:13px;line-height:1.4}
+.intro-steps li b{color:var(--accent);margin-right:6px}
+.player-name-btn{background:none;border:0;padding:0;margin:0;text-align:left;font:inherit;color:inherit;cursor:pointer;min-width:0;overflow-wrap:anywhere}
 @media(max-width:380px){.app{padding-left:10px;padding-right:10px}.fantasy-catalog .thd,.fantasy-catalog .trw{gap:3px;padding-left:5px;padding-right:5px}.fantasy-catalog.selecting .thd,.fantasy-catalog.selecting .trw{grid-template-columns:14px 30px minmax(0,1fr) 28px 38px 26px 44px}.fantasy-catalog .avatar{width:30px;height:30px}.progress li{font-size:9px}.budget-line{font-size:11px}}
 
 
