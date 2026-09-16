@@ -226,7 +226,11 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
   const picks=js(row.picks_json,[]),captainInRoster=catalog.players.some(p=>p.key===row.captain_key),captainScore=pointMap.get(row.captain_key),multiplier=!captainInRoster&&!(captainScore?.matches)?row.vice_key:row.captain_key;let total=0;
   picks.forEach(p=>{const value=pointMap.get(p.key)?.total||0;total+=value+(p.key===multiplier?value*.5:0);selected.set(p.key,(selected.get(p.key)||0)+1)});
   const ownerPlayer=catalog.players.find(p=>nk(p.name)===nk(row.owner_name));
-  leaderboard.push({team_id:row.team_id||'',team_name:row.team_name||row.owner_name||'PTF Team',owner_name:row.owner_name||'',owner_photo:ownerPlayer?.photo||'',points:r1(total),transfers_used:n(row.transfers_used),locked_at:row.locked_at||''});
+  // Kostas wants the team leaderboard to expand and show who is on each squad
+  // (with each player's own points), not just the team total — so we pass the
+  // squad through here instead of making the client re-derive it.
+  const squad=picks.map(p=>({key:p.key,name:p.name,pool:p.pool,points:r1(pointMap.get(p.key)?.total||0),captain:p.key===row.captain_key,vice:p.key===row.vice_key}));
+  leaderboard.push({team_id:row.team_id||'',team_name:row.team_name||row.owner_name||'PTF Team',owner_name:row.owner_name||'',owner_photo:ownerPlayer?.photo||'',points:r1(total),transfers_used:n(row.transfers_used),locked_at:row.locked_at||'',picks:squad});
  }
  leaderboard.sort((a,b)=>b.points-a.points||a.transfers_used-b.transfers_used||String(a.locked_at).localeCompare(String(b.locked_at))||a.team_name.localeCompare(b.team_name));leaderboard.forEach((x,i)=>x.place=i+1);
  const entryOpen=await fantasyEntryOpen(mode);
