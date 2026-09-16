@@ -700,8 +700,8 @@ ${ru?"Внесите счёт — соперник подтвердит, и ма
 function resultSides(slot) {
   const winnerIsFrom = String(slot.result_winner) === String(slot.from_telegram_id);
   return {
-    winner: { name: winnerIsFrom ? slot.from_name : slot.to_name, username: winnerIsFrom ? slot.from_username : slot.to_username },
-    loser:  { name: winnerIsFrom ? slot.to_name : slot.from_name, username: winnerIsFrom ? slot.to_username : slot.from_username }
+    winner: { name: winnerIsFrom ? slot.from_name : slot.to_name, username: winnerIsFrom ? slot.from_username : slot.to_username, telegramId: winnerIsFrom ? slot.from_telegram_id : slot.to_telegram_id },
+    loser:  { name: winnerIsFrom ? slot.to_name : slot.from_name, username: winnerIsFrom ? slot.to_username : slot.from_username, telegramId: winnerIsFrom ? slot.to_telegram_id : slot.from_telegram_id }
   };
 }
 
@@ -850,41 +850,33 @@ export function winnerFirstScore(slot) {
 // Заголовок, дивизион и сезон, одна строка «победитель — счёт — проигравший».
 // Всё, что кликается, ведёт внутрь приложения: карточки игроков и таблица того
 // дивизиона, где сыгран матч. Ссылок на сайт в ленте больше нет.
-async function feedCard(slot, lang = 'ru') {
+async function feedCard(slot) {
   const { winner, loser } = resultSides(slot);
   let season = String(slot.season || '');
   try {
     const { latestSeason } = await import('./division.js');
     if (!season) season = String(await latestSeason().catch(() => '') || '').trim();
-  } catch { /* реестра может не быть */ }
+  } catch { /* the registry may be unavailable */ }
   if (!season) season = String(await getSetting('season_number').catch(() => '') || '').trim();
 
-  const ru = String(lang || 'ru').toLowerCase() !== 'en';
-  const subtitle = [slot.division, slot.group ? `${ru ? 'Группа' : 'Group'} ${slot.group}` : '', season ? `${ru ? 'Сезон' : 'Season'} ${season}` : ''].filter(Boolean).join(' · ');
-
-  const text = `🎾 <b>${ru ? 'Результат матча' : 'Match Result'}</b>${subtitle ? `\n${escapeHtml(subtitle)}` : ''}
-
-${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? `\n<i>${ru ? 'чемпионский тай-брейк' : 'match tie-break'}</i>` : ''}${slot.result_note?`\n💬 <i>${escapeHtml(slot.result_note)}</i>`:''}`;
-
-  const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || (ru ? 'игрок' : 'player');
-  const playerLink = (name) => `${PUBLIC_URL}/league?tab=players&player_name=${encodeURIComponent(String(name || ''))}`;
-  const letter = String(slot.division || '').replace(/^(division|дивизион)\s*/i, '').trim();
-  const tableLink = `${PUBLIC_URL}/league?tab=div`
-    + (letter ? `&division=${encodeURIComponent(letter)}` : '')
-    + (letter && season ? `&season=${encodeURIComponent(season)}` : '');
-
-  const keyboard = [];
-  const row = [];
-  if (winner.name) row.push({ text: `🏆 ${firstName(winner.name)}`, web_app: { url: playerLink(winner.name) } });
-  if (loser.name) row.push({ text: `👤 ${firstName(loser.name)}`, web_app: { url: playerLink(loser.name) } });
-  if (row.length) keyboard.push(row);
-  keyboard.push([{ text: ru ? '📊 Таблица дивизиона' : '📊 Division standings', web_app: { url: tableLink } }]);
-  // В группе кнопка отписки бессмысленна — она только для личной рассылки.
-  const dmKeyboard = [...keyboard, [{ text: ru ? '🔕 Не присылать результаты' : '🔕 Stop results', callback_data: 'results_mute' }]];
-  // Кнопки мини-приложения Telegram разрешает только в личных чатах: в группе
-  // такое сообщение он просто отклонит. Поэтому в ленту группы уходит один
-  // текст с фотографией, а кнопки — в личную рассылку.
-  return { text, reply_markup: undefined, dm_reply_markup: { inline_keyboard: dmKeyboard } };
+  // Results are one public English feed. Telegram links work in a group and in
+  // direct messages; a missing username falls back to Telegram's user URI.
+  const telegramLink = (player) => {
+    const name = escapeHtml(player?.name || 'Player');
+    const username = String(player?.username || '').replace(/^@/, '').replace(/[^a-zA-Z0-9_]/g, '');
+    const id = String(player?.telegramId || '').replace(/[^0-9]/g, '');
+    if (username) return '<a href="https://t.me/'+username+'">'+name+'</a>';
+    return id ? '<a href="tg://user?id='+id+'">'+name+'</a>' : name;
+  };
+  const subtitle = [slot.division, slot.group ? 'Group '+slot.group : '', season ? 'Season '+season : ''].filter(Boolean).join(' · ');
+  const technicalBoth = String(slot.result_kind || '') === 'technical' && !slot.result_winner;
+  const line = technicalBoth
+    ? telegramLink({name:slot.from_name,username:slot.from_username,telegramId:slot.from_telegram_id})+'  L/L  '+telegramLink({name:slot.to_name,username:slot.to_username,telegramId:slot.to_telegram_id})
+    : '🏆 '+telegramLink(winner)+'  '+escapeHtml(winnerFirstScore(slot))+'  '+telegramLink(loser);
+  const text = '🎾 <b>Match Result</b>'+(subtitle ? '\n'+escapeHtml(subtitle) : '')+'\n\n'+line
+    +(slot.result_set3_mode === 'Match TB' ? '\n<i>Match tie-break</i>' : '')
+    +(slot.result_note ? '\n💬 <i>'+escapeHtml(slot.result_note)+'</i>' : '');
+  return { text, reply_markup: undefined, dm_reply_markup: undefined };
 }
 
 // Карточка результата создаётся всегда. Фото матча отправляется дополнительно.

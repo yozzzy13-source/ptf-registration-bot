@@ -21,6 +21,11 @@ const CROSS_GROUP_SHEET = 'Cross_Group_Match_Log';
 const CROSS_GROUP_HEADERS = ['match_id','season','division','player_1_group','player_1','player_2_group','player_2','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
 const PLAYOFF_SHEET = 'Playoff';
 const PLAYOFF_HEADERS = ['match_id','season','division','stage','slot','player_1','player_2','player_1_group','player_2_group','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
+const W_CROSS_SCHEDULE=[
+ ['Olga Sauer','Masha Geveling'],['Olga Sauer','Yana D'],['Marina Banatskaia','Elena Ian'],['Marina Banatskaia','Irina Strembitska'],
+ ['Daria Kozitskaya','Tatiana Sokolova'],['Daria Kozitskaya','Xenia Hors'],['Hyunjung Moon','Masha Geveling'],['Hyunjung Moon','Irina Strembitska'],
+ ['Anna Ermolina','Elena Ian'],['Anna Ermolina','Yana D'],['Maria Evangelista','Tatiana Sokolova'],['Maria Evangelista','Xenia Hors']
+];
 
 function norm(s = '') {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -100,6 +105,13 @@ async function ensureCrossGroupSheet() {
   try { values = await getValues(LEAGUE_RESULTS_SHEET_ID, CROSS_GROUP_SHEET+'!A1:O1'); } catch {}
   if (!(values[0] || []).length) await api.spreadsheets.values.update({ spreadsheetId:LEAGUE_RESULTS_SHEET_ID, range:CROSS_GROUP_SHEET+'!A1:O1', valueInputOption:'RAW', requestBody:{ values:[CROSS_GROUP_HEADERS] } });
 }
+async function seedWomenCrossGroupSchedule(season){
+  await ensureCrossGroupSheet();
+  const api=sheetsClient(),values=await getValues(LEAGUE_RESULTS_SHEET_ID,CROSS_GROUP_SHEET+'!A1:O');
+  const rows=values.slice(1),exists=(a,b)=>rows.some(r=>String(r[1]||'')===String(season)&&divisionLetter(r[2])==='W'&&((sameName(r[4],a)&&sameName(r[6],b))||(sameName(r[4],b)&&sameName(r[6],a))));
+  const missing=W_CROSS_SCHEDULE.filter(([a,b])=>!exists(a,b)).map(([a,b])=>['',String(season),'W','1',a,'2',b,'','','','','','','','scheduled','']);
+  if(missing.length)await api.spreadsheets.values.append({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:CROSS_GROUP_SHEET+'!A:O',valueInputOption:'USER_ENTERED',insertDataOption:'INSERT_ROWS',requestBody:{values:missing}});
+}
 function playoffStage(v='') {
   const x=String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'');
   if(['qf','quarterfinal','quarterfinals'].includes(x))return 'QF';
@@ -126,7 +138,7 @@ async function writePlayoffResult(pair,slot,stage) {
 }
 
 async function writeCrossGroupResult(pair, slot) {
-  await ensureCrossGroupSheet();
+  await seedWomenCrossGroupSchedule(pair.season);
   const values = await getValues(LEAGUE_RESULTS_SHEET_ID, CROSS_GROUP_SHEET+'!A1:O');
   const rows = values.slice(1), p1=String(slot.from_name||pair.a?.name||'').trim(), p2=String(slot.to_name||pair.b?.name||'').trim();
   let found = -1;

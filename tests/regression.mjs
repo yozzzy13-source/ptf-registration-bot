@@ -173,8 +173,10 @@ messages.length=0;
 await matches.broadcastResult({...result2,challenge_id:'broadcast',result_photo_file_id:'user-photo'});
 check(messages.some(m=>m.method==='sendPhotoBuffer'),'Result card generated despite user photo');
 check(messages.some(m=>m.method==='sendPhoto'&&m.args[1]==='user-photo'),'User photo delivered additionally');
-check(messages.some(m=>/sendPhoto/.test(m.method)&&String(m.args[0])==='2'&&/Результат/.test(m.args[m.method==='sendPhotoBuffer'?3:2]?.caption||'')),'RU result caption uses recipient language');
-check(messages.some(m=>/sendPhoto/.test(m.method)&&String(m.args[0])==='3'&&/Match Result/.test(m.args[m.method==='sendPhotoBuffer'?3:2]?.caption||'')),'EN result caption uses recipient language');
+const resultCaptions=messages.filter(m=>/sendPhoto/.test(m.method)).map(m=>m.args[m.method==='sendPhotoBuffer'?3:2]?.caption||'').filter(Boolean);
+check(resultCaptions.length&&resultCaptions.every(c=>/Match Result/.test(c)&&!/[А-Яа-яЁё]/.test(c)),'Result captions are consistently English');
+check(resultCaptions.some(c=>c.includes('tg://user?id=')||c.includes('https://t.me/')),'Result captions use Telegram player links');
+check(!messages.some(m=>/sendPhoto/.test(m.method)&&m.args[m.method==='sendPhotoBuffer'?4:3]?.reply_markup?.inline_keyboard),'Result cards have no inline buttons');
 // Reminder lifecycle: fixed daytime clock, no live scheduler or external APIs.
 const started=Date.parse('2099-09-15T03:00:00Z');
 const iso=ms=>new Date(ms).toISOString();

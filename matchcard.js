@@ -12,10 +12,15 @@
 // Подписи на карточке английские: одна картинка уходит всем сразу, а имена у
 // нас латиницей. Кириллицу выбранный шрифт тянет плохо, поэтому не смешиваем.
 import sharp from 'sharp';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getFileBuffer } from './telegram.js';
 import { findApplicantByTelegramId, getMasterPhotos } from './sheets.js';
 
-const FONT = 'Poppins, DejaVu Sans, Arial, sans-serif';
+const FONT = 'PTFCard';
+// Шрифт лежит в проекте: librsvg у sharp не зависит от набора шрифтов сервера.
+const CARD_FONT_DATA = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets', 'PTFCard.ttf')).toString('base64');
 const W = 1200, H = 630, R = 300;
 
 // Палитра Noir — та же, что в мини-приложении, чтобы картинка не выглядела
@@ -194,7 +199,7 @@ export async function renderMatchCard(match = {}) {
   const foot = [m.date, m.court].filter(Boolean).join('  ·  ');
 
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <defs><style>@font-face{font-family:PTFCard;src:url(data:font/ttf;base64,${CARD_FONT_DATA}) format('truetype');}</style><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="${C.bg1}"/><stop offset="1" stop-color="${C.bg2}"/></linearGradient></defs>
     <rect width="${W}" height="${H}" fill="url(#g)"/>
     <rect width="${W}" height="4" fill="${C.amber}" opacity=".9"/>

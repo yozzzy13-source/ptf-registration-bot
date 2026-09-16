@@ -657,7 +657,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Статус',
-  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',
+  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',resultPending:'Ожидается результат',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
   avTitle:'Аватарка',avSend:'📸 Загрузить селфи',avRedo:'📸 Заменить селфи',avSending:'Отправляю…',
@@ -716,7 +716,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Status',
-  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',
+  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',resultPending:'Result pending',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
   avTitle:'Avatar',avSend:'📸 Upload a selfie',avRedo:'📸 Replace the selfie',avSending:'Sending…',
@@ -1105,7 +1105,7 @@ function upcomingBlock(){
 function upcomingCard(i){
   var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
   var top=[i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
-  var p1=i.p1||{},p2=i.p2||{};
+  var p1=byId((i.p1||{}).id)||i.p1||{},p2=byId((i.p2||{}).id)||i.p2||{};
   return '<div class="mt upcoming'+(mine?' me':'')+'">'
     +(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
@@ -1114,6 +1114,7 @@ function upcomingCard(i){
       +'<b onclick="event.stopPropagation();openPlayer(\''+q(p1.id)+'\',\'matches\')">'+esc(schName(p1))+'</b>'
       +' <s>vs</s> '
       +'<em onclick="event.stopPropagation();openPlayer(\''+q(p2.id)+'\',\'matches\')">'+esc(schName(p2))+'</em></div>'
+      +(i.result_pending?'<div class="res l" style="display:inline-block;margin-top:7px">'+esc(X.resultPending)+'</div>':'')
       +(i.division?'<div style="margin-top:7px" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(i.division)+'\')">'+divChip(i.division)+'</div>':'')
     +'</div>'
     +'<div onclick="openPlayer(\''+q(p2.id)+'\',\'matches\')">'+av(p2)+'</div>'

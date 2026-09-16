@@ -1646,5 +1646,23 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
       });
     }
   }
+  // Add only the pre-approved W1/W2 opponents. The rest of each group
+  // remains isolated, and inactive players are still filtered exactly as above.
+  const crossPairs=[
+    ['Olga Sauer','Masha Geveling'],['Olga Sauer','Yana D'],['Marina Banatskaia','Elena Ian'],['Marina Banatskaia','Irina Strembitska'],
+    ['Daria Kozitskaya','Tatiana Sokolova'],['Daria Kozitskaya','Xenia Hors'],['Hyunjung Moon','Masha Geveling'],['Hyunjung Moon','Irina Strembitska'],
+    ['Anna Ermolina','Elena Ian'],['Anna Ermolina','Yana D'],['Maria Evangelista','Tatiana Sokolova'],['Maria Evangelista','Xenia Hors']
+  ];
+  if(letter==='W'&&String(group||'')){
+    const mine=applicants.find(a=>String(a.telegram_id)===String(excludeTelegramId));
+    const wanted=crossPairs.flatMap(([a,b])=>sameName(a,mine?.name)?[b]:sameName(b,mine?.name)?[a]:[]);
+    for(const name of wanted){
+      const rp=(map.players||[]).find(x=>x.letter==='W'&&sameName(x.name,name));
+      const hit=nameKeys(name).map(k=>byKey.get(k)).find(Boolean);
+      if(!rp||!hit||!master.some(m=>sameName(m.player_name,hit.name))||out.some(o=>String(o.telegram_id)===String(hit.telegram_id)))continue;
+      const sp=nameKeys(rp.name).map(k=>siteByKey.get(k)).find(Boolean)||{};
+      out.push({telegram_id:String(hit.telegram_id),name:rp.name,username:hit.telegram_username||'',rating:hit.ntrp||hit.rating||'',status:hit.status||'',language:hit.language||'',cross_group:true,profile_url:sp.profile_url||'',photo_url:sp.photo_url||''});
+    }
+  }
   return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity:'base' }));
 }

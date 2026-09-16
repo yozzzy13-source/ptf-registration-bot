@@ -1046,8 +1046,8 @@ export async function rejectResultByAdmin(challengeId, actor = {}) {
 
 export { SLOT_HEADERS, LOG_HEADERS };
 
-// Расписание согласованных матчей: только то, что впереди. Прошедшее живёт в
-// истории лиги, поэтому сюда не попадает даже с внесённым счётом.
+// Расписание согласованных матчей. Матч без результата остаётся в Upcoming и после
+// своей даты, чтобы игроки видели, что счёт ещё нужно внести.
 // Корт берём отсюда же — это единственное место, где он вообще хранится.
 export async function agreedSchedule(now = Date.now()) {
   const rows = await allSlots();
@@ -1055,7 +1055,7 @@ export async function agreedSchedule(now = Date.now()) {
     .filter(r => String(r.status || '').toLowerCase() === 'accepted')
     .filter(r => {
       const start = slotStartMs(r);
-      return start !== null && start >= now;
+      return start !== null && (start >= now || String(r.result_status||'').toLowerCase() !== 'confirmed');
     })
     .map(r => ({
       id: r.challenge_id || '',
@@ -1065,6 +1065,7 @@ export async function agreedSchedule(now = Date.now()) {
       end: slotEndMs(r),
       court: r.agreed_court || '',
       court_confirmed: Boolean(r.court_confirmed_at),
+      result_pending: slotStartMs(r) < now && String(r.result_status||'').toLowerCase() !== 'confirmed',
       division: r.division || '',
       round: r.round || '',
       p1: { id: String(r.from_telegram_id || ''), name: r.from_name || '' },

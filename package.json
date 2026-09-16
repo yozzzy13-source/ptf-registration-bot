@@ -10,7 +10,7 @@
     "setup:payments": "node scripts/setup-payments.js",
     "setup:events": "node scripts/setup-events.js",
     "setup:courts": "node scripts/setup-courts.js",
-    "test": "node --experimental-vm-modules tests/regression.mjs && node --experimental-vm-modules tests/card.mjs && node tests/fantasy.mjs"
+    "test": "node --experimental-vm-modules tests/regression.mjs && node --experimental-vm-modules tests/card.mjs && node tests/fantasy.mjs && node tests/women-cross.mjs"
   },
   "engines": {
     "node": ">=20.9"

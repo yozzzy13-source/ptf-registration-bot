@@ -23,7 +23,10 @@ const deps = {
   './sheets.js':mock({
     findApplicantByTelegramId:async id=>({avatar_file_id:id==='1'?'applicants-avatar':''}),
     getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']])
-  })
+  }),
+  'node:fs':mock({default:{readFileSync:()=>Buffer.from('test-font')}}),
+  'node:path':mock({default:{join:(...parts)=>parts.join('/'),dirname:x=>x}}),
+  'node:url':mock({fileURLToPath:x=>String(x)})
 };
 const source=await fs.readFile(new URL('../matchcard.js',import.meta.url),'utf8');
 const mod=new vm.SourceTextModule(source,{context});

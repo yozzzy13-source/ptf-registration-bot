@@ -64,3 +64,22 @@
 - W:X — режим третьего сета и отметку завершения.
 
 Обычный W/L не добавляет сеты и геймы. RET сохраняет фактически сыгранный счёт. Комментарий хранится в матче бота и публикуется вместе с результатом.
+
+## Fixed W1–W2 schedule
+
+The bot seeds the following rows as `scheduled` in `Cross_Group_Match_Log` before the first cross-group result is recorded. The result updates that same row; regular `Match_Log` rows and both group trackers are untouched.
+
+1. Olga Sauer — Masha Geveling
+2. Olga Sauer — Yana D
+3. Marina Banatskaia — Elena Ian
+4. Marina Banatskaia — Irina Strembitska
+5. Daria Kozitskaya — Tatiana Sokolova
+6. Daria Kozitskaya — Xenia Hors
+7. Hyunjung Moon — Masha Geveling
+8. Hyunjung Moon — Irina Strembitska
+9. Anna Ermolina — Elena Ian
+10. Anna Ermolina — Yana D
+11. Maria Evangelista — Tatiana Sokolova
+12. Maria Evangelista — Xenia Hors
+
+Only these W1–W2 opponents are offered by matchmaking. Playoff rows stay manual in `Playoff`.

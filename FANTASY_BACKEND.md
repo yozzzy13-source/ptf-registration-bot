@@ -111,3 +111,19 @@ API:
 - `POST /api/fantasy/validate`;
 - `POST /api/fantasy/team`;
 - `POST /api/fantasy/transfer`.
+## Fantasy Settings
+
+Fantasy is controlled from `Settings` (one key/value per row). Defaults are safe: `FANTASY_MODE = TEST`; only active members listed in `Fantasy Testers` can open it in TEST, and entry remains closed until the opening switch is explicitly enabled.
+
+| Key | Value |
+| --- | --- |
+| `FANTASY_MODE` | `OFF`, `TEST`, or `LIVE` |
+| `FANTASY_OPEN_AT` | ISO date/time when entry may open |
+| `FANTASY_DEADLINE` | ISO date/time when new squads and drafts close |
+| `FANTASY_SEASON` | season number |
+| `FANTASY_BUDGET` | credit budget, normally `88` |
+| `FANTASY_TEAM_SIZE` | `8` |
+| `FANTASY_TRANSFERS` | `2` |
+| `FANTASY_TEST_ENTRY_OPEN` | `true` only when testers may save squads |
+
+A participant may create team slot 1 and team slot 2 before the deadline. They are independent and can contain the same real players.
