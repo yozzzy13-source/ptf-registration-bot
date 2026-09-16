@@ -1066,11 +1066,10 @@ app.get('/api/league/bootstrap', async (req, res) => {
       ? MINIAPP_TABS.slice()
       : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
     const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isPlayersMasterMember }).catch(() => ({ allowed:false }));
-    // Витрина Fantasy (очки, выборы и рейтинг реальных игроков) публична внутри
-    // League. TEST по-прежнему ограничивает только создание и сохранение составов.
-    const fantasy = fantasyAccess.mode === 'closed' ? null
-      : await getFantasyBootstrap(v.user.id, v.profile.name || '', v.lang, fantasyAccess.mode)
-        .catch(e => { console.error('league fantasy:', e.message); return null; });
+    // Apply the Players_Master + TEST gate to every Fantasy surface.
+    const fantasy = fantasyAccess.allowed
+      ? await getFantasyBootstrap(v.user.id, v.profile.name || '', v.lang, fantasyAccess.mode)
+        .catch(e => { console.error('league fantasy:', e.message); return null; }) : null;
     res.json({
       ok: true,
       lang: v.lang,

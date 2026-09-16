@@ -2255,12 +2255,22 @@ function openFantasyApp(){location.href='/fantasy'+(linkToken?'?t='+encodeURICom
 function renderFantasy(){
   if(!fantasyData){$('viewFantasy').innerHTML='<div class="empty">'+esc(X.fantasyEmpty)+'</div>';return}
   var list=fRank==='teams'?(fantasyData.leaderboard||[]):(fantasyData.player_leaderboard||[]);
-  $('viewFantasy').innerHTML='<div class="card fanhero"><div class="fanmark">🎾</div><h3>'+esc(X.fantasyTitle)+'</h3><p>'+esc(X.fantasyIntro)+'</p>'
-    +'<div class="fanpreview">🔒 '+esc(X.fantasyPreview)+'</div><button class="fanopen" onclick="openFantasyApp()">✨ '+esc(X.fantasyOpen)+'</button></div>'
+  var first=(fantasyData.teams||[]).filter(function(t){return Number(t.team_slot||1)===1})[0];
+  var label=first?(L?'Продолжить команду':'Continue team'):(L?'Создать первую команду':'Create first team');
+  var status=first?(first.status==='locked'?(L?'Подтверждена':'Confirmed'):(L?'Черновик':'Draft')):'';
+  var date=fantasyData.lock_at?new Date(fantasyData.lock_at).toLocaleString(L?'ru-RU':'en-GB'):(L?'Дедлайн ещё не установлен':'Deadline is not set yet');
+  $('viewFantasy').innerHTML='<div class="card fanhero"><div class="fanmark">🎾</div><h3>Fantasy</h3><p>'+esc(L?'Соберите команду из реальных игроков PTF. Их настоящие матчи принесут вам Fantasy-очки.':'Build a team of real PTF players. Earn Fantasy points from their real matches.')+'</p>'
+    +'<div class="fantasy-stats-head"><span>'+(L?'Игроков':'Players')+'</span><span>'+(L?'Бюджет':'Budget')+'</span><span>'+(L?'Капитан':'Captain')+'</span></div>'
+    +'<div class="fantasy-stats-row"><b>'+fantasyData.roster_size+'</b><b>'+fantasyData.budget+'</b><b>×1.5</b></div>'
+    +(first?'<h3>'+esc(first.team_name)+'</h3><p>'+esc(status)+' · '+Number(first.points||0)+' Fantasy Points</p>':'')
+    +'<p>'+esc(date)+'</p>'
+    +(!fantasyData.entry_open?'<div class="fanpreview">'+esc(fantasyData.locked?(L?'Дедлайн прошёл. Доступны только разрешённые замены.':'Deadline passed. Only permitted transfers remain.'):X.fantasyPreview)+'</div>':'')
+    +'<button class="fanopen" onclick="openFantasyApp()">'+esc(first||fantasyData.entry_open?label:(L?'Посмотреть Fantasy':'View Fantasy'))+'</button></div>'
     +'<div class="fanseg"><button class="'+(fRank==='teams'?'on':'')+'" onclick="setFantasyRank(\'teams\')">'+esc(X.fantasyTeamRank)+'</button>'
     +'<button class="'+(fRank==='players'?'on':'')+'" onclick="setFantasyRank(\'players\')">'+esc(X.fantasyPlayerRank)+'</button></div>'
     +'<div class="card">'+fantasyRankRows(list,fRank)+'</div>';
 }
+
 
 // ---------------------------------------------------------------- страница игрока
 function openPlayerByName(name,from){

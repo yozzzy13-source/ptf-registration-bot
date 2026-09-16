@@ -1,129 +1,58 @@
 # PTF Fantasy
 
-## Текущий режим тестирования
+Fantasy использует существующие Settings, Players_Master, сезонные составы и Fantasy-листы. Главный пользовательский маршрут — /fantasy; вход из League ведёт на него. Рейтинги и правила доступны отдельно.
 
-По умолчанию Fantasy запускается в режиме `test`. В нём:
+## Доступ
+- Участник обязательно должен находиться в Players_Master таблицы Match Log. Telegram связывается с игроком через Applicants; статус анкеты не заменяет проверку Players_Master.
+- TEST дополнительно требует активную запись в Fantasy Testers либо совпадение с FANTASY_TEST_GROUP (ID, username или имя).
+- Эти требования распространяются и на администратора.
+- OFF / closed закрывает доступ. В LIVE достаточно Players_Master.
+- League bootstrap не возвращает Fantasy-данные при отказе этой же проверки.
 
-- кнопку **✨ Fantasy** видят только администратор и игроки из листа `Fantasy Testers`;
-- прямой адрес `/fantasy` защищён той же проверкой;
-- интерфейс доступен для просмотра, но сервер не сохраняет составы, пока `fantasy_test_entry_open` не включён;
-- после включения тестового приёма команды и замены записываются в отдельные листы `Fantasy Test Teams` и `Fantasy Test Transfers`;
-- тестовые команды и тестовый рейтинг не переходят в основную Fantasy League.
+## Settings
+Поддерживаются текущие FANTASY_* ключи и существующие legacy-имена как fallback:
+- FANTASY_MODE: OFF, TEST, LIVE; при отсутствии значения — TEST.
+- FANTASY_SEASON: сезон.
+- FANTASY_BUDGET: бюджет, по умолчанию 88.
+- FANTASY_TEAM_SIZE: текущий формат — 8.
+- FANTASY_TRANSFERS: лимит платных замен, по умолчанию 2.
+- FANTASY_OPEN_AT: дата открытия.
+- FANTASY_DEADLINE: дедлайн.
+- FANTASY_ENTRY_OPEN / FANTASY_TEST_ENTRY_OPEN: включение приёма для LIVE / TEST.
+- FANTASY_TEST_GROUP: дополнительный список тестеров, разделители — запятая, точка с запятой или новая строка.
+- Существующие fantasy_price_overrides / fantasy_test_price_overrides продолжают задавать ручные цены.
 
-После первого открытия Fantasy администратором backend создаст нужные тестовые листы автоматически.
+Переключатель приёма также управляет доступностью замен после дедлайна. До дедлайна доступны создание и обычное редактирование; после него — только разрешённые замены. Для отключения Fantasy целиком используется OFF.
 
-В `Fantasy Testers` достаточно заполнить одно из полей:
+## Состав и сохранение
+До двух независимых команд (team_slot 1 и 2). Можно выбрать одних и тех же реальных игроков в обе команды.
+Состав: 2 C, 2 W, 1 Prime, 1 A, 1 B, flex из Prime/A/B. В C и W при двух группах выбирается по одному игроку из каждой; не больше двух игроков из одной группы.
+Капитан и вице-капитан различаются и входят в выбранный состав. Капитан получает ×1.5; вице заменяет его при официальном снятии до первого матча.
 
-- `telegram_id` — самый надёжный вариант;
-- `telegram_username`;
-- `player_name`.
+Черновик может быть неполным. Подтверждение требует корректных восьми слотов, бюджета и капитанов. До дедлайна подтверждённую команду можно редактировать без расходования замен. Сервер сохраняет статус locked и первое locked_at; неполные правки не заменяют подтверждённую команду.
 
-Поле `status` можно оставить пустым или указать `active` / `On`. Значения `off`, `inactive`, `no`, `0` и `disabled` отключают тестовый доступ.
+После дедлайна платные замены расходуют отдельный лимит команды. Существующая проверка официального снятия до первого матча позволяет бесплатную замену. Матчевый скоринг и ценообразование сохранены.
 
-## Запуск основной лиги
+## Листы
+TEST пишет только в Fantasy Test Teams / Fantasy Test Transfers; LIVE — в Fantasy Teams / Fantasy Transfers.
+Fantasy Testers: telegram_id, telegram_username, player_name, status, notes. off/inactive/no/0/disabled отключают запись.
 
-В существующем листе `Settings` используются строки:
+Teams:
+team_id, telegram_id, owner_name, team_name, season, status, picks_json, captain_key, vice_key, budget_spent, transfers_used, created_at, updated_at, locked_at, team_slot
 
-- `fantasy_mode` — `test`, `live` или `closed`; без значения используется безопасный режим `test`;
-- `fantasy_season` — номер сезона; без значения используется последний сезон из `Divisions`;
-- `fantasy_budget` — бюджет; по умолчанию 88;
-- `fantasy_lock_at` — дедлайн основной лиги в ISO-формате, например `2026-10-01T18:00:00+07:00`;
-- `fantasy_price_overrides` — необязательный JSON с ручными ценами.
-- `fantasy_entry_open` — `on` только после объявления приёма основных составов; без значения участие закрыто.
+Transfers:
+transfer_id, team_id, telegram_id, season, player_out_key, player_out_name, player_in_key, player_in_name, price_out, price_in, forced, created_at
 
-Для теста предусмотрены отдельные значения:
+Миграция схемы для onboarding не требуется.
 
-- `fantasy_test_season`;
-- `fantasy_test_budget`;
-- `fantasy_test_lock_at`;
-- `fantasy_test_price_overrides`.
-- `fantasy_test_entry_open` — `on` только когда нужно разрешить сохранение тестовых составов.
+## API
+- GET /api/fantasy/bootstrap — доступ, Settings, каталог, свои команды, очки, рейтинги и правила.
+- POST /api/fantasy/validate — проверка состава.
+- POST /api/fantasy/team — черновик / подтверждение.
+- POST /api/fantasy/transfer — замена после дедлайна.
 
-Если тестовые сезон, бюджет или цены не заданы, используются основные значения. Тестовый дедлайн специально не наследует основной, чтобы тест не закрылся вместе с будущим запуском.
+Bootstrap дополнительно возвращает transfers_open; свои teams — points и free_transfer_keys. Запись состава/замены повторно проверяется сервером. POST принимает lang=en/ru для языка сообщений без изменения профиля пользователя.
 
-Для запуска:
+## Проверка
+npm test. Подробности и ограничения: docs/FANTASY_ONBOARDING_QA.md.
 
-1. Установить точный `fantasy_lock_at`.
-2. Проверить цены и составы.
-3. Поменять `fantasy_mode` с `test` на `live`.
-4. После анонса поставить `fantasy_entry_open = on`. До этого интерфейс доступен для просмотра, но не принимает составы.
-
-Основная лига начнётся с пустых листов `Fantasy Teams` и `Fantasy Transfers`. Тестовые данные останутся отдельно. В live-режиме доступ получают администратор и все игроки, чьи имена находятся в листе `Players_Master` таблицы Match Log. Telegram по-прежнему связывается с игроком через `Applicants`. Статус анкеты на доступ не влияет.
-
-Все подтверждённые матчи выбранного сезона начисляются независимо от даты фиксации команды. Поэтому дедлайн можно поставить после первой недели: уже сыгранные матчи позднее войдут в очки всех зафиксированных составов.
-
-## Формат состава
-
-- Одна команда на участника.
-- 8 игроков, включая возможность выбрать себя.
-- По одному игроку из PRIME, A, B, C Group 1, C Group 2, W Group 1 и W Group 2.
-- Восьмое место — свободный выбор.
-- Не больше двух игроков из одной группы.
-- Бюджет: 88 кредитов.
-- Капитан получает ×1,5.
-- Вице-капитан включается только при официальном снятии капитана до его первого матча.
-- После фиксации доступны две замены. Замена снявшегося до первого матча игрока бесплатна.
-
-В PRIME с девятью участниками учитываются 8 матчей. В A и B с восемью участниками — 7 матчей. В C при восьми игроках в группе — 7 матчей внутри группы. В W — 5 матчей внутри группы и 2 матча со случайными соперницами другой группы. Также учитываются четвертьфиналы, полуфиналы, финалы и остальные официальные матчи плей-офф, если они опубликованы в `Match_History_All` с номером нужного сезона.
-
-## Цена игрока
-
-Базовая цена — 10:
-
-- винрейт: до 20% = −1; 20–39,9% = 0; 40–59,9% = +1; 60–79,9% = +2; от 80% = +3;
-- регулярка: 1-е место = +2; 2-е или 3-е = +1;
-- плей-офф прошлого сезона: чемпион = +2; финалист или полуфиналист = +1;
-- повышение на один дивизион уменьшает итоговую надбавку вдвое, на два — до четверти;
-- дебютант без подтверждённой истории стоит 10;
-- NTRP не используется.
-
-API возвращает для игрока точный `price_breakdown` и подсказки `tips.why`, `tips.risks`, `tips.captain` на языке пользователя.
-
-## Очки
-
-- участие: +2;
-- победа: +10;
-- выигранный сет: +3;
-- выигранный гейм: +1;
-- победа 2:0: +3;
-- каждый сет 6:0: +2;
-- победа над соперником дороже на 2 / 3 / 4+ кредита: +2 / +4 / +6;
-- техническая победа без игры: +5 победителю и 0 проигравшему;
-- чемпионский тай-брейк считается сетом, но его очки не считаются геймами;
-- RET учитывает фактический счёт и победу без бонуса 2:0;
-- отменённый или неподтверждённый матч: 0.
-
-При равенстве выше команда с меньшим числом замен, затем команда, зафиксированная раньше.
-
-## Листы и API
-
-Backend создаёт:
-
-- `Fantasy Testers`: `telegram_id, telegram_username, player_name, status, notes`;
-- `Fantasy Test Teams` и `Fantasy Teams`: `team_id, telegram_id, owner_name, team_name, season, status, picks_json, captain_key, vice_key, budget_spent, transfers_used, created_at, updated_at, locked_at`;
-- `Fantasy Test Transfers` и `Fantasy Transfers`: `transfer_id, team_id, telegram_id, season, player_out_key, player_out_name, player_in_key, player_in_name, price_out, price_in, forced, created_at`.
-
-Экран: `GET /fantasy`.
-
-API:
-
-- `GET /api/fantasy/bootstrap`;
-- `POST /api/fantasy/validate`;
-- `POST /api/fantasy/team`;
-- `POST /api/fantasy/transfer`.
-## Fantasy Settings
-
-Fantasy is controlled from `Settings` (one key/value per row). Defaults are safe: `FANTASY_MODE = TEST`; only active members listed in `Fantasy Testers` can open it in TEST, and entry remains closed until the opening switch is explicitly enabled.
-
-| Key | Value |
-| --- | --- |
-| `FANTASY_MODE` | `OFF`, `TEST`, or `LIVE` |
-| `FANTASY_OPEN_AT` | ISO date/time when entry may open |
-| `FANTASY_DEADLINE` | ISO date/time when new squads and drafts close |
-| `FANTASY_SEASON` | season number |
-| `FANTASY_BUDGET` | credit budget, normally `88` |
-| `FANTASY_TEAM_SIZE` | `8` |
-| `FANTASY_TRANSFERS` | `2` |
-| `FANTASY_TEST_ENTRY_OPEN` | `true` only when testers may save squads |
-
-A participant may create team slot 1 and team slot 2 before the deadline. They are independent and can contain the same real players.

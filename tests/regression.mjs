@@ -392,4 +392,15 @@ messages.length=0;await flow.reviewEventProof({signupId:'en-event',approve:true}
 const matchHtml=await fs.readFile(path.join(root,'public/match.html'),'utf8');
 check(matchHtml.includes('function renderAdmin()')&&matchHtml.includes("'/api/match/admin-active"),'Match miniapp includes protected admin list UI');
 check(matchHtml.includes("esc(opp.name||X.waiting)")&&matchHtml.includes('function requestActions'),'Schedule displays named opponents with contact and cancel actions');
+// The League bootstrap must not leak Fantasy data around the dedicated API gate.
+put('1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY','Frontend_Profile_All',[['player_id','player_name'],['1','Alice One']]);
+await sheets.setSetting('FANTASY_MODE','LIVE');
+for(const id of ['6','99']){
+ const result=await request('get','/api/league/bootstrap',id);
+ check(result.code===403||(result.body?.fantasy===null&&!result.body.tabs.includes('fantasy')),'League hides Fantasy for nonmember '+id);
+}
+await sheets.setSetting('FANTASY_MODE','TEST');
+await sheets.setSetting('FANTASY_TEST_GROUP','');
+const noTest=await request('get','/api/league/bootstrap','1');
+check(noTest.body?.fantasy===null&&!noTest.body.tabs.includes('fantasy'),'League hides Fantasy from non-testers');
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
