@@ -24,6 +24,13 @@ const nk=v=>t(v).normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'');
 const n=(v,d=0)=>{const x=Number(String(v??'').replace(',','.'));return Number.isFinite(x)?x:d};
 const js=(v,d)=>{try{return JSON.parse(String(v||''))}catch{return d}};
 const r1=v=>Math.round(Number(v||0)*10)/10;
+// Settings were migrated to uppercase FANTASY_* keys. Keep the legacy key as
+// a fallback so an older sheet never blocks the Fantasy access check.
+async function setting(primary, legacy='') {
+ const current=await getSetting(primary).catch(()=> '');
+ if(t(current)) return t(current);
+ return legacy ? t(await getSetting(legacy).catch(()=> '')) : '';
+}
 export const fantasyPlayerKey=v=>t(v).normalize('NFKD').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'-').replace(/^-+|-+$/g,'');
 
 export function fantasyWinRateBonus(v){v=n(v);return v<20?-1:v<40?0:v<60?1:v<80?2:3}
