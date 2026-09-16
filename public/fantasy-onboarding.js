@@ -1,3 +1,4 @@
+
 import {assignSlots, selectionIssue, deadlineReached} from './fantasy-model.js';
 
 const tg=window.Telegram?.WebApp;
@@ -100,7 +101,7 @@ function homeView() {
 function slotsPanel() {
   const keys=draft().picks.filter(k=>k!==transferOut),state=assignSlots(keys,D.players),next=state.slots.findIndex(s=>!s.key);
   const current=state.slots[next];
-  return '<div class="selection-summary"><div class="budget-line"><b>'+keys.length+'/8</b><span>'+tr('Использовано','Used')+' <b>'+spent(keys)+'/'+D.budget+'</b></span><span>'+tr('Осталось','Left')+' <b class="'+(spent(keys)>D.budget?'error':'')+'">'+(D.budget-spent(keys))+'</b></span></div><div class="slots" aria-label="'+tr('Слоты команды','Team slots')+'">'+state.slots.map((s,i)=>'<div class="req '+(s.key?'ok':i===next?'current':'')+'" '+(i===next?'aria-current="true"':'')+' title="'+esc(s.key?player(s.key)?.name:s.pools.join(' / '))+'">'+(s.key?'✓ ':'')+esc(s.label==='Flex'?'Flex P/A/B':s.label)+'</div>').join('')+'</div><div class="meta slot-instruction">'+(current?tr('Выберите: ','Choose: ')+esc(current.label==='Flex'?'Prime / A / B':current.pools.join(' / '))+(current.pools.some(p=>p.includes(':'))?' · '+tr('по одному из каждой группы','one from each group'):''):tr('Все 8 мест заполнены','All 8 places filled'))+'</div></div>';
+  return '<div class="selection-summary"><p class="slots-howto">'+tr('Заполните все 8 слотов ниже: по одному игроку из каждой группы (C1/C2/W1/W2) и каждого дивизиона (Prime/A/B).','Fill all 8 slots below: one player from each group (C1/C2/W1/W2) and each division (Prime/A/B).')+'</p><div class="budget-line"><b>'+keys.length+'/8</b><span>'+tr('Использовано','Used')+' <b>'+spent(keys)+'/'+D.budget+'</b></span><span>'+tr('Осталось','Left')+' <b class="'+(spent(keys)>D.budget?'error':'')+'">'+(D.budget-spent(keys))+'</b></span></div><div class="slots" aria-label="'+tr('Слоты команды','Team slots')+'">'+state.slots.map((s,i)=>'<div class="req '+(s.key?'ok':i===next?'current':'')+'" '+(i===next?'aria-current="true"':'')+' title="'+esc(s.key?player(s.key)?.name:s.pools.join(' / '))+'">'+(s.key?'✓ ':'')+esc(s.label==='Flex'?'Flex P/A/B':s.label)+'</div>').join('')+'</div><div class="meta slot-instruction">'+(current?tr('Выберите: ','Choose: ')+esc(current.label==='Flex'?'Prime / A / B':current.pools.join(' / '))+(current.pools.some(p=>p.includes(':'))?' · '+tr('по одному из каждой группы','one from each group'):''):tr('Все 8 мест заполнены','All 8 places filled'))+'</div></div>';
 }
 const errors={
   unavailable:['Игрок больше недоступен. Уберите его из состава.','Player is no longer available. Remove them from the squad.'],
@@ -148,6 +149,21 @@ function matchBreakdown(p) {
       +(parts?'<div style="color:var(--muted);font-size:11px;margin-top:2px">'+esc(parts)+'</div>':'')+'</div>';
   }).join('')+'</div>';
 }
+// Костас: клик по подсказке под именем (или по самому имени) в режиме выбора
+// должен раскрывать, ПОЧЕМУ это перспективный выбор — используем готовые
+// p.tips.why/risks/captain с сервера, а не разбивку очков по матчам (это
+// другая функция, matchBreakdown, для вкладки «Игроки» вне режима выбора).
+let tipsOpen='';
+function tipsBreakdown(p) {
+  const t=p.tips||{why:[],risks:[],captain:''};
+  if(!t.why.length&&!t.risks.length&&!t.captain)return '';
+  const line=(cls,label,items)=>items.length?'<div class="pbd-row note '+cls+'">'+esc(label)+' '+items.map(esc).join(' · ')+'</div>':'';
+  return '<div class="price-breakdown">'
+    +line('good',tr('Плюсы:','Why:'),t.why)
+    +line('bad',tr('Риски:','Risks:'),t.risks)
+    +(t.captain?'<div class="pbd-row note">'+esc(tr('Капитан: ','Captain: ')+t.captain)+'</div>':'')
+    +'</div>';
+}
 function hint(p) {
   if(p.history&&p.price>=13&&p.transition_factor===1)return tr('Кандидат в капитаны','Captain candidate');
   const top=D.player_leaderboard?.slice(0,5).some(x=>x.key===p.key);
@@ -169,9 +185,9 @@ function catalog(selecting=false) {
     // Вне режима выбора клик по игроку раскрывает разбивку очков по матчам —
     // за что именно и сколько он получил.
     const nameCell=selecting
-      ?'<div class="player-name"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</div>'
+      ?'<button type="button" class="player-name player-name-btn" data-action="tips-toggle" data-key="'+esc(p.key)+'" aria-expanded="'+(tipsOpen===p.key)+'"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</button>'
       :'<button type="button" class="player-name player-name-btn" data-action="matches-toggle" data-key="'+esc(p.key)+'" aria-expanded="'+(matchesOpen===p.key)+'"><b>'+esc(p.name)+'</b></button>';
-    return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+nameCell+'<span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+(!selecting&&matchesOpen===p.key?matchBreakdown(p):'')+'</div>';
+    return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+nameCell+'<span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+(selecting&&tipsOpen===p.key?tipsBreakdown(p):'')+(!selecting&&matchesOpen===p.key?matchBreakdown(p):'')+'</div>';
   }).join('')+'</div>'+(!list.length?'<div class="empty">'+tr('Нет подходящих игроков. Измените поиск или фильтр.','No matching players. Change the search or filter.')+'</div>':'');
 }
 function cards(mode='review') {
@@ -250,10 +266,14 @@ function render() {
   app.setAttribute('aria-busy',String(busy));
   try { view==='home'?tg?.BackButton?.hide():tg?.BackButton?.show(); } catch {}
 }
+// По просьбе Костаса: сначала «продаём» идею — открытое, бесплатное
+// соревнование между командами игроков лиги — и только потом объясняем
+// механику. Раньше шло наоборот: сразу шаги, без объяснения зачем.
 function introOverlay() {
   return '<div class="intro-backdrop"><div class="intro-card">'
-    +'<div class="clubmark">✨</div><h2>'+tr('Добро пожаловать в Fantasy','Welcome to Fantasy')+'</h2>'
-    +'<p>'+tr('Соберите свою команду из настоящих игроков PTF — их реальные матчи в сезоне будут приносить вам очки.','Build your own squad of real PTF players — their real matches this season earn you points.')+'</p>'
+    +'<div class="clubmark">✨</div><h2>'+tr('Другие игроки уже собирают команды','Other players are already building teams')+'</h2>'
+    +'<p>'+tr('PTF Fantasy — открытое соревнование между командами игроков лиги: кто лучше соберёт состав из настоящих теннисистов PTF. Бесплатно, только ради веселья.','PTF Fantasy is an open competition between league players’ squads — who can build the best team of real PTF players. Free, just for fun.')+'</p>'
+    +'<p class="sub">'+tr('Их реальные матчи в сезоне будут приносить вам очки. Вот как это работает:','Their real matches this season earn you points. Here’s how it works:')+'</p>'
     +'<ul class="intro-steps">'
     +'<li><b>1.</b> '+tr('Выберите 8 игроков в рамках бюджета '+D.budget+' кредитов.','Pick 8 players within a '+D.budget+'-credit budget.')+'</li>'
     +'<li><b>2.</b> '+tr('Назначьте капитана — он приносит очки ×1.5.','Name a captain — they score ×1.5.')+'</li>'
@@ -324,6 +344,7 @@ async function handle(action,el={dataset:{}}) {
   const key=el.dataset.key,d=draft();
   if(action==='price-info'){priceOpen=priceOpen===key?'':key;return render();}
   if(action==='matches-toggle'){matchesOpen=matchesOpen===key?'':key;return render();}
+  if(action==='tips-toggle'){tipsOpen=tipsOpen===key?'':key;return render();}
   if(action==='pick') {
     if(!editable())return;
     const issue=selectionError(key);if(issue){notice=issueText(issue)+' '+tr('Цена: ','Price: ')+player(key).price;render();return;}
@@ -365,3 +386,4 @@ try{setTheme(localStorage.getItem('ptf_theme')==='light'?'light':'dark');tg?.Bac
 api('bootstrap').then(j=>{D=j;D.teams=D.teams||[];ru=j.lang==='ru';render();}).catch(e=>{D=null;app.innerHTML='<div class="card empty"><h2>'+tr('Нет доступа','Access denied')+'</h2><p>'+esc(e.message)+'</p></div>';});
 // A long-open Telegram web view must stop offering edits at the deadline.
 setInterval(()=>{if(D&&!D.locked&&deadlineReached(D)){D.locked=true;D.entry_open=false;review=null;render();api('bootstrap').then(j=>{D=j;render();}).catch(()=>{});}},1000);
+
