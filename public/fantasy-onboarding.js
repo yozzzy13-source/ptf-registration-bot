@@ -1,4 +1,3 @@
-
 import {assignSlots, selectionIssue, deadlineReached} from './fantasy-model.js';
 
 const tg=window.Telegram?.WebApp;
@@ -7,6 +6,11 @@ const initData=tg?.initData||'', token=new URLSearchParams(location.search).get(
 const app=document.getElementById('app');
 let D, ru=(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
 let view='home', step=0, slot=1, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='', searchSugOpen=false;
+// Разовое приглашение при первом заходе в Fantasy — показываем один раз на
+// это устройство, дальше не мешаем.
+let introOpen=false;
+try { introOpen=!localStorage.getItem('ptf_fantasy_intro_seen'); } catch {}
+function dismissIntro(){ introOpen=false; try{ localStorage.setItem('ptf_fantasy_intro_seen','1'); }catch{} render(); }
 const drafts=new Map(), saves=new Map(), timers=new Map();
 const tr=(r,e)=>ru?r:e;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -131,6 +135,19 @@ function priceBreakdown(p) {
     (promoted?'<div class="pbd-row note">'+esc(tr('Переход в более сильный дивизион уменьшает надбавку (×'+b.transition_factor+')','Moving to a stronger division shrinks the premium (×'+b.transition_factor+')'))+'</div>':'')+
     '<div class="pbd-row total"><span>'+tr('Итоговая цена','Final price')+'</span><b>'+b.final+'</b></div></div>';
 }
+// Клик по игроку в общем списке (не в режиме выбора) раскрывает, за какие
+// именно матчи и почему он получил свои Fantasy Points.
+let matchesOpen='';
+const PT_LABELS={appearance:['Участие','Appearance'],win:['Победа','Win'],sets:['Сеты','Sets'],games:['Геймы','Games'],straight:['Победа 2:0','Straight win'],bagels:['«Сухие» сеты','Bagel sets'],upset:['Апсет','Upset'],technical:['Техническая победа','Walkover']};
+function matchBreakdown(p) {
+  const details=p.score?.details||[];
+  if(!details.length)return '<div class="price-breakdown"><div class="pbd-row note">'+esc(tr('Пока нет сыгранных матчей в этом сезоне.','No matches played this season yet.'))+'</div></div>';
+  return '<div class="price-breakdown">'+details.map(m=>{
+    const pts=m.points||{},parts=Object.entries(PT_LABELS).filter(([k])=>pts[k]).map(([k,l])=>tr(l[0],l[1])+' +'+pts[k]).join(' · ');
+    return '<div class="pbd-row" style="display:block"><div style="display:flex;justify-content:space-between;gap:8px"><span>'+esc((m.opponent||'')+(m.score?' · '+m.score:''))+'</span><b>'+(pts.total||0)+'</b></div>'
+      +(parts?'<div style="color:var(--muted);font-size:11px;margin-top:2px">'+esc(parts)+'</div>':'')+'</div>';
+  }).join('')+'</div>';
+}
 function hint(p) {
   if(p.history&&p.price>=13&&p.transition_factor===1)return tr('Кандидат в капитаны','Captain candidate');
   const top=D.player_leaderboard?.slice(0,5).some(x=>x.key===p.key);
@@ -149,7 +166,12 @@ function catalog(selecting=false) {
     +(sugs.length?'<div class="psug">'+sugs.map(r=>'<button type="button" class="pi" onmousedown="event.preventDefault()" data-action="search-pick" data-key="'+esc(r.key)+'">'+esc(r.name)+'</button>').join('')+'</div>':'')+'</div><div class="filters">'+(selecting?button(tr('Для слота','For this slot'),'filter','filter '+(filter==='slot'?'on':''),'data-filter="slot"'):'')+['all','C','W','PRIME','A','B'].map(f=>button(f==='all'?tr('Все','All'):f==='PRIME'?'Prime':f,'filter','filter '+(filter===f?'on':''),'data-filter="'+f+'"')).join('')+'</div><div class="tb fantasy-catalog '+(selecting?'selecting':'')+'"><div class="thd"><span>#</span><span></span><span>'+tr('Игрок','Player')+'</span><span>Teams</span><span>Fantasy<br>Points</span><span>'+tr('Цена','Price')+'</span>'+(selecting?'<span></span>':'')+'</div>'+list.map(p=>{
     const selected=draft().picks.includes(p.key),h=selecting?hint(p):'';
     const priceBtn='<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(p.key)+'" aria-expanded="'+(priceOpen===p.key)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+p.price+'</button>';
-    return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+'<div class="player-name"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</div><span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+'</div>';
+    // Вне режима выбора клик по игроку раскрывает разбивку очков по матчам —
+    // за что именно и сколько он получил.
+    const nameCell=selecting
+      ?'<div class="player-name"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</div>'
+      :'<button type="button" class="player-name player-name-btn" data-action="matches-toggle" data-key="'+esc(p.key)+'" aria-expanded="'+(matchesOpen===p.key)+'"><b>'+esc(p.name)+'</b></button>';
+    return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+nameCell+'<span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+(!selecting&&matchesOpen===p.key?matchBreakdown(p):'')+'</div>';
   }).join('')+'</div>'+(!list.length?'<div class="empty">'+tr('Нет подходящих игроков. Измените поиск или фильтр.','No matching players. Change the search or filter.')+'</div>':'');
 }
 function cards(mode='review') {
@@ -223,9 +245,21 @@ function render() {
   document.documentElement.lang=ru?'ru':'en';
   app.dataset.view=view;
   app.innerHTML=header()+(notice?'<div class="message bad" role="alert">'+esc(notice)+'</div>':'')+
-    (view==='home'?homeView():view==='wizard'?wizardView():view==='team'?teamView():view==='success'?successView():view==='players'?catalog():view==='table'?tableView():rulesView());
+    (view==='home'?homeView():view==='wizard'?wizardView():view==='team'?teamView():view==='success'?successView():view==='players'?catalog():view==='table'?tableView():rulesView())+
+    (introOpen&&view==='home'?introOverlay():'');
   app.setAttribute('aria-busy',String(busy));
   try { view==='home'?tg?.BackButton?.hide():tg?.BackButton?.show(); } catch {}
+}
+function introOverlay() {
+  return '<div class="intro-backdrop"><div class="intro-card">'
+    +'<div class="clubmark">✨</div><h2>'+tr('Добро пожаловать в Fantasy','Welcome to Fantasy')+'</h2>'
+    +'<p>'+tr('Соберите свою команду из настоящих игроков PTF — их реальные матчи в сезоне будут приносить вам очки.','Build your own squad of real PTF players — their real matches this season earn you points.')+'</p>'
+    +'<ul class="intro-steps">'
+    +'<li><b>1.</b> '+tr('Выберите 8 игроков в рамках бюджета '+D.budget+' кредитов.','Pick 8 players within a '+D.budget+'-credit budget.')+'</li>'
+    +'<li><b>2.</b> '+tr('Назначьте капитана — он приносит очки ×1.5.','Name a captain — they score ×1.5.')+'</li>'
+    +'<li><b>3.</b> '+tr('Следите за очками по мере того, как игроки играют реальные матчи.','Watch the points roll in as players compete in real matches.')+'</li></ul>'
+    +'<p class="sub">'+tr('Можно собрать до двух независимых команд за сезон.','You can build up to two independent teams per season.')+'</p>'
+    +button(tr('Понятно, начнём','Got it, let us go'),'intro-dismiss','primary full')+'</div></div>';
 }
 function navigate(v) { view=v;notice='';if(v==='players'){filter='all';search='';}render();window.scrollTo(0,0); }
 async function start(n) {
@@ -272,6 +306,7 @@ async function back() {
 }
 async function handle(action,el={dataset:{}}) {
   if(busy)return;
+  if(action==='intro-dismiss'){dismissIntro();return;}
   if(['dark','light'].includes(action)){setTheme(action);return;}
   if(action==='language'){ru=!ru;render();if(view==='wizard'&&step===3)await validateReview();return;}
   if(['home','players','table','rules'].includes(action)){await saveDraft();return navigate(action);}
@@ -288,6 +323,7 @@ async function handle(action,el={dataset:{}}) {
   if(action==='rank-teams'||action==='rank-players'){rankMode=action.slice(5);return render();}
   const key=el.dataset.key,d=draft();
   if(action==='price-info'){priceOpen=priceOpen===key?'':key;return render();}
+  if(action==='matches-toggle'){matchesOpen=matchesOpen===key?'':key;return render();}
   if(action==='pick') {
     if(!editable())return;
     const issue=selectionError(key);if(issue){notice=issueText(issue)+' '+tr('Цена: ','Price: ')+player(key).price;render();return;}
@@ -329,4 +365,3 @@ try{setTheme(localStorage.getItem('ptf_theme')==='light'?'light':'dark');tg?.Bac
 api('bootstrap').then(j=>{D=j;D.teams=D.teams||[];ru=j.lang==='ru';render();}).catch(e=>{D=null;app.innerHTML='<div class="card empty"><h2>'+tr('Нет доступа','Access denied')+'</h2><p>'+esc(e.message)+'</p></div>';});
 // A long-open Telegram web view must stop offering edits at the deadline.
 setInterval(()=>{if(D&&!D.locked&&deadlineReached(D)){D.locked=true;D.entry_open=false;review=null;render();api('bootstrap').then(j=>{D=j;render();}).catch(()=>{});}},1000);
-
