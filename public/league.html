@@ -110,6 +110,7 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .matchswitch{display:flex;gap:6px;margin:2px 0 14px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--card2)}
 .matchswitch button{flex:1;border:0;border-radius:8px;padding:9px 8px;background:transparent;color:var(--mute);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
 .matchswitch button.on{background:var(--surf);color:var(--amber);box-shadow:0 1px 5px rgba(0,0,0,.2)}
+.match-player-link,.nm3 b,.nm3 em{cursor:pointer}
 /* Временное скрытие внешних ссылок: разметка и обработчики сохранены для возврата. */
 .website-link-hidden{display:none!important}
 .sday{margin:15px 0 7px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
@@ -840,8 +841,20 @@ function statusBadge(p){
   return isActive(p)?'<span class="badge ok">'+esc(X.active)+'</span>':'<span class="badge">'+esc(X.inactive)+'</span>';
 }
 function fantasyBadges(p){
-  if(!fantasyData)return '';
+  // Плашки видны и до первого зафиксированного Fantasy-состава: нули честно
+  // показывают, что игрока пока не выбрали, а не создают впечатление поломки.
   return '<div class="fanbadges"><span class="fanbadge">✨ '+esc(X.fantasyPoints)+': '+esc(p.fantasy_points||0)+'</span><span class="fanbadge">👥 '+esc(X.fantasyTeams)+': '+esc(p.fantasy_teams||0)+'</span></div>';
+}
+function fantasyPlayer(p){
+  var row=(fantasyData&&fantasyData.player_leaderboard||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0]||{};
+  return {points:Number(p.fantasy_points||row.points||0),teams:Number(p.fantasy_teams||row.selected_by||0),place:row.place||'—'};
+}
+function fantasyBlock(p){
+  var f=fantasyPlayer(p);
+  return '<div class="card"><h3>✨ '+esc(X.tFantasy)+'</h3><div class="sr">'
+    +'<span class="sn">'+esc(X.fantasyPoints)+'</span><span class="ptt">'+esc(f.points)+'</span></div>'
+    +'<div class="sr"><span class="sn">'+esc(X.fantasyTeams)+'</span><span class="ptt">'+esc(f.teams)+'</span></div>'
+    +'<div class="sr"><span class="sn">'+esc(X.fantasyPlayerRank)+'</span><span class="pl">#'+esc(f.place)+'</span></div></div>';
 }
 function formRow(form){
   if(!form||!form.length)return '';
@@ -1102,22 +1115,31 @@ function upcomingBlock(){
 }
 // Предстоящий матч использует ту же карточку, что и сыгранный: сразу видны
 // оба игрока, аватары, дивизион, время и корт.
+function scheduledPlayer(p,from){
+  // В расписании id может быть локальным номером строки дивизиона. Открываем
+  // профиль по настоящему id витрины, а при его отсутствии — по имени.
+  var hit=byId((p||{}).id);
+  if(hit){openPlayer(hit.id,from);return}
+  openPlayerByName((p||{}).name,from);
+}
 function upcomingCard(i){
   var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
-  var top=[i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+  var top=[i.date,i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
   var p1=byId((i.p1||{}).id)||i.p1||{},p2=byId((i.p2||{}).id)||i.p2||{};
+  var p1Call="scheduledPlayer({id:'"+q(p1.id)+"',name:'"+q(schName(p1))+"'},'matches')";
+  var p2Call="scheduledPlayer({id:'"+q(p2.id)+"',name:'"+q(schName(p2))+"'},'matches')";
   return '<div class="mt upcoming'+(mine?' me':'')+'">'
     +(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
-    +'<div onclick="openPlayer(\''+q(p1.id)+'\',\'matches\')">'+av(p1,'','w')+'</div>'
+    +'<div class="match-player-link" onclick="'+p1Call+'">'+av(p1,'','w')+'</div>'
     +'<div class="mid"><div class="nm3">'
-      +'<b onclick="event.stopPropagation();openPlayer(\''+q(p1.id)+'\',\'matches\')">'+esc(schName(p1))+'</b>'
+      +'<b onclick="event.stopPropagation();'+p1Call+'">'+esc(schName(p1))+'</b>'
       +' <s>vs</s> '
-      +'<em onclick="event.stopPropagation();openPlayer(\''+q(p2.id)+'\',\'matches\')">'+esc(schName(p2))+'</em></div>'
+      +'<em onclick="event.stopPropagation();'+p2Call+'">'+esc(schName(p2))+'</em></div>'
       +(i.result_pending?'<div class="res l" style="display:inline-block;margin-top:7px">'+esc(X.resultPending)+'</div>':'')
       +(i.division?'<div style="margin-top:7px" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(i.division)+'\')">'+divChip(i.division)+'</div>':'')
     +'</div>'
-    +'<div onclick="openPlayer(\''+q(p2.id)+'\',\'matches\')">'+av(p2)+'</div>'
+    +'<div class="match-player-link" onclick="'+p2Call+'">'+av(p2)+'</div>'
     +'</div></div>';
 }
 
@@ -2367,6 +2389,8 @@ function renderPlayer(p){
       +(sub?'<div class="dt">'+esc(sub)+'</div>':'')+'</div></div>';
   }).join(''):'<div class="hint">'+esc(X.noAch)+'</div>';
   h+='</div>';
+
+  h+=fantasyBlock(p);
 
   var mine=matches[String(p.id)]||[];
   h+='<div class="card"><h3>'+esc(X.history)+(mine.length?' · '+mine.length:'')+'</h3>';
