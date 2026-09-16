@@ -324,7 +324,7 @@ border:1px solid var(--line4);font-size:11px;font-weight:700;color:var(--mute);w
 .tb{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .thd,.trw{display:grid;grid-template-columns:20px 34px minmax(0,1fr) 26px 44px 48px;gap:6px;align-items:center;padding:0 11px}
 /* В гонке между матчами и процентом добавилась колонка побед. */
-.tb.race .thd,.tb.race .trw{grid-template-columns:18px 40px minmax(0,1fr) 22px 22px 38px 42px;gap:5px;padding:0 8px}
+.tb.race .thd,.tb.race .trw{grid-template-columns:18px 40px minmax(0,1fr) 22px 22px 38px 42px;gap:5px;padding:0 8px}.tb.fantasy-race .thd,.tb.fantasy-race .trw{grid-template-columns:18px 40px minmax(0,1fr) 50px 45px;gap:5px;padding:0 8px}.tb.fantasy-race .trw{cursor:pointer}.tb.fantasy-race .trw .n{min-width:0}.tb.fantasy-race .team-count{text-align:center;color:var(--dim);font-size:11px}.tb.fantasy-race .pt{text-align:right}
 .tb.race .trw .avr,.tb.race .trw .avph{width:40px;height:40px;flex:0 0 40px;font-size:12px;object-position:50% 26%}
 .thd{height:36px;background:var(--surf2);font-size:8px;letter-spacing:1.3px;text-transform:uppercase;
 color:var(--mute2);font-weight:800}
@@ -840,16 +840,20 @@ function isActive(p){ return String(p.status||'').trim().toLowerCase()==='active
 function statusBadge(p){
   return isActive(p)?'<span class="badge ok">'+esc(X.active)+'</span>':'<span class="badge">'+esc(X.inactive)+'</span>';
 }
+function fantasyPlayer(p){
+  // Only Players_Master members are included in the server-side Fantasy catalog.
+  // Do not show zero-value Fantasy UI for any other league profile or tester.
+  var source=(fantasyData&&fantasyData.players||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0];
+  if(!source)return null;
+  var row=(fantasyData&&fantasyData.player_leaderboard||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0]||{};
+  return {points:Number(source.score&&source.score.total||row.points||0),teams:Number(source.selected_by||row.selected_by||0),place:row.place||'—'};
+}
 function fantasyBadges(p){
-  var f=fantasyPlayer(p);
+  var f=fantasyPlayer(p);if(!f)return '';
   return '<div class="fanbadges"><span class="fanbadge">✨ FP '+esc(f.points)+' · Teams '+esc(f.teams)+' · Rank #'+esc(f.place)+'</span></div>';
 }
-function fantasyPlayer(p){
-  var row=(fantasyData&&fantasyData.player_leaderboard||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0]||{};
-  return {points:Number(p.fantasy_points||row.points||0),teams:Number(p.fantasy_teams||row.selected_by||0),place:row.place||'—'};
-}
 function fantasyBlock(p){
-  var f=fantasyPlayer(p);
+  var f=fantasyPlayer(p);if(!f)return '';
   return '<div class="card fantasy-player-card" onclick="showTab(\'fantasy\')"><h3>✨ '+esc(X.tFantasy)+'</h3>'
     +'<div class="fantasy-stats-head"><span>Points</span><span>Teams</span><span>Rank</span></div>'
     +'<div class="fantasy-stats-row"><b>'+esc(f.points)+'</b><b>'+esc(f.teams)+'</b><b>#'+esc(f.place)+'</b></div></div>';
@@ -1828,7 +1832,7 @@ function crossGroupBlock(groups){
   if(!all.length)return '';
   all.sort(function(a,b){return String(a.date||'9999').localeCompare(String(b.date||'9999'))||String(a.player_1||'').localeCompare(String(b.player_1||''))});
   var title=L?'Межгрупповые матчи':'Cross-group matches';
-  var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):(L?'Запланирован':'Scheduled');var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(m.date):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> <s>'+esc(score)+'</s> <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
+  var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):'',middle=done?'<s>'+esc(score)+'</s>':'<i class="cross-vs">vs</i>';var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(m.date):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> '+middle+' <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
   return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
 }
 function playoffStages(po){
@@ -2240,15 +2244,11 @@ function renderAbout(){
 
 function fantasyRankRows(list,kind){
   if(!list||!list.length)return '<div class="empty">'+esc(X.fantasyEmpty)+'</div>';
-  return list.map(function(x){
+  if(kind==='players')return '<div class="tb race fantasy-race"><div class="thd"><span>#</span><span></span><span class="n">'+esc(X.tPlayers)+'</span><span>'+esc(X.fantasyTeams)+'</span><span>'+esc(X.fantasyPoints)+'</span></div>'+list.map(function(x){
     var medal=x.place===1?'🥇':x.place===2?'🥈':x.place===3?'🥉':x.place;
-    var isPlayer=kind==='players',pic=isPlayer?x:{name:x.owner_name,photo:x.owner_photo};
-    var click=isPlayer?' onclick="openPlayerByName(\''+q(x.name)+'\',\'fantasy\')"':'';
-    return '<div class="fanrank"'+click+'><div class="fanplace">'+medal+'</div>'+av(pic)
-      +'<div><div class="nm">'+esc(isPlayer?x.name:x.team_name)+'</div><div class="sub">'
-      +(isPlayer?esc(x.pool_label)+' · '+esc(X.fantasyTeams)+': '+esc(x.selected_by||0):esc(X.fantasyOwner)+': '+esc(x.owner_name||''))
-      +'</div></div><div class="fanpts">'+esc(x.points||0)+'</div></div>';
-  }).join('');
+    return '<div class="trw" onclick="openPlayerByName(\''+q(x.name)+'\',\'fantasy\')"><span class="p">'+medal+'</span>'+av(x)+'<span class="n"><div class="nm">'+esc(x.name)+'</div></span><span class="team-count">'+esc(x.selected_by||0)+'</span><span class="pt">'+esc(x.points||0)+'</span></div>';
+  }).join('')+'</div>';
+  return list.map(function(x){var medal=x.place===1?'🥇':x.place===2?'🥈':x.place===3?'🥉':x.place,pic={name:x.owner_name,photo:x.owner_photo};return '<div class="fanrank"><div class="fanplace">'+medal+'</div>'+av(pic)+'<div><div class="nm">'+esc(x.team_name)+'</div><div class="sub">'+esc(X.fantasyOwner)+': '+esc(x.owner_name||'')+'</div></div><div class="fanpts">'+esc(x.points||0)+'</div></div>';}).join('');
 }
 function setFantasyRank(v){fRank=v;renderFantasy()}
 function openFantasyApp(){location.href='/fantasy'+(linkToken?'?t='+encodeURIComponent(linkToken):'')}
@@ -2334,7 +2334,7 @@ function seasonRowsWithLive(p,byTable){
   return rows;
 }
 function renderPlayer(p){
-  var w=pct(p);
+  var w=pct(p),fp=fantasyPlayer(p);
   var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
   var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>';
   // Панель загрузки фото — над самой фотографией: иначе её не видно без прокрутки.
@@ -2351,7 +2351,7 @@ function renderPlayer(p){
     +(p.form&&p.form.length?'<div class="fline"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
       +stt(X.sPoints,p.points||'',true)+stt(X.sMatches,p.matches||'')
-      +(fantasyData?stt(X.fantasyPoints,p.fantasy_points||0,true)+stt(X.fantasyTeams,p.fantasy_teams||0):'')
+      +(fp?stt(X.fantasyPoints,fp.points,true)+stt(X.fantasyTeams,fp.teams):'')
       +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0))+stt(X.sWR,w+'%')
       +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
       +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''))

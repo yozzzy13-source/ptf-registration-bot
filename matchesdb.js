@@ -14,7 +14,9 @@
 import { sheets as sheetsClient } from './google.js';
 import { MATCHES_SPREADSHEET_ID, DIVISIONS_SPREADSHEET_ID, MATCH_SHEETS, TIMEZONE } from './config.js';
 import { nowISO, safe } from './util.js';
-import { authorizeSlot, slotScope, sameScope } from './access.js';
+import { authorizeSlot, slotScope, sameScope, isWCrossGroupPair } from './access.js';
+import { getPlayerLeagueInfo } from './sheets.js';
+import { divisionLetter } from './division.js';
 
 const SLOT_HEADERS = [
   'challenge_id', 'match_type', 'status', 'division', 'season', 'group',
@@ -302,7 +304,7 @@ export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {})
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, taker, { joining: true });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -369,10 +371,17 @@ export async function listOpenSlots(division, viewerTelegramId = '', season = ''
   const rows = (await allSlots()).filter(r => String(r.status).toLowerCase() === 'open')
     .filter(r => !r.to_telegram_id || String(r.to_telegram_id) === String(viewerTelegramId))
     .filter(r => !isSlotPast(r));
+  const viewer = viewerTelegramId ? await getPlayerLeagueInfo({ telegram_id:viewerTelegramId }).catch(() => null) : null;
   const out = [];
   for (const r of rows) {
     const scope = await slotScope(r);
-    if (sameScope(scope, { division, season, group })) out.push(r);
+    const sameGroup = sameScope(scope, { division, season, group });
+    // The author’s open W window is also visible to their two approved
+    // cross-group opponents. They may take it; claimSlot then stores `cross`.
+    const approvedCross = viewer && String(viewer.season) === String(scope.season)
+      && divisionLetter(viewer.letter || viewer.division) === divisionLetter(scope.letter)
+      && isWCrossGroupPair(r.from_name, viewer.name, scope.letter);
+    if (sameGroup || approvedCross) out.push(r);
   }
   return out.sort((a,b) => firstDateMillis(a) - firstDateMillis(b));
 }
@@ -410,7 +419,7 @@ export async function counterSlot(challengeId, actor = {}, offer = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -441,7 +450,7 @@ export async function acceptProposal(challengeId, actor = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -465,7 +474,7 @@ export async function rejectProposal(challengeId, actor = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -490,7 +499,7 @@ export async function confirmCourt(challengeId, actor = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -808,7 +817,7 @@ export async function proposeTimeChange(challengeId, actor = {}, newTime = '') {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -837,7 +846,7 @@ export async function acceptTimeChange(challengeId, actor = {}, expectedTime = '
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -864,7 +873,7 @@ export async function rejectTimeChange(challengeId, actor = {}, expectedTime = '
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -934,7 +943,7 @@ export async function submitResult(challengeId, actor = {}, result = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -993,7 +1002,7 @@ export async function confirmResult(challengeId, actor = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }
@@ -1016,7 +1025,7 @@ export async function disputeResult(challengeId, actor = {}) {
     if (!slot) return { ok: false, reason: 'not_found' };
     const access = await authorizeSlot(slot, actor, { joining: false });
     if (!access.ok) return access;
-    if (!slot.season || !Object.hasOwn(slot, 'group') || (access.scope.group && !slot.group)) {
+    if (!slot.season || !Object.hasOwn(slot, 'group') || String(slot.group || '') !== String(access.scope.group || '')) {
       await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { season:access.scope.season, group:access.scope.group });
       Object.assign(slot, { season:access.scope.season, group:access.scope.group });
     }

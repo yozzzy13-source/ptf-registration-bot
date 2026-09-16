@@ -457,7 +457,7 @@ async function leagueViewer(initData, token = '') {
   if (!league.member && !league.admin && !profileCompleted) return { ok:false, code:403, lang, error:'profile_required' };
   return { ok:true, user, profile, lang, division:league.division || '', season:league.season || '',
     matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin,
-    isLeagueMember:Boolean(league.member || league.admin), profileCompleted };
+    isLeagueMember:Boolean(league.member || league.admin), isPlayersMasterMember:Boolean(league.member), profileCompleted };
 }
 async function matchViewer(initData, token = '') { return leagueViewer(initData, token); }
 
@@ -492,7 +492,9 @@ app.get('/api/match/history', async (req, res) => {
         });
       }
     }
-    out.sort((a, b) => Number(b.no || 0) - Number(a.no || 0));
+    // История должна следовать реальному дню матча, а не техническому номеру
+    // строки, который может появиться позже при ручной корректировке.
+    out.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || Number(b.no || 0) - Number(a.no || 0));
     res.json({ ok:true, division: v.division || '', matches: out.slice(0, 300) });
   } catch (e) {
     console.error('match history failed:', e.message);
@@ -518,7 +520,14 @@ app.get('/api/match/admin-active', async (req, res) => {
     const items=rows.map(function(slot){
       const from=people.get(String(slot.from_telegram_id))||{};const to=people.get(String(slot.to_telegram_id))||{};
       return {...slot,dates:cellToList(slot.dates),courts:cellToList(slot.courts),from_contact:{...from,name:slot.from_name||from.name,username:slot.from_username||from.username,url:slot.from_username?'https://t.me/'+String(slot.from_username).replace(/^@/,''):from.url},to_contact:slot.to_telegram_id?{...to,name:slot.to_name||to.name,username:slot.to_username||to.username,url:slot.to_username?'https://t.me/'+String(slot.to_username).replace(/^@/,''):to.url}:null};
-    }).sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''))});
+    }).sort(function(a,b){
+      // Админ видит матчи в календарном порядке; записи без выбранной даты
+      // оставляем внизу, а одинаковую дату упорядочиваем по времени.
+      var ad=String(a.agreed_date||a.dates[0]||''),bd=String(b.agreed_date||b.dates[0]||'');
+      if(!ad&&!bd)return String(b.created_at||'').localeCompare(String(a.created_at||''));
+      if(!ad)return 1;if(!bd)return -1;
+      return ad.localeCompare(bd)||String(a.agreed_time||a.time_from||'').localeCompare(String(b.agreed_time||b.time_from||''));
+    });
     res.json({ok:true,items:items});
   } catch(e){res.status(500).json({ok:false,error:e.message})}
 });
@@ -1056,7 +1065,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const tabs = (v.isAdmin && !viewAs)
       ? MINIAPP_TABS.slice()
       : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
-    const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isLeagueMember }).catch(() => ({ allowed:false }));
+    const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isPlayersMasterMember }).catch(() => ({ allowed:false }));
     // Витрина Fantasy (очки, выборы и рейтинг реальных игроков) публична внутри
     // League. TEST по-прежнему ограничивает только создание и сохранение составов.
     const fantasy = fantasyAccess.mode === 'closed' ? null

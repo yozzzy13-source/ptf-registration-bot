@@ -40,14 +40,20 @@ export async function authorizeSlot(slot, actor, { joining = false } = {}) {
   if (!info.member) return { ok: false, reason: 'league_access_denied' };
   if (!info.found) return { ok: false, reason: 'division_required' };
   const scope = await slotScope(slot);
-  const crossGroup = scope.group === 'cross';
-  const sameDivision = x => String(x.season) === String(scope.season) && divisionLetter(x.letter || x.division) === divisionLetter(scope.letter);
-  if (crossGroup ? !sameDivision(info) : !sameScope(info, scope)) return { ok: false, reason: 'different_group' };
+  // An open W window has no opponent yet, so its stored group is the author's
+  // group. A taker may cross that boundary only when they are one of the
+  // explicitly approved W1/W2 pairs. Once taken, the slot is persisted as
+  // `cross` and every following proposal uses the normal cross-group policy.
+  const joiningCross = joining && isWCrossGroupPair(slot.from_name, info.name || actor.name, scope.letter);
+  const resolvedScope = joiningCross ? { ...scope, group:'cross' } : scope;
+  const crossGroup = resolvedScope.group === 'cross';
+  const sameDivision = x => String(x.season) === String(resolvedScope.season) && divisionLetter(x.letter || x.division) === divisionLetter(resolvedScope.letter);
+  if (crossGroup ? !sameDivision(info) : !sameScope(info, resolvedScope)) return { ok: false, reason: 'different_group' };
   // A removed/moved opponent cannot keep receiving new match proposals.
   const otherId = String(slot.from_telegram_id) === id ? slot.to_telegram_id : slot.from_telegram_id;
   if (otherId && !isLeagueAdmin(otherId)) {
     const other = await getPlayerLeagueInfo({ telegram_id: otherId });
-    if (!other.member || !other.found || (crossGroup ? !sameDivision(other) : !sameScope(other, scope))) return { ok: false, reason: 'different_group' };
+    if (!other.member || !other.found || (crossGroup ? !sameDivision(other) : !sameScope(other, resolvedScope))) return { ok: false, reason: 'different_group' };
   }
-  return { ok: true, scope };
+  return { ok: true, scope: resolvedScope };
 }

@@ -1,5 +1,5 @@
 import { ADMIN_IDS,SHEETS } from './config.js';
-import { appendObject,ensureExtraSheet,findApplicantByTelegramId,getLeagueMatchHistory,getPlayerLeagueInfo,getLeagueProfiles,getRows,getSetting,updateObjectByRow } from './sheets.js';
+import { appendObject,ensureExtraSheet,findApplicantByTelegramId,getLeagueMatchHistory,getPlayerLeagueInfo,getLeagueProfiles,getMasterPlayers,getRows,getSetting,updateObjectByRow } from './sheets.js';
 import { availableDivisions,divisionGroups,getDivisionTable,latestSeason,seasonRoster } from './division.js';
 import { cellToScore,getSets } from './tennis.js';
 import { nowISO,parseSeasonNumber,uid } from './util.js';
@@ -104,9 +104,12 @@ export async function buildFantasyCatalog({lang='en',fresh=false,mode='live'}={}
  const cfg=await settings(mode),ck=mode+':'+cfg.season+':'+cfg.budget+':'+lang;
  if(!fresh&&cache.value&&cache.key===ck&&Date.now()-cache.at<60000)return cache.value;
  const overrideKey=mode==='test'?'fantasy_test_price_overrides':'fantasy_price_overrides';
- const [roster,profiles,hist,testOverrides,liveOverrides]=await Promise.all([seasonRoster(cfg.season),getLeagueProfiles().catch(()=>[]),previousIndex(cfg.season),getSetting(overrideKey).catch(()=>''),mode==='test'?getSetting('fantasy_price_overrides').catch(()=>''):'']);
- const byName=new Map(profiles.map(p=>[nk(p.name),p])),overrides=js(testOverrides||liveOverrides,{}),seen=new Set(),players=[];
+ const [roster,profiles,master,hist,testOverrides,liveOverrides]=await Promise.all([seasonRoster(cfg.season),getLeagueProfiles().catch(()=>[]),getMasterPlayers(),previousIndex(cfg.season),getSetting(overrideKey).catch(()=>''),mode==='test'?getSetting('fantasy_price_overrides').catch(()=>''):'']);
+ const byName=new Map(profiles.map(p=>[nk(p.name),p])),masterNames=new Set(master.map(p=>nk(p.player_name))),overrides=js(testOverrides||liveOverrides,{}),seen=new Set(),players=[];
  for(const row of roster.players||[]){
+  // Fantasy is available only for real league players listed in Players_Master.
+  // A tester entry never grants an unlisted person a Fantasy card or roster slot.
+  if(!masterNames.has(nk(row.name)))continue;
   const key=fantasyPlayerKey(row.name);if(!key||seen.has(key))continue;seen.add(key);
   const h=hist.get(nk(row.name))||null,pf=byName.get(nk(row.name))||{},division=t(row.letter).toUpperCase(),override=overrides[key]??overrides[row.name];
   const priceBreakdown=fantasyPriceBreakdown(h,division,override),p={key,name:row.name,division,group:t(row.group),pool:poolKey(division,row.group),pool_label:poolLabel(division,row.group,lang),photo:pf.photo||'',profile_id:pf.id||'',price:priceBreakdown.final,price_breakdown:priceBreakdown,is_debutant:!h,transition_factor:h?fantasyTransitionFactor(h.division,division):1,history:h};
@@ -192,13 +195,16 @@ async function testMember(id,name,username=''){
 }
 export async function fantasyAccessFor({telegramId='',name='',username='',isAdmin=false,isLeagueMember=false}={}){
  const mode=await fantasyMode(),admin=Boolean(isAdmin)||ADMIN_IDS.includes(String(telegramId));
+ // Fantasy Testers only selects who can enter TEST. It never replaces the
+ // Players_Master requirement for a real league-player Fantasy profile.
+ if(!isLeagueMember)return{allowed:false,mode,is_test:mode==='test',admin:false,reason:'players_master_required'};
  if(admin)return{allowed:true,mode,is_test:mode==='test',admin:true,reason:'admin'};
- if(mode==='test'){const allowed=Boolean(isLeagueMember)&&await testMember(telegramId,name,username);return{allowed,mode,is_test:true,admin:false,reason:allowed?'tester':'test_only'}}
- if(mode==='live'){const allowed=Boolean(isLeagueMember);return{allowed,mode,is_test:false,admin:false,reason:allowed?'players_master':'players_master_required'}}
+ if(mode==='test'){const allowed=await testMember(telegramId,name,username);return{allowed,mode,is_test:true,admin:false,reason:allowed?'tester':'test_only'}}
+ if(mode==='live')return{allowed:true,mode,is_test:false,admin:false,reason:'players_master'};
  return{allowed:false,mode,is_test:false,admin:false,reason:'closed'};
 }
 export async function canAccessFantasyByTelegramId(telegramId){
- const profile=await findApplicantByTelegramId(telegramId).catch(()=>null),admin=ADMIN_IDS.includes(String(telegramId)),league=admin?{member:true}:await getPlayerLeagueInfo({...profile,telegram_id:telegramId}).catch(()=>({member:false})),access=await fantasyAccessFor({telegramId,name:profile?.name||'',username:profile?.telegram_username||profile?.telegram||'',isAdmin:admin,isLeagueMember:Boolean(league.member)});
+ const profile=await findApplicantByTelegramId(telegramId).catch(()=>null),admin=ADMIN_IDS.includes(String(telegramId)),league=await getPlayerLeagueInfo({...profile,telegram_id:telegramId}).catch(()=>({member:false})),access=await fantasyAccessFor({telegramId,name:profile?.name||'',username:profile?.telegram_username||profile?.telegram||'',isAdmin:admin,isLeagueMember:Boolean(league.member)});
  return access.allowed;
 }
 async function findTeam(id,season,mode,slot=1){const use=storeFor(mode);await ensureSheets(mode);return(await getRows(use.teams,{useCache:false})).rows.find(x=>String(x.telegram_id)===String(id)&&String(x.season)===String(season)&&String(x.team_slot||'1')===String(slot))||null}
@@ -248,7 +254,7 @@ export async function transferFantasyPlayer(id,input={},lang='en',mode='test'){
  return{team:publicTeam({...row,picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext}),forced,transfers_left:c.transfers-usedNext};
 }
 export function registerFantasyRoutes(app,{viewer}){
- const auth=async(req,res)=>{const v=await viewer(req.body?.initData||req.query.initData||'',String(req.body?.t||req.query.t||''));if(!v.ok){res.status(v.code).json({ok:false,error:v.error});return null}const access=await fantasyAccessFor({telegramId:v.user.id,name:v.profile.name||'',username:v.profile.telegram_username||v.user.username||'',isAdmin:v.isAdmin,isLeagueMember:Boolean(v.isLeagueMember)});if(!access.allowed){const ru=v.lang==='ru',error=access.reason==='players_master_required'?(ru?'Fantasy League доступна игрокам из Players_Master таблицы Match Log.':'Fantasy League is available to players listed in Match Log Players_Master.'):(ru?'Fantasy пока доступно только тестовой группе.':'Fantasy is currently available to the test group only.');res.status(403).json({ok:false,error,reason:access.reason});return null}return{...v,fantasy:access}};
+ const auth=async(req,res)=>{const v=await viewer(req.body?.initData||req.query.initData||'',String(req.body?.t||req.query.t||''));if(!v.ok){res.status(v.code).json({ok:false,error:v.error});return null}const access=await fantasyAccessFor({telegramId:v.user.id,name:v.profile.name||'',username:v.profile.telegram_username||v.user.username||'',isAdmin:v.isAdmin,isLeagueMember:Boolean(v.isPlayersMasterMember)});if(!access.allowed){const ru=v.lang==='ru',error=access.reason==='players_master_required'?(ru?'Fantasy League доступна игрокам из Players_Master таблицы Match Log.':'Fantasy League is available to players listed in Match Log Players_Master.'):(ru?'Fantasy пока доступно только тестовой группе.':'Fantasy is currently available to the test group only.');res.status(403).json({ok:false,error,reason:access.reason});return null}return{...v,fantasy:access}};
  app.get('/api/fantasy/bootstrap',async(req,res)=>{try{const v=await auth(req,res);if(v)res.json({ok:true,...await getFantasyBootstrap(v.user.id,v.profile.name||'',v.lang,v.fantasy.mode)})}catch(e){console.error('fantasy bootstrap:',e);res.status(500).json({ok:false,error:e.message})}});
  app.post('/api/fantasy/validate',async(req,res)=>{try{const v=await auth(req,res);if(v){const x=await validateFantasyTeam(req.body||{},v.lang,v.fantasy.mode);res.json({ok:true,validation:{...x,picks:x.picks.map(p=>p.key)}})}}catch(e){res.status(e.code||500).json({ok:false,error:e.message})}});
  app.post('/api/fantasy/team',async(req,res)=>{try{const v=await auth(req,res);if(v)res.json({ok:true,...await saveFantasyTeam(v.user.id,v.profile.name||'',req.body||{},v.lang,v.fantasy.mode)})}catch(e){res.status(e.code||400).json({ok:false,error:e.message})}});
