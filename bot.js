@@ -406,7 +406,12 @@ async function sendResultsSettings(chatId, lang, telegramId, event = '') {
   const button = muted
     ? { text: ru ? '🔔 Включить результаты' : '🔔 Turn results on', callback_data: 'results_unmute' }
     : { text: ru ? '🔕 Отключить результаты' : '🔕 Turn results off', callback_data: 'results_mute' };
-  return sendMessage(chatId, `${head}\n\n${explain}\n\n${state}`, {
+  // По просьбе Костаса: после отключения явно называем команду, которой лента
+  // включается обратно, а не только кнопку — кнопка может потеряться в чате.
+  const howToReenable = event === 'just_muted'
+    ? (ru ? '\n\nЧтобы включить обратно в любой момент — нажмите кнопку ниже или отправьте команду /results.' : '\n\nTo turn it back on anytime — tap the button below or send the /results command.')
+    : '';
+  return sendMessage(chatId, `${head}\n\n${explain}\n\n${state}${howToReenable}`, {
     reply_markup: { inline_keyboard: [[button]] }
   });
 }

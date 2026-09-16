@@ -6,7 +6,7 @@ try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
 let D, ru=(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
-let view='home', step=0, slot=1, filter='slot', search='', transferOut='', busy=false, notice='', review=null;
+let view='home', step=0, slot=1, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='';
 const drafts=new Map(), saves=new Map(), timers=new Map();
 const tr=(r,e)=>ru?r:e;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -114,6 +114,23 @@ function selectionError(key) {
   }
   return selectionIssue(draft().picks,key,D.players,D.budget,D.max_per_pool,assignSlots(draft().picks,D.players).slots.findIndex(s=>!s.key));
 }
+// По просьбе Костаса: клик по цене раскрывает, из чего она сложилась —
+// база + бонусы за винрейт/место/плей-офф, минус скидка за переход дивизиона.
+function priceBreakdown(p) {
+  const b=p.price_breakdown;
+  if(!b)return '';
+  const row=(label,v,signed)=>'<div class="pbd-row"><span>'+esc(label)+'</span><b'+(signed&&v>0?' class="pos"':signed&&v<0?' class="neg"':'')+'>'+(signed&&v>0?'+':'')+v+'</b></div>';
+  if(b.override)return '<div class="price-breakdown">'+row(tr('Цена задана вручную','Manually set price'),b.final,false)+'</div>';
+  if(b.debutant)return '<div class="price-breakdown">'+row(tr('База (нет истории — дебютант)','Base (no history — debutant)'),b.final,false)+'</div>';
+  const promoted=(b.transition_factor||1)<1;
+  return '<div class="price-breakdown">'+
+    row(tr('База','Base'),b.base,false)+
+    row(tr('Винрейт','Win rate'),b.win_rate_bonus,true)+
+    row(tr('Место в регулярке','Regular-season place'),b.regular_bonus,true)+
+    row(tr('Плей-офф','Playoffs'),b.playoff_bonus,true)+
+    (promoted?'<div class="pbd-row note">'+esc(tr('Переход в более сильный дивизион уменьшает надбавку (×'+b.transition_factor+')','Moving to a stronger division shrinks the premium (×'+b.transition_factor+')'))+'</div>':'')+
+    '<div class="pbd-row total"><span>'+tr('Итоговая цена','Final price')+'</span><b>'+b.final+'</b></div></div>';
+}
 function hint(p) {
   if(p.history&&p.price>=13&&p.transition_factor===1)return tr('Кандидат в капитаны','Captain candidate');
   const top=D.player_leaderboard?.slice(0,5).some(x=>x.key===p.key);
@@ -129,7 +146,8 @@ function catalog(selecting=false) {
     (filter==='all'||(filter==='slot'?(!current||current.pools.includes(p.pool)):p.pool.split(':')[0]===filter)));
   return '<label class="sr-only" for="player-search">'+tr('Поиск игрока','Search player')+'</label><input id="player-search" class="search" placeholder="'+tr('Поиск игрока','Search player')+'" value="'+esc(search)+'"><div class="filters">'+(selecting?button(tr('Для слота','For this slot'),'filter','filter '+(filter==='slot'?'on':''),'data-filter="slot"'):'')+['all','C','W','PRIME','A','B'].map(f=>button(f==='all'?tr('Все','All'):f==='PRIME'?'Prime':f,'filter','filter '+(filter===f?'on':''),'data-filter="'+f+'"')).join('')+'</div><div class="tb fantasy-catalog '+(selecting?'selecting':'')+'"><div class="thd"><span>#</span><span></span><span>'+tr('Игрок','Player')+'</span><span>Teams</span><span>Fantasy<br>Points</span><span>'+tr('Цена','Price')+'</span>'+(selecting?'<span></span>':'')+'</div>'+list.map(p=>{
     const selected=draft().picks.includes(p.key),h=selecting?hint(p):'';
-    return '<div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+'<div class="player-name"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</div><span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span><span class="price">'+p.price+'</span>'+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>';
+    const priceBtn='<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(p.key)+'" aria-expanded="'+(priceOpen===p.key)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+p.price+'</button>';
+    return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+'<div class="player-name"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</div><span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+'</div>';
   }).join('')+'</div>'+(!list.length?'<div class="empty">'+tr('Нет подходящих игроков. Измените поиск или фильтр.','No matching players. Change the search or filter.')+'</div>':'');
 }
 function cards(mode='review') {
@@ -139,7 +157,8 @@ function cards(mode='review') {
     const cap=d.captain_key===k,vice=d.vice_key===k;
     return '<div class="pick">'+avatar(p)+'<div class="player-name"><div class="name">'+esc(p.name)+'</div><div class="meta">'+esc(p.pool||'')+' · '+(p.score?.total||0)+' Fantasy Points</div><div class="actions">'+(mode==='captains'?button(tr('Капитан','Captain'),'captain','mini '+(cap?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+cap+'"')+button(tr('Вице-капитан','Vice-captain'),'vice','mini '+(vice?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+vice+'"'):(cap?'<span class="badge cap">'+tr('Капитан','Captain')+' ×1.5</span>':'')+(vice?'<span class="badge">'+tr('Вице-капитан','Vice-captain')+'</span>':''))+
     (mode==='select'?button(tr('Убрать','Remove'),'remove','mini danger','data-key="'+esc(k)+'"'):'')+
-    (mode==='team'&&canTransfer(k)?button((team().free_transfer_keys||[]).includes(k)?tr('Бесплатная замена','Free transfer'):tr('Заменить','Replace'),'transfer-start','mini transfer','data-key="'+esc(k)+'"'):'')+'</div></div><div class="price">'+Number(p.price||0)+'</div></div>';
+    (mode==='team'&&canTransfer(k)?button((team().free_transfer_keys||[]).includes(k)?tr('Бесплатная замена','Free transfer'):tr('Заменить','Replace'),'transfer-start','mini transfer','data-key="'+esc(k)+'"'):'')+'</div></div>'+
+    (p.price_breakdown?'<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(k)+'" aria-expanded="'+(priceOpen===k)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+Number(p.price||0)+'</button>'+(priceOpen===k?priceBreakdown(p):''):'<div class="price">'+Number(p.price||0)+'</div>')+'</div>';
   }).join('')+'</div>';
 }
 function localErrors() {
@@ -266,6 +285,7 @@ async function handle(action,el={dataset:{}}) {
   if(action==='filter'){filter=el.dataset.filter;return render();}
   if(action==='rank-teams'||action==='rank-players'){rankMode=action.slice(5);return render();}
   const key=el.dataset.key,d=draft();
+  if(action==='price-info'){priceOpen=priceOpen===key?'':key;return render();}
   if(action==='pick') {
     if(!editable())return;
     const issue=selectionError(key);if(issue){notice=issueText(issue)+' '+tr('Цена: ','Price: ')+player(key).price;render();return;}

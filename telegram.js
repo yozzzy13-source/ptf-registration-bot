@@ -22,10 +22,29 @@ async function rawCall(method, payload = {}) {
   return res.json().catch(() => ({}));
 }
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Telegram отвечает 429 (error_code:429, parameters.retry_after=N) при превышении
+// лимитов — раньше это просто роняло рассылку с ошибкой и результат/уведомление
+// терялось. Теперь ждём ровно столько, сколько просит Telegram (+небольшой запас),
+// и повторяем сам запрос — без этого масштабирование числа игроков рано или
+// поздно начинает терять сообщения на каждой массовой рассылке.
+const MAX_RETRY_429 = 6;
+async function callWithRetry(doRequest, method) {
+  let json = await doRequest();
+  for (let attempt = 0; json && json.ok === false && json.error_code === 429 && attempt < MAX_RETRY_429; attempt++) {
+    const waitSec = Number(json.parameters?.retry_after) || 1;
+    console.warn(`Telegram 429 on ${method}: waiting ${waitSec}s (attempt ${attempt + 1}/${MAX_RETRY_429})`);
+    await sleep((waitSec + 0.3) * 1000);
+    json = await doRequest();
+  }
+  return json;
+}
+
 async function call(method, payload = {}) {
   if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
   const normalized = normalizePayload(payload);
-  let json = await rawCall(method, normalized);
+  let json = await callWithRetry(() => rawCall(method, normalized), method);
 
   // Telegram group -> supergroup migration.
   // Without this retry, admin notifications can break the whole WebApp submit flow.
@@ -35,7 +54,7 @@ async function call(method, payload = {}) {
     const newChatId = String(migrateTo);
     migratedChats.set(oldChatId, newChatId);
     console.warn(`Telegram chat migrated: ${oldChatId} -> ${newChatId}`);
-    json = await rawCall(method, { ...normalized, chat_id: newChatId });
+    json = await callWithRetry(() => rawCall(method, { ...normalized, chat_id: newChatId }), method);
   }
 
   if (!json.ok) {
@@ -86,8 +105,11 @@ export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', 
     form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
   }
   form.append('photo', new Blob([bytes], { type: mimeType }), `result.${ext}`);
-  const res = await globalThis.fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
-  const json = await res.json().catch(() => ({}));
+  const send = async () => {
+    const res = await globalThis.fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
+    return res.json().catch(() => ({}));
+  };
+  const json = await callWithRetry(send, 'sendPhoto');
   if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
   return json.result;
 }
