@@ -107,6 +107,11 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .bhead h3{margin:0;font-size:15px;letter-spacing:-.2px}
 .bcnt{font-size:11px;color:var(--mute2);font-weight:700}
 .bhead .chip.sm{margin-left:auto;padding:5px 10px;font-size:10.5px;border-radius:9px}
+.matchswitch{display:flex;gap:6px;margin:2px 0 14px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--card2)}
+.matchswitch button{flex:1;border:0;border-radius:8px;padding:9px 8px;background:transparent;color:var(--mute);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
+.matchswitch button.on{background:var(--surf);color:var(--amber);box-shadow:0 1px 5px rgba(0,0,0,.2)}
+/* Временное скрытие внешних ссылок: разметка и обработчики сохранены для возврата. */
+.website-link-hidden{display:none!important}
 .sday{margin:15px 0 7px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .srow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:6px;border:1px solid var(--line4);border-radius:12px;background:var(--card2)}
 .srow.me{border-color:var(--accLine);background:linear-gradient(180deg,#1C1712,#161310)}
@@ -652,7 +657,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Статус',
-  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',
+  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
   avTitle:'Аватарка',avSend:'📸 Загрузить селфи',avRedo:'📸 Заменить селфи',avSending:'Отправляю…',
@@ -711,7 +716,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Status',
-  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',
+  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
   avTitle:'Avatar',avSend:'📸 Upload a selfie',avRedo:'📸 Replace the selfie',avSending:'Sending…',
@@ -1020,6 +1025,7 @@ function showTab(t){
 // рядом, одним касанием. Метрика по кортам приходит только организатору.
 var schData=null,schLoading=false,schErr='';
 var schDiv='',schMine=false;
+var matchesView='upcoming';
 function loadSched(){
   schLoading=true;schErr='';
   fetch('/api/league/schedule?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
@@ -1090,19 +1096,28 @@ function upcomingBlock(){
       day=i.date;
       h+='<div class="sday">'+esc(schDayLabel(i.date,schData.now))+'</div>';
     }
-    var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
-    // Корт показываем как есть: подтверждён он или нет — вопрос переписки, а не
-    // этого экрана.
-    var marks=[];
-    if(i.court)marks.push(esc(i.court));
-    if(i.division)marks.push(esc(divLabel(i.division)));
-    h+='<div class="srow'+(mine?' me':'')+'">'
-      +'<div class="stime">'+esc(i.time||'—')+'</div>'
-      +'<div class="spair">'+esc(schName(i.p1))+' <span class="vs">—</span> '+esc(schName(i.p2))+'</div>'
-      +(marks.length?'<div class="smeta">'+marks.join(' · ')+'</div>':'')
-      +'</div>';
+    h+=upcomingCard(i);
   });
   return h;
+}
+// Предстоящий матч использует ту же карточку, что и сыгранный: сразу видны
+// оба игрока, аватары, дивизион, время и корт.
+function upcomingCard(i){
+  var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
+  var top=[i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+  var p1=i.p1||{},p2=i.p2||{};
+  return '<div class="mt upcoming'+(mine?' me':'')+'">'
+    +(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="fm2">'
+    +'<div onclick="openPlayer(\''+q(p1.id)+'\',\'matches\')">'+av(p1,'','w')+'</div>'
+    +'<div class="mid"><div class="nm3">'
+      +'<b onclick="event.stopPropagation();openPlayer(\''+q(p1.id)+'\',\'matches\')">'+esc(schName(p1))+'</b>'
+      +' <s>vs</s> '
+      +'<em onclick="event.stopPropagation();openPlayer(\''+q(p2.id)+'\',\'matches\')">'+esc(schName(p2))+'</em></div>'
+      +(i.division?'<div style="margin-top:7px" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(i.division)+'\')">'+divChip(i.division)+'</div>':'')
+    +'</div>'
+    +'<div onclick="openPlayer(\''+q(p2.id)+'\',\'matches\')">'+av(p2)+'</div>'
+    +'</div></div>';
 }
 
 // ------------------------------------------------------------- аватарка
@@ -1968,6 +1983,7 @@ function reverseScore(sc){
 // У каждого блока свой набор фильтров, и оба спрятаны под язычки.
 var fOpen=false;
 function toggleF(){fOpen=!fOpen;renderFeed()}
+function setMatchesView(v){matchesView=v;renderFeed()}
 function renderFeed(){
   var list=allMatchesList();
   var divs=[];
@@ -1979,19 +1995,22 @@ function renderFeed(){
     if(qq&&String(m.winner.name).toLowerCase().indexOf(qq)<0&&String(m.loser.name).toLowerCase().indexOf(qq)<0)return false;
     return true;
   });
-  var h=upcomingBlock();
-  h+='<div class="bhead" style="margin-top:16px"><h3>'+esc(X.histTitle)+'</h3>'
+  var upcoming=upcomingBlock();
+  var history='<div class="bhead"><h3>'+esc(X.histTitle)+'</h3>'
     +'<div class="bcnt">'+shown.length+'</div>'
     +'<div class="chip sm'+(fOpen||fQuery||fDiv?' on':'')+'" onclick="toggleF()">'+esc(X.filters)+'</div></div>';
   if(fOpen||fQuery||fDiv){
     var chips='<div class="chip'+(fDiv===''?' on':'')+'" onclick="setFDiv(\'\')">'+esc(X.all)+'</div>'
       +divs.map(function(d){return '<div class="chip'+(fDiv===d?' on':'')+'" onclick="setFDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>'}).join('');
-    h+='<input class="search" id="fq" placeholder="'+esc(X.searchP)+'" value="'+esc(fQuery)+'" oninput="setFQuery(this.value)">'
+    history+='<input class="search" id="fq" placeholder="'+esc(X.searchP)+'" value="'+esc(fQuery)+'" oninput="setFQuery(this.value)">'
       +'<div class="chips sm">'+chips+'</div>';
   }
   var page=shown.slice(0,fLimit);
-  h+=page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
-  if(shown.length>fLimit)h+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
+  history+=page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
+  if(shown.length>fLimit)history+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
+  var h='<div class="matchswitch"><button class="'+(matchesView==='upcoming'?'on':'')+'" onclick="setMatchesView(\'upcoming\')">'+esc(X.matchesUpcoming)+'</button>'
+    +'<button class="'+(matchesView==='history'?'on':'')+'" onclick="setMatchesView(\'history\')">'+esc(X.matchesHistory)+'</button></div>'
+    +(matchesView==='upcoming'?upcoming:history);
   $('viewMatches').innerHTML=h;
   if(fOpen||fQuery)keepFocus('fq',fQuery);
 }
@@ -2191,7 +2210,7 @@ function renderAbout(){
   $('viewAbout').innerHTML='<div class="card"><h3>'+esc(X.rules)+'</h3>'
     +rules.map(function(r){return '<div class="sr" style="grid-template-columns:1fr"><span class="sn" style="font-weight:600;font-size:12.5px;color:var(--dim);line-height:1.5">'+r+'</span></div>'}).join('')
     +'</div><div class="card"><h3>Phuket Tennis Family</h3><div class="hint">'+esc(X.sub)+'</div>'
-    +'<button onclick="openLink(\'https://www.phukettennis.com\')">🌐 '+esc(X.site)+'</button></div>';
+    +'<button class="website-link-hidden" onclick="openLink(\'https://www.phukettennis.com\')">🌐 '+esc(X.site)+'</button></div>';
 }
 
 function fantasyRankRows(list,kind){
@@ -2360,7 +2379,7 @@ function renderPlayer(p){
   h+='</div>';
   if(p.profile_url){
     var u=/^https?:/i.test(p.profile_url)?p.profile_url:'https://www.phukettennis.com'+p.profile_url;
-    h+='<button onclick="openLink(\''+q(u)+'\')">🌐 '+esc(X.site)+'</button>';
+    h+='<button class="website-link-hidden" onclick="openLink(\''+q(u)+'\')">🌐 '+esc(X.site)+'</button>';
   }
   $('viewCard').innerHTML=h;
 }
@@ -2383,7 +2402,7 @@ function matchRow(m){
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
   var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
-    +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(L?(m.result==='WIN'?'ПОБЕДА':'ПОРАЖЕНИЕ'):m.result)+'</div>'
+    +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result==='WIN'?'WIN':'LOST')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
     +'</div></div>';
