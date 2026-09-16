@@ -177,6 +177,12 @@
     .hist2 .amt{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
     .hist2 .plus{color:var(--ok)} .hist2 .minus{color:var(--danger)}
     .hist2 .d{font-size:10.5px;color:var(--muted)}
+    .searchwrap{position:relative}
+    .psug{position:absolute;left:0;right:0;top:calc(100% - 2px);z-index:15;background:var(--card2);border:1px solid var(--line);
+      border-radius:11px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.4)}
+    .psug .pi{padding:9px 12px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+    .psug .pi:last-child{border-bottom:0}
+    .psug .pi:hover,.psug .pi:active{background:var(--card)}
   </style>
 </head>
 <body><div class="wrap">
@@ -195,7 +201,7 @@
       <div><label>Селфи</label><select id="fSelfie"><option value="">Все</option><option value="missing">Нет</option><option value="requested">Запросили</option><option value="received">Есть</option></select></div>
       <div><label>NTRP (Raketo)</label><select id="fRating"><option value="">Все</option><option value="missing">Нет</option><option value="set">Указан</option></select></div>
       <div><label>Событие</label><select id="fEvent"><option value="">Все</option></select></div>
-      <div><label>Поиск</label><input id="fSearch" placeholder="имя или @ник" /></div>
+      <div><label>Поиск</label><div class="searchwrap"><input id="fSearch" placeholder="имя или @ник" autocomplete="off" oninput="fSearchInput(this.value)" onblur="fSearchBlur()"><div id="fSearchSug" class="psug hidden"></div></div></div>
     </div>
     <div class="actions" style="margin-top:9px"><button class="btn" onclick="applyFilters()">Применить</button><button class="btn secondary" onclick="clearFilters()">Сбросить</button><button class="btn secondary" onclick="selectFiltered()">Отметить всех</button><button class="btn secondary" onclick="clearSelection()">Снять отметки</button></div>
     </details>

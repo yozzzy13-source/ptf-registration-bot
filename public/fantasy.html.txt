@@ -42,6 +42,13 @@ button.price-toggle{background:none;border:0;padding:0;margin:0;font:inherit;col
 .pbd-row.total{margin-top:2px;padding-top:6px;border-top:1px dashed var(--line);font-weight:800}
 .pbd-row.total b{color:var(--accent)}
 .pbd-row.note{color:var(--muted);font-style:italic}
+.searchwrap{position:relative}
+.psug{position:absolute;left:0;right:0;top:calc(100% - 10px);z-index:5;background:var(--panel2);border:1px solid var(--line);
+border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28)}
+.psug .pi{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line2);
+padding:10px 13px;font:inherit;font-size:13px;color:var(--text);cursor:pointer}
+.psug .pi:last-child{border-bottom:0}
+.psug .pi:hover,.psug .pi:active{background:var(--panel)}
 @media(max-width:380px){.app{padding-left:10px;padding-right:10px}.fantasy-catalog .thd,.fantasy-catalog .trw{gap:3px;padding-left:5px;padding-right:5px}.fantasy-catalog.selecting .thd,.fantasy-catalog.selecting .trw{grid-template-columns:14px 30px minmax(0,1fr) 28px 38px 26px 44px}.fantasy-catalog .avatar{width:30px;height:30px}.progress li{font-size:9px}.budget-line{font-size:11px}}
 
 

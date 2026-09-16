@@ -96,6 +96,12 @@ box-shadow:inset 0 1px 0 var(--hair)}
 .cnt{color:var(--mute2);font-size:10.5px;margin:0 0 10px 2px;font-weight:600}
 .search{width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--line4);background:var(--surf);
 color:var(--text);font-size:14px;margin-bottom:10px}
+.searchwrap{position:relative}
+.psug{position:absolute;left:0;right:0;top:calc(100% - 6px);z-index:20;background:var(--card2);border:1px solid var(--line4);
+border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28);margin-bottom:10px}
+.psug .pi{padding:10px 13px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line4)}
+.psug .pi:last-child{border-bottom:0}
+.psug .pi:hover,.psug .pi:active{background:var(--card)}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .chip{padding:7px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);font-size:11px;
 font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
@@ -633,7 +639,7 @@ var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.la
 
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='',fantasyData=null,fRank='teams';
 var mode='home',openId='',backTo='players';
-var pQuery='',pDiv='',pStatus='',pView='tile',pOrder=[],openAch='',pFiltersOpen=false;
+var pQuery='',pDiv='',pSeason='',pSeasonTouched=false,pView='tile',pOrder=[],openAch='',pFiltersOpen=false,pSugOpen=false;
 var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false;
 var fQuery='',fDiv='',fLimit=20;
 var divLetter='',divData=null,divLoading=false,divErr='',showExt=false,showMx=false;
@@ -657,7 +663,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Собери команду из игроков всех дивизионов и следи за всей лигой. Здесь будут отдельные рейтинги Fantasy-команд и игроков.',fantasyTeams:'Команд выбрали',fantasyPoints:'Fantasy-очки',fantasyTeamRank:'Команды Fantasy',fantasyPlayerRank:'Игроки Fantasy',fantasyOpen:'Открыть Fantasy',fantasyPreview:'Предпросмотр: участие и сохранение составов пока закрыты.',fantasyEmpty:'Данных Fantasy пока нет.',fantasyOwner:'Автор',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
-  filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Статус',
+  filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Сезон',
   schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',resultPending:'Ожидается результат',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
@@ -716,7 +722,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Build a squad across every division and follow the whole league. Fantasy teams and players have their own standings here.',fantasyTeams:'Selected by teams',fantasyPoints:'Fantasy points',fantasyTeamRank:'Fantasy teams',fantasyPlayerRank:'Fantasy players',fantasyOpen:'Open Fantasy',fantasyPreview:'Preview: squad entry and saving are still closed.',fantasyEmpty:'No Fantasy data yet.',fantasyOwner:'Owner',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
-  filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Status',
+  filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Season',
   schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',resultPending:'Result pending',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
@@ -1716,13 +1722,20 @@ function shuffledPlayers(){
   }
   return pOrder.map(function(i){return players[i]}).filter(Boolean);
 }
+// Игрок относится к сезону, если он в нём реально сыграл (есть матчи с этим
+// номером сезона в истории) либо это текущий активный сезон и игрок сейчас
+// в составе дивизиона — до первого сыгранного матча в истории пусто.
+function playerHasSeason(p,num){
+  if(!num)return true;
+  if(String(season)===String(num)&&isActive(p))return true;
+  return (matches[p.id]||[]).some(function(m){return String(m.season||'')===String(num)});
+}
 function playersList(){
   var qq=pQuery.trim().toLowerCase();
   var ordered=(pDiv||qq)?players.slice().sort(function(a,b){return (a.position||9999)-(b.position||9999)}):shuffledPlayers();
   return ordered.filter(function(p){
     if(pDiv&&String(p.division||'').trim()!==pDiv)return false;
-    if(pStatus==='active'&&!isActive(p))return false;
-    if(pStatus==='inactive'&&isActive(p))return false;
+    if(pSeason&&!playerHasSeason(p,pSeason))return false;
     if(qq&&String(p.name||'').toLowerCase().indexOf(qq)<0)return false;
     return true;
   });
@@ -1733,11 +1746,17 @@ function renderPlayers(){
     +divisionsOfPlayers().map(function(d){
       return '<div class="chip'+(pDiv===d?' on':'')+'" onclick="setPDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
     }).join('');
-  var sch=[['',X.all],['active',X.active],['inactive',X.inactive]].map(function(x){
-    return '<div class="chip'+(pStatus===x[0]?' on':'')+'" onclick="setPStatus(\''+x[0]+'\')">'+esc(x[1])+'</div>';
+  // Сезонные вкладки: сначала «Все», затем сезоны от самого свежего к
+  // старым — список берётся из реального реестра сезонов, а не захардкожен.
+  var seasonOpts=[['',X.all]].concat(seasons.slice().sort(function(a,b){return Number(b.number)-Number(a.number)}).map(function(s){return [String(s.number),s.label];}));
+  var sch=seasonOpts.map(function(x){
+    return '<div class="chip'+(pSeason===x[0]?' on':'')+'" onclick="setPSeason(\''+q(x[0])+'\')">'+esc(x[1])+'</div>';
   }).join('');
-  var nf=(pDiv?1:0)+(pStatus?1:0);
-  var h='<div class="fbar"><input class="search" style="margin:0" id="pq" placeholder="'+esc(X.search)+'" value="'+esc(pQuery)+'" oninput="setPQuery(this.value)">'
+  var nf=(pDiv?1:0)+((pSeason&&pSeason!==String(season))?1:0);
+  var qq2=pQuery.trim().toLowerCase();
+  var sugs=(pSugOpen&&qq2)?players.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qq2)>=0}).slice(0,6):[];
+  var h='<div class="fbar"><div class="searchwrap"><input class="search" style="margin:0" id="pq" placeholder="'+esc(X.search)+'" value="'+esc(pQuery)+'" oninput="setPQuery(this.value)" onfocus="pSugOpen=!!pQuery.trim();renderPlayers()" onblur="setTimeout(function(){pSugOpen=false;renderPlayers()},150)">'
+    +(sugs.length?'<div class="psug">'+sugs.map(function(p){return '<div class="pi" onmousedown="event.preventDefault();pickPQ(\''+q(p.name)+'\')">'+esc(p.name)+'</div>'}).join('')+'</div>':'')+'</div>'
     +'<div class="fbtn'+(pFiltersOpen||nf?' on':'')+'" onclick="togglePFilters()">'+esc(X.filters)
     +(nf?' <span class="n">'+nf+'</span>':'')+'</div></div>'
     +(pFiltersOpen?'<div class="fpanel"><div class="flab">'+esc(X.bucketsDiv)+'</div>'
@@ -1756,8 +1775,9 @@ function renderPlayers(){
 }
 function togglePFilters(){pFiltersOpen=!pFiltersOpen;renderPlayers()}
 function setPDiv(d){pDiv=d;renderPlayers()}
-function setPStatus(s){pStatus=s;renderPlayers()}
-function setPQuery(v){pQuery=v;renderPlayers()}
+function setPSeason(s){pSeason=s;pSeasonTouched=true;renderPlayers()}
+function setPQuery(v){pQuery=v;pSugOpen=!!v.trim();renderPlayers()}
+function pickPQ(name){pQuery=name;pSugOpen=false;renderPlayers()}
 function setPView(v){pView=v;openAch='';renderPlayers()}
 function achSub(a){
   var s=a.season?(X.cSeason+' '+a.season):'';
@@ -2468,6 +2488,9 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
     photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     seasons=(j.seasons||[]).map(function(s){return Object.assign({},s,{label:(L?'Сезон ':'Season ')+s.number})});
+    // По умолчанию в списке игроков выбран самый свежий активный сезон, а не
+    // "Все" — это только первичная инициализация, свой выбор пользователя не трогаем.
+    if(!pSeasonTouched&&season)pSeason=String(season);
     // Нижнее меню приходит с сервера: какие вкладки и в каком порядке видит
     // именно эта группа игроков.
     if(Array.isArray(j.tabs)){

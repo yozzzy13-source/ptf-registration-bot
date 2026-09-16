@@ -6,7 +6,7 @@ try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
 let D, ru=(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
-let view='home', step=0, slot=1, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='';
+let view='home', step=0, slot=1, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='', searchSugOpen=false;
 const drafts=new Map(), saves=new Map(), timers=new Map();
 const tr=(r,e)=>ru?r:e;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -144,7 +144,9 @@ function catalog(selecting=false) {
   const list=(D.player_leaderboard||[]).map(rank=>({...player(rank.key),place:rank.place})).filter(p=>
     (!search||p.name.toLowerCase().includes(search.toLowerCase()))&&
     (filter==='all'||(filter==='slot'?(!current||current.pools.includes(p.pool)):p.pool.split(':')[0]===filter)));
-  return '<label class="sr-only" for="player-search">'+tr('Поиск игрока','Search player')+'</label><input id="player-search" class="search" placeholder="'+tr('Поиск игрока','Search player')+'" value="'+esc(search)+'"><div class="filters">'+(selecting?button(tr('Для слота','For this slot'),'filter','filter '+(filter==='slot'?'on':''),'data-filter="slot"'):'')+['all','C','W','PRIME','A','B'].map(f=>button(f==='all'?tr('Все','All'):f==='PRIME'?'Prime':f,'filter','filter '+(filter===f?'on':''),'data-filter="'+f+'"')).join('')+'</div><div class="tb fantasy-catalog '+(selecting?'selecting':'')+'"><div class="thd"><span>#</span><span></span><span>'+tr('Игрок','Player')+'</span><span>Teams</span><span>Fantasy<br>Points</span><span>'+tr('Цена','Price')+'</span>'+(selecting?'<span></span>':'')+'</div>'+list.map(p=>{
+  const sugs=(searchSugOpen&&search.trim())?(D.player_leaderboard||[]).filter(r=>r.name.toLowerCase().includes(search.trim().toLowerCase())).slice(0,6):[];
+  return '<label class="sr-only" for="player-search">'+tr('Поиск игрока','Search player')+'</label><div class="searchwrap"><input id="player-search" class="search" placeholder="'+tr('Поиск игрока','Search player')+'" value="'+esc(search)+'" autocomplete="off">'
+    +(sugs.length?'<div class="psug">'+sugs.map(r=>'<button type="button" class="pi" onmousedown="event.preventDefault()" data-action="search-pick" data-key="'+esc(r.key)+'">'+esc(r.name)+'</button>').join('')+'</div>':'')+'</div><div class="filters">'+(selecting?button(tr('Для слота','For this slot'),'filter','filter '+(filter==='slot'?'on':''),'data-filter="slot"'):'')+['all','C','W','PRIME','A','B'].map(f=>button(f==='all'?tr('Все','All'):f==='PRIME'?'Prime':f,'filter','filter '+(filter===f?'on':''),'data-filter="'+f+'"')).join('')+'</div><div class="tb fantasy-catalog '+(selecting?'selecting':'')+'"><div class="thd"><span>#</span><span></span><span>'+tr('Игрок','Player')+'</span><span>Teams</span><span>Fantasy<br>Points</span><span>'+tr('Цена','Price')+'</span>'+(selecting?'<span></span>':'')+'</div>'+list.map(p=>{
     const selected=draft().picks.includes(p.key),h=selecting?hint(p):'';
     const priceBtn='<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(p.key)+'" aria-expanded="'+(priceOpen===p.key)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+p.price+'</button>';
     return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+'<div class="player-name"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</div><span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+'</div>';
@@ -298,6 +300,7 @@ async function handle(action,el={dataset:{}}) {
     if(action==='captain'){d.captain_key=key;if(d.vice_key===key)d.vice_key='';}else{d.vice_key=key;if(d.captain_key===key)d.captain_key='';}
     changed();return render();
   }
+  if(action==='search-pick'){const p=player(key);if(p){search=p.name;searchSugOpen=false;}return render();}
   if(action==='transfer-start'&&canTransfer(key)){transferOut=key;filter='slot';search='';return render();}
   if(action==='transfer-cancel'){transferOut='';return render();}
   if(action==='transfer-pick'&&transferOut&&canTransfer(transferOut)) {
@@ -315,7 +318,10 @@ app.addEventListener('click',event=>{
 });
 app.addEventListener('input',event=>{
   if(event.target.id==='team-name'){draft().team_name=event.target.value;changed();const nextButton=app.querySelector('[data-action="next"]');if(nextButton)nextButton.disabled=!draft().team_name.trim();return;}
-  if(event.target.id==='player-search'){search=event.target.value;const pos=event.target.selectionStart;render();const input=document.getElementById('player-search');input.focus();input.setSelectionRange(pos,pos);}
+  if(event.target.id==='player-search'){search=event.target.value;searchSugOpen=!!search.trim();const pos=event.target.selectionStart;render();const input=document.getElementById('player-search');input.focus();input.setSelectionRange(pos,pos);}
+});
+app.addEventListener('focusout',event=>{
+  if(event.target.id==='player-search'&&searchSugOpen)setTimeout(()=>{searchSugOpen=false;render();},150);
 });
 app.addEventListener('error',event=>{if(event.target.tagName==='IMG'){const span=document.createElement('span');span.className='avatar';span.textContent='PTF';event.target.replaceWith(span);}},true);
 function setTheme(value) {document.documentElement.dataset.theme=value;try{localStorage.setItem('ptf_theme',value);tg?.setHeaderColor(value==='light'?'#f2f5f1':'#0a0a0b');}catch{}}
