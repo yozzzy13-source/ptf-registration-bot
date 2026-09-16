@@ -81,9 +81,15 @@ function tips(p,lang){
  return{why,risks,captain};
 }
 async function settings(mode='live'){
- const keys=mode==='test'?['fantasy_test_season','fantasy_test_budget','fantasy_test_lock_at']:['fantasy_season','fantasy_budget','fantasy_lock_at'];
- const a=await Promise.all(keys.map(k=>getSetting(k).catch(()=>''))),baseSeason=mode==='test'&&!t(a[0])?await getSetting('fantasy_season').catch(()=>''):a[0],baseBudget=mode==='test'&&!t(a[1])?await getSetting('fantasy_budget').catch(()=>''):a[1];
- return{season:t(baseSeason)||await latestSeason()||'2',budget:Math.max(1,n(baseBudget,88)),lockAt:t(a[2])};
+ // Settings хранит ключи в едином верхнем регистре. Старые имена оставлены
+ // только как fallback для существующих развёртываний до миграции таблицы.
+ const [season,budget,openAt,deadline,rosterSize,transfers]=await Promise.all([
+   setting('FANTASY_SEASON','fantasy_season'), setting('FANTASY_BUDGET','fantasy_budget'),
+   setting('FANTASY_OPEN_AT',mode==='test'?'fantasy_test_open_at':'fantasy_open_at'),
+   setting('FANTASY_DEADLINE',mode==='test'?'fantasy_test_lock_at':'fantasy_lock_at'),
+   setting('FANTASY_TEAM_SIZE','fantasy_team_size'), setting('FANTASY_TRANSFERS','fantasy_transfers')
+ ]);
+ return{season:t(season)||await latestSeason()||'2',budget:Math.max(1,n(budget,FANTASY_DEFAULTS.budget)),openAt:t(openAt),lockAt:t(deadline),rosterSize:Math.max(1,n(rosterSize,FANTASY_DEFAULTS.rosterSize)),transfers:Math.max(0,n(transfers,FANTASY_DEFAULTS.transfers))};
 }
 let cache={key:'',at:0,value:null};
 export async function buildFantasyCatalog({lang='en',fresh=false,mode='live'}={}){
@@ -168,7 +174,13 @@ const storeFor=mode=>mode==='test'?{teams:SHEETS.fantasyTestTeams,transfers:SHEE
 async function ensureTesterSheet(){await ensureExtraSheet(SHEETS.fantasyTesters,TESTER_HEADERS)}
 async function ensureSheets(mode='test'){const use=storeFor(mode);await Promise.all([ensureExtraSheet(use.teams,TEAM_HEADERS),ensureExtraSheet(use.transfers,TRANSFER_HEADERS)])}
 async function testMember(id,name,username=''){
- await ensureTesterSheet();const rows=(await getRows(SHEETS.fantasyTesters)).rows,idKey=t(id),nameKey=nk(name),userKey=nk(String(username||'').replace(/^@/,''));
+ const idKey=t(id),nameKey=nk(name),userKey=nk(String(username||'').replace(/^@/,''));
+ // Optional Settings list is useful for a quick temporary tester rollout; the
+ // dedicated Fantasy Testers sheet remains the editable source for larger groups.
+ const configured=t(await setting('FANTASY_TEST_GROUP','fantasy_test_group'));
+ const listed=configured.split(/[;,\n]/).map(t).filter(Boolean);
+ if(listed.some(x=>x===idKey||nk(x.replace(/^@/,''))===nameKey||nk(x.replace(/^@/,''))===userKey))return true;
+ await ensureTesterSheet();const rows=(await getRows(SHEETS.fantasyTesters)).rows;
  return rows.some(r=>{const status=t(r.status||'active').toLowerCase();if(['off','inactive','no','0','disabled'].includes(status))return false;return(idKey&&t(r.telegram_id)===idKey)||(nameKey&&nk(r.player_name)===nameKey)||(userKey&&nk(String(r.telegram_username||'').replace(/^@/,''))===userKey)});
 }
 export async function fantasyAccessFor({telegramId='',name='',username='',isAdmin=false,isLeagueMember=false}={}){
@@ -226,10 +238,10 @@ export async function transferFantasyPlayer(id,input={},lang='en',mode='test'){
  if(!v.ok){const e=Error(v.errors.join(' '));e.code=400;throw e}
  const now=nowISO(),usedNext=forced?used:used+1;await appendObject(use.transfers,{transfer_id:uid('ft'),team_id:row.team_id,telegram_id:String(id),season:c.season,player_out_key:old.key,player_out_name:old.name,player_in_key:incoming.key,player_in_name:incoming.name,price_out:old.price,price_in:incoming.price,forced:forced?'yes':'no',created_at:now});
  await updateObjectByRow(use.teams,row._rowNumber,{picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext,updated_at:now});
- return{team:publicTeam({...row,picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext}),forced,transfers_left:2-usedNext};
+ return{team:publicTeam({...row,picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext}),forced,transfers_left:c.transfers-usedNext};
 }
 export function registerFantasyRoutes(app,{viewer}){
- const auth=async(req,res)=>{const v=await viewer(req.body?.initData||req.query.initData||'',String(req.body?.t||req.query.t||''));if(!v.ok){res.status(v.code).json({ok:false,error:v.error});return null}const access=await fantasyAccessFor({telegramId:v.user.id,name:v.profile.name||'',username:v.profile.telegram_username||v.user.username||'',isAdmin:v.isAdmin,isLeagueMember:true});if(!access.allowed){const ru=v.lang==='ru',error=access.reason==='players_master_required'?(ru?'Fantasy League доступна игрокам из Players_Master таблицы Match Log.':'Fantasy League is available to players listed in Match Log Players_Master.'):(ru?'Fantasy пока доступно только тестовой группе.':'Fantasy is currently available to the test group only.');res.status(403).json({ok:false,error,reason:access.reason});return null}return{...v,fantasy:access}};
+ const auth=async(req,res)=>{const v=await viewer(req.body?.initData||req.query.initData||'',String(req.body?.t||req.query.t||''));if(!v.ok){res.status(v.code).json({ok:false,error:v.error});return null}const access=await fantasyAccessFor({telegramId:v.user.id,name:v.profile.name||'',username:v.profile.telegram_username||v.user.username||'',isAdmin:v.isAdmin,isLeagueMember:Boolean(v.isLeagueMember)});if(!access.allowed){const ru=v.lang==='ru',error=access.reason==='players_master_required'?(ru?'Fantasy League доступна игрокам из Players_Master таблицы Match Log.':'Fantasy League is available to players listed in Match Log Players_Master.'):(ru?'Fantasy пока доступно только тестовой группе.':'Fantasy is currently available to the test group only.');res.status(403).json({ok:false,error,reason:access.reason});return null}return{...v,fantasy:access}};
  app.get('/api/fantasy/bootstrap',async(req,res)=>{try{const v=await auth(req,res);if(v)res.json({ok:true,...await getFantasyBootstrap(v.user.id,v.profile.name||'',v.lang,v.fantasy.mode)})}catch(e){console.error('fantasy bootstrap:',e);res.status(500).json({ok:false,error:e.message})}});
  app.post('/api/fantasy/validate',async(req,res)=>{try{const v=await auth(req,res);if(v){const x=await validateFantasyTeam(req.body||{},v.lang,v.fantasy.mode);res.json({ok:true,validation:{...x,picks:x.picks.map(p=>p.key)}})}}catch(e){res.status(e.code||500).json({ok:false,error:e.message})}});
  app.post('/api/fantasy/team',async(req,res)=>{try{const v=await auth(req,res);if(v)res.json({ok:true,...await saveFantasyTeam(v.user.id,v.profile.name||'',req.body||{},v.lang,v.fantasy.mode)})}catch(e){res.status(e.code||400).json({ok:false,error:e.message})}});

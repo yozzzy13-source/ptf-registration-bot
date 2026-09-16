@@ -850,7 +850,7 @@ export function winnerFirstScore(slot) {
 // Заголовок, дивизион и сезон, одна строка «победитель — счёт — проигравший».
 // Всё, что кликается, ведёт внутрь приложения: карточки игроков и таблица того
 // дивизиона, где сыгран матч. Ссылок на сайт в ленте больше нет.
-async function feedCard(slot) {
+async function feedCard(slot, lang='en') {
   const { winner, loser } = resultSides(slot);
   let season = String(slot.season || '');
   try {
@@ -876,7 +876,16 @@ async function feedCard(slot) {
   const text = '🎾 <b>Match Result</b>'+(subtitle ? '\n'+escapeHtml(subtitle) : '')+'\n\n'+line
     +(slot.result_set3_mode === 'Match TB' ? '\n<i>Match tie-break</i>' : '')
     +(slot.result_note ? '\n💬 <i>'+escapeHtml(slot.result_note)+'</i>' : '');
-  return { text, reply_markup: undefined, dm_reply_markup: undefined };
+  const playerUrl=(player)=>{const p=new URL(PUBLIC_URL+'/league');p.searchParams.set('player_name',player?.name||'');return p.toString()};
+  const divisionUrl=()=>{const p=new URL(PUBLIC_URL+'/league');p.searchParams.set('tab','div');p.searchParams.set('division',slot.division||'');return p.toString()};
+  const winnerLabel=technicalBoth?(slot.from_name||'Player'):(winner.name||'Player');
+  const loserLabel=technicalBoth?(slot.to_name||'Player'):(loser.name||'Player');
+  const resultButtons={ inline_keyboard:[
+    [{text:'🏆 '+winnerLabel,url:playerUrl(technicalBoth?{name:slot.from_name}:winner)},{text:'👤 '+loserLabel,url:playerUrl(technicalBoth?{name:slot.to_name}:loser)}],
+    [{text:lang==='ru'?'📊 Таблица дивизиона':'📊 Division standings',url:divisionUrl()}],
+    [{text:lang==='ru'?'🔕 Отключить результаты':'🔕 Stop results',callback_data:'results_mute'}]
+  ]};
+  return { text, reply_markup: resultButtons, dm_reply_markup: resultButtons };
 }
 
 // Карточка результата создаётся всегда. Фото матча отправляется дополнительно.
@@ -918,8 +927,8 @@ export async function broadcastResult(slot) {
   if (chat) {
     const opts = { ...(chat.topicId ? { message_thread_id: chat.topicId } : {}), ...(reply_markup ? { reply_markup } : {}) };
     try {
-      await sendWith(chat.chatId, text, opts);
       if (extraPhoto) await sendPhoto(chat.chatId, extraPhoto, { ...(chat.topicId ? {message_thread_id:chat.topicId} : {}) });
+      await sendWith(chat.chatId, text, opts);
     }
     catch (e) { console.error('results group post failed:', e.message); }
   }
@@ -948,9 +957,9 @@ export async function broadcastResult(slot) {
       const card = String(p.language || '').toLowerCase() === 'en' ? cards.en : cards.ru;
       const opts = { reply_markup: card.dm_reply_markup };
       try {
+        if (extraPhoto) await sendPhoto(p.telegram_id, extraPhoto).catch(e => console.error('extra match photo failed:', e.message));
         await sendWith(p.telegram_id, card.text, opts)
           .catch(() => sendMessage(p.telegram_id, card.text, opts));
-        if (extraPhoto) await sendPhoto(p.telegram_id, extraPhoto).catch(e => console.error('extra match photo failed:', e.message));
         sent++;
         await new Promise(r => setTimeout(r, 45));
       } catch (e) { failed++; }

@@ -109,7 +109,7 @@ async function seedWomenCrossGroupSchedule(season){
   await ensureCrossGroupSheet();
   const api=sheetsClient(),values=await getValues(LEAGUE_RESULTS_SHEET_ID,CROSS_GROUP_SHEET+'!A1:O');
   const rows=values.slice(1),exists=(a,b)=>rows.some(r=>String(r[1]||'')===String(season)&&divisionLetter(r[2])==='W'&&((sameName(r[4],a)&&sameName(r[6],b))||(sameName(r[4],b)&&sameName(r[6],a))));
-  const missing=W_CROSS_SCHEDULE.filter(([a,b])=>!exists(a,b)).map(([a,b])=>['',String(season),'W','1',a,'2',b,'','','','','','','','scheduled','']);
+  const missing=W_CROSS_SCHEDULE.filter(([a,b])=>!exists(a,b)).map(([a,b])=>['',String(season),'W','2',a,'1',b,'','','','','','','','scheduled','']);
   if(missing.length)await api.spreadsheets.values.append({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:CROSS_GROUP_SHEET+'!A:O',valueInputOption:'USER_ENTERED',insertDataOption:'INSERT_ROWS',requestBody:{values:missing}});
 }
 function playoffStage(v='') {

@@ -29,6 +29,7 @@ export function mainKeyboard(lang, opts={}) {
   const btn = {
     events: () => app(lang==='ru'?'📆 События':'📆 Events','/league?tab=events'),
     join_event: () => app(t(lang,'join_event'),'/apply?mode=event'),
+    waitlist: () => app(lang==='ru'?'📝 Лист ожидания':'📝 Join waitlist','/apply?mode=waitlist'),
     matches: () => app(t(lang,'matches'),'/match'),
     participants: () => app(t(lang,'participants'),'/participants'),
     league: () => app(t(lang,'league'),'/league'),
@@ -43,6 +44,7 @@ export function mainKeyboard(lang, opts={}) {
   const pair = (a, b) => [a, b].filter(code => on(code)).map(code => btn[code]());
   const rows = [
     on('join_event') ? [btn.join_event()] : null,
+    on('waitlist') ? [btn.waitlist()] : null,
     on('events') ? [btn.events()] : null,
     (opts.matches && on('matches')) ? [btn.matches()] : null,
     on('participants') ? [btn.participants()] : null,
@@ -112,10 +114,10 @@ export function adminPanelKeyboard(lang) { return inlineKeyboard([[{ text:'🛠 
 // активному — «Оплатить».
 export const MENU_LABELS = {
   ru: { events:'📆 События', matches:'🎾 Мои матчи', result:'📊 Результат', court:'📅 Корт', league:'🏆 Лига', fantasy:'✨ Fantasy',
-        pay:'💳 Оплатить', apply:'🎾 Заявка', squad:'👥 Состав',
+        pay:'💳 Оплатить', apply:'🎾 Заявка', waitlist:'📝 Лист ожидания', squad:'👥 Состав',
         menu:'🏠 Меню', contact:'💬 Связаться' },
   en: { events:'📆 Events', matches:'🎾 My matches', result:'📊 Result', court:'📅 Court', league:'🏆 League', fantasy:'✨ Fantasy',
-        pay:'💳 Pay', apply:'🎾 Apply', squad:'👥 Line-up',
+        pay:'💳 Pay', apply:'🎾 Apply', waitlist:'📝 Join waitlist', squad:'👥 Line-up',
         menu:'🏠 Menu', contact:'💬 Contact' }
 };
 
@@ -127,7 +129,7 @@ export const MENU_LABELS = {
 // Так раздел открывается в ОДИН тап и при этом знает, кто пришёл.
 const MENU_PATHS = {
   events:'/league?tab=events', matches:'/match', result:'/match?tab=res', court:'/match?tab=book',
-  league:'/league', fantasy:'/fantasy', apply:'/apply?mode=event', squad:'/participants'
+  league:'/league', fantasy:'/fantasy', apply:'/apply?mode=event', waitlist:'/apply?mode=waitlist', squad:'/participants'
 };
 
 // «Состав» нужен всем без исключения, в том числе тем, кто уже в сезоне: люди
@@ -145,7 +147,7 @@ const MENU_LAYOUTS = {
 // Значит после любой правки набора кнопок или адресов номер надо поднять —
 // иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
 // без мгновенного открытия мини-приложения).
-export const MENU_VERSION = 7;
+export const MENU_VERSION = 8;
 
 // allow — набор кнопок для группы игрока (настраивается в админке). Не задан —
 // берём прежнюю раскладку по состоянию. Кнопки раскладываем по две в ряд, а

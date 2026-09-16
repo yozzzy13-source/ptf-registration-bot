@@ -249,7 +249,9 @@ const OPEN_APP = {
   squad:  { path:'/participants',      ru:'👥 Открыть состав',    en:'👥 Open the line-up',
             tru:'Предварительные составы дивизионов сезона.',       ten:'Preliminary division line-ups for the season.' },
   apply:  { path:'/apply?mode=event',  ru:'🎾 Подать заявку',     en:'🎾 Apply for the season',
-            tru:'Заполни заявку — это пара минут.',                 ten:'Filling in the form takes a couple of minutes.' }
+            tru:'Заполни заявку — это пара минут.',                 ten:'Filling in the form takes a couple of minutes.' },
+  waitlist:{ path:'/apply?mode=waitlist',ru:'📝 Лист ожидания',    en:'📝 Join waitlist',
+            tru:'Заполните анкету для листа ожидания следующего сезона. Места в каждом сезоне ограничены, а участники листа получают информацию и приоритет раньше других.',ten:'Complete your profile for the next-season waitlist. Every season has limited places; waitlist players receive updates and priority first.' }
 };
 async function sendOpenApp(chatId, lang, key) {
   const l = fallbackLang(lang);
@@ -899,6 +901,7 @@ export async function handleMessage(msg) {
     if (act === 'events') return openDestination(chatId,lang,from,'events');
     if (act === 'squad') return sendOpenApp(chatId, lang, 'squad');
     if (act === 'apply') return sendOpenApp(chatId, lang, 'apply');
+    if (act === 'waitlist') return sendOpenApp(chatId, lang, 'waitlist');
   }
 
   const state = userState.get(String(chatId));

@@ -691,7 +691,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   noDiv:'Дивизион пока не сформирован.',
   seasonSoon:'Составы дивизионов ещё формируются. Таблица появится здесь, как только сезон стартует.',
   seasons:'Сезоны',ach:'Достижения',history:'История матчей',
-  cSeason:'Сезон',cG:'И',cW:'П',cPlace:'Место',cPts:'Очки',
+  cSeason:'Сезон',cG:'Матчи',cW:'Победы',cPlace:'Ранг',cPts:'Очки',
   showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
   sInfo:'Сезон 2',sDates:'Матчи регулярной части',sDatesV:'14 сентября — 5 ноября',
   sSemi:'Полуфиналы и финал',sSemiV:'7–8 ноября',sVenue:'Площадка',sVenueV:'The Peak Racket Park',
@@ -750,7 +750,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   noDiv:'This division is not formed yet.',
   seasonSoon:'Division line-ups are still being formed. The table will appear here once the season starts.',
   seasons:'Seasons',ach:'Achievements',history:'Match history',
-  cSeason:'Season',cG:'P',cW:'W',cPlace:'Place',cPts:'Pts',
+  cSeason:'Season',cG:'Matches',cW:'Wins',cPlace:'Rank',cPts:'Pts',
   showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
   sInfo:'Season 2',sDates:'Regular season matches',sDatesV:'14 September — 5 November',
   sSemi:'Semifinals and final',sSemiV:'7–8 November',sVenue:'Venue',sVenueV:'The Peak Racket Park',
@@ -841,9 +841,8 @@ function statusBadge(p){
   return isActive(p)?'<span class="badge ok">'+esc(X.active)+'</span>':'<span class="badge">'+esc(X.inactive)+'</span>';
 }
 function fantasyBadges(p){
-  // Плашки видны и до первого зафиксированного Fantasy-состава: нули честно
-  // показывают, что игрока пока не выбрали, а не создают впечатление поломки.
-  return '<div class="fanbadges"><span class="fanbadge">✨ '+esc(X.fantasyPoints)+': '+esc(p.fantasy_points||0)+'</span><span class="fanbadge">👥 '+esc(X.fantasyTeams)+': '+esc(p.fantasy_teams||0)+'</span></div>';
+  var f=fantasyPlayer(p);
+  return '<div class="fanbadges"><span class="fanbadge">✨ FP '+esc(f.points)+' · Teams '+esc(f.teams)+' · Rank #'+esc(f.place)+'</span></div>';
 }
 function fantasyPlayer(p){
   var row=(fantasyData&&fantasyData.player_leaderboard||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0]||{};
@@ -851,10 +850,9 @@ function fantasyPlayer(p){
 }
 function fantasyBlock(p){
   var f=fantasyPlayer(p);
-  return '<div class="card"><h3>✨ '+esc(X.tFantasy)+'</h3><div class="sr">'
-    +'<span class="sn">'+esc(X.fantasyPoints)+'</span><span class="ptt">'+esc(f.points)+'</span></div>'
-    +'<div class="sr"><span class="sn">'+esc(X.fantasyTeams)+'</span><span class="ptt">'+esc(f.teams)+'</span></div>'
-    +'<div class="sr"><span class="sn">'+esc(X.fantasyPlayerRank)+'</span><span class="pl">#'+esc(f.place)+'</span></div></div>';
+  return '<div class="card fantasy-player-card" onclick="showTab(\'fantasy\')"><h3>✨ '+esc(X.tFantasy)+'</h3>'
+    +'<div class="fantasy-stats-head"><span>Points</span><span>Teams</span><span>Rank</span></div>'
+    +'<div class="fantasy-stats-row"><b>'+esc(f.points)+'</b><b>'+esc(f.teams)+'</b><b>#'+esc(f.place)+'</b></div></div>';
 }
 function formRow(form){
   if(!form||!form.length)return '';
@@ -931,7 +929,7 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
 // ожидания, заявка без оплаты, остальные). Главная есть всегда.
 // «Расписание» больше не отдельный экран: согласованные матчи живут сверху
 // вкладки «Матчи», прямо над историей.
-var ALL_VIEWS=['home','div','race','players','matches','events','fantasy','about'];
+var ALL_VIEWS=['home','div','race','players','matches','events','fantasy'];
 var VIEWS=ALL_VIEWS.slice();
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
 matches:'viewMatches',events:'viewEvents',fantasy:'viewFantasy',about:'viewAbout'};
@@ -1131,7 +1129,7 @@ function upcomingCard(i){
   return '<div class="mt upcoming'+(mine?' me':'')+'">'
     +(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="fm2">'
-    +'<div class="match-player-link" onclick="'+p1Call+'">'+av(p1,'','w')+'</div>'
+    +'<div class="match-player-link" onclick="'+p1Call+'">'+av({name:schName(p1),photo:livePhoto(p1)},'','w')+'</div>'
     +'<div class="mid"><div class="nm3">'
       +'<b onclick="event.stopPropagation();'+p1Call+'">'+esc(schName(p1))+'</b>'
       +' <s>vs</s> '
@@ -1139,7 +1137,7 @@ function upcomingCard(i){
       +(i.result_pending?'<div class="res l" style="display:inline-block;margin-top:7px">'+esc(X.resultPending)+'</div>':'')
       +(i.division?'<div style="margin-top:7px" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(i.division)+'\')">'+divChip(i.division)+'</div>':'')
     +'</div>'
-    +'<div class="match-player-link" onclick="'+p2Call+'">'+av(p2)+'</div>'
+    +'<div class="match-player-link" onclick="'+p2Call+'">'+av({name:schName(p2),photo:livePhoto(p2)})+'</div>'
     +'</div></div>';
 }
 
@@ -1823,11 +1821,15 @@ function pickSeason(n){
   if(String(divSeason)===String(n))return;
   divSeason=String(n);divLetter='';divData=null;divErr='';showExt=false;showMx=false;renderDiv();
 }
+var crossOpen=false;
+function toggleCross(){crossOpen=!crossOpen;renderDiv()}
 function crossGroupBlock(groups){
   var all=[],seen={};(groups||[]).forEach(function(g){(g.cross_matches||[]).forEach(function(m){var k=m.match_id||[m.season,m.division,m.player_1,m.player_2].join('|');if(!seen[k]){seen[k]=1;all.push(m)}})});
   if(!all.length)return '';
   all.sort(function(a,b){return String(a.date||'9999').localeCompare(String(b.date||'9999'))||String(a.player_1||'').localeCompare(String(b.player_1||''))});
-  return '<div class="lab">'+esc(L?'Межгрупповые матчи':'Cross-group matches')+'<span class="dot"></span></div><div class="crosslist">'+all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):(L?'Запланирован':'Scheduled');return '<div class="crosscard"><div class="crosspair"><span>'+esc(m.player_1||'')+'</span><span>'+esc(score)+'</span><span>'+esc(m.player_2||'')+'</span></div><div class="crossmeta">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(m.date):'')+'</div></div>'}).join('')+'</div>';
+  var title=L?'Межгрупповые матчи':'Cross-group matches';
+  var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):(L?'Запланирован':'Scheduled');var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(m.date):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> <s>'+esc(score)+'</s> <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
+  return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
 }
 function playoffStages(po){
   po=po||{};var stages=[],has=function(m){return m&&(m.first||m.second)};
@@ -2461,7 +2463,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
     if(Array.isArray(j.tabs)){
       VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
     }
-    if(fantasyData&&VIEWS.indexOf('fantasy')<0){var ai=VIEWS.indexOf('about');if(ai<0)VIEWS.push('fantasy');else VIEWS.splice(ai,0,'fantasy')}
+    if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy')
     buildTabs();
     $('title').textContent=X.title;
     // Видно, что это чужой набор вкладок, а не поломка.
@@ -2498,8 +2500,11 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
     // Из бота приходит имя, а не id витрины: в сообщении о результате id нет.
     else if((qs.get('player_name')||'').trim())openPlayerByName((qs.get('player_name')||'').trim(),backFor);
   }).catch(function(e){
-    $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(e.message)+'</div>';
+    var profileNeeded=String(e.message||'')==='profile_required';
+    $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(profileNeeded?(L?'Чтобы открыть интерфейс лиги, заполните анкету.':'Complete your profile to open the League interface.'):e.message)+'</div>'+(profileNeeded?'<div style="padding:0 16px"><button class="primary" onclick="location.href=\'/apply?mode=profile\'+tokQ">'+esc(L?'Заполнить анкету':'Complete profile')+'</button></div>':'');
   });
 </script>
 </body>
 </html>
+
+<style>.fantasy-player-card{cursor:pointer}.fantasy-stats-head,.fantasy-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}.fantasy-stats-head{color:#8291a2;font-size:11px;text-transform:uppercase;margin-top:2px}.fantasy-stats-row{margin-top:6px;font-size:16px}.crosslist{margin-top:8px}</style>

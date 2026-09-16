@@ -453,9 +453,11 @@ async function leagueViewer(initData, token = '') {
   if (profile._rowNumber && user.id) await healApplicantId(profile, user.id);
   const lang = ['ru','en'].includes(profile.language) ? profile.language : (String(user.language_code || '').startsWith('ru') ? 'ru' : 'en');
   const league = await getPlayerLeagueInfo({ ...profile, telegram_id:user.id });
-  if (!league.member && !league.admin) return { ok:false, code:403, lang, error:'league_access_denied' };
+  const profileCompleted = isProfileCompleted(profile);
+  if (!league.member && !league.admin && !profileCompleted) return { ok:false, code:403, lang, error:'profile_required' };
   return { ok:true, user, profile, lang, division:league.division || '', season:league.season || '',
-    matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin };
+    matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin,
+    isLeagueMember:Boolean(league.member || league.admin), profileCompleted };
 }
 async function matchViewer(initData, token = '') { return leagueViewer(initData, token); }
 
@@ -819,7 +821,7 @@ app.get('/api/league/events', async (req, res) => {
     const { getBalance } = await import('./events.js');
     const tg = v.user?.id || '';
     const applicant = tg ? await findApplicantByTelegramId(tg).catch(() => null) : null;
-    const isActive = true; // leagueViewer already checked Players_Master membership.
+    const isActive = Boolean(v.isLeagueMember);
     const [events, balance] = await Promise.all([
       eventsForViewer(tg, isActive, !!v.isAdmin).catch(() => []),
       tg ? getBalance(tg).catch(() => 0) : 0
@@ -1054,7 +1056,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const tabs = (v.isAdmin && !viewAs)
       ? MINIAPP_TABS.slice()
       : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
-    const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:true }).catch(() => ({ allowed:false }));
+    const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isLeagueMember }).catch(() => ({ allowed:false }));
     // Витрина Fantasy (очки, выборы и рейтинг реальных игроков) публична внутри
     // League. TEST по-прежнему ограничивает только создание и сохранение составов.
     const fantasy = fantasyAccess.mode === 'closed' ? null
@@ -1070,7 +1072,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
       me_group:v.matchGroup, can_match:v.canMatch,
       group,
       view_as: viewAs,
-      tabs,
+      tabs: fantasy ? tabs : tabs.filter(t => t !== 'fantasy'),
       players,
       photos: photoByName,
       matches,

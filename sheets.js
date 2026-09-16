@@ -1488,7 +1488,7 @@ export async function playerGroup(telegramId, applicant = null) {
 // открывает приложение в пустоту.
 // «Расписание» слилось с «Матчами»: согласованные матчи теперь показываются
 // сверху той же вкладки, отдельного экрана для них больше нет.
-export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'about'];
+export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'fantasy'];
 // Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.
 export const ALWAYS_TABS = [];
 const tabsKey = (group) => `tabs_${group}`;
@@ -1524,7 +1524,7 @@ export async function allGroupTabs() {
 //
 // То самое стартовое меню, которое человек видит в переписке с ботом. Тексты и
 // адреса кнопок не меняются никогда — настраивается только то, кто их видит.
-export const BOT_MENU_BUTTONS = ['events', 'join_event', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
+export const BOT_MENU_BUTTONS = ['events', 'join_event', 'waitlist', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
 const buttonsKey = (group) => `btns_${group}`;
 
 export async function getGroupButtons(group) {
