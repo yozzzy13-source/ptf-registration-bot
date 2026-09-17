@@ -156,6 +156,7 @@ export async function setWebhook() {
 export const PLAYER_COMMANDS = {
   en: [
     { command: 'avatar', description: 'My avatar versions' },
+    { command: 'fantasy', description: 'PTF Fantasy: build your squad' },
   { command: 'menu', description: 'Main menu' },
     { command: 'help', description: 'What the bot can do' },
     { command: 'results', description: 'Results feed on / off' },
@@ -163,6 +164,7 @@ export const PLAYER_COMMANDS = {
     { command: 'cancel', description: 'Cancel current action' }
   ],
   ru: [
+    { command: 'fantasy', description: 'PTF Fantasy: собрать команду' },
     { command: 'menu', description: 'Главное меню' },
     { command: 'help', description: 'Что умеет бот' },
     { command: 'results', description: 'Лента результатов вкл / выкл' },
@@ -210,6 +212,8 @@ export const ADMIN_COMMAND_LIST = [
     help:'назначенные матчи, где не подтверждён корт, кто не ответил, где нет счёта, открытые окна' },
   { cmd:'matches',      group:'Матчи', short:'То же, что overview', help:'то же, что /overview' },
   { cmd:'league',       group:'Матчи', short:'Витрина лиги', help:'открыть витрину лиги' },
+  { cmd:'fantasy',      group:'Матчи', short:'Fantasy во вкладке лиги',
+    help:'открыть лигу сразу на вкладке Fantasy — та же кнопка, что уходит игрокам' },
   { cmd:'rating',       group:'Панель и рассылки', short:'Рассылка «уточни уровень»',
     help:'рассылка «уточни свой уровень» — два охвата на выбор' },
   { cmd:'rating_to',    group:'Панель и рассылки', short:'Запрос уровня одному', args:'@ник',
