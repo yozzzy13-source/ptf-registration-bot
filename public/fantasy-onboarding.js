@@ -91,12 +91,14 @@ function windowMessage() {
 }
 function homeView() {
   const first=team(1),second=team(2),local=drafts.get(1);
-  let html='<section class="card clubhero"><h2>'+tr('Ваша первая Fantasy-команда','Your first Fantasy team')+'</h2><p>'+tr('Соберите команду из реальных игроков PTF. Их настоящие матчи принесут вам Fantasy-очки.','Build a team of real PTF players. Earn Fantasy points from their real matches.')+'</p><div class="clubgrid"><div class="clubcell"><b>'+D.roster_size+'</b><span>'+tr('игроков','players')+'</span></div><div class="clubcell"><b>'+D.budget+'</b><span>'+tr('бюджет','budget')+'</span></div><div class="clubcell"><b>×'+D.scoring.captainMultiplier+'</b><span>'+tr('капитан','captain')+'</span></div></div>'+timing();
+  // Костас: на главной должно быть сразу понятно, ЧТО это такое — открытое
+  // соревнование команд игроков лиги, — а не только кнопка «создать команду».
+  let html='<section class="card clubhero"><h2>'+tr('PTF Fantasy','PTF Fantasy')+'</h2><p>'+tr('Открытое бесплатное соревнование между командами игроков лиги: вы и другие участники собираете команды из настоящих игроков PTF, и реальные матчи сезона приносят вам очки. Побеждает та команда, что наберёт больше всех.','An open, free competition between league players’ own teams: you and other players build squads of real PTF players, and their real matches this season earn you points. Whoever’s squad scores the most wins.')+'</p><div class="clubgrid"><div class="clubcell"><b>'+D.roster_size+'</b><span>'+tr('игроков','players')+'</span></div><div class="clubcell"><b>'+D.budget+'</b><span>'+tr('бюджет','budget')+'</span></div><div class="clubcell"><b>×'+D.scoring.captainMultiplier+'</b><span>'+tr('капитан','captain')+'</span></div></div>'+timing();
   if(!first)html+=editable()?button(local?.picks.length?tr('Продолжить команду','Continue team'):tr('Создать первую команду','Create first team'),'start','primary full','data-slot="1"'):'<div class="readonly">'+esc(windowMessage())+'</div>';
   html+='</section>';
-  for(const t of [first,second].filter(Boolean))html+='<section class="card"><div class="eyebrow">'+tr('Команда','Team')+' '+Number(t.team_slot||1)+'</div><h2>'+esc(t.team_name)+'</h2><p class="meta">'+esc(t.status==='locked'?tr('Подтверждена','Confirmed'):deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered'):tr('Черновик','Draft'))+' · '+(t.picks||[]).length+'/8 · <b>'+Number(t.points||0)+'</b> Fantasy Points</p>'+timing()+button(tr('Продолжить команду','Continue team'),'start','primary full','data-slot="'+Number(t.team_slot||1)+'"')+'</section>';
+  for(const t of [first,second].filter(Boolean))html+='<section class="card"><div class="eyebrow">'+tr('Команда','Team')+' '+Number(t.team_slot||1)+'</div><h2>'+esc(t.team_name)+'</h2><p class="meta">'+esc(t.status==='locked'?tr('Подтверждена','Confirmed'):deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered'):tr('Черновик','Draft'))+' · '+(t.picks||[]).length+'/8 · <b>'+Number(t.points||0)+'</b> Fantasy Points</p>'+timing()+cards('team')+button(tr('Изменить команду','Edit team'),'start','primary full','data-slot="'+Number(t.team_slot||1)+'"')+'</section>';
   if(first&&!second&&editable())html+=button(tr('Создать вторую команду','Create second team'),'start','secondary full','data-slot="2"');
-  return html+'<details class="card rules"><summary>'+tr('Короткие правила','Quick rules')+'</summary><p>'+esc(rule('squad'))+'</p><p>'+esc(rule('locking'))+'</p></details>';
+  return html+'<details class="card rules"><summary>'+tr('Откуда берутся очки','Where points come from')+'</summary><p>'+esc(rule('intro'))+'</p><p>'+esc(rule('squad'))+'</p><p>'+esc(rule('scoring'))+'</p><p>'+esc(rule('locking'))+'</p></details>';
 }
 function slotsPanel() {
   const keys=draft().picks.filter(k=>k!==transferOut),state=assignSlots(keys,D.players),next=state.slots.findIndex(s=>!s.key);
@@ -185,20 +187,27 @@ function catalog(selecting=false) {
     // Вне режима выбора клик по игроку раскрывает разбивку очков по матчам —
     // за что именно и сколько он получил.
     const nameCell=selecting
-      ?'<button type="button" class="player-name player-name-btn" data-action="tips-toggle" data-key="'+esc(p.key)+'" aria-expanded="'+(tipsOpen===p.key)+'"><b>'+esc(p.name)+'</b>'+(h?'<small>'+esc(h)+'</small>':'')+'</button>'
+      ?'<button type="button" class="player-name player-name-btn" data-action="tips-toggle" data-key="'+esc(p.key)+'" aria-expanded="'+(tipsOpen===p.key)+'"><b>'+esc(p.name)+'</b>'+(h?'<small class="hint-clickable">'+esc(h)+'</small>':'')+'</button>'
       :'<button type="button" class="player-name player-name-btn" data-action="matches-toggle" data-key="'+esc(p.key)+'" aria-expanded="'+(matchesOpen===p.key)+'"><b>'+esc(p.name)+'</b></button>';
     return '<div class="trw-wrap"><div class="trw">'+ '<span class="place">'+p.place+'</span>'+avatar(p)+nameCell+'<span>'+Number(p.selected_by||0)+'</span><span class="pts">'+Number(p.score?.total||0)+'</span>'+priceBtn+(selecting?button(selected?'✓':'+',transferOut?'transfer-pick':'pick','mini '+(selected?'on':''),'data-key="'+esc(p.key)+'" aria-label="'+esc((selected?tr('Уже выбран: ','Already selected: '):tr('Выбрать: ','Select: '))+p.name)+'"'):'')+'</div>'+(priceOpen===p.key?priceBreakdown(p):'')+(selecting&&tipsOpen===p.key?tipsBreakdown(p):'')+(!selecting&&matchesOpen===p.key?matchBreakdown(p):'')+'</div>';
   }).join('')+'</div>'+(!list.length?'<div class="empty">'+tr('Нет подходящих игроков. Измените поиск или фильтр.','No matching players. Change the search or filter.')+'</div>':'');
 }
+// Костас: в списке состава команды (не только в общем каталоге) должно быть
+// видно, сколько очков принёс каждый игрок и за что — прямо разворачивая
+// строку игрока, без ухода на его страницу.
 function cards(mode='review') {
-  const d=draft();
+  const d=draft(),showBreakdown=mode==='team'||mode==='review';
   return '<div class="squad">'+d.picks.map(k=>{
     const p=player(k)||team()?.picks.find(x=>x.key===k)||{key:k,name:k};
     const cap=d.captain_key===k,vice=d.vice_key===k;
-    return '<div class="pick">'+avatar(p)+'<div class="player-name"><div class="name">'+esc(p.name)+'</div><div class="meta">'+esc(p.pool||'')+' · '+(p.score?.total||0)+' Fantasy Points</div><div class="actions">'+(mode==='captains'?button(tr('Капитан','Captain'),'captain','mini '+(cap?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+cap+'"')+button(tr('Вице-капитан','Vice-captain'),'vice','mini '+(vice?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+vice+'"'):(cap?'<span class="badge cap">'+tr('Капитан','Captain')+' ×1.5</span>':'')+(vice?'<span class="badge">'+tr('Вице-капитан','Vice-captain')+'</span>':''))+
+    const nameEl=showBreakdown
+      ?'<button type="button" class="name name-btn" data-action="matches-toggle" data-key="'+esc(k)+'" aria-expanded="'+(matchesOpen===k)+'">'+esc(p.name)+'</button>'
+      :'<div class="name">'+esc(p.name)+'</div>';
+    return '<div class="pick"><div class="pick-row">'+avatar(p)+'<div class="player-name">'+nameEl+'<div class="meta">'+esc(p.pool||'')+' · '+(p.score?.total||0)+' Fantasy Points</div><div class="actions">'+(mode==='captains'?button(tr('Капитан','Captain'),'captain','mini '+(cap?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+cap+'"')+button(tr('Вице-капитан','Vice-captain'),'vice','mini '+(vice?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+vice+'"'):(cap?'<span class="badge cap">'+tr('Капитан','Captain')+' ×1.5</span>':'')+(vice?'<span class="badge">'+tr('Вице-капитан','Vice-captain')+'</span>':''))+
     (mode==='select'?button(tr('Убрать','Remove'),'remove','mini danger','data-key="'+esc(k)+'"'):'')+
     (mode==='team'&&canTransfer(k)?button((team().free_transfer_keys||[]).includes(k)?tr('Бесплатная замена','Free transfer'):tr('Заменить','Replace'),'transfer-start','mini transfer','data-key="'+esc(k)+'"'):'')+'</div></div>'+
-    (p.price_breakdown?'<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(k)+'" aria-expanded="'+(priceOpen===k)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+Number(p.price||0)+'</button>'+(priceOpen===k?priceBreakdown(p):''):'<div class="price">'+Number(p.price||0)+'</div>')+'</div>';
+    (p.price_breakdown?'<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(k)+'" aria-expanded="'+(priceOpen===k)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+Number(p.price||0)+'</button>'+(priceOpen===k?priceBreakdown(p):''):'<div class="price">'+Number(p.price||0)+'</div>')+'</div>'
+    +(showBreakdown&&matchesOpen===k?matchBreakdown(p):'')+'</div>';
   }).join('')+'</div>';
 }
 function localErrors() {

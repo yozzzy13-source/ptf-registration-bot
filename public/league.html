@@ -597,7 +597,7 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
 .hdr .meplate .t1{max-width:88px}
 
 html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturate(.6)}
-.fanbadges{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}.fanbadge{display:inline-flex;align-items:baseline;gap:4px;font-size:10.5px;font-weight:850;color:var(--amber);border:1px solid var(--accLine);background:linear-gradient(145deg,var(--accBg2),var(--accBg));padding:4px 8px;border-radius:999px}.fanbadge i{font-style:normal;font-weight:650;font-size:9px;color:var(--dim);text-transform:uppercase}.fanbadge.rank b{color:var(--amber2,var(--amber))}.fanhero{position:relative;overflow:hidden;padding:18px;background:linear-gradient(145deg,var(--accBg2),var(--surf) 62%)}.fanhero:after{content:'PTF';position:absolute;right:-7px;bottom:-28px;font-size:82px;font-weight:950;color:rgba(222,154,74,.06)}.fanhero h3{font-size:23px;margin:0 0 7px}.fanhero p{max-width:420px;color:var(--dim);line-height:1.5;margin:0;position:relative;z-index:1}.fanmark{width:50px;height:50px;border-radius:16px;background:linear-gradient(145deg,var(--amber2),var(--amber));display:flex;align-items:center;justify-content:center;color:#17110a;font-size:24px;margin-bottom:13px}.fanseg{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.fanseg button{margin:0;padding:10px}.fanseg button.on{border-color:var(--accLine);background:var(--accBg);color:var(--amber)}.fanrank{display:grid;grid-template-columns:28px 40px minmax(0,1fr) auto;gap:9px;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line2);cursor:pointer}.fanrank:last-child{border-bottom:0}.fanrank .avr,.fanrank .avph{width:40px;height:40px;font-size:11px}.fanplace{text-align:center;font-size:15px;font-weight:900}.fanpts{font-size:15px;font-weight:900;color:var(--amber)}.fanopen{position:relative;z-index:1;margin-top:14px}.fanpreview{margin-top:12px;color:var(--amber);font-size:11px;font-weight:750}
+.fanmeta{display:inline-block;margin-top:7px;font-size:10.5px;color:var(--mute);font-weight:600;border:1px solid var(--line2);border-radius:8px;padding:4px 8px}.fanhero{position:relative;overflow:hidden;padding:18px;background:linear-gradient(145deg,var(--accBg2),var(--surf) 62%)}.fanhero:after{content:'PTF';position:absolute;right:-7px;bottom:-28px;font-size:82px;font-weight:950;color:rgba(222,154,74,.06)}.fanhero h3{font-size:23px;margin:0 0 7px}.fanhero p{max-width:420px;color:var(--dim);line-height:1.5;margin:0;position:relative;z-index:1}.fanmark{width:50px;height:50px;border-radius:16px;background:linear-gradient(145deg,var(--amber2),var(--amber));display:flex;align-items:center;justify-content:center;color:#17110a;font-size:24px;margin-bottom:13px}.fanseg{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.fanseg button{margin:0;padding:10px}.fanseg button.on{border-color:var(--accLine);background:var(--accBg);color:var(--amber)}.fanrank{display:grid;grid-template-columns:28px 40px minmax(0,1fr) auto;gap:9px;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line2);cursor:pointer}.fanrank:last-child{border-bottom:0}.fanrank .avr,.fanrank .avph{width:40px;height:40px;font-size:11px}.fanplace{text-align:center;font-size:15px;font-weight:900}.fanpts{font-size:15px;font-weight:900;color:var(--amber)}.fanopen{position:relative;z-index:1;margin-top:14px}.fanpreview{margin-top:12px;color:var(--amber);font-size:11px;font-weight:750}
 .fanhero.compact{padding:13px 15px}.fanhero.compact:after{font-size:60px;bottom:-18px}.fanhero-top{display:flex;align-items:center;gap:11px;position:relative;z-index:1}.fanhero-top .fanmark{width:38px;height:38px;border-radius:12px;font-size:18px;margin-bottom:0;flex:0 0 auto}.fanhero-title h3{font-size:17px;margin:0}.fanhero-title .sub{color:var(--dim);font-size:11.5px;margin-top:2px}.fanhero-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--dim);font-size:10.5px;margin-top:9px;position:relative;z-index:1}.fanpreview-tag{color:var(--amber);font-weight:750;border:1px solid var(--accLine);background:var(--accBg);padding:2px 7px;border-radius:999px}
 .fanmine{cursor:pointer}
 .fanrank-wrap{border-bottom:1px solid var(--line2)}.fanrank-wrap:last-child{border-bottom:0}.fanrank-wrap .fanrank{border-bottom:0}.fanrank-wrap.open .fanrank{background:var(--accBg)}.fanrank{grid-template-columns:28px 40px minmax(0,1fr) auto auto}.fanchev{font-size:9px;color:var(--dim)}
@@ -878,11 +878,12 @@ function myFantasyMarks(name){
   });
   return out;
 }
+// Костас: не ярлычки-«пилюли», а тем же шрифтом, что и остальная мета-инфа
+// карточки — просто в отдельной рамке, чтобы не сливалось, но и не бросалось
+// в глаза.
 function fantasyBadges(p){
   var f=fantasyPlayer(p);if(!f)return '';
-  return '<div class="fanbadges"><span class="fanbadge"><b>✨ '+esc(f.points)+'</b><i>'+esc(L?'очки':'pts')+'</i></span>'
-    +'<span class="fanbadge"><b>'+esc(f.teams)+'</b><i>'+esc(L?'команд':'teams')+'</i></span>'
-    +'<span class="fanbadge rank"><b>#'+esc(f.place)+'</b><i>'+esc(L?'место':'rank')+'</i></span></div>';
+  return '<div class="fanmeta">✨ '+esc(f.points)+' '+esc(L?'очков':'pts')+' · '+esc(L?'команд':'teams')+' '+esc(f.teams)+' · '+esc(L?'место':'rank')+' #'+esc(f.place)+'</div>';
 }
 var fanBlockOpen=false;
 var PT_LABELS_LEAGUE={appearance:['Участие','Appearance'],win:['Победа','Win'],sets:['Сеты','Sets'],games:['Геймы','Games'],straight:['Победа 2:0','Straight win'],bagels:['«Сухие» сеты','Bagel sets'],upset:['Апсет','Upset'],technical:['Техническая победа','Walkover']};
@@ -2327,11 +2328,18 @@ function fanSquadList(picks){
       +'<b class="pt">'+esc(pk.points||0)+'</b></div>';
   }).join('')+'</div>';
 }
+var fanPlayerOpen='';
+function toggleFanPlayer(key){fanPlayerOpen=(fanPlayerOpen===key?'':key);renderFantasy()}
+// Костас: клик по игроку в рейтинге Fantasy должен раскрывать, сколько и за что
+// он заработал очков, — не сразу перекидывать на его страницу. На страницу
+// по-прежнему можно попасть через обычную вкладку «Игроки».
 function fantasyRankRows(list,kind){
   if(!list||!list.length)return '<div class="empty">'+esc(X.fantasyEmpty)+'</div>';
   if(kind==='players')return '<div class="tb race fantasy-race"><div class="thd"><span>#</span><span></span><span class="n">'+esc(X.tPlayers)+'</span><span>'+esc(X.fantasyTeams)+'</span><span>'+esc(X.fantasyPoints)+'</span></div>'+list.map(function(x){
-    var medal=x.place===1?'🥇':x.place===2?'🥈':x.place===3?'🥉':x.place;
-    return '<div class="trw" onclick="openPlayerByName(\''+q(x.name)+'\',\'fantasy\')"><span class="p">'+medal+'</span>'+av(x)+'<span class="n"><div class="nm">'+esc(x.name)+'</div></span><span class="team-count">'+esc(x.selected_by||0)+'</span><span class="pt">'+esc(x.points||0)+'</span></div>';
+    var medal=x.place===1?'🥇':x.place===2?'🥈':x.place===3?'🥉':x.place,key=x.key||x.name,open=fanPlayerOpen===key;
+    var src=(fantasyData.players||[]).filter(function(pp){return pp.key===x.key})[0];
+    return '<div class="trw-wrap"><div class="trw" onclick="toggleFanPlayer(\''+q(key)+'\')" aria-expanded="'+open+'"><span class="p">'+medal+'</span>'+av(x)+'<span class="n"><div class="nm">'+esc(x.name)+'</div></span><span class="team-count">'+esc(x.selected_by||0)+'</span><span class="pt">'+esc(x.points||0)+'</span></div>'
+      +(open?'<div class="fansquad">'+fanMatchBreakdown(src&&src.score&&src.score.details||[])+'<button class="website-link-hidden" onclick="event.stopPropagation();openPlayerByName(\''+q(x.name)+'\',\'fantasy\')">'+esc(L?'Страница игрока':'Player page')+'</button></div>':'')+'</div>';
   }).join('')+'</div>';
   return list.map(function(x,i){
     var id=x.team_id||String(i),open=fanTeamOpen===id;
