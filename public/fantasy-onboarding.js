@@ -229,7 +229,7 @@ function reviewView() {
 function wizardView() {
   let html=progress();
   if(!editable())return html+'<div class="card">'+esc(windowMessage())+button(tr('Посмотреть состав','View squad'),'team','secondary full')+'</div>';
-  if(step===0)html+=slotsPanel()+'<div class="section-title"><h2>'+tr('Выберите игроков','Pick your players')+'</h2></div><details class="card" '+(draft().picks.length===8?'open':'')+'><summary>'+tr('Мой состав','My squad')+' · '+draft().picks.length+'/8</summary>'+cards('select')+'</details>'+catalog(true);
+  if(step===0)html+=slotsPanel()+'<details class="card squad-fold" '+(draft().picks.length===8?'open':'')+'><summary>'+tr('Мой состав','My squad')+' · '+draft().picks.length+'/8</summary>'+cards('select')+'</details>'+catalog(true);
   if(step===1)html+='<section class="card"><h2>'+tr('Капитан и вице-капитан','Captain and vice-captain')+'</h2><p class="sub">'+tr('Капитан получает ×1.5. Вице-капитан заменяет его при официальном снятии до первого матча.','Your captain earns ×1.5. Your vice-captain takes over if the captain officially withdraws before their first match.')+'</p>'+cards('captains')+'</section>';
   if(step===2)html+='<section class="card"><h2>'+tr('Как назовём команду?','Name your team')+'</h2><p class="sub">'+tr('Название появится в рейтинге.','This name appears in the standings.')+'</p><div class="field"><label for="team-name">'+tr('Название команды','Team name')+'</label><input id="team-name" maxlength="40" autocomplete="off" value="'+esc(draft().team_name)+'"></div></section>';
   if(step===3)html+=reviewView();
@@ -256,10 +256,26 @@ function teamView() {
 function successView() {
   return '<section class="card"><div class="clubmark">✓</div><h2>'+tr('Команда создана!','Team created!')+'</h2><p>'+esc(team().team_name)+'</p>'+timing()+'<p class="sub">'+esc(rule('locking'))+'</p><p class="sub">'+esc(rule('transfers'))+'</p>'+button(tr('Посмотреть мою команду','View my team'),'team','primary full')+'</section>';
 }
-let rankMode='teams';
+let rankMode='teams',rankOpen='';
+// Рейтинг разворачивается так же, как в интерфейсе лиги: команда показывает
+// свой состав с очками каждого игрока, игрок — за какие матчи он их набрал.
+function rankSquad(picks) {
+  if(!picks||!picks.length)return '<div class="rank-more"><div class="pbd-row note">'+esc(tr('Состав скрыт.','Squad is hidden.'))+'</div></div>';
+  return '<div class="rank-more">'+picks.map(pk=>'<div class="pbd-row"><span>'+esc(pk.name)
+    +(pk.captain?' <b class="capmark">'+esc(tr('К','C'))+'</b>':pk.vice?' <b class="capmark vc">'+esc(tr('ВК','VC'))+'</b>':'')
+    +'</span><b>'+Number(pk.points||0)+'</b></div>').join('')+'</div>';
+}
 function tableView() {
   const list=rankMode==='teams'?D.leaderboard:D.player_leaderboard;
-  return '<div class="ranktabs">'+button(tr('Команды','Teams'),'rank-teams',rankMode==='teams'?'on':'')+button(tr('Игроки','Players'),'rank-players',rankMode==='players'?'on':'')+'</div><div class="card">'+(list.length?list.map(p=>'<div class="leader"><div class="place">'+p.place+'</div>'+avatar(rankMode==='teams'?{name:p.owner_name,photo:p.owner_photo}:p)+'<div class="player-name"><div class="name">'+esc(p.team_name||p.name)+'</div><div class="meta">'+esc(rankMode==='teams'?p.owner_name:'Teams: '+p.selected_by)+'</div></div><div class="pts">'+p.points+'</div></div>').join(''):'<div class="empty">'+tr('Рейтинг пока пуст','No standings yet')+'</div>')+'</div>';
+  return '<div class="ranktabs">'+button(tr('Команды','Teams'),'rank-teams',rankMode==='teams'?'on':'')+button(tr('Игроки','Players'),'rank-players',rankMode==='players'?'on':'')+'</div><div class="card">'
+    +(list.length?list.map((p,i)=>{
+      const key=rankMode==='teams'?(p.team_id||String(i)):p.key,open=rankOpen===key;
+      const body=open?(rankMode==='teams'?rankSquad(p.picks):matchBreakdown(player(p.key)||{})):'';
+      return '<div class="leader-wrap'+(open?' open':'')+'"><button type="button" class="leader" data-action="rank-toggle" data-key="'+esc(key)+'" aria-expanded="'+open+'">'
+        +'<div class="place">'+p.place+'</div>'+avatar(rankMode==='teams'?{name:p.owner_name,photo:p.owner_photo}:p)
+        +'<div class="player-name"><div class="name">'+esc(p.team_name||p.name)+'</div><div class="meta">'+esc(rankMode==='teams'?p.owner_name:tr('Команд: ','Teams: ')+p.selected_by)+'</div></div>'
+        +'<div class="pts">'+p.points+'</div><div class="chev">'+(open?'▲':'▼')+'</div></button>'+body+'</div>';
+    }).join(''):'<div class="empty">'+tr('Рейтинг пока пуст','No standings yet')+'</div>')+'</div>';
 }
 function rulesView() {
   const titles={intro:tr('Формат','Format'),squad:tr('Состав','Squad'),budget:tr('Бюджет','Budget'),format:tr('Матчи','Matches'),pricing:tr('Цены','Prices'),locking:tr('Дедлайн','Deadline'),captain:tr('Капитаны','Captains'),transfers:tr('Замены','Transfers'),scoring:tr('Очки','Points'),ranking:tr('Рейтинг','Standings')};
@@ -349,7 +365,8 @@ async function handle(action,el={dataset:{}}) {
   if(action==='confirm')return commit();
   if(action==='save-exit'){await saveDraft();return navigate('home');}
   if(action==='filter'){filter=el.dataset.filter;return render();}
-  if(action==='rank-teams'||action==='rank-players'){rankMode=action.slice(5);return render();}
+  if(action==='rank-teams'||action==='rank-players'){rankMode=action.slice(5);rankOpen='';return render();}
+  if(action==='rank-toggle'){rankOpen=rankOpen===key?'':key;return render();}
   const key=el.dataset.key,d=draft();
   if(action==='price-info'){priceOpen=priceOpen===key?'':key;return render();}
   if(action==='matches-toggle'){matchesOpen=matchesOpen===key?'':key;return render();}
