@@ -123,8 +123,25 @@ box-shadow:inset 0 1px 0 var(--hair)}
 .ivChampNo{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surf2);border:1px solid var(--line3)}
 .ivChampName{font-size:14px;font-weight:800;color:var(--text)}
 .ivChampTitle{font-size:11px;color:var(--mute)}
-.ivPast{margin-top:14px}
-.ivPast summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--mute);margin-bottom:10px}
+.ivStat.tap{cursor:pointer}
+.ivStat.tap .qm{font-style:normal;color:var(--amber)}
+.ivGrp2{margin:16px 0 10px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);font-weight:800}
+.ivRoster{margin-top:10px;border:1px solid var(--line4);border-radius:14px;overflow:hidden}
+.ivRow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line2);background:var(--card2)}
+.ivRow:last-child{border-bottom:0}
+.ivRow .avr,.ivRow .avph{width:30px;height:30px;flex:0 0 30px;font-size:12px}
+.ivRowName{flex:1;font-size:13.5px;font-weight:700;color:var(--text)}
+.ivRowDiv{font-size:11px;color:var(--mute)}
+.ivHero{margin-top:16px;padding:14px;border-radius:18px;border:1px solid var(--line);background:var(--surf)}
+.ivHeroHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.ivHeroTitle{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--champ);font-weight:800}
+.ivFaces{display:flex;gap:-8px}
+.ivFace{text-align:center;flex:1;min-width:0}
+.ivFace .avr,.ivFace .avph{width:56px;height:56px;flex:0 0 56px;font-size:18px;margin:0 auto 6px;border:1px solid var(--champ2)}
+.ivFaceName{font-size:11.5px;font-weight:800;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ivFaceDiv{font-size:10px;color:var(--mute)}
+.ivEv.done{opacity:1}
+
 .empty{color:var(--mute);font-size:13.5px;text-align:center;padding:26px 10px;line-height:1.55}
 .hint{color:var(--mute);font-size:11.5px;line-height:1.5}
 .cnt{color:var(--mute2);font-size:10.5px;margin:0 0 10px 2px;font-weight:600}
@@ -2765,22 +2782,39 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
 // события идут и куда открыт набор. Про Fantasy не пишем — он только для
 // участников лиги.
 var inviteSeasons={};
-var inviteChampsOpen='';
+var invitePlayersOpen='';
 // Номер сезона у события: он же связывает строку Events с тем, что лига реально
-// сыграла — дивизионами, составом и чемпионами.
+// сыграла — дивизионами, составом, финалами и чемпионами.
 function inviteSeasonNo(ev){
   var m=String(ev.event_id||'').match(/(\d+)/)||String(ev.event_name_en||ev.event_name||ev.event_name_ru||'').match(/(\d+)/);
   return m?String(m[1]):'';
 }
-function inviteStat(v,k){return '<div class="ivStat"><div class="ivStatV">'+esc(v)+'</div><div class="ivStatK">'+esc(k)+'</div></div>'}
-function inviteChampRow(list){
-  return '<div class="ivChamps">'+list.map(function(c){
-    return '<div class="ivChamp">'+(c.photo?'<img src="'+esc(c.photo)+'" alt="">':'<div class="ivChampNo">🏆</div>')
-      +'<div><div class="ivChampName">'+esc(c.name)+'</div><div class="ivChampTitle">'+esc(c.title||'')+'</div></div></div>';
+function inviteStat(v,k,onclick){
+  return '<div class="ivStat'+(onclick?' tap':'')+'"'+(onclick?' onclick="'+onclick+'"':'')+'>'
+    +'<div class="ivStatV">'+esc(v)+'</div><div class="ivStatK">'+esc(k)+(onclick?' <i class="qm">▾</i>':'')+'</div></div>';
+}
+// Финалы дивизионов показываем той же карточкой, что и на главной лиги:
+// крупное фото чемпиона, подпись дивизиона, счёт финала и кто проиграл финал.
+function inviteFinal(f){
+  var h='<div class="chbig" style="cursor:default">'
+    +'<div>'+av({name:f.champion.name,photo:f.champion.photo})+'<div class="nm2">'+esc(f.champion.name)+'</div></div>'
+    +'<div class="sub">'+esc((f.title||('Division '+f.letter))+' '+(L?'ЧЕМПИОН':'CHAMPION'))+'</div>';
+  if(f.score)h+='<div class="chsc">'+esc(f.score)+'</div>';
+  if(f.runner_up&&f.runner_up.name){
+    h+='<div class="chru">'+av({name:f.runner_up.name,photo:f.runner_up.photo})
+      +'<span class="nm3">'+esc(f.runner_up.name)+'</span></div>';
+  }
+  return h+'</div>';
+}
+function invitePlayerList(list){
+  return '<div class="ivRoster">'+list.map(function(p){
+    return '<div class="ivRow">'+av({name:p.name,photo:p.photo})
+      +'<div class="ivRowName">'+esc(p.name)+'</div>'
+      +(p.division?'<div class="ivRowDiv">'+esc(p.division)+'</div>':'')+'</div>';
   }).join('')+'</div>';
 }
-function toggleInviteChamps(no){
-  inviteChampsOpen=(inviteChampsOpen===no?'':no);
+function toggleInvitePlayers(no){
+  invitePlayersOpen=(invitePlayersOpen===no?'':no);
   var box=document.getElementById('ivEvents');
   if(box)box.innerHTML=inviteEventsHtml();
 }
@@ -2793,31 +2827,32 @@ function inviteEventCard(ev){
   var cls=s==='archived'?'past':(s==='waitlist'?'wait':'live');
   var fmt=function(d){var x=new Date(d);return isNaN(x.getTime())?String(d):x.toLocaleDateString(L?'ru-RU':'en-US',{day:'numeric',month:'short'})};
   var dates=[ev.start_date||'',ev.end_date||''].filter(Boolean).map(fmt).join(' — ');
-  var weeks=0;
-  if(ev.start_date&&ev.end_date){
+  var no=inviteSeasonNo(ev),info=inviteSeasons[no]||null;
+  // Длительность берём по реально сыгранным матчам сезона; даты в строке
+  // события бывают плановыми и сезон выглядел короче, чем шёл.
+  var weeks=(info&&info.weeks)||0;
+  if(!weeks&&ev.start_date&&ev.end_date){
     var a=new Date(ev.start_date),b=new Date(ev.end_date);
     if(!isNaN(a.getTime())&&!isNaN(b.getTime()))weeks=Math.max(1,Math.round((b-a)/6048e5));
   }
-  var no=inviteSeasonNo(ev),info=inviteSeasons[no]||null;
+  var roster=(info&&info.players_list)||[];
   var stats='';
-  if(info&&(info.divisions||info.players)||weeks){
+  if((info&&(info.divisions||info.players))||weeks){
     stats='<div class="ivStats">'
-      +(info&&info.divisions?inviteStat(info.divisions,L?'дивизиона':'divisions'):'')
-      +(info&&info.players?inviteStat(info.players,L?'игроков':'players'):'')
-      +(weeks?inviteStat(weeks+(L?' нед.':'w'),L?'длительность':'duration'):'')
+      +(info&&info.divisions?inviteStat(info.divisions,L?'дивизиона':'divisions',''):'')
+      +(info&&info.players?inviteStat(info.players,L?'игроков':'players',roster.length?'toggleInvitePlayers(\''+esc(no)+'\')':''):'')
+      +(weeks?inviteStat(weeks+(L?' нед.':'w'),L?'длительность':'duration',''):'')
       +'</div>';
   }
-  var champs=(info&&info.champions)||[];
+  var finals=(info&&info.finals)||[];
   var desc=L?(ev.description_ru||ev.description_en||ev.description||''):(ev.description_en||ev.description_ru||ev.description||'');
-  var open=inviteChampsOpen===no&&champs.length;
-  return '<div class="ivEv'+(s==='archived'?' past':'')+'"><div class="ivEvName">'+esc(name)+'</div>'
+  return '<div class="ivEv'+(s==='archived'?' done':'')+'"><div class="ivEvName">'+esc(name)+'</div>'
     +'<div class="ivEvRow"><span class="ivTag '+cls+'">'+esc(label)+'</span>'
     +(dates?'<span class="ivTag">'+esc(dates)+'</span>':'')+'</div>'
     +(desc&&s!=='archived'?'<div class="ivEvDesc">'+esc(desc)+'</div>':'')
     +stats
-    +(champs.length?'<button class="ivLink" onclick="toggleInviteChamps(\''+esc(no)+'\')">'
-        +esc(open?(L?'Скрыть чемпионов':'Hide champions'):(L?'🏆 Показать чемпионов':'🏆 Show champions'))+'</button>':'')
-    +(open?inviteChampRow(champs):'')
+    +(invitePlayersOpen===no&&roster.length?invitePlayerList(roster):'')
+    +(finals.length?'<div class="ivGrp2">'+esc(L?'Финалы сезона':'Season finals')+'</div>'+finals.map(inviteFinal).join(''):'')
     +'</div>';
 }
 function renderInvite(){
@@ -2829,6 +2864,7 @@ function renderInvite(){
     +'<h2>'+esc(L?'Лига открывается после анкеты':'The League opens after your profile')+'</h2>'
     +'<p>'+esc(L?'Анкета занимает пару минут. После неё открывается интерфейс лиги, а заявку на событие или лист ожидания можно оставить там же.'
                 :'The form takes a couple of minutes. After it the League interface opens, and you can apply for an event or join the waitlist right there.')+'</p></div>'
+    +'<div id="ivHero"></div>'
     +'<ul class="ivList">'+perks.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul>'
     +'<button class="ivBtn" onclick="location.href=\'/apply?mode=profile\'+(tokQ||\'\')">'+esc(L?'Заполнить анкету':'Complete the profile')+'</button>'
     +'<div class="ivNote">'+esc(L?'Анкета уже заполнена? Доступ откроется, как только организатор внесёт вас в состав.'
@@ -2843,7 +2879,28 @@ function renderInvite(){
     (sj.seasons||[]).forEach(function(x){inviteSeasons[String(x.number)]=x});
     inviteEvents=(j.all_events||j.events)||[];
     var box=$('ivEvents');if(box)box.innerHTML=inviteEventsHtml();
+    var hero=$('ivHero');if(hero)hero.innerHTML=inviteHeroHtml();
   });
+}
+// Чемпионы — сразу под шапкой, до списка того, что открывается: это первое,
+// что должно зацепить, а не то, до чего надо долистать.
+function inviteHeroHtml(){
+  var nums=Object.keys(inviteSeasons).map(Number).filter(function(n){return n>0});
+  var best=null;
+  nums.sort(function(a,b){return b-a}).forEach(function(n){
+    var s=inviteSeasons[String(n)];
+    if(!best&&s&&(s.finals||[]).length)best=s;
+  });
+  if(!best)return '';
+  var faces=best.finals.slice(0,4).map(function(f){
+    return '<div class="ivFace">'+av({name:f.champion.name,photo:f.champion.photo})
+      +'<div class="ivFaceName">'+esc(f.champion.name)+'</div>'
+      +'<div class="ivFaceDiv">'+esc(f.title||('Division '+f.letter))+'</div></div>';
+  }).join('');
+  return '<div class="ivHero"><div class="ivHeroHead">'
+    +'<div class="ivHeroTitle">🏆 '+esc((L?'Чемпионы сезона ':'Season ')+best.number+(L?'':' champions'))+'</div>'
+    +'<div class="ivFaceDiv">'+esc(best.players?best.players+(L?' игроков':' players'):'')+'</div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat('+Math.min(4,best.finals.length)+',1fr);gap:8px">'+faces+'</div></div>';
 }
 // Прошедшие сезоны показываем развёрнутыми: это витрина, а не архив. Под ними
 // цифры сезона и кнопка с чемпионами — то, ради чего человек и приходит.

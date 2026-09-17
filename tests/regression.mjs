@@ -442,6 +442,10 @@ check(applyHtml.includes('function renderIntro()')&&applyHtml.includes('introEve
 check(applyHtml.includes("id=\"instagram\"")&&applyHtml.includes('instagramHint')&&!/instagram[\s\S]{0,80}missing\.push/.test(applyHtml),'Instagram есть в анкете и остаётся необязательным');
 check(applyHtml.includes('function fillProfile(')&&applyHtml.includes("set('instagram'"),'Анкета подставляет сохранённые данные, включая Instagram');
 check(applyHtml.includes('loadSeasonInfo')&&applyHtml.includes('/api/public/seasons'),'Стартовый экран подтягивает цифры сезонов');
+check(applyHtml.includes('fillAgeOptions')&&applyHtml.includes('COUNTRIES_RU')&&applyHtml.includes('countryList'),'Возраст выбирается списком, страна — списком с вводом');
+check(applyHtml.includes('nameHint')&&applyHtml.includes('experienceHint'),'У имени и опыта есть поясняющие подписи');
+check(applyHtml.includes('function finalCard(')&&applyHtml.includes('toggleRoster'),'Прошедший сезон показывает финалы, а число игроков раскрывает состав');
+check(leagueHtml.includes('inviteHeroHtml')&&leagueHtml.includes('toggleInvitePlayers')&&leagueHtml.includes('function inviteFinal('),'Экран приглашения: чемпионы сверху, финалы в карточке, состав по клику');
 check(leagueHtml.includes('inviteEventsHtml')&&!leagueHtml.includes('ivPast\">'),'Прошлые сезоны на экране приглашения показаны развёрнутыми');
 const pub = await request('get','/api/public/seasons','777');
 check(pub.code===200&&Array.isArray(pub.body?.seasons),'Витрина сезонов открыта без анкеты');

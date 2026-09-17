@@ -1398,8 +1398,24 @@ app.get('/api/public/seasons', async (req, res) => {
       getLeagueAchievements().catch(() => new Map())
     ]);
     const byId = new Map(profiles.map(p => [String(p.id), p]));
+    const byName = new Map(profiles.map(p => [String(p.name || '').trim().toLowerCase(), p]));
     const { seasonRoster } = await import('./division.js');
     const isChampion = (a) => /champion|чемпион|winner|победител/i.test(`${a.type} ${a.title}`);
+    // Сколько недель сезон реально шёл: по датам сыгранных матчей, а не по тому,
+    // что стоит в строке события — там даты часто плановые.
+    const history = await getLeagueMatchHistory().catch(() => new Map());
+    const span = new Map();
+    for (const list of history.values()) {
+      for (const m of list) {
+        const n = String(m.season || '').replace(/\D+/g, '');
+        const d = new Date(m.date);
+        if (!n || Number.isNaN(d.getTime())) continue;
+        const cur = span.get(n) || { from: d, to: d };
+        if (d < cur.from) cur.from = d;
+        if (d > cur.to) cur.to = d;
+        span.set(n, cur);
+      }
+    }
     const out = [];
     for (const s of seasonList) {
       const letters = await availableDivisions(s.number).catch(() => []);
@@ -1413,10 +1429,41 @@ app.get('/api/public/seasons', async (req, res) => {
           champions.push({ id: String(pid), name: p?.name || '', photo: p?.photo || '', title: a.title, division: p?.division || '' });
         }
       }
+      // Финалы дивизионов: тот же плей-офф, что лига показывает у себя на
+      // главной. Для новичка это самая наглядная картинка сезона.
+      const finals = [];
+      const titles = await divisionTitles(s.number).catch(() => ({}));
+      for (const letter of letters) {
+        const data = await getDivisionTable(letter, s.number).catch(() => null);
+        const champ = data?.playoff?.champion || null;
+        if (!champ?.name) continue;
+        const final = data?.playoff?.final || null;
+        let runner = null;
+        if (final) {
+          const other = String(final.first?.id) === String(champ.id) ? final.second : final.first;
+          if (other?.name) runner = { name: other.name, photo: other.photo || '' };
+        }
+        finals.push({
+          letter,
+          title: titles[letter]?.title || titles[letter] || '',
+          champion: { name: champ.name, photo: champ.photo || '' },
+          runner_up: runner,
+          score: String(final?.score || final?.display || '')
+        });
+      }
+      const sp = span.get(String(s.number));
+      const weeks = sp ? Math.max(1, Math.round((sp.to - sp.from) / 6048e5)) : 0;
+      const players = (roster?.players || []).map(p => {
+        const hit = byName.get(String(p.name || '').trim().toLowerCase());
+        return { name: p.name, division: p.division || '', photo: hit?.photo || '' };
+      });
       out.push({
         number: String(s.number), label: s.label, status: s.status,
         divisions: letters.length,
-        players: roster?.players?.length || 0,
+        players: players.length,
+        players_list: players,
+        weeks,
+        finals,
         champions: champions.filter(c => c.name).slice(0, 8)
       });
     }
