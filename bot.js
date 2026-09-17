@@ -824,6 +824,30 @@ export async function handleMessage(msg) {
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/topic_sync') return adminTopicSync(msg);
     if (text.startsWith('/topic_backfill')) return adminTopicBackfill(msg);
+    if (text.startsWith('/fix_result')) {
+      // Перевыпуск карточки в ленте: /fix_result <id сообщения> [id матча].
+      // Id сообщения берётся из ссылки на пост — это последнее число в ней.
+      const parts = text.split(/\s+/).slice(1);
+      const messageId = Number(parts[0] || 0);
+      if (!messageId) return sendMessage(chatId, 'Как пользоваться: <code>/fix_result 1234</code> — номер сообщения из ссылки на пост в ленте. Вторым аргументом можно указать id матча, иначе беру последний результат.');
+      try {
+        const { refreshResultPost } = await import('./matches.js');
+        const wanted = String(parts[1] || '').trim();
+        const rows = await allSlots();
+        const done = rows.filter(r => String(r.result_status || '').toLowerCase() === 'confirmed');
+        const slot = wanted
+          ? done.find(r => String(r.challenge_id) === wanted)
+          : done.sort((a, b) => String(b.result_confirmed_at || '').localeCompare(String(a.result_confirmed_at || '')))[0];
+        if (!slot) return sendMessage(chatId, wanted ? 'Матч с таким id не найден.' : 'Подтверждённых результатов нет.');
+        await refreshResultPost(slot, messageId, chatId);
+        return sendMessage(chatId, `✅ Обновил карточку: <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>.`);
+      } catch (e) {
+        const hint = /message can't be edited|MESSAGE_ID_INVALID|not found/i.test(e.message)
+          ? '\n\nПроверьте номер сообщения. И помните: Telegram разрешает боту править своё сообщение только первые 48 часов.'
+          : '';
+        return sendMessage(chatId, '⛔ ' + escapeHtml(e.message) + hint);
+      }
+    }
     if (text === '/match_test') return adminMatchTest(msg);
     if (text === '/overview' || text === '/matches') return adminMatchesOverview(msg);
     if (text === '/league') {
