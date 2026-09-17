@@ -47,6 +47,13 @@ label:first-of-type{margin-top:0}
 select,input,textarea{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:15px;font-family:inherit}
 textarea{min-height:60px;resize:vertical}
 .row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
+.searchwrap{position:relative}
+.psug{position:absolute;left:0;right:0;top:calc(100% - 4px);z-index:9;background:var(--card2);border:1px solid var(--border);
+border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28)}
+.psug .pi{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line2);
+margin:0;padding:10px 13px;font:inherit;font-size:14px;font-weight:400;color:var(--text);cursor:pointer}
+.psug .pi:last-child{border-bottom:0}
+.psug .pi:hover,.psug .pi:active{background:var(--card)}
 button{width:100%;border:0;border-radius:14px;padding:15px;font-size:15px;font-weight:900;margin-top:14px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border);font-family:inherit}
 button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--onAcc);border:0;font-weight:900}
 button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11px}
@@ -168,7 +175,7 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
+var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
@@ -520,13 +527,18 @@ function historyBlock(){
     +(list.length>histLimit?'<button class="mini" style="width:100%;padding:12px;margin-top:8px" onclick="moreHist()">'+esc(X.histMore)+'</button>':'');
 }
 
-function adminQueryChanged(el){adminQuery=el.value;renderAdmin();var input=$('adminSearch');if(input){input.focus();try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}}
+function adminQueryChanged(el){adminQuery=el.value;adminSugOpen=!!el.value.trim();renderAdmin();var input=$('adminSearch');if(input){input.focus();try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}}
+function adminPickName(name){adminQuery=name;adminSugOpen=false;renderAdmin()}
+function adminSearchBlur(){setTimeout(function(){adminSugOpen=false;renderAdmin()},150)}
 function renderAdmin(){
   var view=$('viewAdmin');
   if(!isAdmin){view.innerHTML='';return}
   if(!adminLoaded){view.innerHTML='<div class="empty">…</div>';fetch('/api/match/admin-active?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');adminItems=j.items||[];adminLoaded=true;renderAdmin()}).catch(function(e){view.innerHTML='<div class="empty" style="color:var(--danger)">'+esc(e.message)+'</div>'});return}
   var divisions=[];adminItems.forEach(function(s){var d=String(s.division||'').trim();if(d&&divisions.indexOf(d)<0)divisions.push(d)});divisions.sort();
-  var controls='<div class="card"><h3 style="margin:0 0 10px;font-size:17px">'+esc(X.adminTitle)+'</h3><div class="row"><select onchange="adminDiv=this.value;renderAdmin()"><option value="">'+esc(X.adminAll)+'</option>'+divisions.map(function(d){return '<option value="'+esc(d)+'"'+(adminDiv===d?' selected':'')+'>'+esc(d)+'</option>'}).join('')+'</select><input id="adminSearch" value="'+esc(adminQuery)+'" placeholder="'+esc(X.adminSearch)+'" oninput="adminQueryChanged(this)"></div></div>';
+  var qSug=adminQuery.trim().toLowerCase();
+  var nameSugs=(adminSugOpen&&qSug)?adminPlayers.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qSug)>=0}).slice(0,6):[];
+  var controls='<div class="card"><h3 style="margin:0 0 10px;font-size:17px">'+esc(X.adminTitle)+'</h3><div class="row"><select onchange="adminDiv=this.value;renderAdmin()"><option value="">'+esc(X.adminAll)+'</option>'+divisions.map(function(d){return '<option value="'+esc(d)+'"'+(adminDiv===d?' selected':'')+'>'+esc(d)+'</option>'}).join('')+'</select><div class="searchwrap"><input id="adminSearch" value="'+esc(adminQuery)+'" placeholder="'+esc(X.adminSearch)+'" autocomplete="off" oninput="adminQueryChanged(this)" onblur="adminSearchBlur()">'
+    +(nameSugs.length?'<div class="psug">'+nameSugs.map(function(p){return '<button type="button" class="pi" onmousedown="event.preventDefault()" onclick="adminPickName(\''+esc(String(p.name||'').replace(/\'/g,"\\'"))+'\')">'+esc(p.name)+'</button>'}).join('')+'</div>':'')+'</div></div></div>';
   var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){return (!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)});
   var cards=list.map(function(s){var status=String(s.status||'').toLowerCase(),label=status==='accepted'?X.adminAccepted:status==='pending'?X.adminPending:X.adminOpen;var to=s.to_name||X.adminGroup;var dates=s.agreed_date?[s.agreed_date]:(s.dates||[]);var time=s.agreed_time||s.time_from||'';var court=s.agreed_court||(s.courts||[]).join(' · ');var acts='<div class="acts">';if(s.from_contact&&s.from_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.from_contact.url)+'\')">💬 '+esc(s.from_name||'1')+'</button>';if(s.to_contact&&s.to_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.to_contact.url)+'\')">💬 '+esc(s.to_name||'2')+'</button>';acts+='</div>';return '<div class="slot"><div class="who">'+esc(s.from_name||'—')+' → '+esc(to)+'</div><div class="meta"><span class="pill open">'+esc(label)+'</span> '+esc(s.division||'')+(s.group?' · '+esc(L?'Группа ':'Group ')+esc(s.group):'')+'</div><div class="when">📅 <b>'+dates.map(fmtDay).map(esc).join(' · ')+'</b>'+(time?' · 🕐 <b>'+esc(time)+'</b>':'')+'</div>'+(court?'<div class="meta">📍 '+esc(court)+'</div>':'')+acts+'</div>'}).join('');
   view.innerHTML=controls+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
@@ -936,9 +948,9 @@ function renderBook(){
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
     +'<div class="dtwrap fold"><div class="datestrip">'+days+'</div></div>'+dtMore()
     +'<label>'+esc(X.bookTime)+'</label>'
-    +'<div class="row"><select id="bkTime">'+timeOptions('17:00')+'</select>'
-    +'<select id="bkDur"><option value="60">'+esc(X.h1)+'</option><option value="90">'+esc(X.h15)+'</option>'
-    +'<option value="120" selected>'+esc(X.h2)+'</option><option value="150">'+esc(X.h25)+'</option><option value="180">'+esc(X.h3)+'</option></select></div>'
+    +'<div class="row"><select id="bkTime" onchange="bookTime=this.value">'+timeOptions(bookTime)+'</select>'
+    +'<select id="bkDur" onchange="bookDur=this.value">'+durOption('60',X.h1)+durOption('90',X.h15)
+    +durOption('120',X.h2)+durOption('150',X.h25)+durOption('180',X.h3)+'</select></div>'
     +'<label>'+esc(X.bookCourtsLbl)+(bookCourts.length?' <span class="pill">'+bookCourts.length+'</span>':'')+'</label>'
     +'<div class="chips">'+chips+'</div>'
     +'<div class="hint">'+esc(X.bookNote)+'</div>'
@@ -946,14 +958,17 @@ function renderBook(){
     +'<div id="bkRes" class="res"></div></div>';
   foldStrips();
 }
-function pickBookDate(iso){bookDate=iso;renderBook()}
-function toggleBookCourt(n){var i=bookCourts.indexOf(n);if(i>=0)bookCourts.splice(i,1);else bookCourts.push(n);renderBook()}
+function durOption(v,label){return '<option value="'+v+'"'+(String(bookDur)===v?' selected':'')+'>'+esc(label)+'</option>'}
+function syncBookInputs(){var t=$('bkTime'),d=$('bkDur');if(t&&t.value)bookTime=t.value;if(d&&d.value)bookDur=d.value}
+function pickBookDate(iso){syncBookInputs();bookDate=iso;renderBook()}
+function toggleBookCourt(n){syncBookInputs();var i=bookCourts.indexOf(n);if(i>=0)bookCourts.splice(i,1);else bookCourts.push(n);renderBook()}
 function submitBooking(btn){
+  syncBookInputs();
   var res=$('bkRes');res.className='res';
   if(!bookCourts.length){res.className='res err';res.textContent=X.needCourts;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/court/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,t:linkToken,date:bookDate,time:$('bkTime').value,duration_min:Number($('bkDur').value),courts:bookCourts
+    initData:initData,t:linkToken,date:bookDate,time:bookTime,duration_min:Number(bookDur),courts:bookCourts
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
