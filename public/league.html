@@ -659,7 +659,7 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 
-var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='',fantasyData=null,fRank='teams',fanTeamOpen='';
+var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='',fantasyData=null,fRank='teams',fanTeamOpen='',fantasyAllowed=false;
 var mode='home',openId='',backTo='players';
 var pQuery='',pDiv='',pSeason='',pSeasonTouched=false,pView='tile',pOrder=[],openAch='',pFiltersOpen=false,pSugOpen=false;
 var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false;
@@ -1560,7 +1560,14 @@ function fanDeadlineShort(){
   return d.toLocaleDateString(L?'ru-RU':'en-GB',{day:'numeric',month:'long'});
 }
 function homeFantasyBanner(){
-  if(!fantasyData)return '';
+  if(!fantasyData){
+    // Данные Fantasy не доехали (сбой или таймаут). Вкладка и вход всё равно
+    // должны остаться: человек пришёл по кнопке именно за этим.
+    if(!fantasyAllowed)return '';
+    return '<div class="card fanhomebanner live" onclick="openFantasyApp()"><div class="fhb-top"><div class="fhb-ico">\u2728</div><div><h3>PTF Fantasy</h3></div></div>'
+      +'<div class="fhb-text">'+esc(L?'Соберите команду из настоящих игроков PTF — их матчи в сезоне принесут вам очки.':'Build a squad of real PTF players — their real matches this season earn you points.')+'</div>'
+      +'<button class="fanopen" onclick="event.stopPropagation();openFantasyApp()">'+esc(L?'Открыть Fantasy':'Open Fantasy')+'</button></div>';
+  }
   var have=(fantasyData.teams||[]).length;
   var open=Boolean(fantasyData.entry_open);
   var until=fanDeadlineShort();
@@ -2384,7 +2391,11 @@ function fantasyRankRows(list,kind){
 function setFantasyRank(v){fRank=v;renderFantasy()}
 function openFantasyApp(){location.href='/fantasy'+(linkToken?'?t='+encodeURIComponent(linkToken):'')}
 function renderFantasy(){
-  if(!fantasyData){$('viewFantasy').innerHTML='<div class="empty">'+esc(X.fantasyEmpty)+'</div>';return}
+  if(!fantasyData){
+    $('viewFantasy').innerHTML='<div class="card fanhero compact"><div class="fanhero-top"><div class="fanmark">\ud83c\udfbe</div><div class="fanhero-title"><h3>Fantasy</h3><div class="sub">'
+      +esc(fantasyAllowed?(L?'Данные не загрузились. Откройте приложение Fantasy.':'Data did not load. Open the Fantasy app.'):X.fantasyEmpty)+'</div></div></div>'
+      +(fantasyAllowed?'<button class="fanopen" onclick="openFantasyApp()">'+esc(L?'Открыть Fantasy':'Open Fantasy')+'</button>':'')+'</div>';
+    return}
   var list=fRank==='teams'?(fantasyData.leaderboard||[]):(fantasyData.player_leaderboard||[]);
   var first=(fantasyData.teams||[]).filter(function(t){return Number(t.team_slot||1)===1})[0];
   var label=first?(L?'Продолжить команду':'Continue team'):(L?'Создать первую команду':'Create first team');
@@ -2589,7 +2600,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
   .then(function(r){return r.json()}).then(function(j){
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
     if(!j.ok)throw new Error(j.error||(L?'Ошибка':'Error'));
-    players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];fantasyData=j.fantasy||null;
+    players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy);
     if(fantasyData){
       var fs={};(fantasyData.players||[]).forEach(function(fp){fs[nameKey(fp.name)]={points:(fp.score&&fp.score.total)||0,teams:fp.selected_by||0}});
       players.forEach(function(p){var x=fs[nameKey(p.name)]||{};p.fantasy_points=x.points||0;p.fantasy_teams=x.teams||0});
