@@ -936,7 +936,7 @@ export async function refreshResultPost(slot, messageId, adminChatId) {
   if (!chat) throw new Error('Лента результатов не настроена.');
   const scope = await slotScope(slot);
   const full = { ...slot, season: scope.season, group: scope.group };
-  const card = await feedCard(full, 'ru');
+  const card = await feedCard(full, 'en');
   const media = await resultMedia(full);
   let fileId = media.fileId || '';
   let temp = null;
@@ -953,11 +953,43 @@ export async function refreshResultPost(slot, messageId, adminChatId) {
   return true;
 }
 
+// Предпросмотр результата «как уйдёт людям», но только заказчику.
+//
+// Ни лента, ни подписчики не затрагиваются: это способ посмотреть на карточку
+// и текст на настоящем матче до того, как это увидят все. Показываем оба
+// варианта — тот, что идёт в группу, и тот, что уходит в личку.
+export async function previewResultPost(slot, chatId, { withButtons = true } = {}) {
+  const scope = await slotScope(slot);
+  const full = { ...slot, season: scope.season, group: scope.group };
+  const group = await feedCard(full, 'en');
+  const dm = await feedCard(full, 'ru');
+  const media = await resultMedia(full);
+  const send = async (caption, opts) => {
+    if (media.fileId) return sendPhoto(chatId, media.fileId, { caption, ...opts });
+    if (media.buffer) {
+      const res = await sendPhotoBuffer(chatId, media.buffer, 'image/png', { caption, ...opts });
+      const id = (res?.photo || res?.result?.photo || []).slice(-1)[0]?.file_id;
+      if (id) media.fileId = id;
+      return res;
+    }
+    return telegramSendMessage(chatId, caption, opts);
+  };
+  await telegramSendMessage(chatId, '1️⃣ <b>Так уйдёт в ленту результатов</b>');
+  await send(group.text, group.reply_markup ? { reply_markup: group.reply_markup } : {});
+  await telegramSendMessage(chatId, '2️⃣ <b>Так уйдёт каждому в личку</b>');
+  // Кнопки мини-приложения Telegram принимает только в личной переписке.
+  await send(dm.text, withButtons ? { reply_markup: dm.dm_reply_markup } : {})
+    .catch(async () => { await send(dm.text, {}); await telegramSendMessage(chatId, '<i>Кнопки не показаны: в группе Telegram их не принимает. Запустите команду в личке с ботом.</i>'); });
+  return true;
+}
+
 export async function broadcastResult(slot) {
   const scope = await slotScope(slot);
   slot = {...slot,season:scope.season,group:scope.group};
   const cards = { ru: await feedCard(slot, 'ru'), en: await feedCard(slot, 'en') };
-  const { text, reply_markup } = cards.ru;
+  // Лента — общий английский фид, поэтому и карточка для группы английская.
+  // В личку каждый получает свой язык (см. ниже).
+  const { text, reply_markup } = cards.en;
   const media = await resultMedia(slot);
   const extraPhoto = slot.result_photo_file_id || '';
 
