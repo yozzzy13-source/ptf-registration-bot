@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup, canonicalStatus, getPlayerLeagueInfo } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -305,8 +305,24 @@ export async function notifyProfileFilled(profile = {}, { headline = '📝 <b>А
     `WhatsApp: ${escapeHtml(profile.whatsapp || '—')}`,
     profile.notes ? `Заметки: ${escapeHtml(profile.notes)}` : ''
   ].filter(Boolean);
-  return replyInPlayerTopic(chatId, telegramId, lines.join('\n'))
+  // Раньше на этой карточке кнопок не было вовсе: человека, пришедшего без
+  // события, из топика было не обработать — приходилось искать его руками.
+  return replyInPlayerTopic(chatId, telegramId, lines.join('\n'), { reply_markup: playerActionsKeyboard(telegramId) })
     .catch(e => { console.error('notifyProfileFilled failed:', e.message); return null; });
+}
+
+// Членство в лиге бот берёт из Players_Master, а писать в таблицы дивизионов он
+// не умеет и по решению организатора не должен. Поэтому после подтверждения
+// участия напоминаем вписать человека руками — но только если его там ещё нет,
+// чтобы не дёргать зря.
+export async function remindRosterEntry(chatId, telegramId, name = '') {
+  const league = await getPlayerLeagueInfo({ telegram_id: telegramId, name }).catch(() => null);
+  if (league?.member) return null;
+  const who = escapeHtml(name || String(telegramId));
+  return replyInPlayerTopic(chatId, telegramId,
+    `📋 Напоминание: впишите <b>${who}</b> в <b>Players_Master</b> и в таблицу его дивизиона.\n\n`
+    + 'Пока этого нет, лига не считает его участником: матчи, дивизион и Fantasy ему недоступны.')
+    .catch(e => { console.error('remindRosterEntry failed:', e.message); return null; });
 }
 
 // Короткая заметка о смене рейтинга: полная карточка тут была бы шумом.
@@ -330,8 +346,8 @@ export async function adminStats(chatId) {
   const applicants = (await getRows(SHEETS.applicants, { useCache:false })).rows;
   const apps = (await getRows(SHEETS.applications, { useCache:false })).rows;
   const payments = (await getRows(SHEETS.payments, { useCache:false })).rows;
-  const active = applicants.filter(r => r.status === 'active').length;
-  const waitlist = applicants.filter(r => r.status === 'waitlist').length;
+  const active = applicants.filter(r => canonicalStatus(r.status) === 'active').length;
+  const waitlist = applicants.filter(r => canonicalStatus(r.status) === 'waitlist').length;
   const norm = v => String(v || '').trim().toLowerCase();
   const unpaid = apps.filter(r => ['payment_required','waiting_payment'].includes(norm(r.payment_status))).length;
   const proof = apps.filter(r => norm(r.payment_status) === 'proof_received' || norm(r.payment_proof_status) === 'proof_received').length;
@@ -1125,8 +1141,9 @@ export function hasRealInteraction(row = {}, appIds = new Set()) {
   if (s(row.ntrp)) return true;
   if (Number(row.application_count || 0) > 0) return true;
   if (appIds.has(String(row.telegram_id || '').trim())) return true;
-  const status = s(row.status);
-  if (status && status !== 'lead') return true;
+  // Новичок теперь с пустым статусом (раньше писали lead) — любой непустой
+  // рабочий статус означает, что с человеком уже что-то происходило.
+  if (canonicalStatus(row.status)) return true;
   // Анкету могли начать заполнять до появления статусов — смотрим на поля.
   return Boolean(s(row.experience) || s(row.country_of_origin) || s(row.whatsapp));
 }
@@ -1284,7 +1301,7 @@ export async function adminMatchTest(msg) {
         lines.push('Имя из анкеты не нашлось ни в одном листе Division_Tracker этого сезона.');
         lines.push('Проверьте, что имя в анкете написано так же, как в таблице дивизиона.');
       } else {
-        const active = String(info.status || '').toLowerCase() === 'active';
+        const active = canonicalStatus(info.status) === 'active';
         lines.push(`в составе: <b>да</b>, сезон <b>${escapeHtml(info.season || '?')}</b>`);
         lines.push(`дивизион: <b>${escapeHtml(info.division || '— не указан ⚠️')}</b>`);
         lines.push(`статус: <b>${escapeHtml(info.status || '—')}</b> (из анкеты)`);
@@ -1871,6 +1888,7 @@ export async function setApplicationStatus({ chatId, applicationId, status }) {
     await sendMessage(app.telegram_id, t(lang, 'waitlist'));
   }
   await replyInPlayerTopic(chatId, app.telegram_id, `Status updated: <b>${escapeHtml(app.player_name)}</b> → <b>${escapeHtml(status)}</b>`);
+  if (canonicalStatus(status) === 'active') await remindRosterEntry(chatId, app.telegram_id, app.player_name || '');
 }
 
 export async function setPaymentStatus({ chatId, applicationId, paymentId = '', status }) {
@@ -1900,6 +1918,7 @@ export async function setPaymentStatus({ chatId, applicationId, paymentId = '', 
       .catch(e => console.error('confirm message failed:', e.message));
     await updateApplication(applicationId, { confirmed_message_sent_at: nowISO() }).catch(() => {});
   }
+  if (status === 'approved' && app?.telegram_id) await remindRosterEntry(chatId, app.telegram_id, app.player_name || '');
   if (status === 'waitlisted' && app?.telegram_id) {
     const lang = (await findApplicantByTelegramId(app.telegram_id))?.language === 'ru' ? 'ru' : 'en';
     await sendMessage(app.telegram_id, t(lang, 'waitlist_paid'))

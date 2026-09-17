@@ -101,6 +101,39 @@ function normalizeStatus(value='') {
   if (['waitlist','wait list','waiting','лист ожидания','ожидание','pending'].includes(v)) return 'waitlist';
   return v;
 }
+
+// --- статусы игрока в листе заявок -------------------------------------------
+//
+// Рабочих статусов ровно четыре: пусто (человек просто зашёл в бота), waitlist,
+// payment и active. Плюс inactive — единственный «выключатель» для тех, кому
+// отказали или кто ушёл; раньше под это было шесть разных слов, и три места в
+// коде понимали их по-разному.
+//
+// Старые значения из таблицы продолжаем понимать: canonicalStatus сводит их к
+// рабочим, так что руками в таблице править ничего не нужно — новые записи
+// пишутся уже по-новому, старые доживают свой век и читаются корректно.
+//
+// ВАЖНО: это словарь ТОЛЬКО для колонки status в листе заявок. У заявок и
+// платежей (application_status, payment_status) свой набор слов, он не меняется.
+export const APPLICANT_STATUS = { new:'', waitlist:'waitlist', payment:'payment', active:'active', inactive:'inactive' };
+const STATUS_ALIASES = {
+  lead:'', new:'', '':'',
+  waitlist:'waitlist', wait_list:'waitlist', waiting:'waitlist', pending:'waitlist',
+  application_received:'waitlist', submitted:'waitlist',
+  payment:'payment', waiting_payment:'payment', payment_required:'payment',
+  proof_received:'payment', payment_pending:'payment',
+  active:'active', confirmed:'active', approved:'active', payment_approved:'active', paid:'active',
+  inactive:'inactive', rejected:'inactive', declined:'inactive', refunded:'inactive',
+  blocked:'inactive', banned:'inactive', left:'inactive', unsubscribed:'inactive'
+};
+// Незнакомое значение возвращаем как есть: если организатор пометил строку
+// своим словом, мы его не стираем и не приравниваем к отказу.
+export function canonicalStatus(value='') {
+  const v = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!v) return '';
+  return Object.prototype.hasOwnProperty.call(STATUS_ALIASES, v) ? STATUS_ALIASES[v] : v;
+}
+export function isInactiveStatus(value='') { return canonicalStatus(value) === 'inactive'; }
 function isGenericPlayerCell(value='') {
   const v = String(value || '').trim().toLowerCase();
   return !v || ['name','player','players','participant','participants','имя','игрок','игроки','участник','участники','ntrp','raketo','rating','рейтинг','status','статус','country','страна','telegram','whatsapp','phone','телефон','division','дивизион'].includes(v);
@@ -973,7 +1006,7 @@ export async function ensureApplicantLead(user={}) {
   const name = user.name || [user.first_name, user.last_name].filter(Boolean).join(' ') || '';
   const newRow = {
     date: nowISO(), created_at: nowISO(), updated_at: nowISO(),
-    name, status: 'lead', division: 'pending',
+    name, status: APPLICANT_STATUS.new, division: 'pending',
     telegram_id: telegramId, telegram_username: username, telegram: username ? `t.me/${username}` : '',
     language: ['ru','en'].includes(String(user.language || '').toLowerCase()) ? String(user.language).toLowerCase() : '',
     source: 'telegram_lead', crm_tags: 'lead', profile_completed: 'no', selfie_status: 'optional_missing'
@@ -1055,7 +1088,7 @@ export async function setUserLanguage(user={}, language='en') {
     created_at: nowISO(),
     updated_at: nowISO(),
     name,
-    status: 'lead',
+    status: APPLICANT_STATUS.new,
     division: 'pending',
     telegram_id: telegramId,
     telegram_username: username,
@@ -1075,7 +1108,7 @@ export async function upsertApplicant(profile) {
   const patch = {
     name: profile.name,
     ntrp: profile.ntrp,
-    status: profile.status || existing?.status || 'lead',
+    status: canonicalStatus(profile.status || existing?.status || APPLICANT_STATUS.new),
     experience: profile.experience,
     gender: profile.gender,
     age: profile.gender === 'female' ? '' : profile.age,
@@ -1175,8 +1208,11 @@ export async function updateApplication(applicationId, patch) {
 export async function updateApplicantStatusByTelegramId(telegramId, status) {
   const found = await findApplicantByTelegramId(telegramId);
   if (!found) return null;
-  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { status, updated_at: nowISO() });
-  return { ...found, status };
+  // Единственная точка записи статуса игрока: что бы ни прислал вызывающий код
+  // (waiting_payment, rejected, confirmed...), в таблицу уходит рабочее слово.
+  const clean = canonicalStatus(status);
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { status: clean, updated_at: nowISO() });
+  return { ...found, status: clean };
 }
 
 export async function logMessage(row) { return appendObject(SHEETS.messages, row); }
@@ -1232,7 +1268,7 @@ export async function getMissingRatingContacts(scope='missing') {
   return rows.filter(r => {
     if (!r.telegram_id) return false;
     if (!wanted(r)) return false;
-    if (['inactive','declined','rejected','refunded'].includes(String(r.status || '').toLowerCase())) return false;
+    if (isInactiveStatus(r.status)) return false;
     // Avoid pure language-only leads with no actual profile data.
     return Boolean(r.name || r.telegram_username || r.whatsapp || r.experience || r.country_of_origin || r.gender);
   });
@@ -1242,16 +1278,19 @@ export async function getSegmentContacts(segment='all') {
   const { rows } = await getRows(SHEETS.applicants, { useCache:false });
   return rows.filter(r => {
     if (!r.telegram_id) return false;
+    // Раньше статус сравнивался как есть: «Active» с большой буквы или с лишним
+    // пробелом молча выкидывал человека из всех сегментов рассылки.
+    const status = canonicalStatus(r.status);
     if (segment === 'all') return true;
-    if (segment === 'active') return r.status === 'active';
-    if (segment === 'waitlist') return r.status === 'waitlist';
-    if (segment === 'payment') return ['waiting_payment','proof_received','payment_approved'].includes(r.status);
+    if (segment === 'active') return status === 'active';
+    if (segment === 'waitlist') return status === 'waitlist';
+    if (segment === 'payment') return status === 'payment';
     if (segment === 'missing_rating') return hasMissingRating(r);
-    if (segment === 'missing_selfie') return String(r.status).toLowerCase() === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received';
+    if (segment === 'missing_selfie') return status === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received';
     if (segment === 'ru') return r.language === 'ru';
     if (segment === 'en') return r.language !== 'ru';
     if (segment === 'season2') return String(r.last_application_event || '').includes('Season 2') || String(r.last_application_event || '').includes('league_s2');
-    return String(r.crm_tags || '').includes(segment) || r.status === segment;
+    return String(r.crm_tags || '').includes(segment) || status === canonicalStatus(segment);
   });
 }
 
@@ -1305,7 +1344,9 @@ export function summarizePollRows(rows=[]) {
 
 export function isProfileCompleted(row={}) {
   const rating = String(row.ntrp || row.racket_rating || '').trim().toLowerCase();
-  return Boolean(row.telegram_id && row.name && row.gender && row.country_of_origin && row.experience && row.whatsapp && rating && rating !== 'unknown' && !['inactive','declined','refunded'].includes(String(row.status || '').toLowerCase()));
+  // Раньше здесь был свой список исключений, и в нём забыли rejected — отклонённый
+  // человек продолжал открывать мини-приложение лиги. Теперь выключатель один.
+  return Boolean(row.telegram_id && row.name && row.gender && row.country_of_origin && row.experience && row.whatsapp && rating && rating !== 'unknown' && !isInactiveStatus(row.status));
 }
 
 export async function createMatchChallenge(row) {
@@ -1404,7 +1445,7 @@ export async function getPlayerDivision(profile = {}) {
 // Все живые пользователи бота — для ленты результатов. Лига идёт для всех, кто в боте,
 // а не только для тех, кто попал в текущий состав дивизионов: результат видят все,
 // кроме тех, кто отписался или был отклонён.
-const DEAD_SUBSCRIBER_STATUSES = ['inactive','declined','rejected','blocked','banned','left','unsubscribed'];
+// Список схлопнулся в один статус: см. canonicalStatus выше.
 
 // Отписка касается ТОЛЬКО ленты результатов: свои матчи, оплаты и ответы админа
 // приходят по-прежнему. Хранится одним флагом, отдельного статуса не заводим.
@@ -1428,7 +1469,7 @@ export async function getAllBotSubscribers() {
   for (const r of rows) {
     const id = String(r.telegram_id || '').trim();
     if (!id || seen.has(id)) continue;
-    if (DEAD_SUBSCRIBER_STATUSES.includes(String(r.status || '').toLowerCase())) continue;
+    if (isInactiveStatus(r.status)) continue;
     if (isResultsMuted(r)) continue;   // сам отписался от ленты результатов
     seen.add(id);
     out.push({ telegram_id: id, name: r.name || '', language: r.language || '' });
@@ -1470,7 +1511,7 @@ export async function getAllActiveLeaguePlayers() {
 export const PLAYER_GROUPS = ['active', 'waitlist', 'applied', 'guest'];
 export async function playerGroup(telegramId, applicant = null) {
   const who = applicant || await findApplicantByTelegramId(telegramId).catch(() => null);
-  const status = String(who?.status || '').toLowerCase();
+  const status = canonicalStatus(who?.status);
   const league = await getPlayerLeagueInfo({ ...(who || {}), telegram_id: telegramId });
   if (league.member || league.admin) return 'active';
   const app = await findLatestApplicationByTelegramId(telegramId).catch(() => null);
@@ -1527,16 +1568,31 @@ export async function allGroupTabs() {
 export const BOT_MENU_BUTTONS = ['events', 'join_event', 'waitlist', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
 const buttonsKey = (group) => `btns_${group}`;
 
+// «Лига» есть у всех групп: не-член, нажав её, не упирается в ошибку, а получает
+// объяснение и кнопку «Заполнить анкету» — то есть это вход в лигу, а не тупик.
+// Скрыть её можно только целиком, выключив группе все кнопки словом none.
+const ALWAYS_BUTTONS = ['league'];
+function withAlwaysButtons(list, allowed) {
+  const out = list.slice();
+  for (const must of ALWAYS_BUTTONS) {
+    if (allowed.includes(must) && !out.includes(must)) out.push(must);
+  }
+  return out;
+}
+
 export async function getGroupButtons(group) {
   const raw = String(await getSetting(buttonsKey(group)).catch(() => '')).trim();
   if (raw === NONE) return [];
   const picked = raw.split(',').map(s => s.trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
-  return picked.length ? picked : BOT_MENU_BUTTONS.slice();
+  return picked.length ? withAlwaysButtons(picked, BOT_MENU_BUTTONS) : BOT_MENU_BUTTONS.slice();
 }
 
 export async function setGroupButtons(group, list = []) {
   if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
-  const picked = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
+  const raw = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
+  // Дописываем «Лигу» и при сохранении, иначе галочка в панели будет снята, а
+  // кнопка всё равно показывается — расхождение, которое сложно объяснить.
+  const picked = raw.length ? withAlwaysButtons(raw, BOT_MENU_BUTTONS) : raw;
   await setSetting(buttonsKey(group), picked.length ? picked.join(',') : NONE, 'Кнопки меню бота для группы');
   return picked;
 }
@@ -1573,12 +1629,13 @@ export async function getGroupKeyboard(group) {
   const raw = String(await getSetting(kbKey(group)).catch(() => '')).trim();
   if (raw === NONE) return [];
   const picked = raw.split(',').map(s => s.trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
-  return picked.length ? picked : (DEFAULT_KEYBOARD[group] || DEFAULT_KEYBOARD.guest).slice();
+  return picked.length ? withAlwaysButtons(picked, KEYBOARD_BUTTONS) : (DEFAULT_KEYBOARD[group] || DEFAULT_KEYBOARD.guest).slice();
 }
 
 export async function setGroupKeyboard(group, list = []) {
   if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
-  const picked = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
+  const raw = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
+  const picked = raw.length ? withAlwaysButtons(raw, KEYBOARD_BUTTONS) : raw;
   await setSetting(kbKey(group), picked.length ? picked.join(',') : NONE, 'Нижняя клавиатура для группы');
   return picked;
 }

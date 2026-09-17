@@ -1,6 +1,6 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck } from './sheets.js';
+import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck, canonicalStatus } from './sheets.js';
 import { sendMessage, sendPhotoBuffer, sendPhotoAlbumBuffers } from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 import { panelBroadcastText, broadcastVariant, validateBroadcastLanguages, parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
@@ -36,7 +36,9 @@ function publicContact(row) {
     telegram_id: row.telegram_id || '',
     telegram_username: row.telegram_username || '',
     name: row.name || '',
-    status: row.status || '',
+    // Панель показывает рабочий статус, а не то, что исторически лежит в ячейке:
+    // иначе в фильтре плодятся waiting_payment, proof_received, lead и прочее.
+    status: canonicalStatus(row.status),
     division: row.division || '',
     language: row.language || '',
     selfie_status: row.selfie_status || '',
@@ -175,7 +177,7 @@ export function registerAdminRoutes(app) {
       const paidThb = approvedPayments.filter(p => norm(p.currency) === 'thb').reduce((sum,p) => sum + Number(p.amount || 0), 0);
       const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
       const divisions = [...new Set(contacts.map(r => r.division).filter(Boolean))].sort();
-      const statuses = [...new Set(contacts.map(r => r.status).filter(Boolean))].sort();
+      const statuses = [...new Set(contacts.map(r => canonicalStatus(r.status)).filter(Boolean))].sort();
       res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses,
         link_codes: DESTINATIONS.map(d => ({ code: d.aliases[0] || d.code, label: req.uiLang==='en'?d.en:d.ru })) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
