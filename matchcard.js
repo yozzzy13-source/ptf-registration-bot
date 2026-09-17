@@ -14,13 +14,76 @@
 import sharp from 'sharp';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getFileBuffer } from './telegram.js';
 import { findApplicantByTelegramId, getMasterPhotos } from './sheets.js';
 
-const FONT = 'PTFCard';
-// Шрифт лежит в проекте: librsvg у sharp не зависит от набора шрифтов сервера.
-const CARD_FONT_DATA = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets', 'PTFCard.ttf')).toString('base64');
+const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+const CARD_FONT_FILE = path.join(ASSETS_DIR, 'PTFCard.ttf');
+const CARD_FONT_DATA = fs.readFileSync(CARD_FONT_FILE).toString('base64');
+
+// Шрифт для картинки. Раньше он лежал в SVG как base64 внутри @font-face, и
+// казалось, что этого достаточно. Но librsvg внутри sharp встроенные шрифты НЕ
+// читает — он спрашивает их у fontconfig. На машине разработчика шрифты есть, и
+// всё рисовалось; на сервере их нет, и вся подпись превращалась в квадратики.
+//
+// Поэтому показываем fontconfig папку с нашим шрифтом и зовём его настоящим
+// именем семейства — оно берётся из самого файла, а не выдумывается. Тогда
+// подмена файла на другой шрифт продолжит работать без правок кода.
+function fontFamilyOf(file) {
+  try {
+    const b = fs.readFileSync(file);
+    const tables = {};
+    const count = b.readUInt16BE(4);
+    for (let i = 0; i < count; i++) {
+      const rec = 12 + i * 16;
+      tables[b.toString('latin1', rec, rec + 4)] = b.readUInt32BE(rec + 8);
+    }
+    const nameOff = tables.name;
+    if (!nameOff) return '';
+    const recs = b.readUInt16BE(nameOff + 2), strOff = nameOff + b.readUInt16BE(nameOff + 4);
+    let fallback = '';
+    for (let i = 0; i < recs; i++) {
+      const r = nameOff + 6 + i * 12;
+      const platform = b.readUInt16BE(r), nameId = b.readUInt16BE(r + 6);
+      const len = b.readUInt16BE(r + 8), off = b.readUInt16BE(r + 10);
+      if (nameId !== 1) continue;
+      const raw = b.subarray(strOff + off, strOff + off + len);
+      const wide = platform === 3 || platform === 0;
+      const value = wide ? Buffer.from(raw).swap16().toString('utf16le') : raw.toString('latin1');
+      if (value && !fallback) fallback = value;
+      if (platform === 3) return value;
+    }
+    return fallback;
+  } catch (e) { console.error('card font name read failed:', e.message); return ''; }
+}
+const CARD_FONT_FAMILY = fontFamilyOf(CARD_FONT_FILE) || 'DejaVu Sans';
+// Экранировать не нужно: имя семейства берём из файла шрифта, кавычек там не бывает.
+const FONT = `'${CARD_FONT_FAMILY}', 'DejaVu Sans', 'Liberation Sans', sans-serif`;
+
+// Конфиг fontconfig собираем сами: так папка со шрифтом видна всегда, даже если
+// на сервере своего конфига нет вовсе. Системные папки оставляем — вдруг там
+// есть что-то ещё полезное.
+(function ensureCardFont() {
+  if (process.env.FONTCONFIG_FILE) return;
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ptf-fonts-'));
+    const conf = path.join(dir, 'fonts.conf');
+    fs.writeFileSync(conf, `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${ASSETS_DIR}</dir>
+  <dir>/usr/share/fonts</dir>
+  <dir>/usr/local/share/fonts</dir>
+  <dir prefix="xdg">fonts</dir>
+  <cachedir>${path.join(dir, 'cache')}</cachedir>
+</fontconfig>
+`);
+    process.env.FONTCONFIG_FILE = conf;
+    console.log(`card font: ${CARD_FONT_FAMILY} from ${ASSETS_DIR}`);
+  } catch (e) { console.error('card font setup failed:', e.message); }
+})();
 const W = 1200, H = 630, R = 300;
 
 // Палитра Noir — та же, что в мини-приложении, чтобы картинка не выглядела
