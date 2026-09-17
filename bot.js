@@ -242,7 +242,7 @@ async function openDestination(chatId, lang, from, code) {
 // не передаёт в него initData. Поэтому отвечаем сообщением с inline-кнопкой —
 // у неё авторизация работает.
 const OPEN_APP = {
-  fantasy:{ path:'/fantasy', ru:'✨ Открыть Fantasy', en:'✨ Open Fantasy',
+  fantasy:{ path:'/league?tab=fantasy', ru:'✨ Открыть Fantasy', en:'✨ Open Fantasy',
             tru:'Тестовая Fantasy League: соберите команду и проверьте правила.', ten:'Fantasy League test: build a squad and try the rules.' },
   league: { path:'/league',            ru:'🏆 Открыть лигу',      en:'🏆 Open the league',
             tru:'Таблицы, годовая гонка, игроки и история матчей.', ten:'Tables, Yearly Race, players and match history.' },
@@ -784,6 +784,7 @@ export async function handleMessage(msg) {
   if (text === '/menu' && isPrivate) return sendMain(chatId, lang, from);
   if (text === '/avatar' && isPrivate) return showAvatarGallery(chatId, from.id);
   if (text === '/results' && isPrivate) return sendResultsSettings(chatId, lang, from.id);
+  if (text === '/fantasy' && isPrivate) return sendOpenApp(chatId, lang, 'fantasy');
   if (text === '/match' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'open');
   if (text === '/result' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'res');
   if (text === '/book' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'book');
