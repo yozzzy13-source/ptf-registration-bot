@@ -72,6 +72,12 @@ export const editMessageText = (chat_id, message_id, text, opts={}) => call('edi
   chat_id, message_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...opts
 });
 export const answerCallbackQuery = (callback_query_id, text='', show_alert=false) => call('answerCallbackQuery', { callback_query_id, text, show_alert });
+// Правка уже отправленного сообщения. Картинку меняем по file_id — тогда это
+// обычный JSON-запрос, без загрузки файла заново. Телеграм разрешает боту
+// править свои сообщения только первые 48 часов.
+export const editMessageMedia = (chat_id, message_id, media, opts={}) => call('editMessageMedia', { chat_id, message_id, media, ...opts });
+export const editMessageCaption = (chat_id, message_id, caption, opts={}) => call('editMessageCaption', { chat_id, message_id, caption, parse_mode: 'HTML', ...opts });
+export const deleteMessage = (chat_id, message_id) => call('deleteMessage', { chat_id, message_id });
 export const sendPhoto = (chat_id, photo, opts={}) => call('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...opts });
 export const sendDocument = (chat_id, document, opts={}) => call('sendDocument', { chat_id, document, parse_mode: 'HTML', ...opts });
 export const sendVideo = (chat_id, video, opts={}) => call('sendVideo', { chat_id, video, parse_mode: 'HTML', ...opts });
@@ -228,6 +234,8 @@ export const ADMIN_COMMAND_LIST = [
   { cmd:'topic_backfill', group:'Настройка', short:'Добрать темы', args:'[сколько]',
     help:'завести темы тем, кто уже взаимодействовал, но темы не получил; по умолчанию 25 за раз' },
   { cmd:'topic_test',   group:'Настройка', short:'Проверка топиков', help:'проверка вебхука и топиков игроков' },
+  { cmd:'fix_result',   group:'Матчи', short:'Перевыпустить карточку результата', args:'<id сообщения> [id матча]',
+    help:'заменить картинку, текст и кнопки у уже опубликованного результата в ленте; id сообщения — последнее число в ссылке на пост, править можно первые 48 часов' },
   { cmd:'match_test',   group:'Настройка', short:'Проверка таблиц', help:'таблицы матчей, таблицы лиги и реестр дивизионов; заодно перечитывает реестр' },
   { cmd:'avatar',       group:'Прочее', short:'Мои варианты аватарки', help:'мои варианты аватарки' },
   { cmd:'help',         group:'Прочее', short:'Все команды', help:'этот список' },
