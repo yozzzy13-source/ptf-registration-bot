@@ -91,6 +91,28 @@ margin:0 0 10px 2px;display:flex;align-items:center;gap:8px}
 box-shadow:inset 0 1px 0 var(--hair)}
 .card h3{font-size:13.5px;font-weight:800;letter-spacing:.2px;margin-bottom:11px}
 .panel{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.invite{padding:18px 16px 32px;max-width:560px;margin:0 auto}
+.ivHead{padding:20px;border-radius:20px;border:1px solid var(--accLine);background:linear-gradient(160deg,var(--accBg2),transparent 70%),var(--surf)}
+.ivKicker{font-size:10px;letter-spacing:.22em;color:var(--mute);font-weight:800}
+.ivHead h2{margin:8px 0 8px;font-size:22px;line-height:1.2;color:var(--text)}
+.ivHead p{margin:0;font-size:14px;line-height:1.55;color:var(--dim)}
+.ivList{list-style:none;padding:0;margin:16px 0 0}
+.ivList li{position:relative;padding:9px 0 9px 22px;font-size:14px;color:var(--dim);border-bottom:1px solid var(--line2)}
+.ivList li:last-child{border-bottom:0}
+.ivList li:before{content:'';position:absolute;left:4px;top:16px;width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.ivBtn{display:block;width:100%;margin-top:18px;padding:16px;border:0;border-radius:16px;font-size:16px;font-weight:900;color:#1A1208;background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer}
+.ivNote{margin-top:10px;font-size:12px;color:var(--mute);text-align:center;line-height:1.5}
+.ivGrp{margin:22px 0 8px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--mute);font-weight:800}
+.ivEv{padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--surf);margin-bottom:10px}
+.ivEv.past{opacity:.55}
+.ivEvName{font-size:15px;font-weight:800;color:var(--text)}
+.ivEvRow{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
+.ivTag{display:inline-block;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800;color:var(--mute);border:1px solid var(--line3);background:var(--card2)}
+.ivTag.live{color:var(--win);border-color:var(--goLine);background:rgba(143,191,154,.12)}
+.ivTag.wait{color:var(--amber);border-color:var(--accLine);background:var(--accBg)}
+.ivTag.past{color:var(--mute2)}
+.ivPast{margin-top:14px}
+.ivPast summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--mute);margin-bottom:10px}
 .empty{color:var(--mute);font-size:13.5px;text-align:center;padding:26px 10px;line-height:1.55}
 .hint{color:var(--mute);font-size:11.5px;line-height:1.5}
 .cnt{color:var(--mute2);font-size:10.5px;margin:0 0 10px 2px;font-weight:600}
@@ -2655,7 +2677,7 @@ var asQ=(new URLSearchParams(location.search).get('as')||'').trim();
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
-    if(!j.ok)throw new Error(j.error||(L?'Ошибка':'Error'));
+    if(!j.ok)throw new Error(j.code||j.error||(L?'Ошибка':'Error'));
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy);
     if(fantasyData){
       var fs={};(fantasyData.players||[]).forEach(function(fp){fs[nameKey(fp.name)]={points:(fp.score&&fp.score.total)||0,teams:fp.selected_by||0}});
@@ -2721,9 +2743,56 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
     // Из бота приходит имя, а не id витрины: в сообщении о результате id нет.
     else if((qs.get('player_name')||'').trim())openPlayerByName((qs.get('player_name')||'').trim(),backFor);
   }).catch(function(e){
-    var profileNeeded=String(e.message||'')==='profile_required';
-    $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(profileNeeded?(L?'Чтобы открыть интерфейс лиги, заполните анкету.':'Complete your profile to open the League interface.'):e.message)+'</div>'+(profileNeeded?'<div style="padding:0 16px"><button class="primary" onclick="location.href=\'/apply?mode=profile\'+tokQ">'+esc(L?'Заполнить анкету':'Complete profile')+'</button></div>':'');
+    if(String(e.message||'')==='profile_required')return renderInvite();
+    $('viewHome').innerHTML='<div class="empty" style="color:var(--lose)">'+esc(e.message)+'</div>';
   });
+
+// Экран для того, кто ещё не в лиге. Раньше здесь была строка об ошибке, и
+// человек упирался в тупик: внутрь не пускают, а что делать — не сказано.
+// Теперь это приглашение: что такое лига, что открывается после анкеты, какие
+// события идут и куда открыт набор. Про Fantasy не пишем — он только для
+// участников лиги.
+function inviteEventCard(ev){
+  var s=String(ev.status_code||ev.status||'open').toLowerCase();
+  var name=L?(ev.event_name_ru||ev.event_name_en||ev.event_name||''):(ev.event_name_en||ev.event_name_ru||ev.event_name||'');
+  var label=s==='live'?(L?'Идёт сейчас':'Live now')
+    :s==='waitlist'?(L?'Лист ожидания':'Waitlist')
+    :s==='archived'?(L?'Завершено':'Finished'):(L?'Открыт набор':'Registration open');
+  var cls=s==='archived'?'past':(s==='waitlist'?'wait':'live');
+  var dates=[ev.start_date||'',ev.end_date||''].filter(Boolean).map(function(d){
+    var x=new Date(d);return isNaN(x.getTime())?String(d):x.toLocaleDateString(L?'ru-RU':'en-US',{day:'numeric',month:'short'});
+  }).join(' — ');
+  return '<div class="ivEv'+(s==='archived'?' past':'')+'"><div class="ivEvName">'+esc(name)+'</div>'
+    +'<div class="ivEvRow"><span class="ivTag '+cls+'">'+esc(label)+'</span>'
+    +(dates?'<span class="ivTag">'+esc(dates)+'</span>':'')+'</div></div>';
+}
+function renderInvite(){
+  var wrap=$('viewHome');
+  var perks=L?['Витрина игроков: карточки, уровень, статистика','Таблицы дивизионов и годовая гонка','История матчей лиги','Заявки на события и лист ожидания']
+             :['Player showcase: cards, level, statistics','Division tables and the Yearly Race','League match history','Event applications and the waitlist'];
+  var h='<div class="invite">'
+    +'<div class="ivHead"><div class="ivKicker">PHUKET TENNIS FAMILY</div>'
+    +'<h2>'+esc(L?'Лига открывается после анкеты':'The League opens after your profile')+'</h2>'
+    +'<p>'+esc(L?'Анкета занимает пару минут. После неё открывается интерфейс лиги, а заявку на событие или лист ожидания можно оставить там же.'
+                :'The form takes a couple of minutes. After it the League interface opens, and you can apply for an event or join the waitlist right there.')+'</p></div>'
+    +'<ul class="ivList">'+perks.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul>'
+    +'<button class="ivBtn" onclick="location.href=\'/apply?mode=profile\'+(tokQ||\'\')">'+esc(L?'Заполнить анкету':'Complete the profile')+'</button>'
+    +'<div class="ivNote">'+esc(L?'Анкета уже заполнена? Доступ откроется, как только организатор внесёт вас в состав.'
+                                 :'Already completed it? Access opens as soon as the organiser adds you to the line-up.')+'</div>'
+    +'<div id="ivEvents"></div></div>';
+  wrap.innerHTML=h;
+  fetch('/api/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      var list=(j&&(j.all_events||j.events))||[];
+      if(!list.length)return;
+      var by=function(s){return list.filter(function(ev){return String(ev.status_code||ev.status||'open').toLowerCase()===s})};
+      var live=by('live'),open=by('open'),wait=by('waitlist'),past=by('archived');
+      var sec=function(title,rows){return rows.length?('<div class="ivGrp">'+esc(title)+'</div>'+rows.map(inviteEventCard).join('')):''};
+      var out=sec(L?'Идут сейчас':'Live now',live)+sec(L?'Открыт набор':'Registration open',open)+sec(L?'Лист ожидания':'Waitlist',wait);
+      if(past.length)out+='<details class="ivPast"><summary>'+esc(L?'Уже прошли':'Past events')+' ('+past.length+')</summary><div>'+past.map(inviteEventCard).join('')+'</div></details>';
+      var box=$('ivEvents');if(box)box.innerHTML=out;
+    }).catch(function(){});
+}
 </script>
 </body>
 </html>

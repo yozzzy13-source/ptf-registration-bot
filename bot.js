@@ -253,11 +253,28 @@ const OPEN_APP = {
   waitlist:{ path:'/apply?mode=waitlist',ru:'📝 Лист ожидания',    en:'📝 Join waitlist',
             tru:'Заполните анкету для листа ожидания следующего сезона. Места в каждом сезоне ограничены, а участники листа получают информацию и приоритет раньше других.',ten:'Complete your profile for the next-season waitlist. Every season has limited places; waitlist players receive updates and priority first.' }
 };
+// Разделы, которые без анкеты всё равно не откроются. Раньше бот отправлял
+// кнопку, приложение отвечало отказом — и человек оставался ни с чем. Теперь
+// сразу объясняем, что первый шаг — анкета, и ведём на неё. Про Fantasy тут не
+// говорим: он доступен только участникам лиги.
+const NEEDS_PROFILE = new Set(['league','fantasy']);
+async function sendProfileInvite(chatId, ru) {
+  return sendMessage(chatId, ru
+    ? '🎾 <b>Интерфейс лиги открывается после анкеты.</b>\n\nЗаполнение занимает пару минут. После него открываются:\n• витрина игроков с карточками и статистикой\n• таблицы дивизионов и годовая гонка\n• история матчей лиги\n• заявки на события и лист ожидания следующего сезона'
+    : '🎾 <b>The League interface opens after your profile.</b>\n\nIt takes a couple of minutes. After that you get:\n• the player showcase with cards and statistics\n• division tables and the Yearly Race\n• league match history\n• event applications and the next-season waitlist',
+    { reply_markup: { inline_keyboard: [[{ text: ru ? '📝 Заполнить анкету' : '📝 Complete the profile', web_app: { url: `${PUBLIC_URL}/apply?mode=profile` } }]] } });
+}
 async function sendOpenApp(chatId, lang, key) {
   const l = fallbackLang(lang);
   const d = OPEN_APP[key];
   if (!d) return sendMain(chatId, l, null);
   const ru = l === 'ru';
+  if (NEEDS_PROFILE.has(key)) {
+    try {
+      const profile = await findApplicantByTelegramId(chatId);
+      if (!isProfileCompleted(profile)) return sendProfileInvite(chatId, ru);
+    } catch (e) { console.error('profile check failed:', e.message); }
+  }
   return sendMessage(chatId, ru ? d.tru : d.ten, {
     reply_markup: { inline_keyboard: [[{ text: ru ? d.ru : d.en, web_app: { url: `${PUBLIC_URL}${d.path}` } }]] }
   });

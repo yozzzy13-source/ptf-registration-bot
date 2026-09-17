@@ -850,11 +850,46 @@ export async function getBotText(text_key, language='en') {
   return rows.find(r => r.text_key === text_key && r.language === lang) || rows.find(r => r.text_key === text_key && r.language === 'en') || null;
 }
 
-export async function getActiveEvents() {
+// Статусы событий. В таблице Events организатор пишет их по-разному, поэтому
+// сводим написания к четырём состояниям и больше ничего не выдумываем:
+//   open     — набор открыт, заявку оставить можно;
+//   live     — идёт сейчас, заявок не принимаем;
+//   waitlist — набор в следующий сезон, можно встать в лист ожидания;
+//   archived — прошло: карточку показываем, набора нет.
+export const EVENT_STATUS = { open:'open', live:'live', waitlist:'waitlist', archived:'archived' };
+const EVENT_STATUS_ALIASES = {
+  open:['open','active','registration_open','registration','signup','набор','открыт','открыта'],
+  live:['live','running','in_progress','started','ongoing','идёт','идет','в процессе'],
+  waitlist:['waitlist','wait_list','next_season','upcoming','queue','лист ожидания','ожидание','следующий сезон'],
+  archived:['archived','archive','closed','finished','done','past','completed','архив','завершено','закрыто','прошло']
+};
+export function canonicalEventStatus(value = '') {
+  const v = safe(value).toLowerCase().replace(/[\s-]+/g, '_');
+  if (!v) return EVENT_STATUS.open;
+  for (const [key, list] of Object.entries(EVENT_STATUS_ALIASES)) {
+    if (list.some(a => a.replace(/[\s-]+/g, '_') === v)) return key;
+  }
+  return EVENT_STATUS.archived;
+}
+// Можно ли оставить заявку на событие с таким статусом.
+export function eventJoinable(status = '') {
+  const s = canonicalEventStatus(status);
+  return s === EVENT_STATUS.open || s === EVENT_STATUS.waitlist;
+}
+
+// Все события с приведённым статусом — для витрины: новичку показываем и то,
+// что уже прошло, чтобы он видел живую лигу, а не пустой экран.
+export async function getAllEvents() {
   const { rows } = await getRows(SHEETS.events, { useCache:false });
   return rows
-    .filter(r => ['active','open','registration_open'].includes(safe(r.status)))
+    .filter(r => safe(r.event_id) || safe(r.event_name) || safe(r.event_name_en) || safe(r.event_name_ru))
+    .filter(r => !['hidden','draft','no','false','0'].includes(safe(r.visible).toLowerCase()) && safe(r.status).toLowerCase() !== 'hidden')
+    .map(r => ({ ...r, status_code: canonicalEventStatus(r.status), joinable: eventJoinable(r.status) }))
     .sort((a,b) => Number(a.sort_order || 999) - Number(b.sort_order || 999));
+}
+
+export async function getActiveEvents() {
+  return (await getAllEvents()).filter(r => r.joinable);
 }
 
 export async function getPaymentMethods() {

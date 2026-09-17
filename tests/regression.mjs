@@ -424,4 +424,19 @@ check((await sheets.getGroupButtons('applied')).length===0,'Слово none по
 await sheets.setSetting('btns_applied','');
 await sheets.setSetting('kb_applied','');
 
+// Статусы событий: витрина новичка показывает всё, заявку принимаем не везде.
+check(sheets.canonicalEventStatus('active')==='open'&&sheets.canonicalEventStatus('registration_open')==='open','Открытый набор читается одинаково при любом написании');
+check(sheets.canonicalEventStatus('Live')==='live'&&sheets.canonicalEventStatus('in progress')==='live','Идущее событие читается как live');
+check(sheets.canonicalEventStatus('next_season')==='waitlist'&&sheets.canonicalEventStatus('лист ожидания')==='waitlist','Набор в следующий сезон читается как лист ожидания');
+check(sheets.canonicalEventStatus('finished')==='archived'&&sheets.canonicalEventStatus('что-то своё')==='archived','Завершённое и незнакомое читаются как архив');
+check(sheets.eventJoinable('open')&&sheets.eventJoinable('waitlist')&&!sheets.eventJoinable('live')&&!sheets.eventJoinable('closed'),'Заявку принимаем только в открытый набор и в лист ожидания');
+// Новичку без анкеты интерфейс лиги отвечает кодом, а не общей ошибкой:
+// по коду он показывает приглашение заполнить анкету.
+const invite = await request('get','/api/league/bootstrap','777');
+check(invite.code===403&&(invite.body?.code==='profile_required'||invite.body?.error==='profile_required'),'Без анкеты лига отдаёт код profile_required, а не переведённый текст');
+const leagueHtml = await fs.readFile(path.join(root,'public/league.html'),'utf8');
+check(leagueHtml.includes('function renderInvite()')&&!/renderInvite[\s\S]{0,1200}Fantasy/.test(leagueHtml.split('function renderInvite()')[1]?.slice(0,1200)||''),'Экран приглашения есть и не рассказывает про Fantasy');
+const applyHtml = await fs.readFile(path.join(root,'public/apply.html'),'utf8');
+check(applyHtml.includes('function renderIntro()')&&applyHtml.includes('introEvents'),'Стартовый экран анкеты показывает витрину событий');
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
@@ -30,6 +30,11 @@ import { uiError } from './ui-errors.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Служебные коды: интерфейс показывает по ним свой экран, поэтому наружу они
+// уходят как есть, без перевода в человеческий текст.
+// Остальные коды по-прежнему переводятся; сам код всегда едет отдельным полем code.
+const UI_CODES = new Set(['profile_required']);
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -49,7 +54,14 @@ app.use('/api', async (req,res,next) => {
   res.json = body => {
     if (body && typeof body === 'object' && !Array.isArray(body)) {
       body = { ...body, lang:body.lang || lang };
-      if (body.error) { console.error('API error:',req.path,body.error); body.error = uiError(body.error,lang); }
+      if (body.error) {
+        console.error('API error:',req.path,body.error);
+        // Коды, на которые интерфейс отвечает своим экраном, а не текстом ошибки,
+        // переводить нельзя: перевод превращал их в общее «не удалось выполнить»,
+        // и новый игрок вместо приглашения заполнить анкету упирался в тупик.
+        body.code = body.error;
+        if (!UI_CODES.has(body.error)) body.error = uiError(body.error,lang);
+      }
       if (body.warning) body.warning = uiError(body.warning,lang);
     }
     return json(body);
@@ -168,9 +180,13 @@ app.get('/api/bootstrap', async (req, res) => {
     const user = who.ok ? who.user : null;
     const existingProfile = user ? await findApplicantByTelegramIdentity(user) : null;
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en';
-    const events = await getActiveEvents();
-    const enrichedEvents = await enrichEventsWithStats(events);
-    res.json({ ok: true, user, lang, language_required: !existingProfile?.language, events: enrichedEvents, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
+    // Витрина новичка: показываем и то, что идёт, и то, что прошло — иначе
+    // экран выглядит пустым и непонятно, живая ли лига вообще. Заявку по-прежнему
+    // можно оставить только туда, где набор открыт.
+    const allEvents = await getAllEvents();
+    const enrichedAll = await enrichEventsWithStats(allEvents);
+    const enrichedEvents = enrichedAll.filter(e => e.joinable);
+    res.json({ ok: true, user, lang, language_required: !existingProfile?.language, events: enrichedEvents, all_events: enrichedAll, usdtAmount: DEFAULT_USDT_AMOUNT, existingProfile, profileCompleted: isProfileCompleted(existingProfile) });
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }
