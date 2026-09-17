@@ -543,7 +543,7 @@ background:linear-gradient(180deg,transparent,rgba(17,16,16,.75) 58%,var(--surf)
 .hero .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
 .fline{display:flex;gap:4px;align-items:center;margin-top:11px}
 .fline .lb{font-size:8.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin-right:5px}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}.stt.tap{cursor:pointer}.stt.on{border-color:var(--accLine);background:var(--accBg)}.stt .qm{font-style:normal;font-size:8.5px;opacity:.5;border:1px solid currentColor;border-radius:999px;padding:0 3px;vertical-align:top}.stnote{margin-top:9px;font-size:11.5px;line-height:1.55;color:var(--dim);background:var(--tile2);border:1px solid var(--line2);border-radius:11px;padding:9px 11px}
 .stt{background:var(--surf2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .stt .k{font-size:8.5px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800}
 .stt .v{font-size:18px;font-weight:800;margin-top:3px;letter-spacing:-.5px}
@@ -682,7 +682,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   wBalance:'Депозит',wEmpty:'Операций пока нет',wTopup:'Пополнить',wOwn:'Своя сумма',wGo:'Пополнить',
   wSent:'Счёт на пополнение отправлен в бот',wMin:'Минимум {n} ฿',
   wNote:'После перевода пришли скриншот в бот — организатор подтвердит, и деньги появятся здесь.',
-  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Собери команду из игроков всех дивизионов и следи за всей лигой. Здесь будут отдельные рейтинги Fantasy-команд и игроков.',fantasyTeams:'Команд выбрали',fantasyPoints:'Fantasy-очки',fantasyTeamRank:'Команды Fantasy',fantasyPlayerRank:'Игроки Fantasy',fantasyOpen:'Открыть Fantasy',fantasyPreview:'Предпросмотр: участие и сохранение составов пока закрыты.',fantasyEmpty:'Данных Fantasy пока нет.',fantasyOwner:'Автор',
+  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Собери команду из игроков всех дивизионов и следи за всей лигой. Здесь будут отдельные рейтинги Fantasy-команд и игроков.',fantasyTeams:'Команд выбрали',fantasyPoints:'FP',fantasyTeamRank:'Команды Fantasy',fantasyPlayerRank:'Игроки Fantasy',fantasyOpen:'Открыть Fantasy',fantasyPreview:'Предпросмотр: участие и сохранение составов пока закрыты.',fantasyEmpty:'Данных Fantasy пока нет.',fantasyOwner:'Автор',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Сезон',
@@ -709,7 +709,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   howDiv:'В дивизионе играют круговой турнир: каждый с каждым. За победу даются очки, места распределяются по очкам, при равенстве — по разнице сетов и геймов. Первые места выходят в плей-офф, последние опускаются дивизионом ниже.',
   players:'Игроков',matchesN:'Матчей',leader:'Лидер',
   colNo:'#',colPlayer:'Игрок',colM:'М',colW:'П',colWR:'WR',colPts:'Очки',
-  sMatches:'Матчи',sWins:'Победы',sPoints:'Очки',sWL:'Победы — поражения',sWR:'Процент побед',
+  sMatches:'Матчи',sWins:'Победы',sPoints:'YRP',sPointsFull:'Очки гонки (YRP)',sWL:'Победы — поражения',sWR:'Процент побед',
   sDivPos:'в дивизионе',sSeasonNow:'LIVE',avOpen:'Изменить аватарку',
   sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
   detail:'Подробно',tile:'Плитка',ntrp:'NTRP',exp:'Опыт',
@@ -741,7 +741,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   wBalance:'Deposit',wEmpty:'No operations yet',wTopup:'Top up',wOwn:'Custom amount',wGo:'Top up',
   wSent:'Top-up invoice sent to the bot',wMin:'Minimum {n} ฿',
   wNote:'After the transfer send the screenshot to the bot — once confirmed the money appears here.',
-  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Build a squad across every division and follow the whole league. Fantasy teams and players have their own standings here.',fantasyTeams:'Selected by teams',fantasyPoints:'Fantasy points',fantasyTeamRank:'Fantasy teams',fantasyPlayerRank:'Fantasy players',fantasyOpen:'Open Fantasy',fantasyPreview:'Preview: squad entry and saving are still closed.',fantasyEmpty:'No Fantasy data yet.',fantasyOwner:'Owner',
+  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Build a squad across every division and follow the whole league. Fantasy teams and players have their own standings here.',fantasyTeams:'Selected by teams',fantasyPoints:'FP',fantasyTeamRank:'Fantasy teams',fantasyPlayerRank:'Fantasy players',fantasyOpen:'Open Fantasy',fantasyPreview:'Preview: squad entry and saving are still closed.',fantasyEmpty:'No Fantasy data yet.',fantasyOwner:'Owner',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Season',
@@ -768,7 +768,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   howDiv:'A division plays a round robin: everyone against everyone. Wins bring points, places are decided by points and then by set and game difference. The top places go to the play-offs, the bottom ones drop a division.',
   players:'Players',matchesN:'Matches',leader:'Leader',
   colNo:'#',colPlayer:'Player',colM:'M',colW:'W',colWR:'WR',colPts:'Pts',
-  sMatches:'Matches',sWins:'Wins',sPoints:'Points',sWL:'Wins — losses',sWR:'Win rate',
+  sMatches:'Matches',sWins:'Wins',sPoints:'YRP',sPointsFull:'Yearly Race points (YRP)',sWL:'Wins — losses',sWR:'Win rate',
   sDivPos:'in division',sSeasonNow:'live',avOpen:'Change avatar',
   sortTip:'Tap a column header to sort',
   detail:'Detailed',tile:'Tiles',ntrp:'NTRP',exp:'Experience',
@@ -894,7 +894,7 @@ function myFantasyMarks(name){
 // в глаза.
 function fantasyBadges(p){
   var f=fantasyPlayer(p);if(!f)return '';
-  return '<div class="fanmeta">✨ '+esc(f.points)+' '+esc(L?'очков':'pts')+' · '+esc(L?'команд':'teams')+' '+esc(f.teams)+' · '+esc(L?'место':'rank')+' #'+esc(f.place)+'</div>';
+  return '<div class="fanmeta">✨ '+esc(f.points)+' FP · '+esc(L?'команд':'teams')+' '+esc(f.teams)+' · '+esc(L?'место':'rank')+' #'+esc(f.place)+'</div>';
 }
 var fanBlockOpen=false;
 var PT_LABELS_LEAGUE={appearance:['Участие','Appearance'],win:['Победа','Win'],sets:['Сеты','Sets'],games:['Геймы','Games'],straight:['Победа 2:0','Straight win'],bagels:['«Сухие» сеты','Bagel sets'],upset:['Апсет','Upset'],technical:['Техническая победа','Walkover']};
@@ -913,7 +913,7 @@ function fanMatchBreakdown(details){
 function fantasyBlock(p){
   var f=fantasyPlayer(p);if(!f)return '';
   return '<div class="card fantasy-player-card"><div class="fanblock-hd" onclick="toggleFanBlock()" aria-expanded="'+fanBlockOpen+'"><h3>✨ '+esc(X.tFantasy)+'</h3><span class="fanchev">'+(fanBlockOpen?'▲':'▼')+'</span></div>'
-    +'<div class="fantasy-stats-head"><span>Points</span><span>Teams</span><span>Rank</span></div>'
+    +'<div class="fantasy-stats-head"><span>FP</span><span>'+esc(L?'Команд':'Teams')+'</span><span>'+esc(L?'Место':'Rank')+'</span></div>'
     +'<div class="fantasy-stats-row"><b>'+esc(f.points)+'</b><b>'+esc(f.teams)+'</b><b>#'+esc(f.place)+'</b></div>'
     +(fanBlockOpen?fanMatchBreakdown(f.details):'')
     +'<button class="website-link-hidden" onclick="event.stopPropagation();showTab(\'fantasy\')">'+esc(L?'Открыть Fantasy':'Open Fantasy')+'</button></div>';
@@ -1396,6 +1396,23 @@ function renderWallet(){
 function shortDate(v){
   var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||''));
   return m?(m[3]+'.'+m[2]):String(v||'').slice(0,10);
+}
+// Единый вид даты матча: число и месяц, без года. Раньше в предстоящих и
+// сыгранных дата выглядела по-разному, потому что в таблицы её пишут кто во что
+// горазд — где-то ISO, где-то с точками. Разбираем оба вида, остальное
+// показываем как есть, чтобы не потерять данные.
+var MONTHS_SHORT={ru:['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'],
+                  en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']};
+function matchDate(v){
+  var t=String(v||'').trim();
+  if(!t)return '';
+  var d=null,mo=null;
+  var iso=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  var dot=/^(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/.exec(t);
+  if(iso){ d=Number(iso[3]); mo=Number(iso[2]); }
+  else if(dot){ d=Number(dot[1]); mo=Number(dot[2]); }
+  if(!d||!mo||mo<1||mo>12)return t;
+  return d+' '+MONTHS_SHORT[L?'ru':'en'][mo-1];
 }
 function toggleWallet(){ walletOpen=!walletOpen;renderWallet();
   if(walletOpen)$('walletPanel').scrollIntoView({behavior:'smooth',block:'nearest'}) }
@@ -1902,7 +1919,7 @@ function playerRow(p){
   return '<div class="pr" onclick="openPlayer(\''+q(p.id)+'\',\'players\')"><div class="top">'
     +'<div class="ph">'+av(p)+'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p)+'</div>'
     +'<div><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
-    +'<div class="rw">'+divChip(p.division)+statusBadge(p)+'</div>'
+    +'<div class="rw">'+divChip(p.division,p.division_position)+statusBadge(p)+'</div>'
     +'<div class="meta">'+(p.ntrp?'<span>'+esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b></span>':'')
       +(p.nationality?'<span>'+flag(p.nationality)+' <b>'+esc(p.nationality)+'</b></span>':'')
       +(p.experience?'<span>'+esc(X.exp)+' <b>'+esc(p.experience)+'</b></span>':'')+'</div>'
@@ -1921,7 +1938,7 @@ function playerTile(p){
   return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'players\')">'+av(p)
     +'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p,'ach2')
     +'<div class="bd"><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
-    +'<div class="rw">'+divChip(p.division)+'</div>'
+    +'<div class="rw">'+divChip(p.division,p.division_position)+'</div>'
     +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
       +(p.ntrp?esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b> · ':'')+'WR <b>'+w+'%</b></div>'+fantasyBadges(p)
     +'<div class="bg"><i style="width:'+w+'%"></i></div>'
@@ -1946,7 +1963,7 @@ function crossGroupBlock(groups){
   if(!all.length)return '';
   all.sort(function(a,b){return String(a.date||'9999').localeCompare(String(b.date||'9999'))||String(a.player_1||'').localeCompare(String(b.player_1||''))});
   var title=L?'Межгрупповые матчи':'Cross-group matches';
-  var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):'',middle=done?'<s>'+esc(score)+'</s>':'<i class="cross-vs">vs</i>';var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(m.date):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> '+middle+' <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
+  var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):'',middle=done?'<s>'+esc(score)+'</s>':'<i class="cross-vs">vs</i>';var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(matchDate(m.date)):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> '+middle+' <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
   return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
 }
 function playoffStages(po){
@@ -2161,7 +2178,7 @@ function setFDiv(d){fDiv=d;fLimit=20;renderFeed()}
 function setFQuery(v){fQuery=v;fLimit=20;renderFeed()}
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
-  var top=[m.no?'#'+m.no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+  var top=[m.no?'#'+m.no:'',matchDate(m.date),m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   // В ленте ярлык дивизиона стоит по центру под счётом — второй, в углу,
   // был дублем. Угловой остаётся только в карточке игрока.
   return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
@@ -2472,14 +2489,22 @@ function seasonRowsWithLive(p,byTable){
   var now=live.length?Math.max.apply(null,live):Number(season||0);
   if(!now)return rows;
   var found=rows.filter(function(r){return r.n===now})[0];
-  if(found){ found.live=true; return rows }
+  if(found){
+    found.live=true;
+    // История матчей приезжает из витрины и отстаёт; матчи и победы текущего
+    // сезона берём из живой таблицы дивизиона, если там больше.
+    if(Number(p.matches||0)>Number(found.g||0))found.g=Number(p.matches||0);
+    if(Number(p.wins||0)>Number(found.w||0))found.w=Number(p.wins||0);
+    if(!found.place&&p.division_position)found.place=p.division_position;
+    return rows;
+  }
   var hit=(byTable||{})[String(now)];
   if(!hit&&seasonHasTables(now))return rows;
   var s=seasonOf(now);
   // Очки гонки за идущий сезон появятся, когда организатор их проставит, —
   // выдумывать их из таблицы дивизиона нельзя, шкала другая.
   rows.unshift({n:now,name:(s&&s.label)||((L?'Сезон ':'Season ')+now),division:(hit&&hit.division)||p.division||'',
-    g:0,w:0,place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
+    g:Number(p.matches||0),w:Number(p.wins||0),place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
   return rows;
 }
 function renderPlayer(p){
@@ -2500,12 +2525,12 @@ function renderPlayer(p){
       +(fp?'<span class="badge fanpos" onclick="event.stopPropagation();showTab(\'fantasy\')">✨ Fantasy #'+esc(fp.place)+'</span>':'')+'</div>'
     +(p.form&&p.form.length?'<div class="fline"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
-      +stt(X.sPoints,p.points||'',true)+stt(X.sMatches,p.matches||'')
-      +(fp?stt(X.fantasyPoints,fp.points,true)+stt(X.fantasyTeams,fp.teams):'')
-      +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0))+stt(X.sWR,w+'%')
-      +stt(X.ntrp,p.ntrp||'')+stt(X.exp,p.experience||'')
-      +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''))
-    +'</div></div></div>';
+      +stt(X.sPoints,p.points||'',true,'yrp')+stt(X.sMatches,p.matches||'','','matches')
+      +(fp?stt(X.fantasyPoints,fp.points,true,'fp')+stt(X.fantasyTeams,fp.teams,'','teams'):'')
+      +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0),'','wl')+stt(X.sWR,w+'%','','wr')
+      +stt(X.ntrp,p.ntrp||'','','ntrp')+stt(X.exp,p.experience||'','','exp')
+      +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''),'','country')
+    +'</div>'+statNote()+'</div></div>';
 
   var byTable=seasonPlacesOf(p.name,p.id);
   var srows=seasonRowsWithLive(p,byTable);
@@ -2560,7 +2585,34 @@ function renderPlayer(p){
   }
   $('viewCard').innerHTML=h;
 }
-function stt(k,v,acc){ return v?'<div class="stt"><div class="k">'+esc(k)+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>':'' }
+// Плашки под аватаркой. Очков в лиге стало много — YRP, FP, «выбрали команд» —
+// и без подписи не понять, что есть что. Поэтому каждая плашка кликается и
+// объясняет себя: коротко, своими словами, прямо под сеткой.
+var openStat='';
+var STAT_HELP={
+  yrp:['Очки годовой гонки. Начисляются за результаты в сезонах лиги и складываются в общий рейтинг года — это и есть таблица «Гонка».',
+       'Yearly Race points. Earned from league season results and added up into the year-long rating — the Race table.'],
+  matches:['Сколько матчей сыграно в текущем сезоне дивизиона.','Matches played in the current division season.'],
+  fp:['Fantasy Points. Начисляются игроку за его реальные матчи: победы, выигранные сеты и геймы. Эти очки получают все, кто взял его в свою Fantasy-команду.',
+      'Fantasy Points. Earned from the player\u2019s real matches: wins, sets and games won. Everyone who picked him for their Fantasy squad gets these points.'],
+  teams:['Сколько участников Fantasy взяли этого игрока в свой состав.','How many Fantasy players picked him for their squad.'],
+  wl:['Победы и поражения в текущем сезоне дивизиона.','Wins and losses in the current division season.'],
+  wr:['Доля выигранных матчей в текущем сезоне.','Share of matches won this season.'],
+  ntrp:['Уровень игры по шкале NTRP. Указывается самим игроком или по результатам теста.','NTRP playing level. Set by the player or from the rating test.'],
+  exp:['Сколько лет человек играет в теннис.','How long the player has been playing tennis.'],
+  country:['Страна, откуда игрок.','Where the player is from.']
+};
+function toggleStat(key){ openStat=(openStat===key?'':key); renderPlayer(byId(openId)); }
+function stt(k,v,acc,key){
+  if(v===''||v===null||v===undefined)return '';
+  var on=key&&openStat===key;
+  return '<div class="stt'+(on?' on':'')+(key?' tap':'')+'"'+(key?' onclick="toggleStat(\''+q(key)+'\')"':'')
+    +'><div class="k">'+esc(k)+(key?' <i class="qm">?</i>':'')+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>';
+}
+function statNote(){
+  if(!openStat||!STAT_HELP[openStat])return '';
+  return '<div class="stnote">'+esc(L?STAT_HELP[openStat][0]:STAT_HELP[openStat][1])+'</div>';
+}
 // Ярлык дивизиона на карточке матча: показывает, в каком дивизионе матч игрался,
 // и открывает таблицу того самого сезона.
 function divTag(division,season){
@@ -2577,7 +2629,7 @@ function matchRow(m){
   var meName=(byId(openId)||{}).name||'';
   var dv=divTag(divisionAt(m.season,meName,openId,m.opponent,m.opponent_id,m.division),m.season);
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
-  var top=[m.match_no?'#'+m.match_no:'',m.date,m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+  var top=[m.match_no?'#'+m.match_no:'',matchDate(m.date),m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
     +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result==='WIN'?'WIN':'LOST')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
@@ -2631,6 +2683,18 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
     // ?tab=race / ?division=B — чтобы кнопка из меню или рассылки открывала
     // приложение сразу на нужном разделе, а не на главной.
     var qs=new URLSearchParams(location.search);
+    // Ссылка из ленты результатов приходит как startapp=<что открыть>: обычных
+    // query-параметров в ней нет, Telegram кладёт полезную нагрузку отдельно.
+    // Раскладываем её в те же параметры, чтобы дальше всё работало как прежде.
+    try {
+      var sp=String((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||qs.get('tgWebAppStartParam')||'').trim();
+      if(sp){
+        var kind=sp.slice(0,2),raw=sp.slice(2);
+        var val=decodeURIComponent(escape(atob(raw.replace(/-/g,'+').replace(/_/g,'/'))));
+        if(kind==='p_'&&val)qs.set('player_name',val);
+        else if(kind==='d_'&&val){qs.set('tab','div');qs.set('division',val)}
+      }
+    } catch(e){ /* мусорный startapp просто игнорируем */ }
     var wantDiv=(qs.get('division')||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
     if(wantDiv&&divisions.indexOf(wantDiv)>=0)divLetter=wantDiv;
     var wantTab=(qs.get('tab')||'').trim().toLowerCase();

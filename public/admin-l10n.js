@@ -290,4 +290,4 @@ window.ADMIN_EN={
 };
 window.AUI=function(s){return window.PTF_LANG==='en'?(window.ADMIN_EN[s]||s):s};
 
-window.adminValue=function(s){if(window.PTF_LANG!=='ru')return s;return ({active:'Активен',inactive:'Неактивен',waitlist:'Лист ожидания',applied:'Подана заявка',new:'Новый',rejected:'Отклонено',paid:'Оплачено',unpaid:'Не оплачено',pending:'Ожидает проверки',received:'Получено',missing:'Нет',published:'Опубликовано',approved:'Подтверждено'})[String(s).toLowerCase()]||s};
+window.adminValue=function(s){if(window.PTF_LANG!=='ru')return s;return ({active:'Активен',inactive:'Неактивен',waitlist:'Лист ожидания',payment:'Оплата',applied:'Подана заявка',new:'Новый',rejected:'Отклонено',paid:'Оплачено',unpaid:'Не оплачено',pending:'Ожидает проверки',received:'Получено',missing:'Нет',published:'Опубликовано',approved:'Подтверждено'})[String(s).toLowerCase()]||s};
