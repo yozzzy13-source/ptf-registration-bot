@@ -96,7 +96,7 @@ function homeView() {
   let html='<section class="card clubhero"><h2>'+tr('PTF Fantasy','PTF Fantasy')+'</h2><p>'+tr('Открытое бесплатное соревнование между командами игроков лиги: вы и другие участники собираете команды из настоящих игроков PTF, и реальные матчи сезона приносят вам очки. Побеждает та команда, что наберёт больше всех.','An open, free competition between league players’ own teams: you and other players build squads of real PTF players, and their real matches this season earn you points. Whoever’s squad scores the most wins.')+'</p><div class="clubgrid"><div class="clubcell"><b>'+D.roster_size+'</b><span>'+tr('игроков','players')+'</span></div><div class="clubcell"><b>'+D.budget+'</b><span>'+tr('бюджет','budget')+'</span></div><div class="clubcell"><b>×'+D.scoring.captainMultiplier+'</b><span>'+tr('капитан','captain')+'</span></div></div>'+timing();
   if(!first)html+=editable()?button(local?.picks.length?tr('Продолжить команду','Continue team'):tr('Создать первую команду','Create first team'),'start','primary full','data-slot="1"'):'<div class="readonly">'+esc(windowMessage())+'</div>';
   html+='</section>';
-  for(const t of [first,second].filter(Boolean))html+='<section class="card"><div class="eyebrow">'+tr('Команда','Team')+' '+Number(t.team_slot||1)+'</div><h2>'+esc(t.team_name)+'</h2><p class="meta">'+esc(t.status==='locked'?tr('Подтверждена','Confirmed'):deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered'):tr('Черновик','Draft'))+' · '+(t.picks||[]).length+'/8 · <b>'+Number(t.points||0)+'</b> Fantasy Points</p>'+timing()+cards('team')+button(tr('Изменить команду','Edit team'),'start','primary full','data-slot="'+Number(t.team_slot||1)+'"')+'</section>';
+  for(const t of [first,second].filter(Boolean))html+='<section class="card"><div class="eyebrow">'+tr('Команда','Team')+' '+Number(t.team_slot||1)+'</div><h2>'+esc(t.team_name)+'</h2><p class="meta">'+esc(t.status==='locked'?tr('Подтверждена','Confirmed'):deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered'):tr('Черновик — не в рейтинге, подтвердите состав','Draft — not in the standings, confirm your squad'))+' · '+(t.picks||[]).length+'/8 · <b>'+Number(t.points||0)+'</b> Fantasy Points</p>'+timing()+cards('team')+button(tr('Изменить команду','Edit team'),'start','primary full','data-slot="'+Number(t.team_slot||1)+'"')+'</section>';
   if(first&&!second&&editable())html+=button(tr('Создать вторую команду','Create second team'),'start','secondary full','data-slot="2"');
   return html+'<details class="card rules"><summary>'+tr('Откуда берутся очки','Where points come from')+'</summary><p>'+esc(rule('intro'))+'</p><p>'+esc(rule('squad'))+'</p><p>'+esc(rule('scoring'))+'</p><p>'+esc(rule('locking'))+'</p></details>';
 }
@@ -247,7 +247,7 @@ function teamView() {
   const t=team();
   if(!t)return homeView();
   const locked=t.status==='locked';
-  return '<section class="card"><h2>'+esc(t.team_name)+'</h2><p class="meta">'+(locked?tr('Подтверждена','Confirmed'):tr('Черновик','Draft'))+' · '+Number(t.points||0)+' Fantasy Points</p>'+timing()+
+  return '<section class="card"><h2>'+esc(t.team_name)+'</h2><p class="meta">'+(locked?tr('Подтверждена','Confirmed'):tr('Черновик — не в рейтинге, подтвердите состав','Draft — not in the standings, confirm your squad'))+' · '+Number(t.points||0)+' Fantasy Points</p>'+timing()+
     (deadlineReached(D)?'<div class="readonly">'+(locked?tr('Состав закрыт. Осталось замен: ','Squad closed. Transfers left: ')+Math.max(0,D.transfers-Number(t.transfers_used)):tr('Черновик не подтверждён до дедлайна и не участвует в рейтинге.','This draft was not confirmed before the deadline and is not in the standings.'))+'</div>':'')+
     cards('team')+(editable()?button(tr('Изменить команду','Edit team'),'edit','primary full'):'')+'</section>'+
     (transferOut?'<section class="card"><h3>'+tr('Заменить: ','Replace: ')+esc((player(transferOut)||t.picks.find(p=>p.key===transferOut)).name)+'</h3>'+button(tr('Отмена замены','Cancel transfer'),'transfer-cancel','secondary')+'</section>'+slotsPanel()+catalog(true):'')+
@@ -366,8 +366,8 @@ async function handle(action,el={dataset:{}}) {
   if(action==='save-exit'){await saveDraft();return navigate('home');}
   if(action==='filter'){filter=el.dataset.filter;return render();}
   if(action==='rank-teams'||action==='rank-players'){rankMode=action.slice(5);rankOpen='';return render();}
-  if(action==='rank-toggle'){rankOpen=rankOpen===key?'':key;return render();}
   const key=el.dataset.key,d=draft();
+  if(action==='rank-toggle'){rankOpen=rankOpen===key?'':key;return render();}
   if(action==='price-info'){priceOpen=priceOpen===key?'':key;return render();}
   if(action==='matches-toggle'){matchesOpen=matchesOpen===key?'':key;return render();}
   if(action==='tips-toggle'){tipsOpen=tipsOpen===key?'':key;return render();}
