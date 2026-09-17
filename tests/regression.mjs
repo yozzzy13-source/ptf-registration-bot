@@ -74,7 +74,7 @@ function synthetic(key,values){const m=new vm.SyntheticModule(Object.keys(values
 synthetic(path.join(root,'google.js'),{sheets:()=>google});
 const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
-synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');messages.push({method:n,args});if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
+synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card')});
 async function getModule(spec,ref){
@@ -175,7 +175,8 @@ check(messages.some(m=>m.method==='sendPhotoBuffer'),'Result card generated desp
 check(messages.some(m=>m.method==='sendPhoto'&&m.args[1]==='user-photo'),'User photo delivered additionally');
 const resultCaptions=messages.filter(m=>/sendPhoto/.test(m.method)).map(m=>m.args[m.method==='sendPhotoBuffer'?3:2]?.caption||'').filter(Boolean);
 check(resultCaptions.length&&resultCaptions.every(c=>/Match Result/.test(c)&&!/[А-Яа-яЁё]/.test(c)),'Result captions are consistently English');
-check(resultCaptions.some(c=>c.includes('tg://user?id=')||c.includes('https://t.me/')),'Result captions use Telegram player links');
+check(resultCaptions.every(c=>!c.includes('tg://user?id=')&&!/<a href="https:\/\/t\.me\/[^\/"]+">/.test(c)),'Result captions never link to private chats');
+check(resultCaptions.some(c=>/🏆 <b>[^<]+<\/b>/.test(c)),'Result captions show player names in bold');
 check(!messages.some(m=>/sendPhoto/.test(m.method)&&m.args[m.method==='sendPhotoBuffer'?4:3]?.reply_markup?.inline_keyboard),'Result cards have no inline buttons');
 // Reminder lifecycle: fixed daytime clock, no live scheduler or external APIs.
 const started=Date.parse('2099-09-15T03:00:00Z');
@@ -403,4 +404,24 @@ await sheets.setSetting('FANTASY_MODE','TEST');
 await sheets.setSetting('FANTASY_TEST_GROUP','');
 const noTest=await request('get','/api/league/bootstrap','1');
 check(noTest.body?.fantasy===null&&!noTest.body.tabs.includes('fantasy'),'League hides Fantasy from non-testers');
+// --- словарь статусов -------------------------------------------------------
+// Статусы решают, кого пускать в лигу и кому уходят рассылки, поэтому словарь
+// закрываем тестами: старые значения из таблицы должны читаться как раньше.
+check(sheets.canonicalStatus('lead')===''&&sheets.canonicalStatus('')==='','Новичок и старый lead читаются как пустой статус');
+check(sheets.canonicalStatus(' Active ')==='active'&&sheets.canonicalStatus('WAITLIST')==='waitlist','Статус не зависит от регистра и пробелов');
+check(sheets.canonicalStatus('waiting_payment')==='payment'&&sheets.canonicalStatus('proof_received')==='payment','Оба платёжных статуса сводятся к payment');
+check(['rejected','declined','banned','blocked','left','unsubscribed','refunded'].every(v=>sheets.isInactiveStatus(v)),'Все отказные статусы сведены к одному выключателю');
+check(sheets.canonicalStatus('confirmed')==='active'&&sheets.canonicalStatus('payment_approved')==='active','Подтверждённые и оплаченные читаются как активные');
+check(!sheets.isProfileCompleted({telegram_id:'1',name:'A',gender:'male',country_of_origin:'TH',experience:'5',whatsapp:'+1',ntrp:'3.5',status:'rejected'}),'Отклонённый больше не проходит в мини-приложение лиги');
+check(sheets.isProfileCompleted({telegram_id:'1',name:'A',gender:'male',country_of_origin:'TH',experience:'5',whatsapp:'+1',ntrp:'3.5',status:'waitlist'}),'Игрок из листа ожидания по-прежнему проходит');
+// «Лига» не должна теряться, даже если в настройках группы её забыли.
+await sheets.setSetting('btns_applied','events,contact');
+check((await sheets.getGroupButtons('applied')).includes('league'),'Кнопка лиги добавляется в меню группы, даже если её нет в настройках');
+await sheets.setSetting('kb_applied','pay,contact');
+check((await sheets.getGroupKeyboard('applied')).includes('league'),'Кнопка лиги добавляется и в нижнюю клавиатуру');
+await sheets.setSetting('btns_applied','none');
+check((await sheets.getGroupButtons('applied')).length===0,'Слово none по-прежнему выключает все кнопки группы');
+await sheets.setSetting('btns_applied','');
+await sheets.setSetting('kb_applied','');
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

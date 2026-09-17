@@ -689,7 +689,7 @@ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelect
   // больше, чем помещается, и иначе непонятно, где ты находишься.
   b.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
   window.scrollTo({top:0,behavior:'smooth'});
-  ['Players','Broadcast','Direct','Selfie','Rating','History','Events','Balances','Refunds','Menu'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',['history','events','balances','refunds','menu'].includes(b.dataset.tab));
+  ['Players','Broadcast','Direct','History','Events','Balances','Refunds','Menu'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',['history','events','balances','refunds','menu'].includes(b.dataset.tab));
   // Карточка аватарки живёт рядом со списком игроков — уходим из него, закрываем.
   if(b.dataset.tab!=='players')avClose();
   if(b.dataset.tab==='history'&&!history.length)loadHistory();

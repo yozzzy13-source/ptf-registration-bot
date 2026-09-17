@@ -51,7 +51,9 @@
     input,select,textarea{width:100%;min-height:44px;padding:11px 12px;border-radius:12px;border:1px solid var(--line);
       background:var(--card2);color:var(--text);font-size:16px;font-family:inherit}
     input:focus,select:focus,textarea:focus{outline:0;border-color:var(--accent)}
-    textarea{min-height:96px;resize:vertical;line-height:1.4}
+    textarea{min-height:168px;resize:vertical;line-height:1.5}
+    #broadcastText,#broadcastTextEn,#directText{min-height:220px}
+    #evDescRu,#evDescEn{min-height:132px}
     input[type=checkbox]{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
     .filters{display:grid;grid-template-columns:1fr;gap:2px 12px}
     .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
@@ -191,7 +193,7 @@
     <button class="ico" onclick="reload()" title="Обновить">⟳</button>
   </div>
   <details class="fold statFold" id="statFold"><summary>Сводка по базе</summary><div class="grid" id="stats"></div></details>
-  <div class="tabs" id="tabBar"><button class="tab active" data-tab="players"><i>👥</i>Игроки</button><button class="tab" data-tab="events"><i>🎾</i>События</button><button class="tab" data-tab="balances"><i>💰</i>Касса</button><button class="tab" data-tab="broadcast"><i>📣</i>Рассылка</button><button class="tab" data-tab="direct"><i>💬</i>Личное</button><button class="tab" data-tab="refunds"><i>↩️</i>Возвраты</button><button class="tab" data-tab="menu"><i>🎛</i>Кнопки</button><button class="tab" data-tab="selfie"><i>🖼</i>Селфи</button><button class="tab" data-tab="rating"><i>📈</i>Рейтинг</button><button class="tab" data-tab="history"><i>🕔</i>История</button></div>
+  <div class="tabs" id="tabBar"><button class="tab active" data-tab="players"><i>👥</i>Игроки</button><button class="tab" data-tab="events"><i>🎾</i>События</button><button class="tab" data-tab="balances"><i>💰</i>Касса</button><button class="tab" data-tab="broadcast"><i>📣</i>Рассылка</button><button class="tab" data-tab="direct"><i>💬</i>Личное</button><button class="tab" data-tab="refunds"><i>↩️</i>Возвраты</button><button class="tab" data-tab="menu"><i>🎛</i>Кнопки</button><button class="tab" data-tab="history"><i>🕔</i>История</button></div>
   <div class="card" id="filtersCard">
     <details class="fold" id="filtersFold"><summary>Фильтры</summary>
     <div class="filters" style="margin-top:8px">
@@ -203,7 +205,7 @@
       <div><label>Событие</label><select id="fEvent"><option value="">Все</option></select></div>
       <div><label>Поиск</label><div class="searchwrap"><input id="fSearch" placeholder="имя или @ник" autocomplete="off" oninput="fSearchInput(this.value)" onblur="fSearchBlur()"><div id="fSearchSug" class="psug hidden"></div></div></div>
     </div>
-    <div class="actions" style="margin-top:9px"><button class="btn" onclick="applyFilters()">Применить</button><button class="btn secondary" onclick="clearFilters()">Сбросить</button><button class="btn secondary" onclick="selectFiltered()">Отметить всех</button><button class="btn secondary" onclick="clearSelection()">Снять отметки</button></div>
+    <div class="actions" style="margin-top:9px"><button class="btn" onclick="applyFilters()">Применить</button><button class="btn secondary" onclick="clearFilters()">Сбросить</button><button class="btn secondary" onclick="selectFiltered()">Отметить всех</button><button class="btn secondary" onclick="clearSelection()">Снять отметки</button></div><div class="actions" style="margin-top:9px;border-top:1px solid var(--line);padding-top:9px"><button class="btn secondary" onclick="requestSelfies()">🖼 Запросить селфи</button><button class="btn secondary" onclick="requestRatings()">📈 Запросить рейтинг</button></div><div class="muted" style="margin-top:6px">Запрос уходит отмеченным игрокам, а если никто не отмечен — всем, кто попал под фильтры.</div><div id="selfieResult" class="muted"></div><div id="ratingResult" class="muted"></div>
     </details>
     <div class="muted" id="countLine" style="margin-top:8px"></div>
   </div>
@@ -247,7 +249,7 @@
     <details class="fold" style="margin-top:12px"><summary>Добавить кнопки к сообщению</summary><div style="padding-top:8px"><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="broadcastButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select></div></details>
     <div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast('ru')">Предпросмотр RU</button><button class="btn secondary" onclick="previewBroadcast('en')">Предпросмотр EN</button></div><div id="broadcastPreview" class="prev hidden"></div><div class="actions"><button class="btn" onclick="sendBroadcast()">Отправить рассылку</button></div><div id="broadcastResult" class="muted"></div></div>
   <div id="tabDirect" class="card hidden"><h3>Личное сообщение</h3><p class="muted">Найди игрока по имени — Telegram ID вводить не нужно.</p><div class="pick"><input id="directPick" placeholder="Начни вводить имя или @ник" autocomplete="off" oninput="pickInput(this.value)" onkeydown="pickKey(event)" onblur="setTimeout(pickClose,150)"/><div class="sug hidden" id="directSug"></div></div><div id="directChosen"></div><input id="directId" class="hidden" placeholder="telegram_id"/><textarea id="directText" placeholder="Текст сообщения игроку"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="directButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Отправить</button></div><div id="directResult" class="muted"></div></div>
-  <div id="tabSelfie" class="card hidden"><h3>Нет селфи</h3><p class="muted">Запросить селфи у активных игроков, у которых его ещё нет. Берём отмеченных или тех, кто попал под фильтры.</p><div class="actions"><button class="btn" onclick="requestSelfies()">Запросить селфи</button></div><div id="selfieResult" class="muted"></div></div>
+  
   <div id="tabHistory" class="card hidden"><h3>История рассылок</h3><div class="toolbar"><input id="hSearch" placeholder="поиск по тексту, сегменту, админу" oninput="renderHistory()"/><label><input type="checkbox" id="hFailedOnly" onchange="renderHistory()"> только с ошибками</label><button class="btn secondary" onclick="loadHistory()">Обновить</button><span class="muted" id="hCount"></span></div><div class="tableWrap"><table id="historyTable" class="hist"></table></div></div>
   <div id="tabEvents" class="card hidden"><h3>События</h3>
     <p class="muted">Создай карточку, потом нажми «Предпросмотр» — бот пришлёт её тебе в чат такой, какой её увидят игроки, с кнопками подтверждения и рассылки.</p>
@@ -346,7 +348,7 @@
     <div class="muted" style="margin-top:6px">Бот пришлёт сообщение с кнопками этой группы, а мини-апп откроется с её набором вкладок. Нижняя клавиатура в чате при этом не меняется — она твоя.</div>
     <div id="previewResult" class="muted"></div>
   </div>
-  <div id="tabRating" class="card hidden"><h3>Нет рейтинга NTRP</h3><p class="muted">Отправить кнопку «указать рейтинг» отмеченным игрокам или всем, кто попал под фильтры и без рейтинга.</p><div class="actions"><button class="btn" onclick="requestRatings()">Запросить рейтинг</button></div><div id="ratingResult" class="muted"></div></div>
+  
 </div>
 <script src="/public/admin-l10n.js"></script><script>
 (async function(){

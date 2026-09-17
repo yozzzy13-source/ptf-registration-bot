@@ -7,7 +7,7 @@ import sharp from 'sharp';
 const red = await sharp({create:{width:400,height:400,channels:3,background:'#ef3434'}}).png().toBuffer();
 const blue = await sharp({create:{width:400,height:400,channels:3,background:'#3454ef'}}).png().toBuffer();
 let lookups = [], downloads = [], failAvatar = false;
-const context = vm.createContext({Buffer,console,Map,fetch:async url=>{
+const context = vm.createContext({Buffer,console,Map,process:{env:{}},fetch:async url=>{
   downloads.push(url);
   assert.equal(url,'https://portraits.test/master.png');
   return {ok:true,arrayBuffer:async()=>blue};
@@ -24,8 +24,9 @@ const deps = {
     findApplicantByTelegramId:async id=>({avatar_file_id:id==='1'?'applicants-avatar':''}),
     getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']])
   }),
-  'node:fs':mock({default:{readFileSync:()=>Buffer.from('test-font')}}),
+  'node:fs':mock({default:{readFileSync:()=>Buffer.from('test-font'),writeFileSync:()=>{},mkdtempSync:p=>String(p)+'tmp'}}),
   'node:path':mock({default:{join:(...parts)=>parts.join('/'),dirname:x=>x}}),
+  'node:os':mock({default:{tmpdir:()=>'/tmp'}}),
   'node:url':mock({fileURLToPath:x=>String(x)})
 };
 const source=await fs.readFile(new URL('../matchcard.js',import.meta.url),'utf8');

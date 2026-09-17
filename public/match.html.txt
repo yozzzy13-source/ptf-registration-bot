@@ -175,7 +175,7 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
+var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
@@ -948,9 +948,9 @@ function renderBook(){
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
     +'<div class="dtwrap fold"><div class="datestrip">'+days+'</div></div>'+dtMore()
     +'<label>'+esc(X.bookTime)+'</label>'
-    +'<div class="row"><select id="bkTime">'+timeOptions('17:00')+'</select>'
-    +'<select id="bkDur"><option value="60">'+esc(X.h1)+'</option><option value="90">'+esc(X.h15)+'</option>'
-    +'<option value="120" selected>'+esc(X.h2)+'</option><option value="150">'+esc(X.h25)+'</option><option value="180">'+esc(X.h3)+'</option></select></div>'
+    +'<div class="row"><select id="bkTime" onchange="bookTime=this.value">'+timeOptions(bookTime)+'</select>'
+    +'<select id="bkDur" onchange="bookDur=this.value">'+durOption('60',X.h1)+durOption('90',X.h15)
+    +durOption('120',X.h2)+durOption('150',X.h25)+durOption('180',X.h3)+'</select></div>'
     +'<label>'+esc(X.bookCourtsLbl)+(bookCourts.length?' <span class="pill">'+bookCourts.length+'</span>':'')+'</label>'
     +'<div class="chips">'+chips+'</div>'
     +'<div class="hint">'+esc(X.bookNote)+'</div>'
@@ -958,14 +958,17 @@ function renderBook(){
     +'<div id="bkRes" class="res"></div></div>';
   foldStrips();
 }
-function pickBookDate(iso){bookDate=iso;renderBook()}
-function toggleBookCourt(n){var i=bookCourts.indexOf(n);if(i>=0)bookCourts.splice(i,1);else bookCourts.push(n);renderBook()}
+function durOption(v,label){return '<option value="'+v+'"'+(String(bookDur)===v?' selected':'')+'>'+esc(label)+'</option>'}
+function syncBookInputs(){var t=$('bkTime'),d=$('bkDur');if(t&&t.value)bookTime=t.value;if(d&&d.value)bookDur=d.value}
+function pickBookDate(iso){syncBookInputs();bookDate=iso;renderBook()}
+function toggleBookCourt(n){syncBookInputs();var i=bookCourts.indexOf(n);if(i>=0)bookCourts.splice(i,1);else bookCourts.push(n);renderBook()}
 function submitBooking(btn){
+  syncBookInputs();
   var res=$('bkRes');res.className='res';
   if(!bookCourts.length){res.className='res err';res.textContent=X.needCourts;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/court/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,t:linkToken,date:bookDate,time:$('bkTime').value,duration_min:Number($('bkDur').value),courts:bookCourts
+    initData:initData,t:linkToken,date:bookDate,time:bookTime,duration_min:Number(bookDur),courts:bookCourts
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
