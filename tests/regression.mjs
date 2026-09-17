@@ -450,4 +450,8 @@ check(leagueHtml.includes('inviteEventsHtml')&&!leagueHtml.includes('ivPast\">')
 const pub = await request('get','/api/public/seasons','777');
 check(pub.code===200&&Array.isArray(pub.body?.seasons),'Витрина сезонов открыта без анкеты');
 
+check(applyHtml.includes('fillAgeOptions')&&applyHtml.includes('<select id="age"')&&applyHtml.includes('countryList'),'Возраст выбирается списком, страна — с подсказками ввода');
+check(applyHtml.includes('nameHint')&&applyHtml.includes('experienceHint'),'У имени и опыта есть поясняющие подписи');
+check(leagueHtml.includes('inviteHeroHtml')&&leagueHtml.includes('toggleInvitePlayers')&&leagueHtml.includes('inviteFinal'),'Приглашение: чемпионы сверху, состав раскрывается, финалы показаны сразу');
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
