@@ -320,7 +320,87 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}) {
     if (a) extra.push(a); if (b) extra.push(b);
   }
   await batchUpdate(spreadsheetId, writes.concat(extra));
+  // Результат записан — значит всё, что из него считается, устарело.
+  // Без этого таблица дивизиона, места и профили жили старыми ещё пять минут.
+  await refreshAfterResult().catch(e => console.error('refresh after result failed:', e.message));
   return { status: 'saved', division: d1, row: info.row, reversed: info.reversed, playoff:playoff||null };
+}
+
+// Сброс кешей и подталкивание витрины.
+//
+// Своё сбрасываем всегда: это мгновенно и ничего не стоит. Витрину профилей
+// (та таблица, что собирается формулами IMPORTRANGE и кормит карточки игроков
+// и Fantasy) Google пересчитывает по своему расписанию, до получаса. Заставить
+// его можно единственным способом: переписать формулу той же строкой — тогда
+// он идёт за данными заново. Делаем это только если организатор включил
+// PROFILE_REFRESH в Settings, и только по тем ячейкам, что нашли сами.
+// Ищем в витрине профилей ячейки с IMPORTRANGE и переписываем их той же самой
+// формулой. Читаем и пишем строго одно и то же значение — содержимое таблицы
+// не меняется, меняется только момент, когда Google сходит за данными.
+//
+// dryRun отдаёт список найденного, ничего не трогая: сначала смотрим глазами,
+// потом включаем.
+export async function pokeProfileImports({ dryRun = false } = {}) {
+  const { WEBSITE_SPREADSHEET_ID } = await import('./config.js');
+  if (!WEBSITE_SPREADSHEET_ID) return { ok: false, reason: 'no_sheet' };
+  const api = sheetsClient();
+  const meta = await api.spreadsheets.get({ spreadsheetId: WEBSITE_SPREADSHEET_ID, fields: 'sheets.properties(title,sheetId)' });
+  const titles = (meta.data.sheets || []).map(x => x.properties?.title).filter(Boolean);
+  const found = [];
+  for (const title of titles) {
+    let values = [];
+    try {
+      const res = await api.spreadsheets.values.get({
+        spreadsheetId: WEBSITE_SPREADSHEET_ID,
+        range: `'${title}'!A1:Z60`,
+        valueRenderOption: 'FORMULA'
+      });
+      values = res.data.values || [];
+    } catch { continue; }
+    for (let r = 0; r < values.length; r++) {
+      const row = values[r] || [];
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] ?? '');
+        if (!/^=.*IMPORTRANGE/i.test(cell)) continue;
+        found.push({ sheet: title, a1: `'${title}'!${colLetter(c + 1)}${r + 1}`, formula: cell });
+      }
+    }
+  }
+  if (dryRun || !found.length) return { ok: true, dryRun: true, cells: found };
+  let poked = 0;
+  for (const cell of found) {
+    try {
+      // Сначала пусто, потом та же формула обратно — это и заставляет пересчитать.
+      await api.spreadsheets.values.update({ spreadsheetId: WEBSITE_SPREADSHEET_ID, range: cell.a1,
+        valueInputOption: 'USER_ENTERED', requestBody: { values: [['']] } });
+      await api.spreadsheets.values.update({ spreadsheetId: WEBSITE_SPREADSHEET_ID, range: cell.a1,
+        valueInputOption: 'USER_ENTERED', requestBody: { values: [[cell.formula]] } });
+      poked++;
+    } catch (e) { console.error(`poke ${cell.a1} failed:`, e.message); }
+  }
+  console.log(`profile refresh: обновлено формул ${poked}/${found.length}`);
+  return { ok: true, poked, cells: found };
+}
+function colLetter(col) {
+  let out = '';
+  while (col > 0) { const rem = (col - 1) % 26; out = String.fromCharCode(65 + rem) + out; col = Math.floor((col - 1) / 26); }
+  return out;
+}
+
+export async function refreshAfterResult() {
+  try {
+    const { invalidateLeagueCache } = await import('./sheets.js');
+    invalidateLeagueCache();
+  } catch (e) { console.error('league cache reset failed:', e.message); }
+  try {
+    const { invalidateDivisionCache } = await import('./division.js');
+    invalidateDivisionCache();
+  } catch (e) { console.error('division cache reset failed:', e.message); }
+  scheduleCache.clear();
+  try {
+    const mode = String(await getSetting('PROFILE_REFRESH').catch(() => '') || '').trim().toLowerCase();
+    if (['1','on','yes','true'].includes(mode)) await pokeProfileImports();
+  } catch (e) { console.error('profile refresh failed:', e.message); }
 }
 
 // Расписание дивизиона: кто с кем должен сыграть и что уже сыграно.

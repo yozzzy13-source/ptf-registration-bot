@@ -824,6 +824,24 @@ export async function handleMessage(msg) {
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/topic_sync') return adminTopicSync(msg);
     if (text.startsWith('/topic_backfill')) return adminTopicBackfill(msg);
+    if (text.startsWith('/profile_refresh')) {
+      // Сухой прогон: показать, какие формулы бот нашёл и собирается трогать.
+      // С аргументом «go» — выполнить обновление один раз, вручную.
+      try {
+        const { pokeProfileImports } = await import('./results.js');
+        const go = /\bgo\b/i.test(text);
+        const res = await pokeProfileImports({ dryRun: !go });
+        if (!res.ok) return sendMessage(chatId, '⛔ Таблица витрины профилей не настроена.');
+        const cells = res.cells || [];
+        if (!cells.length) return sendMessage(chatId, 'Формул IMPORTRANGE в витрине не нашёл. Проверьте, та ли таблица указана в WEBSITE_SPREADSHEET_ID.');
+        const list = cells.slice(0, 25).map(c => `• <code>${escapeHtml(c.a1)}</code>`).join('\n');
+        const head = go
+          ? `✅ Обновил формул: <b>${res.poked}</b> из ${cells.length}.`
+          : `🔍 Нашёл формул IMPORTRANGE: <b>${cells.length}</b>. Ничего не тронул.`;
+        return sendMessage(chatId, `${head}\n\n${list}${cells.length > 25 ? `\n… и ещё ${cells.length - 25}` : ''}`
+          + (go ? '' : '\n\nЗапустить по-настоящему: <code>/profile_refresh go</code>\nВключить обновление после каждого матча: строка <code>PROFILE_REFRESH</code> = <code>on</code> в Settings.'));
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (text.startsWith('/result_test')) {
       // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
       // не трогаются — всё уходит только сюда.

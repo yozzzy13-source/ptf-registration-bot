@@ -312,6 +312,7 @@ async function readPlayoffRows(letter,season){
 // и сбрасывается общим invalidateDivisionCache().
 const placesCache = new Map();
 const PLACES_CACHE_MS = 60 * 1000;
+export const placeKey = (v = '') => norm(v);
 export async function livePlaces(season = '') {
   const key = `places:${season || '-'}`;
   const hit = placesCache.get(key);

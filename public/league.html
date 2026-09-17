@@ -719,7 +719,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   noDiv:'Дивизион пока не сформирован.',
   seasonSoon:'Составы дивизионов ещё формируются. Таблица появится здесь, как только сезон стартует.',
   seasons:'Сезоны',ach:'Достижения',history:'История матчей',
-  cSeason:'Сезон',cG:'M',cW:'W',cPlace:'Ранг',cPts:'Очки',
+  cSeason:'Сезон',cG:'M',cW:'W',cPlace:'Ранг',cPts:'YRP',
   showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
   sInfo:'Сезон 2',sDates:'Матчи регулярной части',sDatesV:'14 сентября — 5 ноября',
   sSemi:'Полуфиналы и финал',sSemiV:'7–8 ноября',sVenue:'Площадка',sVenueV:'The Peak Racket Park',
@@ -778,7 +778,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   noDiv:'This division is not formed yet.',
   seasonSoon:'Division line-ups are still being formed. The table will appear here once the season starts.',
   seasons:'Seasons',ach:'Achievements',history:'Match history',
-  cSeason:'Season',cG:'M',cW:'W',cPlace:'Rank',cPts:'Pts',
+  cSeason:'Season',cG:'M',cW:'W',cPlace:'Rank',cPts:'YRP',
   showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
   sInfo:'Season 2',sDates:'Regular season matches',sDatesV:'14 September — 5 November',
   sSemi:'Semifinals and final',sSemiV:'7–8 November',sVenue:'Venue',sVenueV:'The Peak Racket Park',
@@ -2491,11 +2491,11 @@ function seasonRowsWithLive(p,byTable){
   var found=rows.filter(function(r){return r.n===now})[0];
   if(found){
     found.live=true;
-    // История матчей приезжает из витрины и отстаёт; матчи и победы текущего
-    // сезона берём из живой таблицы дивизиона, если там больше.
-    if(Number(p.matches||0)>Number(found.g||0))found.g=Number(p.matches||0);
-    if(Number(p.wins||0)>Number(found.w||0))found.w=Number(p.wins||0);
-    if(!found.place&&p.division_position)found.place=p.division_position;
+    if(p.live_stats){
+      found.g=Number(p.matches||0);
+      found.w=Number(p.wins||0);
+      if(p.division_position)found.place=p.division_position;
+    }
     return rows;
   }
   var hit=(byTable||{})[String(now)];
@@ -2504,7 +2504,8 @@ function seasonRowsWithLive(p,byTable){
   // Очки гонки за идущий сезон появятся, когда организатор их проставит, —
   // выдумывать их из таблицы дивизиона нельзя, шкала другая.
   rows.unshift({n:now,name:(s&&s.label)||((L?'Сезон ':'Season ')+now),division:(hit&&hit.division)||p.division||'',
-    g:Number(p.matches||0),w:Number(p.wins||0),place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
+    g:p.live_stats?Number(p.matches||0):0,w:p.live_stats?Number(p.wins||0):0,
+    place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
   return rows;
 }
 function renderPlayer(p){
@@ -2521,12 +2522,12 @@ function renderPlayer(p){
     +'<div class="row"><span onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')">'
       +divChip(p.division, p.division_position)+'</span>'
       +(raceNo(p)?'<span class="badge g">'+esc(X.tRace)+' #'+raceNo(p)+'</span>':'')
-      +statusBadge(p)
-      +(fp?'<span class="badge fanpos" onclick="event.stopPropagation();showTab(\'fantasy\')">✨ Fantasy #'+esc(fp.place)+'</span>':'')+'</div>'
+      +(fp?'<span class="badge fanpos" onclick="event.stopPropagation();showTab(\'fantasy\')">✨ Fantasy #'+esc(fp.place)+'</span>':'')
+      +statusBadge(p)+'</div>'
     +(p.form&&p.form.length?'<div class="fline"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
       +stt(X.sPoints,p.points||'',true,'yrp')+stt(X.sMatches,p.matches||'','','matches')
-      +(fp?stt(X.fantasyPoints,fp.points,true,'fp')+stt(X.fantasyTeams,fp.teams,'','teams'):'')
+      +(fp?stt(X.fantasyPoints,fp.points,true,'fp'):'')
       +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0),'','wl')+stt(X.sWR,w+'%','','wr')
       +stt(X.ntrp,p.ntrp||'','','ntrp')+stt(X.exp,p.experience||'','','exp')
       +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''),'','country')

@@ -1022,9 +1022,9 @@ app.get('/api/league/bootstrap', async (req, res) => {
     // витрины: после матча они меняются сразу, витрина же ждёт импорт.
     // Витрина остаётся запасным вариантом для тех, кого в таблице нет.
     try {
-      const { livePlaces } = await import('./division.js');
+      const { livePlaces, placeKey } = await import('./division.js');
       const places = await livePlaces(current ? current.number : '');
-      const key = (v) => String(v || '').trim().toLowerCase();
+      const key = placeKey;
       for (const pl of players) {
         const live = places.get(key(pl.name));
         if (!live) continue;
@@ -1032,6 +1032,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
         pl.matches = live.matches;
         pl.wins = live.wins;
         pl.losses = live.losses;
+        pl.live_stats = true;
       }
     } catch (e) { console.error('live places failed:', e.message); }
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
