@@ -1,7 +1,7 @@
 import {allSlots,pendingActionsFor} from './matchesdb.js';
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST, withBulkRetries} from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getAllEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml } from './util.js';
@@ -456,7 +456,9 @@ USDT: <b>${escapeHtml(amountUsdt || '-')} USDT</b>`;
 }
 
 async function paymentAmountsForApplication(app) {
-  const events = await getActiveEvents().catch(() => []);
+  // Цену ищем среди всех событий, а не только среди тех, куда открыт набор:
+  // у идущего сезона регистрация закрыта, а счета по нему ещё выставляются.
+  const events = await getAllEvents().catch(() => []);
   const event = events.find(e => String(e.event_id || '') === String(app?.event_id || '')) || null;
   const amountThb = cleanPaymentAmount(event?.price_thb) || cleanPaymentAmount(app?.payment_amount_thb) || cleanPaymentAmount(app?.price_thb) || cleanPaymentAmount(app?.payment_amount) || '';
   const amountUsdt = cleanPaymentAmount(event?.price_usdt) || cleanPaymentAmount(event?.usdt_amount) || cleanPaymentAmount(app?.payment_amount_usdt) || cleanPaymentAmount(app?.price_usdt) || cleanPaymentAmount(DEFAULT_USDT_AMOUNT) || '';

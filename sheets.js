@@ -858,8 +858,9 @@ export async function getBotText(text_key, language='en') {
 //   archived — прошло: карточку показываем, набора нет.
 export const EVENT_STATUS = { open:'open', live:'live', waitlist:'waitlist', archived:'archived' };
 const EVENT_STATUS_ALIASES = {
-  open:['open','active','registration_open','registration','signup','набор','открыт','открыта'],
-  live:['live','running','in_progress','started','ongoing','идёт','идет','в процессе'],
+  open:['open','registration_open','registration','signup','набор','открыт','открыта'],
+  // active — это «сезон идёт»: играем, но набор уже закрыт.
+  live:['live','active','running','in_progress','started','ongoing','идёт','идет','в процессе'],
   waitlist:['waitlist','wait_list','next_season','upcoming','queue','лист ожидания','ожидание','следующий сезон'],
   archived:['archived','archive','closed','finished','done','past','completed','архив','завершено','закрыто','прошло']
 };
@@ -1006,6 +1007,17 @@ export async function enrichEventsWithStats(events=[]) {
 // Колонки аватарки. Дописываем в конец листа: вставлять их между существующими
 // незачем — эти поля служебные и глазами их читать не нужно.
 let avatarColumnsReady = null;
+// Instagram в анкете — необязательное поле: нужно, чтобы отмечать игрока в
+// публикациях лиги. Колонку заводим один раз и только если её ещё нет.
+let instagramColumnReady = null;
+export async function ensureInstagramColumn() {
+  if (!instagramColumnReady) {
+    instagramColumnReady = ensureSheetWithHeaders(SHEETS.applicants, ['instagram'])
+      .catch(e => { instagramColumnReady = null; throw e; });
+  }
+  return instagramColumnReady;
+}
+
 export async function ensureAvatarColumns() {
   if (!avatarColumnsReady) {
     avatarColumnsReady = ensureSheetWithHeaders(SHEETS.applicants,

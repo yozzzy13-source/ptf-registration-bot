@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
+import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
@@ -270,7 +270,8 @@ app.post('/api/save-profile'
     const existingProfile = await findApplicantByTelegramIdentity(user);
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en'; const username = user.username || '';
     const racketRating = requireRacketRating(profile);
-    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:withRatingSourceTag('ptf_waitlist,profile_completed', ratingSource(profile.ntrp_source)), increment_application_count:false });
+    await ensureInstagramColumn().catch(() => {});
+    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), instagram:normalizeInstagram(profile.instagram), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:withRatingSourceTag('ptf_waitlist,profile_completed', ratingSource(profile.ntrp_source)), increment_application_count:false });
     // Анкета без события раньше не приходила никуда: человек заполнял всё,
     // попадал в лист ожидания и пропадал из виду. Теперь это событие в его теме.
     const wasCompleted = isProfileCompleted(existingProfile);
@@ -309,6 +310,7 @@ app.post('/api/submit-application', async (req, res) => {
     if (!who.ok) return res.status(who.code).json({ ok:false, error:who.error });
     const user = who.user;
 
+    await ensureInstagramColumn().catch(() => {});
     const events = await getActiveEvents();
     const event = event_id ? events.find(e => e.event_id === event_id) : null;
 
@@ -351,6 +353,7 @@ app.post('/api/submit-application', async (req, res) => {
       country_of_origin: safe(effectiveProfile.country_of_origin),
       telegram: username ? `t.me/${username}` : '',
       whatsapp: safe(effectiveProfile.whatsapp),
+      instagram: normalizeInstagram(effectiveProfile.instagram),
       notes: safe(effectiveProfile.notes),
       telegram_id: user.id,
       telegram_username: username,
@@ -444,6 +447,14 @@ You can now join an open event.`, { reply_markup:{ inline_keyboard:[[ { text: la
 // длительность, площадка — и уходит либо в топик дивизиона (открытое окно),
 // либо лично сопернику (адресный вызов).
 // ---------------------------------------------------------------------------
+// Instagram пишем в одном виде — @nick: люди присылают и ссылку, и с собачкой,
+// и без. Пустое значение остаётся пустым, поле необязательное.
+function normalizeInstagram(value = '') {
+  let v = String(value || '').trim();
+  if (!v) return '';
+  v = v.replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/[?/].*$/, '').replace(/^@+/, '').trim();
+  return v ? '@' + v : '';
+}
 function hhmmToMin(v) { const [h, m] = String(v || '').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
 
 // Кто открыл мини-приложение. Обычный путь — подписанный Telegram initData.
@@ -1366,6 +1377,54 @@ app.get('/api/league/seasons-summary', async (req, res) => {
   } catch (e) {
     console.error('seasons summary failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Витрина сезонов для тех, кто ещё не в лиге: сколько было дивизионов и
+// игроков, когда сезон шёл и кто стал чемпионом. Анкета для этого не нужна —
+// это и есть то, ради чего человек анкету заполняет. Считаем из тех же данных,
+// что и сама лига, и держим ответ в кеше: экран открывают часто, а меняется он
+// раз в сезон.
+let publicSeasonsCache = { t: 0, v: null };
+const PUBLIC_SEASONS_MS = 10 * 60 * 1000;
+app.get('/api/public/seasons', async (req, res) => {
+  try {
+    if (publicSeasonsCache.v && Date.now() - publicSeasonsCache.t < PUBLIC_SEASONS_MS) {
+      return res.json({ ok:true, seasons: publicSeasonsCache.v });
+    }
+    const [seasonList, profiles, achievements] = await Promise.all([
+      getSeasons().catch(() => []),
+      getLeagueProfiles().catch(() => []),
+      getLeagueAchievements().catch(() => new Map())
+    ]);
+    const byId = new Map(profiles.map(p => [String(p.id), p]));
+    const { seasonRoster } = await import('./division.js');
+    const isChampion = (a) => /champion|чемпион|winner|победител/i.test(`${a.type} ${a.title}`);
+    const out = [];
+    for (const s of seasonList) {
+      const letters = await availableDivisions(s.number).catch(() => []);
+      const roster = await seasonRoster(s.number).catch(() => null);
+      const champions = [];
+      for (const [pid, list] of achievements.entries()) {
+        for (const a of list) {
+          if (!isChampion(a)) continue;
+          if (String(a.season || '').replace(/\D+/g, '') !== String(s.number)) continue;
+          const p = byId.get(String(pid));
+          champions.push({ id: String(pid), name: p?.name || '', photo: p?.photo || '', title: a.title, division: p?.division || '' });
+        }
+      }
+      out.push({
+        number: String(s.number), label: s.label, status: s.status,
+        divisions: letters.length,
+        players: roster?.players?.length || 0,
+        champions: champions.filter(c => c.name).slice(0, 8)
+      });
+    }
+    publicSeasonsCache = { t: Date.now(), v: out };
+    res.json({ ok:true, seasons: out });
+  } catch (e) {
+    console.error('public seasons failed:', e.message);
+    res.json({ ok:true, seasons: [] });
   }
 });
 

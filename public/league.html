@@ -111,6 +111,18 @@ box-shadow:inset 0 1px 0 var(--hair)}
 .ivTag.live{color:var(--win);border-color:var(--goLine);background:rgba(143,191,154,.12)}
 .ivTag.wait{color:var(--amber);border-color:var(--accLine);background:var(--accBg)}
 .ivTag.past{color:var(--mute2)}
+.ivEvDesc{margin-top:8px;font-size:13px;line-height:1.5;color:var(--dim)}
+.ivStats{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ivStat{padding:10px 8px;border-radius:12px;background:var(--card2);border:1px solid var(--line4);text-align:center}
+.ivStatV{font-size:17px;font-weight:900;color:var(--champ)}
+.ivStatK{margin-top:2px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.ivLink{margin-top:12px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--accLine2);background:var(--accBg);color:var(--amber);font-size:13px;font-weight:800;cursor:pointer}
+.ivChamps{margin-top:10px;display:grid;gap:8px}
+.ivChamp{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;background:var(--card2);border:1px solid var(--line4)}
+.ivChamp img{width:38px;height:38px;border-radius:50%;object-fit:cover;border:1px solid var(--champ2)}
+.ivChampNo{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surf2);border:1px solid var(--line3)}
+.ivChampName{font-size:14px;font-weight:800;color:var(--text)}
+.ivChampTitle{font-size:11px;color:var(--mute)}
 .ivPast{margin-top:14px}
 .ivPast summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--mute);margin-bottom:10px}
 .empty{color:var(--mute);font-size:13.5px;text-align:center;padding:26px 10px;line-height:1.55}
@@ -2752,6 +2764,26 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
 // Теперь это приглашение: что такое лига, что открывается после анкеты, какие
 // события идут и куда открыт набор. Про Fantasy не пишем — он только для
 // участников лиги.
+var inviteSeasons={};
+var inviteChampsOpen='';
+// Номер сезона у события: он же связывает строку Events с тем, что лига реально
+// сыграла — дивизионами, составом и чемпионами.
+function inviteSeasonNo(ev){
+  var m=String(ev.event_id||'').match(/(\d+)/)||String(ev.event_name_en||ev.event_name||ev.event_name_ru||'').match(/(\d+)/);
+  return m?String(m[1]):'';
+}
+function inviteStat(v,k){return '<div class="ivStat"><div class="ivStatV">'+esc(v)+'</div><div class="ivStatK">'+esc(k)+'</div></div>'}
+function inviteChampRow(list){
+  return '<div class="ivChamps">'+list.map(function(c){
+    return '<div class="ivChamp">'+(c.photo?'<img src="'+esc(c.photo)+'" alt="">':'<div class="ivChampNo">🏆</div>')
+      +'<div><div class="ivChampName">'+esc(c.name)+'</div><div class="ivChampTitle">'+esc(c.title||'')+'</div></div></div>';
+  }).join('')+'</div>';
+}
+function toggleInviteChamps(no){
+  inviteChampsOpen=(inviteChampsOpen===no?'':no);
+  var box=document.getElementById('ivEvents');
+  if(box)box.innerHTML=inviteEventsHtml();
+}
 function inviteEventCard(ev){
   var s=String(ev.status_code||ev.status||'open').toLowerCase();
   var name=L?(ev.event_name_ru||ev.event_name_en||ev.event_name||''):(ev.event_name_en||ev.event_name_ru||ev.event_name||'');
@@ -2759,12 +2791,34 @@ function inviteEventCard(ev){
     :s==='waitlist'?(L?'Лист ожидания':'Waitlist')
     :s==='archived'?(L?'Завершено':'Finished'):(L?'Открыт набор':'Registration open');
   var cls=s==='archived'?'past':(s==='waitlist'?'wait':'live');
-  var dates=[ev.start_date||'',ev.end_date||''].filter(Boolean).map(function(d){
-    var x=new Date(d);return isNaN(x.getTime())?String(d):x.toLocaleDateString(L?'ru-RU':'en-US',{day:'numeric',month:'short'});
-  }).join(' — ');
+  var fmt=function(d){var x=new Date(d);return isNaN(x.getTime())?String(d):x.toLocaleDateString(L?'ru-RU':'en-US',{day:'numeric',month:'short'})};
+  var dates=[ev.start_date||'',ev.end_date||''].filter(Boolean).map(fmt).join(' — ');
+  var weeks=0;
+  if(ev.start_date&&ev.end_date){
+    var a=new Date(ev.start_date),b=new Date(ev.end_date);
+    if(!isNaN(a.getTime())&&!isNaN(b.getTime()))weeks=Math.max(1,Math.round((b-a)/6048e5));
+  }
+  var no=inviteSeasonNo(ev),info=inviteSeasons[no]||null;
+  var stats='';
+  if(info&&(info.divisions||info.players)||weeks){
+    stats='<div class="ivStats">'
+      +(info&&info.divisions?inviteStat(info.divisions,L?'дивизиона':'divisions'):'')
+      +(info&&info.players?inviteStat(info.players,L?'игроков':'players'):'')
+      +(weeks?inviteStat(weeks+(L?' нед.':'w'),L?'длительность':'duration'):'')
+      +'</div>';
+  }
+  var champs=(info&&info.champions)||[];
+  var desc=L?(ev.description_ru||ev.description_en||ev.description||''):(ev.description_en||ev.description_ru||ev.description||'');
+  var open=inviteChampsOpen===no&&champs.length;
   return '<div class="ivEv'+(s==='archived'?' past':'')+'"><div class="ivEvName">'+esc(name)+'</div>'
     +'<div class="ivEvRow"><span class="ivTag '+cls+'">'+esc(label)+'</span>'
-    +(dates?'<span class="ivTag">'+esc(dates)+'</span>':'')+'</div></div>';
+    +(dates?'<span class="ivTag">'+esc(dates)+'</span>':'')+'</div>'
+    +(desc&&s!=='archived'?'<div class="ivEvDesc">'+esc(desc)+'</div>':'')
+    +stats
+    +(champs.length?'<button class="ivLink" onclick="toggleInviteChamps(\''+esc(no)+'\')">'
+        +esc(open?(L?'Скрыть чемпионов':'Hide champions'):(L?'🏆 Показать чемпионов':'🏆 Show champions'))+'</button>':'')
+    +(open?inviteChampRow(champs):'')
+    +'</div>';
 }
 function renderInvite(){
   var wrap=$('viewHome');
@@ -2781,17 +2835,28 @@ function renderInvite(){
                                  :'Already completed it? Access opens as soon as the organiser adds you to the line-up.')+'</div>'
     +'<div id="ivEvents"></div></div>';
   wrap.innerHTML=h;
-  fetch('/api/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
-    .then(function(r){return r.json()}).then(function(j){
-      var list=(j&&(j.all_events||j.events))||[];
-      if(!list.length)return;
-      var by=function(s){return list.filter(function(ev){return String(ev.status_code||ev.status||'open').toLowerCase()===s})};
-      var live=by('live'),open=by('open'),wait=by('waitlist'),past=by('archived');
-      var sec=function(title,rows){return rows.length?('<div class="ivGrp">'+esc(title)+'</div>'+rows.map(inviteEventCard).join('')):''};
-      var out=sec(L?'Идут сейчас':'Live now',live)+sec(L?'Открыт набор':'Registration open',open)+sec(L?'Лист ожидания':'Waitlist',wait);
-      if(past.length)out+='<details class="ivPast"><summary>'+esc(L?'Уже прошли':'Past events')+' ('+past.length+')</summary><div>'+past.map(inviteEventCard).join('')+'</div></details>';
-      var box=$('ivEvents');if(box)box.innerHTML=out;
-    }).catch(function(){});
+  Promise.all([
+    fetch('/api/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null}),
+    fetch('/api/public/seasons',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null})
+  ]).then(function(res){
+    var j=res[0]||{},sj=res[1]||{};
+    (sj.seasons||[]).forEach(function(x){inviteSeasons[String(x.number)]=x});
+    inviteEvents=(j.all_events||j.events)||[];
+    var box=$('ivEvents');if(box)box.innerHTML=inviteEventsHtml();
+  });
+}
+// Прошедшие сезоны показываем развёрнутыми: это витрина, а не архив. Под ними
+// цифры сезона и кнопка с чемпионами — то, ради чего человек и приходит.
+var inviteEvents=[];
+function inviteEventsHtml(){
+  if(!inviteEvents.length)return '';
+  var by=function(s){return inviteEvents.filter(function(ev){return String(ev.status_code||ev.status||'open').toLowerCase()===s})};
+  var live=by('live'),open=by('open'),wait=by('waitlist'),past=by('archived');
+  var sec=function(title,rows){return rows.length?('<div class="ivGrp">'+esc(title)+'</div>'+rows.map(inviteEventCard).join('')):''};
+  return sec(L?'Идут сейчас':'Live now',live)
+    +sec(L?'Открыт набор':'Registration open',open)
+    +sec(L?'Лист ожидания':'Waitlist',wait)
+    +sec(L?'Прошлые сезоны':'Past seasons',past);
 }
 </script>
 </body>

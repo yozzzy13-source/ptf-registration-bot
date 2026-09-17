@@ -1,5 +1,5 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup, canonicalStatus, getPlayerLeagueInfo } from './sheets.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, getAllEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup, canonicalStatus, getPlayerLeagueInfo } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -426,8 +426,9 @@ export async function activatePlayer({ chatId, telegramId }) {
   if (!applicant) return replyInPlayerTopic(chatId, telegramId, 'Игрок не найден в анкетах.');
   let app = await _findLatestApp(telegramId).catch(() => null);
   if (!app) {
-    const events = await getActiveEvents().catch(() => []);
-    const ev = events[0];
+    // Сначала туда, где открыт набор; если набора нет — к идущему сезону.
+    const events = await getAllEvents().catch(() => []);
+    const ev = events.find(e => e.joinable) || events.find(e => e.status_code === 'live') || null;
     if (!ev) return replyInPlayerTopic(chatId, telegramId, 'Нет активного события, к которому привязать участие.');
     app = await createOrUpdateApplication({
       application_id: uid('app'),
