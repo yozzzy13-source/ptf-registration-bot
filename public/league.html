@@ -107,6 +107,17 @@ border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28);margin
 .fanmine.t2{color:#7aa8d6}
 .fanhomebanner{display:flex;gap:13px;align-items:center;cursor:pointer}
 .fanhomebanner .fhb-ico{font-size:28px;flex:0 0 auto}
+/* Открытый набор — единственная плашка на главной, которая должна бросаться
+   в глаза: подсвеченная рамка, тёплая заливка и живая кнопка. */
+.fanhomebanner.live{display:block;position:relative;overflow:hidden;border-color:var(--accLine);
+  background:linear-gradient(145deg,var(--accBg2),var(--surf) 70%);box-shadow:0 0 0 1px var(--accLine) inset}
+.fanhomebanner.live:after{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--amber2,var(--amber)),var(--amber))}
+.fanhomebanner.live .fhb-top{display:flex;gap:12px;align-items:center}
+.fanhomebanner.live h3{margin:0;font-size:17px}
+.fanhomebanner.live .fhb-tag{display:inline-block;margin-top:4px;font-size:9.5px;font-weight:850;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--amber);border:1px solid var(--accLine);background:var(--accBg);padding:3px 8px;border-radius:999px}
+.fanhomebanner.live .fhb-text{margin-top:10px;color:var(--dim);font-size:12.5px;line-height:1.5}
+.fanhomebanner.live .fanopen{margin-top:12px;width:100%}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .chip{padding:7px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);font-size:11px;
 font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
@@ -1539,12 +1550,34 @@ function championsBlock(){
 }
 // Короткий баннер-приглашение в Fantasy на главной — виден только тем, у кого
 // вообще есть доступ (лига-игроки), сразу ведёт на вкладку Fantasy.
+// Плашка Fantasy на главной. Три состояния, и самое яркое — то, ради которого
+// она и нужна: набор открыт, а команды у человека ещё нет. Тогда это не тихая
+// справка, а заметный призыв собрать состав, с дедлайном и кнопкой.
+function fanDeadlineShort(){
+  if(!fantasyData||!fantasyData.lock_at)return '';
+  var d=new Date(fantasyData.lock_at);
+  if(isNaN(d.getTime()))return '';
+  return d.toLocaleDateString(L?'ru-RU':'en-GB',{day:'numeric',month:'long'});
+}
 function homeFantasyBanner(){
   if(!fantasyData)return '';
   var have=(fantasyData.teams||[]).length;
+  var open=Boolean(fantasyData.entry_open);
+  var until=fanDeadlineShort();
+  // Набор открыт и команды нет — ведём за руку к созданию состава.
+  if(open&&!have){
+    var call=L?'Соберите команду из настоящих игроков PTF — их матчи в сезоне принесут вам очки. Бесплатно, до двух команд.'
+             :'Build a squad of real PTF players — their real matches this season earn you points. Free, up to two squads.';
+    var due=until?(L?('Составы принимаются до '+until+'.'):('Squads are open until '+until+'.')):'';
+    return '<div class="card fanhomebanner live" onclick="openFantasyApp()">'
+      +'<div class="fhb-top"><div class="fhb-ico">✨</div><div><h3>PTF Fantasy</h3>'
+      +'<div class="fhb-tag">'+esc(L?'Набор открыт':'Entry is open')+'</div></div></div>'
+      +'<div class="fhb-text">'+esc(call)+(due?' '+esc(due):'')+'</div>'
+      +'<button class="fanopen" onclick="event.stopPropagation();openFantasyApp()">'+esc(L?'Собрать команду':'Build my squad')+'</button></div>';
+  }
   var text=have
     ?(L?('У вас '+have+(have===1?' команда':' команды')+' в игре — загляните за очками и составом.'):('You have '+have+' Fantasy '+(have===1?'team':'teams')+' in play — check your points and squad.'))
-    :(L?'Соберите команду из реальных игроков PTF — их матчи в сезоне принесут вам очки. Бесплатно, до двух команд.':'Build a squad of real PTF players — their real matches earn you points. Free, up to two squads.');
+    :(L?'Скоро откроется набор составов. Загляните, как это устроено.':'Squad entry opens soon. Take a look at how it works.');
   return '<div class="card fanhomebanner" onclick="showTab(\'fantasy\')"><div class="fhb-ico">✨</div><div><h3 style="margin:0 0 4px">PTF Fantasy</h3><div class="hint">'+esc(text)+'</div></div></div>';
 }
 function renderHome(){
