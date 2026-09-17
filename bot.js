@@ -824,6 +824,23 @@ export async function handleMessage(msg) {
     if (text === '/topic_test') return adminTopicTest(msg);
     if (text === '/topic_sync') return adminTopicSync(msg);
     if (text.startsWith('/topic_backfill')) return adminTopicBackfill(msg);
+    if (text.startsWith('/result_test')) {
+      // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
+      // не трогаются — всё уходит только сюда.
+      try {
+        const { previewResultPost } = await import('./matches.js');
+        const wanted = String(text.split(/\s+/)[1] || '').trim();
+        const rows = await allSlots();
+        const done = rows.filter(r => String(r.result_status || '').toLowerCase() === 'confirmed');
+        const slot = wanted
+          ? done.find(r => String(r.challenge_id) === wanted)
+          : done.sort((a, b) => String(b.result_confirmed_at || '').localeCompare(String(a.result_confirmed_at || '')))[0];
+        if (!slot) return sendMessage(chatId, wanted ? 'Матч с таким id не найден.' : 'Подтверждённых результатов пока нет.');
+        await sendMessage(chatId, `🧪 Предпросмотр: <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>. Никому, кроме вас, это не уходит.`);
+        await previewResultPost(slot, chatId, { withButtons: msg.chat?.type === 'private' });
+        return;
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (text.startsWith('/fix_result')) {
       // Перевыпуск карточки в ленте: /fix_result <id сообщения> [id матча].
       // Id сообщения берётся из ссылки на пост — это последнее число в ней.
