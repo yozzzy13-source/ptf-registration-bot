@@ -357,6 +357,14 @@ let historyCache = { t: 0, v: null };
 export async function getLeagueMatchHistory() {
   if (historyCache.v && Date.now() - historyCache.t < PROFILES_CACHE_MS) return historyCache.v;
   const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Match_History_All', 'player_id');
+  // Пустая колонка Competition встречается: матч записан, а подпись сезона в
+  // строке таблицы дивизиона не стояла. Без сезона матч выпадал отовсюду — из
+  // Fantasy, из истории дивизионов, из строки идущего сезона. Считаем такие
+  // строки последним из известных сезонов: раньше него подписи проставлены,
+  // а пустыми остаются именно свежие.
+  const seen = rows.map(r => Number(parseSeasonNumber(r.season_id, r.season, r.season_number, r.competition)))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const fallbackSeason = seen.length ? String(Math.max(...seen)) : '';
   const byPlayer = new Map();
   for (const r of rows) {
     const pid = String(r.player_id || '').trim();
@@ -373,7 +381,7 @@ export async function getLeagueMatchHistory() {
       // Сезон матча: сначала своя колонка, если она заполнена, иначе название
       // соревнования — «Season 1», «Сезон 1», «Final S1» понимаются одинаково.
       // Сезон нужен, чтобы клик по ярлыку дивизиона вёл в таблицу того самого сезона.
-      season: parseSeasonNumber(r.season_id, r.season, r.season_number, r.competition),
+      season: parseSeasonNumber(r.season_id, r.season, r.season_number, r.competition) || fallbackSeason,
       result: String(r.result || '').toUpperCase().startsWith('W') ? 'WIN' : 'LOST',
       score: r.score || ''
     };

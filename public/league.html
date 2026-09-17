@@ -2452,7 +2452,10 @@ function seasonRows(p){
   var hist=matches[String(p.id)]||[];
   var by={};
   hist.forEach(function(m){
-    var s=String(m.competition||'').match(/(\d+)/);
+    // Сезон матча приходит с сервера отдельным полем: подпись Competition
+    // бывает пустой, и тогда матч терял сезон и не попадал ни в одну строку.
+    var raw=String(m.season||'')||String(m.competition||'');
+    var s=raw.match(/(\d+)/);
     var n=s?Number(s[1]):0;
     if(!n)return;
     if(!by[n])by[n]={n:n,g:0,w:0};
@@ -2492,8 +2495,8 @@ function seasonRowsWithLive(p,byTable){
   if(found){
     found.live=true;
     if(p.live_stats){
-      found.g=Number(p.matches||0);
-      found.w=Number(p.wins||0);
+      found.g=Number(p.season_matches||0);
+      found.w=Number(p.season_wins||0);
       if(p.division_position)found.place=p.division_position;
     }
     return rows;
@@ -2504,7 +2507,7 @@ function seasonRowsWithLive(p,byTable){
   // Очки гонки за идущий сезон появятся, когда организатор их проставит, —
   // выдумывать их из таблицы дивизиона нельзя, шкала другая.
   rows.unshift({n:now,name:(s&&s.label)||((L?'Сезон ':'Season ')+now),division:(hit&&hit.division)||p.division||'',
-    g:p.live_stats?Number(p.matches||0):0,w:p.live_stats?Number(p.wins||0):0,
+    g:p.live_stats?Number(p.season_matches||0):0,w:p.live_stats?Number(p.season_wins||0):0,
     place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
   return rows;
 }
@@ -2593,12 +2596,12 @@ var openStat='';
 var STAT_HELP={
   yrp:['Очки годовой гонки. Начисляются за результаты в сезонах лиги и складываются в общий рейтинг года — это и есть таблица «Гонка».',
        'Yearly Race points. Earned from league season results and added up into the year-long rating — the Race table.'],
-  matches:['Сколько матчей сыграно в текущем сезоне дивизиона.','Matches played in the current division season.'],
+  matches:['Сколько матчей сыграно в лиге за всю историю — все сезоны вместе, а не только текущий. Счёт идущего сезона — в блоке «История дивизионов» ниже.','Matches played in the league all-time — every season combined, not just the current one. The running season is in the Division history block below.'],
   fp:['Fantasy Points. Начисляются игроку за его реальные матчи: победы, выигранные сеты и геймы. Эти очки получают все, кто взял его в свою Fantasy-команду.',
       'Fantasy Points. Earned from the player\u2019s real matches: wins, sets and games won. Everyone who picked him for their Fantasy squad gets these points.'],
   teams:['Сколько участников Fantasy взяли этого игрока в свой состав.','How many Fantasy players picked him for their squad.'],
-  wl:['Победы и поражения в текущем сезоне дивизиона.','Wins and losses in the current division season.'],
-  wr:['Доля выигранных матчей в текущем сезоне.','Share of matches won this season.'],
+  wl:['Победы и поражения за всю историю выступлений в лиге — все сезоны вместе. Счёт идущего сезона — в блоке «История дивизионов» ниже.','Wins and losses all-time — every season combined. The running season is in the Division history block below.'],
+  wr:['Доля выигранных матчей за всю историю — по всем сезонам, а не только по текущему.','Share of matches won all-time, across every season rather than the current one.'],
   ntrp:['Уровень игры по шкале NTRP. Указывается самим игроком или по результатам теста.','NTRP playing level. Set by the player or from the rating test.'],
   exp:['Сколько лет человек играет в теннис.','How long the player has been playing tennis.'],
   country:['Страна, откуда игрок.','Where the player is from.']

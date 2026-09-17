@@ -309,6 +309,19 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}) {
     namedWrite(headers, info.row, ['p2_result_points','p2_points','player_2_points'], points[1]),
     namedWrite(headers, info.row, ['result_note','comment'], String(slot.result_note || ''))
   ].filter(Boolean);
+  // Сезон матча. Строки в Match_Log заводятся заранее, и колонка Competition в
+  // них часто пустая — бот её не заполнял. Без неё матч терял сезон везде, где
+  // он нужен: в Fantasy, в истории дивизионов, в строке идущего сезона.
+  // Пишем только если колонка в таблице есть и в ней пусто — чужие подписи
+  // («Playoff S2», ручные пометки организатора) не трогаем.
+  if (season) {
+    const cell = namedWrite(headers, info.row, ['competition','tournament'], `Season ${season}`)
+      || namedWrite(headers, info.row, ['season','season_id','season_number'], season);
+    if (cell) {
+      const had = await getValues(spreadsheetId, cell.range).catch(() => []);
+      if (!String(had?.[0]?.[0] ?? '').trim()) extra.push(cell);
+    }
+  }
   if (kind === 'technical') {
     const winner = info.reversed
       ? (String(slot.result_winner) === String(slot.from_telegram_id) ? 'p2' : String(slot.result_winner) ? 'p1' : '')

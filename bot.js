@@ -842,6 +842,34 @@ export async function handleMessage(msg) {
           + (go ? '' : '\n\nЗапустить по-настоящему: <code>/profile_refresh go</code>\nВключить обновление после каждого матча: строка <code>PROFILE_REFRESH</code> = <code>on</code> в Settings.'));
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+    if (text.startsWith('/places')) {
+      // Почему в карточке игрока нет места в дивизионе: показать, что бот видит
+      // в живых таблицах сезона и совпали ли имена с витриной профилей.
+      try {
+        const { livePlaces, placeKey, latestSeason, availableDivisions, invalidateDivisionCache } = await import('./division.js');
+        const { getLeagueProfiles, invalidateLeagueCache } = await import('./sheets.js');
+        invalidateDivisionCache(); invalidateLeagueCache();
+        const arg = String(text.split(/\s+/)[1] || '').trim();
+        const season = arg || String(await latestSeason().catch(() => '') || '');
+        const divs = await availableDivisions(season).catch(() => []);
+        const places = await livePlaces(season);
+        const profiles = await getLeagueProfiles().catch(() => []);
+        let matched = 0;
+        const missing = [];
+        for (const p of profiles) {
+          if (places.get(placeKey(p.name))) matched++; else missing.push(p.name);
+        }
+        const sample = [...places.entries()].slice(0, 8)
+          .map(([k, v]) => `• <code>${escapeHtml(k)}</code> — ${escapeHtml(String(v.division))} #${v.place} (${v.matches} м, ${v.wins}–${v.losses})`).join('\n');
+        return sendMessage(chatId,
+          `<b>Живые места, сезон ${escapeHtml(season || '—')}</b>\n`
+          + `Дивизионы: ${divs.length ? escapeHtml(divs.join(', ')) : '<i>ни одного</i>'}\n`
+          + `Строк в таблицах: <b>${places.size}</b>\n`
+          + `Совпало с витриной: <b>${matched}</b> из ${profiles.length}\n\n`
+          + (sample || '<i>таблицы пустые</i>')
+          + (missing.length ? `\n\nБез места (${missing.length}): ${escapeHtml(missing.slice(0, 10).join(', '))}` : ''));
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (text.startsWith('/result_test')) {
       // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
       // не трогаются — всё уходит только сюда.

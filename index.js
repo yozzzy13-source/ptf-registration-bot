@@ -1025,14 +1025,24 @@ app.get('/api/league/bootstrap', async (req, res) => {
       const { livePlaces, placeKey } = await import('./division.js');
       const places = await livePlaces(current ? current.number : '');
       const key = placeKey;
+      let matched = 0;
       for (const pl of players) {
         const live = places.get(key(pl.name));
         if (!live) continue;
         pl.division_position = live.place;
-        pl.matches = live.matches;
-        pl.wins = live.wins;
-        pl.losses = live.losses;
+        // Плитки под аватаркой — статистика за всю историю лиги, её не трогаем.
+        // Счёт текущего сезона кладём отдельными полями: он нужен только строке
+        // идущего сезона в истории дивизионов.
+        pl.season_matches = live.matches;
+        pl.season_wins = live.wins;
+        pl.season_losses = live.losses;
         pl.live_stats = true;
+        matched++;
+      }
+      console.log(`live places: season=${current ? current.number : '-'} rows=${places.size} matched=${matched}/${players.length}`);
+      if (places.size && !matched) {
+        console.warn('live places: имена витрины не совпали с таблицами дивизионов; примеры ' +
+          JSON.stringify({ table: [...places.keys()].slice(0, 5), showcase: players.slice(0, 5).map(p => key(p.name)) }));
       }
     } catch (e) { console.error('live places failed:', e.message); }
     // История матчей отдаётся отдельным словарём id → матчи: так карточка любого
