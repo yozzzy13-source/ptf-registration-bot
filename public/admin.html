@@ -15,14 +15,17 @@
       --accent:#ef5f00;--accent2:#ff8a2a;--danger:#ff6b6b;--ok:#61d67f;--r:16px;--bar:74px}
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
     body{margin:0;background:var(--bg);color:var(--text);
-      font:15px/1.45 Inter,system-ui,-apple-system,"SF Pro Text",Segoe UI,Arial,sans-serif;
+      font:13.5px/1.35 Inter,system-ui,-apple-system,"SF Pro Text",Segoe UI,Arial,sans-serif;
       padding:0 14px calc(var(--bar) + 18px + env(safe-area-inset-bottom));-webkit-text-size-adjust:100%}
+    /* Плотный режим по просьбе Костаса: меньше строк на элемент, меньше кегль —
+       больше данных помещается на экран без прокрутки. Поля ввода — исключение:
+       16px и 44px высота там нарочно, iOS иначе зумит страницу при фокусе. */
     .wrap{max-width:1180px;margin:0 auto}
     /* Шапка липнет к верху: имя раздела и «Обновить» всегда под рукой. */
     .top{position:sticky;top:0;z-index:40;display:flex;gap:10px;align-items:center;justify-content:space-between;
       padding:calc(10px + env(safe-area-inset-top)) 0 10px;background:linear-gradient(180deg,var(--bg) 76%,rgba(14,14,16,0));backdrop-filter:blur(8px)}
-    h1{margin:0;font-size:19px;letter-spacing:-.2px}
-    .top .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+    h1{margin:0;font-size:16.5px;letter-spacing:-.2px}
+    .top .sub{font-size:10.5px;color:var(--muted);margin-top:1px}
     .muted{color:var(--muted)}
     .ico{flex:0 0 auto;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
       border:1px solid var(--line);border-radius:13px;background:var(--card);color:var(--text);font-size:17px;cursor:pointer}
@@ -30,38 +33,40 @@
     #status{font-size:12px;color:var(--muted);min-height:16px}
 
     /* Сводка по цифрам — под спойлером: нужна редко, а место занимала всегда. */
-    details.fold>summary{cursor:pointer;list-style:none;font-weight:800;font-size:14px;
-      min-height:44px;display:flex;align-items:center;gap:8px}
+    details.fold>summary{cursor:pointer;list-style:none;font-weight:800;font-size:12.5px;
+      min-height:38px;display:flex;align-items:center;gap:8px}
     details.fold>summary::-webkit-details-marker{display:none}
-    details.fold>summary:after{content:'▾';color:var(--muted);margin-left:auto;font-size:13px}
+    details.fold>summary:after{content:'▾';color:var(--muted);margin-left:auto;font-size:12px}
     details.fold[open]>summary:after{content:'▴'}
-    .statFold{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:6px 14px;margin:2px 0 10px}
-    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin:4px 0 12px}
-    .stat{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:9px 11px}
-    .stat b{font-size:18px;color:var(--accent2);display:block;line-height:1.15}
-    .stat span{font-size:10px;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)}
+    .statFold{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:4px 12px;margin:2px 0 8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:6px;margin:3px 0 9px}
+    .stat{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:7px 9px}
+    .stat b{font-size:16px;color:var(--accent2);display:block;line-height:1.1}
+    .stat span{font-size:9px;letter-spacing:.25px;text-transform:uppercase;color:var(--muted)}
 
-    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:10px 0}
-    .card h3{margin:0 0 4px;font-size:16px}
-    .card>p.muted{margin:0 0 10px;font-size:12.5px}
-    label{display:block;font-size:11px;font-weight:800;color:#cfcac2;margin:10px 0 5px;letter-spacing:.3px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:11px;margin:7px 0}
+    .card h3{margin:0 0 3px;font-size:14px}
+    .card>p.muted{margin:0 0 8px;font-size:11.5px}
+    label{display:block;font-size:10px;font-weight:800;color:#cfcac2;margin:8px 0 4px;letter-spacing:.25px}
     input,select,textarea{width:100%;min-height:44px;padding:11px 12px;border-radius:12px;border:1px solid var(--line);
       background:var(--card2);color:var(--text);font-size:16px;font-family:inherit}
     input:focus,select:focus,textarea:focus{outline:0;border-color:var(--accent)}
-    textarea{min-height:96px;resize:vertical;line-height:1.4}
+    textarea{min-height:168px;resize:vertical;line-height:1.5}
+    #broadcastText,#broadcastTextEn,#directText{min-height:220px}
+    #evDescRu,#evDescEn{min-height:132px}
     input[type=checkbox]{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
     .filters{display:grid;grid-template-columns:1fr;gap:2px 12px}
-    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
-    .actions label{margin:0;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0}
-    .btn{border:0;border-radius:13px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
-      font-weight:800;font-size:14px;min-height:44px;padding:0 16px;cursor:pointer;flex:1 1 auto}
+    .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+    .actions label{margin:0;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;text-transform:none;letter-spacing:0}
+    .btn{border:0;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+      font-weight:800;font-size:12.5px;min-height:40px;padding:0 13px;cursor:pointer;flex:1 1 auto}
     .btn.secondary{background:var(--card2);color:var(--text);border:1px solid var(--line)}
     .btn.danger{background:var(--danger);color:#1a0d0d}
-    .btn.small{min-height:38px;padding:0 12px;font-size:13px;flex:0 0 auto}
+    .btn.small{min-height:34px;padding:0 10px;font-size:11.5px;flex:0 0 auto}
     .btn:active{transform:translateY(1px)}
-    .pill{display:inline-block;padding:4px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:11.5px}
-    .chip{display:inline-block;padding:3px 8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);
-      font-size:11px;margin:1px 3px 1px 0;color:#ddd;cursor:pointer}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:10.5px}
+    .chip{display:inline-block;padding:2px 7px;border-radius:999px;background:var(--card2);border:1px solid var(--line);
+      font-size:10px;margin:1px 3px 1px 0;color:#ddd;cursor:pointer}
     .ok{color:var(--ok)} .err{color:var(--danger)} .hidden{display:none!important}
     .photoStrip{display:flex;gap:8px;overflow:auto;padding:8px 0}.photoStrip .pv{position:relative;flex:0 0 76px}.photoStrip img{width:76px;height:76px;border-radius:12px;object-fit:cover;border:1px solid var(--line)}.photoStrip button{position:absolute;right:-4px;top:-5px;width:23px;height:23px;border-radius:50%;padding:0;margin:0;background:var(--danger);color:white;border:0;font-size:12px}
     .num{font-variant-numeric:tabular-nums;text-align:right}
@@ -70,13 +75,13 @@
     /* Таблицы. На широком экране обычная таблица, на телефоне каждая строка
        становится карточкой, а второстепенные колонки (.lo) прячутся — по-другому
        на 440 px получается только горизонтальная прокрутка, а это мучение. */
-    .tableWrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);margin-top:12px;background:#141518}
+    .tableWrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);margin-top:9px;background:#141518}
     table{width:100%;border-collapse:collapse}
-    th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;font-size:13px;vertical-align:middle}
-    th{position:sticky;top:0;background:#22242a;color:#ddd;z-index:1;font-size:11px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+    th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;font-size:12px;vertical-align:middle}
+    th{position:sticky;top:0;background:#22242a;color:#ddd;z-index:1;font-size:10px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
     tr:last-child td{border-bottom:0}
     .msg{color:#c9c4bc;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .logs{background:#131418} .logs table{background:transparent} .logs td{font-size:12px;padding:6px 10px}
+    .logs{background:#131418} .logs table{background:transparent} .logs td{font-size:11px;padding:4px 8px}
     .logs .fail td{color:#ffb3b3}
     .hist tr.row{cursor:pointer} .hist tr.row.open{background:var(--card2)}
 
@@ -87,8 +92,8 @@
          экране от неё остаются висящие подписи, поэтому прячем такую строку. */
       th{display:none}
       tr:has(th){display:none}
-      tbody tr,table>tr{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--line)}
-      tbody td,table>tr>td{border:0;padding:0;font-size:13.5px}
+      tbody tr,table>tr{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 10px;border-bottom:1px solid var(--line)}
+      tbody td,table>tr>td{border:0;padding:0;font-size:12px}
       td.lo,th.lo{display:none}
       td.grow{flex:1 1 auto;min-width:52%}
       td .btn{flex:0 0 auto}
@@ -103,27 +108,27 @@
       background:rgba(14,14,16,.94);backdrop-filter:blur(16px);border-top:1px solid var(--line);
       overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
     .tabs::-webkit-scrollbar{display:none}
-    .tab{flex:0 0 auto;min-width:72px;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;
-      gap:3px;padding:6px 8px;border:0;border-radius:14px;background:transparent;color:var(--muted);
-      font:700 10.5px/1.15 inherit;cursor:pointer;text-align:center}
-    .tab i{font-style:normal;font-size:19px;line-height:1}
+    .tab{flex:0 0 auto;min-width:64px;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:2px;padding:4px 6px;border:0;border-radius:12px;background:transparent;color:var(--muted);
+      font:700 9.5px/1.1 inherit;cursor:pointer;text-align:center}
+    .tab i{font-style:normal;font-size:17px;line-height:1}
     .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
     @media(min-width:900px){
-      body{padding-bottom:24px}
-      .tabs{position:sticky;top:60px;bottom:auto;border-top:0;border-bottom:1px solid var(--line);
-        padding:8px 0;background:var(--bg);backdrop-filter:none;margin-bottom:6px}
-      .tab{flex-direction:row;min-height:44px;gap:7px;font-size:13px;padding:0 14px}
-      .tab i{font-size:15px}
+      body{padding-bottom:20px}
+      .tabs{position:sticky;top:52px;bottom:auto;border-top:0;border-bottom:1px solid var(--line);
+        padding:6px 0;background:var(--bg);backdrop-filter:none;margin-bottom:5px}
+      .tab{flex-direction:row;min-height:38px;gap:6px;font-size:11.5px;padding:0 12px}
+      .tab i{font-size:13px}
     }
 
     /* Список получателей и подсказки по имени. */
-    .rcp{border:1px solid var(--line);border-radius:14px;background:#141518;max-height:340px;overflow:auto;margin:8px 0 4px}
-    .rcp .r{display:flex;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;min-height:48px}
+    .rcp{border:1px solid var(--line);border-radius:12px;background:#141518;max-height:320px;overflow:auto;margin:6px 0 3px}
+    .rcp .r{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;min-height:40px}
     .rcp .r:last-child{border-bottom:0}
     .rcp .r.on{background:rgba(239,95,0,.12)}
-    .rcp .r input{width:22px;flex:0 0 auto}
-    .rcp .nm{font-weight:700;font-size:13.5px}
-    .rcp .sub{font-size:11.5px;color:var(--muted)}
+    .rcp .r input{width:20px;flex:0 0 auto}
+    .rcp .nm{font-weight:700;font-size:12px}
+    .rcp .sub{font-size:10.5px;color:var(--muted)}
     .rcp .tags{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
     .rcpbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
     .rcpbar .cnt{font-size:12px;color:var(--muted);margin-left:auto}
@@ -148,32 +153,38 @@
     #bcWho span{padding:4px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line)}
     .codes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
     .codes span{padding:9px 12px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:13px;cursor:pointer}
-    .prev{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:13px;margin:8px 0;font-size:14px;line-height:1.55}
-    .prev .pbtn{display:inline-block;margin:4px 6px 0 0;padding:7px 12px;border-radius:11px;background:#2c2f35;border:1px solid var(--line);font-size:12.5px}
-    .prev .warn{color:var(--danger);font-weight:800;margin-top:8px}
-    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+    .prev{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px;margin:6px 0;font-size:12.5px;line-height:1.45}
+    .prev .pbtn{display:inline-block;margin:3px 5px 0 0;padding:6px 10px;border-radius:10px;background:#2c2f35;border:1px solid var(--line);font-size:11.5px}
+    .prev .warn{color:var(--danger);font-weight:800;margin-top:6px}
+    .toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
     .toolbar input{width:auto;min-width:180px;flex:1 1 180px}
-    .toolbar label{margin:0;display:flex;gap:8px;align-items:center;font-size:13px;text-transform:none;letter-spacing:0}
+    .toolbar label{margin:0;display:flex;gap:6px;align-items:center;font-size:12px;text-transform:none;letter-spacing:0}
 
     /* Касса: карточка игрока, крупный баланс, действия кнопками. */
-    .bal{display:flex;align-items:baseline;gap:10px;margin:12px 0 4px}
-    .bal b{font-size:30px;color:var(--accent2);font-variant-numeric:tabular-nums}
-    .bal span{font-size:13px;color:var(--muted)}
-    .who{display:flex;align-items:center;gap:12px}
-    .who .av{width:44px;height:44px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
+    .bal{display:flex;align-items:baseline;gap:8px;margin:9px 0 3px}
+    .bal b{font-size:25px;color:var(--accent2);font-variant-numeric:tabular-nums}
+    .bal span{font-size:11.5px;color:var(--muted)}
+    .who{display:flex;align-items:center;gap:10px}
+    .who .av{width:38px;height:38px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
       display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--accent2)}
-    .who .nm{font-weight:800;font-size:16px}
-    .ops{display:flex;gap:8px;margin-top:12px}
+    .who .nm{font-weight:800;font-size:14px}
+    .ops{display:flex;gap:6px;margin-top:9px}
     .ops .btn{flex:1 1 0}
-    .amts{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
-    .amts .chip{padding:10px 14px;font-size:14px;font-weight:700}
+    .amts{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
+    .amts .chip{padding:8px 12px;font-size:12.5px;font-weight:700}
     .amts .chip.on{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
-    .hist2{margin-top:14px}
-    .hist2 .row2{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)}
+    .hist2{margin-top:10px}
+    .hist2 .row2{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line)}
     .hist2 .row2:last-child{border-bottom:0}
     .hist2 .amt{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
     .hist2 .plus{color:var(--ok)} .hist2 .minus{color:var(--danger)}
-    .hist2 .d{font-size:11.5px;color:var(--muted)}
+    .hist2 .d{font-size:10.5px;color:var(--muted)}
+    .searchwrap{position:relative}
+    .psug{position:absolute;left:0;right:0;top:calc(100% - 2px);z-index:15;background:var(--card2);border:1px solid var(--line);
+      border-radius:11px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.4)}
+    .psug .pi{padding:9px 12px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+    .psug .pi:last-child{border-bottom:0}
+    .psug .pi:hover,.psug .pi:active{background:var(--card)}
   </style>
 </head>
 <body><div class="wrap">
@@ -192,7 +203,7 @@
       <div><label>Селфи</label><select id="fSelfie"><option value="">Все</option><option value="missing">Нет</option><option value="requested">Запросили</option><option value="received">Есть</option></select></div>
       <div><label>NTRP (Raketo)</label><select id="fRating"><option value="">Все</option><option value="missing">Нет</option><option value="set">Указан</option></select></div>
       <div><label>Событие</label><select id="fEvent"><option value="">Все</option></select></div>
-      <div><label>Поиск</label><input id="fSearch" placeholder="имя или @ник" /></div>
+      <div><label>Поиск</label><div class="searchwrap"><input id="fSearch" placeholder="имя или @ник" autocomplete="off" oninput="fSearchInput(this.value)" onblur="fSearchBlur()"><div id="fSearchSug" class="psug hidden"></div></div></div>
     </div>
     <div class="actions" style="margin-top:9px"><button class="btn" onclick="applyFilters()">Применить</button><button class="btn secondary" onclick="clearFilters()">Сбросить</button><button class="btn secondary" onclick="selectFiltered()">Отметить всех</button><button class="btn secondary" onclick="clearSelection()">Снять отметки</button></div>
     </details>
