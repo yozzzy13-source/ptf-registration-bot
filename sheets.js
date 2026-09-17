@@ -56,9 +56,22 @@ function firstNonEmpty(row={}, keys=[]) {
   }
   return '';
 }
-async function manualParticipantsSheetTitle() {
+// Лист состава. У каждого сезона свой лист в той же таблице: организатор
+// заводит новую вкладку, как только начинает собирать следующий сезон. Ищем по
+// номеру сезона в названии вкладки — «Season 3», «Сезон 3», «S3» читаются
+// одинаково. Если такой вкладки нет, остаётся та, что указана в настройках:
+// это состав текущего сезона, как было раньше.
+async function manualParticipantsSheetTitle(season = '') {
   const meta = await spreadsheetMetaFor(PARTICIPANTS_SPREADSHEET_ID);
   const sheets = meta.sheets || [];
+  const want = String(season || '').replace(/\D+/g, '');
+  if (want) {
+    const hit = sheets.find(s => {
+      const nums = String(s.properties?.title || '').match(/\d+/g) || [];
+      return nums.includes(want);
+    });
+    if (hit) return hit.properties.title;
+  }
   const byId = sheets.find(s => String(s.properties?.sheetId || '') === String(PARTICIPANTS_SHEET_ID));
   return byId?.properties?.title || sheets[0]?.properties?.title || 'Sheet1';
 }
@@ -673,12 +686,14 @@ export async function attachWebsiteProfiles(players=[]) {
   return players;
 }
 
-export async function getManualParticipants() {
-  const title = await manualParticipantsSheetTitle();
+export async function getManualParticipants(season = '') {
+  const title = await manualParticipantsSheetTitle(season);
   const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
   const parsed = parseManualParticipantsValues(values);
   await attachWebsiteProfiles(parsed.players); // groups reference the same player objects
-  return parsed;
+  // Пустой лист нового сезона — это не ошибка: состав ещё собирают. Отдаём его
+  // как есть, вместе с названием вкладки, чтобы экран мог честно сказать об этом.
+  return { ...parsed, sheet: title, season: String(season || '') };
 }
 export function parseManualParticipantsValues(values=[]) {
   if (!values.length) return { players: [], groups: [], divisions: [], note: '', totals: { total:0, active:0, waitlist:0 } };

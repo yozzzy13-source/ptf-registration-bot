@@ -192,16 +192,16 @@ app.get('/api/bootstrap', async (req, res) => {
   }
 });
 
-async function participantsPayload(user=null) {
+async function participantsPayload(user=null, season='') {
   let lang = '';
   if (user?.id) {
     const profile = await findApplicantByTelegramId(user.id).catch(() => null);
     lang = ['ru','en'].includes(String(profile?.language || '').toLowerCase()) ? String(profile.language).toLowerCase() : '';
   }
   if (!lang) lang = String(user?.language_code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
-  const data = await getManualParticipants();
+  const data = await getManualParticipants(season);
   const players = (data.players || []).map((p, idx) => ({ n: idx + 1, ...p }));
-  return { ok:true, lang, total: players.length, totals: data.totals, note: data.note, divisions: data.divisions, groups: data.groups, players };
+  return { ok:true, lang, season: data.season || '', sheet: data.sheet || '', total: players.length, totals: data.totals, note: data.note, divisions: data.divisions, groups: data.groups, players };
 }
 
 app.get('/api/participants', async (req, res) => {
@@ -211,7 +211,7 @@ app.get('/api/participants', async (req, res) => {
     // отвечал «Invalid Telegram initData».
     const who = webAppUser(req.query.initData || '', req.query.t || '');
     if (!who.ok) return res.status(who.code).json({ ok:false, error:who.error });
-    res.json(await participantsPayload(who.user));
+    res.json(await participantsPayload(who.user, String(req.query.season || '')));
   } catch (e) {
     res.status(500).json({ ok:false, error:e.message });
   }

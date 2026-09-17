@@ -454,4 +454,9 @@ check(applyHtml.includes('fillAgeOptions')&&applyHtml.includes('<select id="age"
 check(applyHtml.includes('nameHint')&&applyHtml.includes('experienceHint'),'У имени и опыта есть поясняющие подписи');
 check(leagueHtml.includes('inviteHeroHtml')&&leagueHtml.includes('toggleInvitePlayers')&&leagueHtml.includes('inviteFinal'),'Приглашение: чемпионы сверху, состав раскрывается, финалы показаны сразу');
 
+check(applyHtml.includes("id=\"startBtn2\"")&&applyHtml.indexOf("id=\"startBtn\"")<applyHtml.indexOf('id="introEvents"'),'Кнопка продолжения стоит над витриной событий');
+check(applyHtml.includes("openParticipantsPage(ev)")&&applyHtml.includes("'&season='"),'Список участников открывается для сезона своего события');
+const partsHtml = await fs.readFile(path.join(root,'public/participants.html'),'utf8');
+check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Страница состава читает вкладку своего сезона и объясняет пустой список');
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

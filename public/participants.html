@@ -102,7 +102,11 @@ function playerCell(p){const name=p.profile_url?`<a class="pname" href="${esc(p.
 function statusPill(s){const x=L[lang];const k=s==='active'?'active':(s==='waitlist'?'waitlist':'other');const label=k==='active'?x.active:(k==='waitlist'?x.waitlist:(s||'—'));return `<span class="st ${k}">${esc(label)}</span>`}
 function render(data){
   const x=L[lang]; const groups=data.groups||[]; const t=data.totals||{total:0,active:0,waitlist:0};
-  if(!groups.length){$('content').innerHTML=`<p class="sub">${esc(x.empty)}</p>`;return}
+  if(!groups.length){
+    // Состав нового сезона ещё собирают — это нормальное состояние, а не сбой.
+    const soon=data.season?(lang==='ru'?`Состав сезона ${data.season} ещё собирается. Оставьте анкету — попадёте в лист ожидания и узнаете о наборе первым.`
+                                        :`The season ${data.season} line-up is still being assembled. Leave your profile to join the waitlist and hear about it first.`):'';
+    $('content').innerHTML=`<p class="sub">${esc(soon||x.empty)}</p>`;return}
   let html='';
   if(data.note) html+=`<div class="note">${esc(data.note)}</div>`;
   html+=`<div class="totals"><div class="tot"><small>${x.total}</small><b>${t.total}</b></div><div class="tot active"><small>${x.active}</small><b>${t.active}</b></div><div class="tot waitlist"><small>${x.waitlist}</small><b>${t.waitlist}</b></div></div>`;
@@ -123,7 +127,9 @@ function render(data){
 async function load(){
   applyLang();
   try{
-    const r=await fetch('/api/participants?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'});
+    // ?season=3 — состав конкретного сезона: у каждого своя вкладка в таблице.
+    const seasonQ=(new URLSearchParams(location.search).get('season')||'').trim();
+    const r=await fetch('/api/participants?initData='+encodeURIComponent(initData)+tokQ+(seasonQ?'&season='+encodeURIComponent(seasonQ):''),{cache:'no-store'});
     const j=await r.json();
     if(!j.ok) throw new Error(j.error||'Participants loading error');
     if(j.lang==='ru'||j.lang==='en'){lang=j.lang;applyLang();}
