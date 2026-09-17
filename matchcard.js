@@ -20,8 +20,22 @@ import { getFileBuffer } from './telegram.js';
 import { findApplicantByTelegramId, getMasterPhotos } from './sheets.js';
 
 const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
-const CARD_FONT_FILE = path.join(ASSETS_DIR, 'PTFCard.ttf');
-const CARD_FONT_DATA = fs.readFileSync(CARD_FONT_FILE).toString('base64');
+// Берём любые шрифты, положенные в assets: .ttf и .otf, сколько угодно
+// начертаний. Имя семейства читаем из файла, поэтому замена шрифта — это
+// просто замена файлов, без единой правки кода.
+function cardFontFiles() {
+  try {
+    return fs.readdirSync(ASSETS_DIR)
+      .filter(f => /\.(ttf|otf)$/i.test(f))
+      .sort((a, b) => {
+        // Обычное начертание вперёд: именно из него берём имя семейства.
+        const score = f => (/regular/i.test(f) ? 0 : /medium|book/i.test(f) ? 1 : /italic/i.test(f) ? 3 : 2);
+        return score(a) - score(b) || a.localeCompare(b);
+      })
+      .map(f => path.join(ASSETS_DIR, f));
+  } catch (e) { console.error('card fonts read failed:', e.message); return []; }
+}
+const CARD_FONT_FILE = cardFontFiles()[0] || '';
 
 // Шрифт для картинки. Раньше он лежал в SVG как base64 внутри @font-face, и
 // казалось, что этого достаточно. Но librsvg внутри sharp встроенные шрифты НЕ
@@ -58,7 +72,7 @@ function fontFamilyOf(file) {
     return fallback;
   } catch (e) { console.error('card font name read failed:', e.message); return ''; }
 }
-const CARD_FONT_FAMILY = fontFamilyOf(CARD_FONT_FILE) || 'DejaVu Sans';
+const CARD_FONT_FAMILY = (CARD_FONT_FILE && fontFamilyOf(CARD_FONT_FILE)) || 'DejaVu Sans';
 // Экранировать не нужно: имя семейства берём из файла шрифта, кавычек там не бывает.
 const FONT = `'${CARD_FONT_FAMILY}', 'DejaVu Sans', 'Liberation Sans', sans-serif`;
 
@@ -81,7 +95,7 @@ const FONT = `'${CARD_FONT_FAMILY}', 'DejaVu Sans', 'Liberation Sans', sans-seri
 </fontconfig>
 `);
     process.env.FONTCONFIG_FILE = conf;
-    console.log(`card font: ${CARD_FONT_FAMILY} from ${ASSETS_DIR}`);
+    console.log(`card font: ${CARD_FONT_FAMILY} (${cardFontFiles().length} file(s) in assets)`);
   } catch (e) { console.error('card font setup failed:', e.message); }
 })();
 const W = 1200, H = 630, R = 300;
@@ -262,7 +276,7 @@ export async function renderMatchCard(match = {}) {
   const foot = [m.date, m.court].filter(Boolean).join('  ·  ');
 
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs><style>@font-face{font-family:PTFCard;src:url(data:font/ttf;base64,${CARD_FONT_DATA}) format('truetype');}</style><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="${C.bg1}"/><stop offset="1" stop-color="${C.bg2}"/></linearGradient></defs>
     <rect width="${W}" height="${H}" fill="url(#g)"/>
     <rect width="${W}" height="4" fill="${C.amber}" opacity=".9"/>
