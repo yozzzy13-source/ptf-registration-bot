@@ -6,7 +6,7 @@ try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
 let D, ru=(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
-let view='home', step=0, slot=1, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='', searchSugOpen=false;
+let view='home', step=0, slot=1, homeTeamOpen=0, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='', searchSugOpen=false;
 // Разовое приглашение при первом заходе в Fantasy — показываем один раз на
 // это устройство, дальше не мешаем.
 let introOpen=false;
@@ -96,8 +96,36 @@ function homeView() {
   let html='<section class="card clubhero"><h2>'+tr('PTF Fantasy','PTF Fantasy')+'</h2><p>'+tr('Открытое бесплатное соревнование между командами игроков лиги: вы и другие участники собираете команды из настоящих игроков PTF, и реальные матчи сезона приносят вам очки. Побеждает та команда, что наберёт больше всех.','An open, free competition between league players’ own teams: you and other players build squads of real PTF players, and their real matches this season earn you points. Whoever’s squad scores the most wins.')+'</p><div class="clubgrid"><div class="clubcell"><b>'+D.roster_size+'</b><span>'+tr('игроков','players')+'</span></div><div class="clubcell"><b>'+D.budget+'</b><span>'+tr('бюджет','budget')+'</span></div><div class="clubcell"><b>×'+D.scoring.captainMultiplier+'</b><span>'+tr('капитан','captain')+'</span></div></div>'+timing();
   if(!first)html+=editable()?button(local?.picks.length?tr('Продолжить команду','Continue team'):tr('Создать первую команду','Create first team'),'start','primary full','data-slot="1"'):'<div class="readonly">'+esc(windowMessage())+'</div>';
   html+='</section>';
-  for(const t of [first,second].filter(Boolean))html+='<section class="card"><div class="eyebrow">'+tr('Команда','Team')+' '+Number(t.team_slot||1)+'</div><h2>'+esc(t.team_name)+'</h2><p class="meta">'+esc(t.status==='locked'?tr('Подтверждена','Confirmed'):deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered'):tr('Черновик — не в рейтинге, подтвердите состав','Draft — not in the standings, confirm your squad'))+' · '+(t.picks||[]).length+'/8 · <b>'+Number(t.points||0)+'</b> Fantasy Points</p>'+timing()+cards('team',Number(t.team_slot||1))+button(tr('Изменить команду','Edit team'),'start','primary full','data-slot="'+Number(t.team_slot||1)+'"')+'</section>';
-  if(first&&!second&&editable())html+=button(tr('Создать вторую команду','Create second team'),'start','secondary full','data-slot="2"');
+  // Костас: на главной команды должны быть свёрнуты — строка с названием и
+  // кнопками, а состав раскрывается по нажатию. Иначе два состава по восемь
+  // человек занимают весь экран и до второй команды никто не доскроллит.
+  for(const t of [first,second].filter(Boolean)) {
+    const n=Number(t.team_slot||1),open=homeTeamOpen===n;
+    const state=t.status==='locked'?tr('Подтверждена','Confirmed')
+      :deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered')
+      :tr('Черновик — не в рейтинге','Draft — not in the standings');
+    html+='<section class="card teamfold'+(open?' open':'')+'">'
+      +'<div class="tf-head">'
+        +'<button type="button" class="tf-main" data-action="team-toggle" data-slot="'+n+'" aria-expanded="'+open+'">'
+          +'<div class="eyebrow">'+tr('Команда','Team')+' '+n+'</div>'
+          +'<div class="tf-name">'+esc(t.team_name)+' <span class="tf-chev">'+(open?'\u25b2':'\u25bc')+'</span></div>'
+          +'<div class="tf-meta">'+esc(state)+' \u00b7 '+(t.picks||[]).length+'/8 \u00b7 <b>'+Number(t.points||0)+'</b> Fantasy Points</div>'
+        +'</button>'
+        +(editable()?'<div class="tf-actions">'
+          +button(tr('Состав','Squad'),'start','mini','data-slot="'+n+'"')
+          +button(tr('Название','Rename'),'rename','mini','data-slot="'+n+'"')
+        +'</div>':'')
+      +'</div>'
+      +(open?cards('team',n):'')
+    +'</section>';
+  }
+  // Пока команда одна — объясняем, что можно собрать вторую, а не просто даём
+  // кнопку без пояснения.
+  if(first&&!second)html+='<section class="card teamhint"><h3>'+tr('Можно собрать вторую команду','You can build a second team')+'</h3>'
+    +'<p class="sub">'+tr('Вторая команда полностью независима: свой состав, свой капитан и своё место в рейтинге. Это второй заход с другой ставкой.','Your second team is fully independent: its own squad, its own captain and its own place in the standings. A second shot with a different bet.')+'</p>'
+    +(editable()?button(tr('Создать вторую команду','Create second team'),'start','primary full','data-slot="2"'):'<div class="readonly">'+esc(windowMessage())+'</div>')+'</section>';
+  // Про дедлайн важно сказать прямо: до него состав можно менять сколько угодно.
+  if(first)html+='<p class="meta home-note">'+esc(tr('Состав можно менять сколько угодно до дедлайна: ','You can change your squad as often as you like until the deadline: ')+date()+tr('. После дедлайна остаются только разрешённые замены.','. After the deadline, only permitted transfers remain.'))+'</p>';
   return html+'<details class="card rules"><summary>'+tr('Откуда берутся очки','Where points come from')+'</summary><p>'+esc(rule('intro'))+'</p><p>'+esc(rule('squad'))+'</p><p>'+esc(rule('scoring'))+'</p><p>'+esc(rule('locking'))+'</p></details>';
 }
 function slotsPanel() {
@@ -368,6 +396,14 @@ async function handle(action,el={dataset:{}}) {
   if(action==='filter'){filter=el.dataset.filter;return render();}
   if(action==='rank-teams'||action==='rank-players'){rankMode=action.slice(5);rankOpen='';return render();}
   const key=el.dataset.key,d=draft();
+  if(action==='team-toggle'){const n=Number(el.dataset.slot||1);homeTeamOpen=homeTeamOpen===n?0:n;return render();}
+  // «Название» — это тот же мастер, но сразу на шаге с именем команды.
+  if(action==='rename'){
+    const n=Number(el.dataset.slot||1);
+    if(!editable())return render();
+    await saveDraft(slot);slot=n;transferOut='';review=null;draft(n);
+    step=2;return navigate('wizard');
+  }
   if(action==='rank-toggle'){rankOpen=rankOpen===key?'':key;return render();}
   if(action==='price-info'){priceOpen=priceOpen===key?'':key;return render();}
   if(action==='matches-toggle'){matchesOpen=matchesOpen===key?'':key;return render();}
