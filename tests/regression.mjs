@@ -496,4 +496,44 @@ check(applyHtml.includes("openParticipantsPage(ev)")&&applyHtml.includes("'&seas
 const partsHtml = await fs.readFile(path.join(root,'public/participants.html'),'utf8');
 check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Страница состава читает вкладку своего сезона и объясняет пустой список');
 
+// Каждый импорт между файлами проекта должен иметь свой экспорт. Проверка
+// появилась после падения на деплое: results.js звал новую функцию из
+// division.js, а в архив попали не все файлы — бот не поднялся с SyntaxError.
+// Ловим это здесь, а не на Railway.
+{
+ const jsFiles=(await fs.readdir(root)).filter(f=>f.endsWith('.js')&&!f.includes('.test.'));
+ const exportsOf=src=>{
+  const out=new Set();
+  for(const m of src.matchAll(/export\s+(?:async\s+)?(?:function|class)\s+([A-Za-z0-9_$]+)/g))out.add(m[1]);
+  for(const m of src.matchAll(/export\s+(?:const|let|var)\s+([A-Za-z0-9_$]+)/g))out.add(m[1]);
+  for(const m of src.matchAll(/export\s*\{([^}]+)\}/g))
+   for(const part of m[1].split(','))
+    {const n=part.trim().split(/\s+as\s+/).pop().trim();if(n)out.add(n)}
+  return out;
+ };
+ const cache=new Map();
+ const exportsFor=async file=>{
+  if(!cache.has(file))cache.set(file,exportsOf(await fs.readFile(path.join(root,file),'utf8')));
+  return cache.get(file);
+ };
+ const broken=[];
+ for(const file of jsFiles){
+  const src=await fs.readFile(path.join(root,file),'utf8');
+  const uses=[...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*'(\.\/[^']+)'/g)]
+   // Динамический импорт считаем только «чистый»: с .then() модуль могут
+   // домешать из другого файла, и такая строка не про этот модуль.
+   .concat([...src.matchAll(/(?:const|let)\s*\{([^}]+)\}\s*=\s*await\s+import\(\s*'(\.\/[^']+)'\s*\)(?!\s*\n?\s*\.then)/g)]);
+  for(const use of uses){
+   const target=use[2].replace('./','');
+   if(!jsFiles.includes(target))continue;
+   const have=await exportsFor(target);
+   for(const raw of use[1].split(',')){
+    const name=raw.trim().split(/\s+as\s+/)[0].trim();
+    if(name&&!have.has(name))broken.push(`${file} → ${target}: нет экспорта «${name}»`);
+   }
+  }
+ }
+ check(!broken.length,'Каждый импорт находит свой экспорт:\n'+broken.join('\n'));
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
