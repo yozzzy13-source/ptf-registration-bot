@@ -8,6 +8,53 @@ export const uid = (prefix='id') => `${prefix}_${Date.now()}_${Math.random().toS
 export const langOf = (code) => String(code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
 export const escapeHtml = (s='') => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
+// ---------------------------------------------------------------- /test_match
+// Разбор команды тестового прогона. Набирают её с телефона одной рукой, поэтому
+// жёсткий формат «Имя | Имя | счёт» на практике не работает: разделитель
+// забывается, фамилия пишется без имени, регистр любой. Правило простое —
+// счёт начинается с первого токена вида «6:4», всё до него имена, а имена
+// сверяются с составом сезона: точное совпадение, вхождение или поиск обоих
+// прямо внутри слитной строки.
+export const matchNameKey = v => String(v || '').toLowerCase().normalize('NFD')
+  .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9а-яё]+/gi, '');
+
+export function parseTestMatchInput(raw = '') {
+  const cleaned = String(raw || '').replace(/^\/test_match(@\S+)?\s*/i, '').trim();
+  if (!cleaned) return null;
+  const tokens = cleaned.split(/\s+/);
+  const at = tokens.findIndex(t => /^\(?\d{1,2}\s*[:\-–]\s*\d{1,2}/.test(t));
+  const score = at >= 0 ? tokens.slice(at).join(' ') : '';
+  const head = (at >= 0 ? tokens.slice(0, at) : tokens).join(' ').replace(/[|;,\-–—]+$/, '').trim();
+  const parts = head.split(/\s*[|;]\s*|\s+[-–—]\s+|\s+vs\.?\s+/i).map(x => x.trim()).filter(Boolean);
+  return { head, score, parts };
+}
+// Один игрок по куску имени: точное совпадение, иначе вхождение в любую сторону.
+export function findRosterPlayer(players = [], wanted = '') {
+  const w = matchNameKey(wanted);
+  if (!w) return { none: true };
+  const exact = players.filter(p => matchNameKey(p.name) === w);
+  if (exact.length === 1) return { player: exact[0] };
+  const part = players.filter(p => matchNameKey(p.name).includes(w) || w.includes(matchNameKey(p.name)));
+  if (part.length === 1) return { player: part[0] };
+  if (part.length > 1) return { many: part };
+  return { none: true };
+}
+// Оба игрока из слитной строки, по порядку появления: «Ilia izotov Viacheslav
+// Poniiatovsky» → победитель Ilia Izotov, проигравший Viacheslav Poniiatovsky.
+export function findRosterPair(players = [], head = '') {
+  const hay = matchNameKey(head), hits = [];
+  for (const p of players) {
+    const key = matchNameKey(p.name);
+    if (!key) continue;
+    const at = hay.indexOf(key);
+    if (at >= 0) hits.push({ p, at, len: key.length });
+  }
+  hits.sort((a, b) => a.at - b.at || b.len - a.len);
+  const picked = [];
+  for (const h of hits) if (!picked.some(x => h.at < x.at + x.len && x.at < h.at + h.len)) picked.push(h);
+  return picked.map(x => x.p);
+}
+
 // Номер сезона из чего угодно, что встречается в таблицах: отдельная колонка
 // season_id, выпадашка «Season 1» / «Сезон 1», подпись матча «Semifinal S1» или
 // «Round 3 S2». Раньше понимался только формат S1, поэтому «Season 1» из колонки
