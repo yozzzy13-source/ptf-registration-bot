@@ -98,14 +98,31 @@ const FONT = `'${CARD_FONT_FAMILY}', 'DejaVu Sans', 'Liberation Sans', sans-seri
     console.log(`card font: ${CARD_FONT_FAMILY} (${cardFontFiles().length} file(s) in assets)`);
   } catch (e) { console.error('card font setup failed:', e.message); }
 })();
-const W = 1200, H = 630, R = 300;
+const W = 1200, H = 650, R = 200;
+// Центры портретов. По краям карточки — колонки со статистикой (место в
+// дивизионе и очки Fantasy), между портретами — счёт.
+const CENTER = [{ x: 330, y: 288 }, { x: 870, y: 288 }];
+const PLATE = { w: 196, x: [24, 980], rankY: 168, fpY: 312, fpH: 96 };
+const SCORE_ROOM = 340;
 
 // Палитра Noir — та же, что в мини-приложении, чтобы картинка не выглядела
-// чужой рядом с интерфейсом.
+// чужой рядом с интерфейсом. Золото — то же самое кольцо чемпиона, что и на
+// главной странице лиги (--goldRing/--goldGlow), только глянец собран из
+// пары полупрозрачных обводок вместо box-shadow — librsvg blur ненадёжен.
 const C = {
   bg1: '#0C0B0B', bg2: '#17130F', text: '#EFEBE4', dim: '#B9B1A5', mute: '#8A7F6F',
   amber: '#E8A45C', win: '#8FBF9A', line: 'rgba(255,255,255,.10)', ring2: '#4A423A',
-  chipBg: 'rgba(143,191,154,.15)', chipLine: 'rgba(143,191,154,.34)', avBg: '#1C1A18'
+  chipBg: 'rgba(143,191,154,.15)', chipLine: 'rgba(143,191,154,.34)', avBg: '#1C1A18',
+  champ: '#D9C7A3', loss: '#C2695E', lossBg: 'rgba(194,105,94,.15)', lossLine: 'rgba(194,105,94,.36)',
+  upBg: 'rgba(143,191,154,.16)', upLine: 'rgba(143,191,154,.38)',
+  plate: 'rgba(255,255,255,.035)', plateLine: 'rgba(255,255,255,.10)',
+  // Кольцо чемпиона — ровно как на главной странице лиги:
+  // box-shadow: 0 0 0 3px var(--goldRing), 0 0 0 5px var(--goldGlow).
+  // Это не размытое свечение, а два плотных кольца, поэтому и рисуем их
+  // обводками в тех же пропорциях (3px и 2px от 96px аватарки).
+  gold: '#C9A76A', goldGlow: 'rgba(201,167,106,.24)', goldSoft: 'rgba(201,167,106,.10)',
+  // Проигравший — серебро финалиста из той же карточки чемпиона (.chru, 2px).
+  silver: '#9A948B', silverSoft: 'rgba(154,148,139,.18)'
 };
 
 const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -178,7 +195,16 @@ async function trimEdges(buffer) {
   } catch { return buffer; }
 }
 
-async function toCircle(buffer, size, ring) {
+// Рамки ровно те же, что и в карточке чемпиона на главной: победителю —
+// золотое кольцо 3px плюс плотный полупрозрачный ободок 2px, проигравшему —
+// серебро финалиста 2px. Пропорции считаем от 96px аватарки интерфейса, чтобы
+// на большой картинке кольцо выглядело так же, а не толстым обручем.
+const FRAME = {
+  winner: { ring: C.gold, glow: C.goldGlow, soft: C.goldSoft, ringScale: 0.031, glowScale: 0.021 },
+  loser: { ring: C.silver, glow: C.silverSoft, soft: '', ringScale: 0.021, glowScale: 0.014 }
+};
+
+async function toCircle(buffer, size, frame) {
   const big = Math.round(size * ZOOM);
   const off = Math.round((big - size) / 2);
   const photo = await sharp(await trimEdges(buffer))
@@ -188,25 +214,58 @@ async function toCircle(buffer, size, ring) {
   const mask = Buffer.from(
     `<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="#fff"/></svg>`);
   const round = await sharp(photo).composite([{ input: mask, blend: 'dest-in' }]).png().toBuffer();
-  return withRing(round, size, ring);
+  return withFrame(round, size, frame);
 }
-// Кольцо плотное, не полупрозрачное: оно же перекрывает самый край фотографии.
-async function withRing(buffer, size, ring) {
-  const w = Math.round(size * 0.055);
-  const frame = Buffer.from(`<svg width="${size}" height="${size}">
-    <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - w / 2}" fill="none" stroke="${ring}" stroke-width="${w}"/>
-  </svg>`);
-  return sharp(buffer).composite([{ input: frame }]).png().toBuffer();
+// Кольца рисуются СНАРУЖИ фотографии, поэтому буфер выходит крупнее исходного:
+// композит на карточке центрируется по фактическому размеру, а не по R.
+async function withFrame(buffer, size, frame = FRAME.loser) {
+  const rw = Math.max(3, Math.round(size * frame.ringScale));
+  const gw = Math.max(2, Math.round(size * frame.glowScale));
+  const sw = frame.soft ? Math.round(gw * 0.9) : 0;
+  const pad = rw + gw + sw + 2, canvas = size + pad * 2, c = canvas / 2, r0 = size / 2;
+  const rings = [
+    `<circle cx="${c}" cy="${c}" r="${r0 + rw / 2}" fill="none" stroke="${frame.ring}" stroke-width="${rw}"/>`,
+    `<circle cx="${c}" cy="${c}" r="${r0 + rw + gw / 2}" fill="none" stroke="${frame.glow}" stroke-width="${gw}"/>`
+  ];
+  if (frame.soft) rings.push(`<circle cx="${c}" cy="${c}" r="${r0 + rw + gw + sw / 2}" fill="none" stroke="${frame.soft}" stroke-width="${sw}"/>`);
+  const svg = Buffer.from(`<svg width="${canvas}" height="${canvas}" xmlns="http://www.w3.org/2000/svg">${rings.join('')}</svg>`);
+  return sharp({ create: { width: canvas, height: canvas, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: buffer, left: pad, top: pad }, { input: svg, left: 0, top: 0 }])
+    .png().toBuffer();
 }
 // Заглушка вместо фото: инициалы, как в приложении.
-async function initialsCircle(name, size, ring) {
+async function initialsCircle(name, size, frame) {
   const svg = Buffer.from(`<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">
     <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${C.avBg}"/>
     <text x="${size / 2}" y="${size / 2 + size * 0.13}" text-anchor="middle" font-family="${FONT}"
       font-size="${Math.round(size * 0.34)}" font-weight="800" fill="${C.mute}">${esc(initials(name))}</text>
   </svg>`);
-  return withRing(await sharp(svg).png().toBuffer(), size, ring);
+  return withFrame(await sharp(svg).png().toBuffer(), size, frame);
 }
+
+// Контекст карточки (место в дивизионе «до», форма «до», очки Fantasy за этот
+// матч) — снимается в results.js прямо перед записью счёта, пока прошлое
+// состояние ещё не перезаписано. Карточка собирается уже после записи, когда
+// это «до» не восстановить простым чтением таблицы, поэтому оно передаётся
+// через этот короткоживущий кэш по challenge_id матча.
+const cardContextStore = new Map();
+const CARD_CONTEXT_TTL = 2 * 60 * 60 * 1000;
+const CARD_CONTEXT_MAX = 500;
+export function rememberCardContext(id, data) {
+  if (!id) return;
+  cardContextStore.set(String(id), { ...data, at: Date.now() });
+  if (cardContextStore.size > CARD_CONTEXT_MAX) cardContextStore.delete(cardContextStore.keys().next().value);
+}
+function takeCardContext(id) {
+  if (!id) return null;
+  const hit = cardContextStore.get(String(id));
+  if (!hit) return null;
+  if (Date.now() - hit.at > CARD_CONTEXT_TTL) { cardContextStore.delete(String(id)); return null; }
+  return hit;
+}
+// Для отчёта тестового прогона: показать, что именно бот снял перед записью.
+export function peekCardContext(id) { return takeCardContext(id); }
+export function forgetCardContext(id) { if (id) cardContextStore.delete(String(id)); }
 
 const photoCache = new Map();      // ключ → буфер фотографии
 const PHOTO_CACHE_MAX = 200;
@@ -252,22 +311,82 @@ async function playerPhoto({ telegramId = '', name = '' } = {}) {
   return remember(key, null);
 }
 
+// Плашка статистики в боковой колонке: подпись, крупное число и — только у
+// места в дивизионе — пилюля со стрелкой, на сколько позиций игрок сместился.
+function plateSvg(x, y, height, label, value, color, pill) {
+  const cx = x + PLATE.w / 2;
+  const head = `<rect x="${x}" y="${y}" width="${PLATE.w}" height="${height}" rx="18" fill="${C.plate}" stroke="${C.plateLine}"/>
+    <text x="${cx}" y="${y + 27}" text-anchor="middle" font-family="${FONT}" font-size="13" font-weight="800"
+      letter-spacing="2.2" fill="${C.mute}">${esc(label)}</text>
+    <text x="${cx}" y="${y + 74}" text-anchor="middle" font-family="${FONT}" font-size="46" font-weight="900"
+      fill="${color}">${esc(value)}</text>`;
+  if (!pill) return head;
+  return head + `<rect x="${cx - pill.w / 2}" y="${y + 84}" width="${pill.w}" height="30" rx="15"
+      fill="${pill.bg}" stroke="${pill.line}"/>
+    <text x="${cx}" y="${y + 104}" text-anchor="middle" font-family="${FONT}" font-size="16" font-weight="800"
+      fill="${pill.fg}">${esc(pill.text)}</text>`;
+}
+// Сколько позиций и куда. Без «было #3»: стрелка с числом и так читается.
+function rankPill(before, after) {
+  if (!Number.isFinite(before) || !Number.isFinite(after) || before === after) return null;
+  return after < before
+    ? { w: 66, text: `▲ ${before - after}`, bg: C.upBg, line: C.upLine, fg: C.win }
+    : { w: 66, text: `▼ ${after - before}`, bg: C.lossBg, line: C.lossLine, fg: C.loss };
+}
+// Колонка статистики одного игрока. Плашки рисуются только если данные есть:
+// нет контекста матча — карточка просто остаётся без колонок.
+function statColumn(meta, side) {
+  if (!meta) return '';
+  const x = PLATE.x[side];
+  const pos = meta.position || {};
+  let out = '';
+  if (Number.isFinite(pos.after)) {
+    const pill = rankPill(pos.before, pos.after);
+    out += plateSvg(x, PLATE.rankY, pill ? 122 : 96, 'DIVISION RANK', `#${pos.after}`, C.text, pill);
+  }
+  if (Number.isFinite(meta.fp)) {
+    out += plateSvg(x, PLATE.fpY, PLATE.fpH, 'FANTASY POINTS', `+${meta.fp}`, C.amber, null);
+  }
+  return out;
+}
+// Форма — последние до 5 матчей строго до этого, W/L кружками, как в
+// приложении. Подписи нет намеренно: у части игроков истории меньше пяти
+// матчей, и подпись «last 5» там врала бы.
+function formChipsSvg(form, cx, y) {
+  const items = (form || []).slice(-5);
+  if (!items.length) return '';
+  const gap = 44, r = 17;
+  let x = cx - (items.length * gap) / 2 + gap / 2;
+  let out = '';
+  for (const f of items) {
+    const win = f === 'W';
+    const bg = win ? C.chipBg : C.lossBg, line = win ? C.chipLine : C.lossLine, fg = win ? C.win : C.loss;
+    out += `<circle cx="${x}" cy="${y}" r="${r}" fill="${bg}" stroke="${line}" stroke-width="1.5"/>`
+      + `<text x="${x}" y="${y + Math.round(r * 0.38)}" text-anchor="middle" font-family="${FONT}"
+        font-size="${Math.round(r * 1.15)}" font-weight="800" fill="${fg}">${f}</text>`;
+    x += gap;
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ карточка
-// match: { winner, loser, score, division, season, date, court }
+// match: { winner, loser, score, division, season, date, court, winnerMeta, loserMeta }
+// winnerMeta/loserMeta: { position:{before,after}, fp, form } — необязательны.
 export async function renderMatchCard(match = {}) {
   const m = {
     winner: txt(match.winner), loser: txt(match.loser), score: txt(match.score),
     division: txt(match.division), season: txt(match.season),
-    date: txt(match.date), court: txt(match.court), label:txt(match.label || 'WINNER')
+    date: txt(match.date), court: txt(match.court), label:txt(match.label || 'WINNER'),
+    winnerMeta: match.winnerMeta || null, loserMeta: match.loserMeta || null
   };
   const chip = [m.division, m.season ? `Season ${m.season}` : ''].filter(Boolean).join(' · ');
   const chipW = Math.max(200, chip.length * 11 + 48);
 
-  // Счёт столбиком по центру просвета между кружками (центр кружков — y 320).
+  // Счёт столбиком по центру просвета между портретами.
   const lines = scoreLines(m.score);
-  const fs = scoreSize(lines);
-  const step = Math.round(fs * 1.18);
-  const first = Math.round(320 + fs * 0.34 - (lines.length - 1) * step / 2);
+  const fs = scoreSize(lines, SCORE_ROOM);
+  const step = Math.round(fs * 1.16);
+  const first = Math.round(CENTER[0].y + fs * 0.34 - (lines.length - 1) * step / 2);
   const scoreSvg = lines.map((l, i) =>
     `<text x="${W / 2}" y="${first + i * step}" text-anchor="middle" font-family="${FONT}"
       font-size="${fs}" font-weight="800" fill="${C.amber}" letter-spacing="1">${esc(l)}</text>`).join('');
@@ -280,20 +399,24 @@ export async function renderMatchCard(match = {}) {
       <stop offset="0" stop-color="${C.bg1}"/><stop offset="1" stop-color="${C.bg2}"/></linearGradient></defs>
     <rect width="${W}" height="${H}" fill="url(#g)"/>
     <rect width="${W}" height="4" fill="${C.amber}" opacity=".9"/>
-    <text x="${W / 2}" y="72" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="700"
+    <text x="${W / 2}" y="56" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="700"
       letter-spacing="6" fill="${C.mute}">PHUKET TENNIS FAMILY</text>
-    ${chip ? `<rect x="${W / 2 - chipW / 2}" y="96" width="${chipW}" height="40" rx="20"
+    ${chip ? `<rect x="${W / 2 - chipW / 2}" y="78" width="${chipW}" height="42" rx="21"
       fill="${C.chipBg}" stroke="${C.chipLine}"/>
-    <text x="${W / 2}" y="123" text-anchor="middle" font-family="${FONT}" font-size="19" font-weight="700"
+    <text x="${W / 2}" y="106" text-anchor="middle" font-family="${FONT}" font-size="19" font-weight="700"
       fill="${C.win}">${esc(chip)}</text>` : ''}
+    ${statColumn(m.winnerMeta, 0)}
+    ${statColumn(m.loserMeta, 1)}
     ${scoreSvg}
-    <text x="280" y="540" text-anchor="middle" font-family="${FONT}" font-size="34" font-weight="800"
+    ${formChipsSvg(m.winnerMeta && m.winnerMeta.form, CENTER[0].x, 442)}
+    <text x="${CENTER[0].x}" y="508" text-anchor="middle" font-family="${FONT}" font-size="38" font-weight="800"
       fill="${C.text}">${esc(fit(m.winner))}</text>
-    <text x="280" y="578" text-anchor="middle" font-family="${FONT}" font-size="20" font-weight="700"
-      fill="${C.win}" letter-spacing="4">${esc(m.label)}</text>
-    <text x="920" y="540" text-anchor="middle" font-family="${FONT}" font-size="34" font-weight="700"
+    <text x="${CENTER[0].x}" y="544" text-anchor="middle" font-family="${FONT}" font-size="20" font-weight="700"
+      fill="${C.champ}" letter-spacing="5">${esc(m.label)}</text>
+    ${formChipsSvg(m.loserMeta && m.loserMeta.form, CENTER[1].x, 442)}
+    <text x="${CENTER[1].x}" y="508" text-anchor="middle" font-family="${FONT}" font-size="38" font-weight="700"
       fill="${C.dim}">${esc(fit(m.loser))}</text>
-    ${foot ? `<text x="${W / 2}" y="600" text-anchor="middle" font-family="${FONT}" font-size="19"
+    ${foot ? `<text x="${W / 2}" y="612" text-anchor="middle" font-family="${FONT}" font-size="19"
       font-weight="600" fill="${C.mute}" letter-spacing="1">${esc(foot)}</text>` : ''}
   </svg>`;
 
@@ -302,15 +425,47 @@ export async function renderMatchCard(match = {}) {
     playerPhoto({ telegramId: match.loserId, name: m.loser }).catch(() => null)
   ]);
   const [a, b] = await Promise.all([
-    wp ? toCircle(wp, R, C.amber).catch(() => initialsCircle(m.winner, R, C.amber))
-       : initialsCircle(m.winner, R, C.amber),
-    lp ? toCircle(lp, R, C.ring2).catch(() => initialsCircle(m.loser, R, C.ring2))
-       : initialsCircle(m.loser, R, C.ring2)
+    wp ? toCircle(wp, R, FRAME.winner).catch(() => initialsCircle(m.winner, R, FRAME.winner))
+       : initialsCircle(m.winner, R, FRAME.winner),
+    lp ? toCircle(lp, R, FRAME.loser).catch(() => initialsCircle(m.loser, R, FRAME.loser))
+       : initialsCircle(m.loser, R, FRAME.loser)
   ]);
+  // Кольца выходят за пределы фотографии, поэтому композит центрируется по
+  // фактическому размеру каждого буфера, а не по фиксированному R.
+  const [am, bm] = await Promise.all([sharp(a).metadata(), sharp(b).metadata()]);
+  const composites = [
+    { input: a, left: Math.round(CENTER[0].x - am.width / 2), top: Math.round(CENTER[0].y - am.height / 2) },
+    { input: b, left: Math.round(CENTER[1].x - bm.width / 2), top: Math.round(CENTER[1].y - bm.height / 2) }
+  ];
 
   return sharp(Buffer.from(svg))
-    .composite([{ input: a, left: 130, top: 170 }, { input: b, left: 770, top: 170 }])
+    .composite(composites)
     .png({ compressionLevel: 6 }).toBuffer();
+}
+
+// Место «после» матча читаем прямо сейчас (это просто текущая таблица
+// дивизиона — она не протухает), а место «до», форму и очки Fantasy — из
+// контекста, снятого results.js перед записью счёта. Если контекста нет
+// (карточка перевыпущена спустя долгое время, или сервер перезапускался
+// между записью и рассылкой) — просто не показываем эти блоки.
+async function buildPlayerMetas(slot, winnerIsFrom) {
+  const ctx = takeCardContext(slot.challenge_id);
+  if (!ctx) return [null, null];
+  const fromMeta = { form: ctx.p1?.form || [], fp: Number.isFinite(ctx.fp?.p1) ? ctx.fp.p1 : null, position: { before: ctx.p1?.place } };
+  const toMeta = { form: ctx.p2?.form || [], fp: Number.isFinite(ctx.fp?.p2) ? ctx.fp.p2 : null, position: { before: ctx.p2?.place } };
+  try {
+    if (ctx.division && ctx.season) {
+      const { getDivisionTable } = await import('./division.js');
+      const table = await getDivisionTable(ctx.division, ctx.season, ctx.group || '');
+      if (table?.ok) {
+        const find = name => (table.players || []).find(p => txt(p.name).toLowerCase() === txt(name).toLowerCase());
+        const p1row = find(ctx.p1?.name), p2row = find(ctx.p2?.name);
+        if (p1row) fromMeta.position.after = p1row.place;
+        if (p2row) toMeta.position.after = p2row.place;
+      }
+    }
+  } catch (e) { console.error('card position lookup failed:', e.message); }
+  return winnerIsFrom ? [fromMeta, toMeta] : [toMeta, fromMeta];
 }
 
 // Карточка по слоту матча из таблицы матчей. Победитель всегда первым, счёт
@@ -319,6 +474,7 @@ export async function cardForSlot(slot = {}, { winnerFirstScore, season = '' } =
   const bothTechnical=String(slot.result_kind||'')==='technical'&&!slot.result_winner;
   const winnerIsFrom = bothTechnical || String(slot.result_winner) === String(slot.from_telegram_id);
   const score = typeof winnerFirstScore === 'function' ? winnerFirstScore(slot) : txt(slot.result_score);
+  const [winnerMeta, loserMeta] = await buildPlayerMetas(slot, winnerIsFrom).catch(() => [null, null]);
   return renderMatchCard({
     winner: winnerIsFrom ? slot.from_name : slot.to_name,
     loser: winnerIsFrom ? slot.to_name : slot.from_name,
@@ -327,7 +483,8 @@ export async function cardForSlot(slot = {}, { winnerFirstScore, season = '' } =
     label:bothTechnical?'TECHNICAL RESULT':'WINNER',
     score, division: [slot.division, slot.group ? `Group ${slot.group}` : ''].filter(Boolean).join(' · '), season,
     date: slot.agreed_date ? fmtDate(slot.agreed_date) : '',
-    court: slot.agreed_court || ''
+    court: slot.agreed_court || '',
+    winnerMeta, loserMeta
   });
 }
 function fmtDate(iso = '') {

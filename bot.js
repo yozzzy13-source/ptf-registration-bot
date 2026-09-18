@@ -11,7 +11,7 @@ import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, 
 import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
   notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, broadcastResult,
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
-import { writeConfirmedResult, describeWrite } from './results.js';
+import { writeConfirmedResult, describeWrite, divisionPair, rollbackJournal } from './results.js';
 import { invalidateDivisionCache } from './division.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
@@ -893,6 +893,102 @@ export async function handleMessage(msg) {
 // игрока: challenge_id нигде не показывается человеку, а имя — то, что видно
 // в самой карточке результата. Матчей на разных языках может быть много, поэтому
 // при неоднозначности просим уточнить, а не берём случайный.
+// ---------------------------------------------------------------------------
+// Боевой тестовый прогон матча: /test_match Победитель | Проигравший | 6:4 6:3
+//
+// Проходит ровно ту же цепочку, что и настоящий подтверждённый результат:
+// пишет счёт в общий лог и в таблицу дивизиона, заполняет сезон, снимает место
+// «до», форму и очки Fantasy, пересчитывает таблицы и собирает карточку. Разница
+// в двух вещах: в ленту и игрокам НИЧЕГО не уходит (карточка приходит только
+// сюда), и каждая запись заносится в журнал, поэтому одной кнопкой всё
+// возвращается как было — вместе с формулами, а не их значениями.
+const testRuns = new Map();
+const TEST_RUN_TTL = 6 * 60 * 60 * 1000;
+function rememberTestRun(id, data) {
+  testRuns.set(id, { ...data, at: Date.now() });
+  for (const [key, value] of testRuns) if (Date.now() - value.at > TEST_RUN_TTL) testRuns.delete(key);
+}
+const TEST_MATCH_USAGE = 'Как пользоваться:\n<code>/test_match Победитель | Проигравший | 6:4 6:3</code>\n\n'
+  + 'Имена — как в составе дивизиона, счёт — всегда от победителя. Счёт запишется в таблицы по-настоящему, '
+  + 'карточка придёт только вам, в ленту и игрокам ничего не уйдёт. Под карточкой будет кнопка «Откатить».';
+
+async function adminTestMatch(msg, text) {
+  const chatId = msg.chat.id;
+  const parts = text.replace(/^\/test_match(@\S+)?\s*/i, '').split('|').map(x => x.trim()).filter(Boolean);
+  if (parts.length < 3) return sendMessage(chatId, TEST_MATCH_USAGE);
+  const [winner, loser, score] = parts;
+  try {
+    // Дивизион и группу берём из состава сезона по имени победителя: админ
+    // вводит только имена, а всей остальной цепочке нужен полноценный слот.
+    const { seasonRoster, latestSeason } = await import('./division.js');
+    const { sameName } = await import('./sheets.js');
+    const season = String(await latestSeason().catch(() => '') || '');
+    const roster = await seasonRoster(season);
+    const a = (roster.players || []).find(p => sameName(p.name, winner));
+    const b = (roster.players || []).find(p => sameName(p.name, loser));
+    const missing = [!a && winner, !b && loser].filter(Boolean);
+    if (missing.length) return sendMessage(chatId, '⛔ Не нашёл в составах сезона ' + escapeHtml(season) + ': <b>' + escapeHtml(missing.join(', ')) + '</b>.\n\nИмена должны совпадать с Division_Tracker.');
+    const slot = {
+      challenge_id: 'test-' + uid('tm'),
+      from_name: winner, to_name: loser,
+      from_telegram_id: 'test-winner', to_telegram_id: 'test-loser',
+      result_winner: 'test-winner', result_kind: 'played', result_score: score,
+      result_status: 'confirmed', result_note: '',
+      division: a.letter, group: a.group || '', season,
+      agreed_date: nowISO().slice(0, 10), agreed_court: ''
+    };
+    const pair = await divisionPair(winner, loser, slot);
+    if (!pair.known) return sendMessage(chatId, '⛔ ' + escapeHtml(pair.reason) + '\n\nПроверьте имена: они должны совпадать с составом дивизиона.');
+    if (pair.crossGroup) return sendMessage(chatId, '⛔ Это кросс-групповая пара. Тестовый прогон с откатом работает только на обычном матче регулярки внутри одной группы.');
+    slot.division = pair.d1; slot.group = pair.group === 'cross' ? slot.group : pair.group; slot.season = pair.season;
+
+    await sendMessage(chatId, `🧪 Прогоняю по-настоящему: <b>${escapeHtml(winner)}</b> — <b>${escapeHtml(loser)}</b>, счёт <b>${escapeHtml(score)}</b>. Публикаций не будет.`);
+    const journal = [];
+    const write = await writeConfirmedResult(slot, { journal });
+    const d = write.division || {};
+    if (write.status === 'error' || d.status === 'error') {
+      await rollbackJournal(journal).catch(() => {});
+      return sendMessage(chatId, '⛔ Записать не удалось: ' + escapeHtml(describeWrite(write)) + '\nЧто успело записаться — откатил.');
+    }
+    invalidateLeagueCache(); invalidateDivisionCache();
+
+    // Что бот снял перед записью — именно это и рисуется на карточке.
+    const { peekCardContext, cardForSlot } = await import('./matchcard.js');
+    const { winnerFirstScore } = await import('./matches.js');
+    const ctx = peekCardContext(slot.challenge_id);
+    const line = (who, name) => {
+      const side = ctx?.[who];
+      if (!side) return `• <b>${escapeHtml(name)}</b>: снимок не снялся`;
+      return `• <b>${escapeHtml(name)}</b>: место до <b>${side.place ?? '—'}</b>, форма <b>${(side.form || []).join(' ') || '—'}</b>, Fantasy <b>+${ctx.fp?.[who] ?? '—'}</b>`;
+    };
+    const seasonNote = d.season_write?.column
+      ? `✅ сезон записан: <code>${escapeHtml(d.season_write.value)}</code> → ${escapeHtml(d.season_write.column)}`
+      : `⚠️ сезон не записан — ${escapeHtml(d.season_write?.skipped || 'причина неизвестна')}`;
+    const report = '🧪 <b>Тестовый прогон</b>\n\n'
+      + `Дивизион: <b>${escapeHtml(d.division || pair.d1)}</b>${pair.group ? ' · группа ' + escapeHtml(pair.group) : ''} · сезон <b>${escapeHtml(pair.season)}</b>\n`
+      + `Общий лог: строка <b>${escapeHtml(write.row || '—')}</b> (${escapeHtml(write.status)})\n`
+      + `Таблица дивизиона: строка <b>${escapeHtml(d.row || '—')}</b>, колонок найдено <b>${escapeHtml(d.columns ?? 0)}</b>\n`
+      + seasonNote + '\n\n'
+      + '<b>Снимок до матча</b>\n' + line('p1', winner) + '\n' + line('p2', loser) + '\n\n'
+      + `Записано ячеек: <b>${journal.length}</b>\n` + journal.map(j => '• <code>' + escapeHtml(j.range) + '</code>').join('\n')
+      + (write.status === 'duplicate' ? '\n\n⚠️ У этой пары уже была строка в общем логе — я переписал её тестовым счётом. Обязательно откатите.' : '')
+      + '\n\n⚠️ Пока не нажали «Откатить», в таблицах лежит тестовый счёт.';
+    await sendMessage(chatId, report);
+
+    const buffer = await cardForSlot(slot, { winnerFirstScore, season: String(pair.season || '') });
+    const { sendPhotoBuffer } = await import('./telegram.js');
+    rememberTestRun(slot.challenge_id, { journal, winner, loser });
+    await sendPhotoBuffer(chatId, buffer, 'image/png', {
+      caption: 'Так карточка уйдёт в ленту. Никому, кроме вас, она не отправлена.',
+      reply_markup: { inline_keyboard: [[{ text: '↩️ Откатить запись', callback_data: 'tm_undo:' + slot.challenge_id }]] }
+    });
+    return;
+  } catch (e) {
+    console.error('test match failed:', e);
+    return sendMessage(chatId, '⛔ ' + escapeHtml(e.message) + '\n\n' + TEST_MATCH_USAGE);
+  }
+}
+
 function findConfirmedSlot(done, wanted) {
   if (!wanted) return { slot: done.sort((a, b) => String(b.result_confirmed_at || '').localeCompare(String(a.result_confirmed_at || '')))[0] || null };
   const byId = done.find(r => String(r.challenge_id) === wanted);
@@ -903,6 +999,7 @@ function findConfirmedSlot(done, wanted) {
   if (byName.length > 1) return { slot: null, many: byName };
   return { slot: null };
 }
+    if (text.startsWith('/test_match')) return adminTestMatch(msg, text);
     if (text.startsWith('/result_test')) {
       // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
       // не трогаются — всё уходит только сюда.
@@ -1408,6 +1505,19 @@ export async function handleCallback(q) {
       return sendMessage(chatId, `${lang==='ru'?'Напиши ответ игроку':'Write a reply to'} <code>${escapeHtml(targetTelegramId)}</code>.`);
     }
     // Междивизионный матч: организатор решает, записывать его или нет.
+    // Откат тестового прогона: возвращаем в таблицы ровно то, что там было.
+    if (data.startsWith('tm_undo:')) {
+      const id = data.split(':')[1];
+      const run = testRuns.get(id);
+      if (!run) return sendMessage(chatId, 'Этот прогон уже откачен или бот перезапускался — журнал правок потерялся. Проверьте таблицу руками.');
+      testRuns.delete(id);
+      const res = await rollbackJournal(run.journal).catch(e => ({ restored: 0, total: run.journal.length, failed: [e.message] }));
+      const { forgetCardContext } = await import('./matchcard.js');
+      forgetCardContext(id);
+      invalidateLeagueCache(); invalidateDivisionCache();
+      return sendMessage(chatId, `↩️ Откатил <b>${escapeHtml(run.winner)}</b> — <b>${escapeHtml(run.loser)}</b>: вернул <b>${res.restored}</b> из ${res.total} диапазонов.`
+        + (res.failed?.length ? '\n\n⚠️ Не вернулось:\n' + res.failed.map(x => '• ' + escapeHtml(x)).join('\n') : '\n\nТаблицы в исходном состоянии.'));
+    }
     if (data.startsWith('res_force:')) {
       const slot = await findMatchSlot(data.split(':')[1]);
       if (!slot) return sendMessage(chatId, 'Матч не найден.');

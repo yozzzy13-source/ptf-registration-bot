@@ -32,7 +32,7 @@ put('master','Cross_Division_Match_Log',[['Match','Date']]);
 for(const [id,names] of Object.entries({c1:['Alice One','Bob Two'],c2:['Carol Three','Dan Four'],w1:['Wendy One','Wendy Two'],w2:['Wendy Three','Wendy Four']})){
  put(id,'Division_Tracker',[['Player'],...names.map(n=>[n])]);
  put(id,'Match_Log',[
-  ['match','p1_id','player_1','p2_id','player_2','s1p1','s1p2','s1tb1','s1tb2','s2p1','s2p2','s2tb1','s2tb2','s3p1','s3p2','s3tb1','s3tb2','set3_mode','played'],
+  ['match','p1_id','player_1','p2_id','player_2','s1p1','s1p2','s1tb1','s1tb2','s2p1','s2p2','s2tb1','s2tb2','s3p1','s3p2','s3tb1','s3tb2','set3_mode','played','competition','winner_id'],
   ['1','1',names[0],'2',names[1]]
  ]);
 }
@@ -76,7 +76,7 @@ const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
 synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
-const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card')});
+const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:()=>{}});
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
  if(modules.has(key))return modules.get(key);
@@ -121,9 +121,23 @@ const result2={division:'Division C',season:'2',group:'2',from_name:'Carol Three
 const before=writes.length;const write=await results.writeConfirmedResult(result2);
 check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
 check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
+// Заголовки Match_Log раньше не находились никогда (norm() съедает подчёркивание
+// в «p1_id»), и вместе с ними молча отваливалась запись сезона.
+check(write.division.columns>0,'Match_Log header row is located');
+check(write.division.season_write?.value==='Season 2','Season is written into the division Match_Log');
+check(String(tables.get('c2|Match_Log')[1][19]||'')==='Season 2','Competition cell holds the season of the match');
 const dup=await results.writeConfirmedResult(result2);check(dup.status==='duplicate','Repeat result does not append duplicate');
 const mixed=await results.writeConfirmedResult({...result2,group:'cross',to_name:'Alice One',to_telegram_id:'1'});check(mixed.status==='saved'&&mixed.division?.cross_group,'Same-division cross-group result is stored centrally');
 check(tables.has('master|Cross_Group_Match_Log'),'Cross-group journal is created in MatchLog');
+// Боевой тестовый прогон: журнал правок и полный откат в исходное состояние.
+const undoBefore=structuredClone(tables.get('w1|Match_Log'));
+const journal=[];
+const testRun=await results.writeConfirmedResult({division:'Division W',season:'2',group:'1',from_name:'Wendy One',to_name:'Wendy Two',from_telegram_id:'7',to_telegram_id:'8',agreed_date:'2099-10-01',result_score:'6:1 6:2',result_winner:'7'},{journal});
+check(testRun.division?.status==='saved'&&journal.length>0,'Test run records every written range in the journal');
+check(String(tables.get('w1|Match_Log')[1][5]||'')!=='','Test run really writes the score into the division table');
+const undo=await results.rollbackJournal(journal);
+check(undo.restored===undo.total&&!undo.failed.length,'Rollback restores every recorded range');
+check(JSON.stringify(tables.get('w1|Match_Log')[1].slice(0,20))===JSON.stringify([...undoBefore[1],...Array(20-undoBefore[1].length).fill('')].slice(0,20)),'Division row returns to its pre-test state');
 check((await results.getUnplayedOpponents('C','Alice One','2','1')).names.includes('Bob Two'),'Schedule uses group 1');
 check((await results.getUnplayedOpponents('C','Carol Three','2','2')).played===1,'Schedule uses group 2 result');
 const server=await load('index.js');

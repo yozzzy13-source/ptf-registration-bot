@@ -9,10 +9,12 @@
 // сохранён в таблице матчей, ничего не теряется.
 import { sheets as sheetsClient } from './google.js';
 import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, TIMEZONE } from './config.js';
-import { scoreValues, detectSet3Mode, reverseScore, cellToScore } from './tennis.js';
-import { divisionSheetId, divisionLetter } from './division.js';
+import { scoreValues, detectSet3Mode, reverseScore, cellToScore, formatScore } from './tennis.js';
+import { divisionSheetId, divisionLetter, getDivisionTable, recentFormBefore } from './division.js';
 import { getSetting, sameName } from './sheets.js';
 import { slotScope, sameScope } from './access.js';
+import { buildFantasyCatalog, scoreFantasyMatch, fantasyPlayerKey } from './fantasy.js';
+import { rememberCardContext } from './matchcard.js';
 
 const DATA_START_ROW = 2;
 const MASTER_START_ROW = 4;
@@ -55,10 +57,53 @@ async function getValues(spreadsheetId, range) {
   const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId, range });
   return res.data.values || [];
 }
-async function batchUpdate(spreadsheetId, data) {
+// journal — «журнал правок» для тестового прогона: перед каждой записью
+// запоминаем, что в этих ячейках было, и потом можем вернуть всё как было.
+// Читаем в режиме FORMULA: иначе откат подменил бы формулы их значениями.
+async function batchUpdate(spreadsheetId, data, journal = null) {
+  if (journal) {
+    for (const item of data) {
+      const before = await sheetsClient().spreadsheets.values
+        .get({ spreadsheetId, range: item.range, valueRenderOption: 'FORMULA' })
+        .then(r => r.data.values || []).catch(() => []);
+      journal.push({ spreadsheetId, range: item.range, before });
+    }
+  }
   await sheetsClient().spreadsheets.values.batchUpdate({
     spreadsheetId, requestBody: { valueInputOption: 'USER_ENTERED', data }
   });
+}
+// Сколько строк и колонок в диапазоне: нужно, чтобы при откате дописать
+// пустышки и вычистить ячейки, которых до записи вообще не существовало.
+function rangeShape(range = '') {
+  const m = /!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/.exec(String(range));
+  if (!m) return null;
+  const idx = letters => [...letters].reduce((n, c) => n * 26 + (c.charCodeAt(0) - 64), 0);
+  const c1 = idx(m[1]), r1 = Number(m[2]);
+  const c2 = m[3] ? idx(m[3]) : c1, r2 = m[4] ? Number(m[4]) : r1;
+  return { rows: Math.max(1, r2 - r1 + 1), cols: Math.max(1, c2 - c1 + 1) };
+}
+export async function rollbackJournal(journal = []) {
+  const done = [], failed = [];
+  // В обратном порядке: последняя правка откатывается первой.
+  for (const entry of [...journal].reverse()) {
+    const shape = rangeShape(entry.range) || { rows: (entry.before || []).length || 1, cols: 1 };
+    const values = [];
+    for (let r = 0; r < shape.rows; r++) {
+      const row = ((entry.before || [])[r] || []).slice(0, shape.cols);
+      while (row.length < shape.cols) row.push('');
+      values.push(row);
+    }
+    try {
+      await sheetsClient().spreadsheets.values.update({
+        spreadsheetId: entry.spreadsheetId, range: entry.range,
+        valueInputOption: 'USER_ENTERED', requestBody: { values }
+      });
+      done.push(entry.range);
+    } catch (e) { failed.push(`${entry.range}: ${e.message}`); }
+  }
+  await refreshAfterResult().catch(e => console.error('refresh after rollback failed:', e.message));
+  return { restored: done.length, total: journal.length, done, failed };
 }
 function resultKind(slot = {}) { return String(slot.result_kind || 'played').toLowerCase(); }
 function resultMarker(slot = {}, reversed = false) {
@@ -85,7 +130,14 @@ function centralWrites(row, slot, parsed) {
 }
 async function matchLogHeaders(spreadsheetId) {
   const values = await getValues(spreadsheetId, 'Match_Log!A1:BZ5');
-  const rowIndex = values.findIndex(r => (r || []).map(norm).includes('p1_id'));
+  // norm() выкидывает подчёркивания: «p1_id» превращается в «p1id». Искали же
+  // строку заголовков по сырому «p1_id» — и не находили НИКОГДА, ни в одной
+  // таблице. Из-за этого список колонок всегда приходил пустым, а с ним молча
+  // отваливались все именованные записи: сезон (Competition), result_kind,
+  // очки за матч и технические поражения. Сравниваем нормализованное с
+  // нормализованным — и колонки находятся.
+  const wanted = norm('p1_id');
+  const rowIndex = values.findIndex(r => (r || []).map(norm).includes(wanted));
   if (rowIndex < 0) return { row: 1, headers: [] };
   return { row: rowIndex + 1, headers: (values[rowIndex] || []).map(norm) };
 }
@@ -213,7 +265,7 @@ async function findExistingResultRow(p1, p2, dateSerial) {
 // Составы сезона определяют дивизион и группу для записи результата.
 // Междивизионные матчи сохраняют существующее ручное подтверждение админом.
 // Между группами одного дивизиона запись пока запрещена.
-async function divisionPair(p1, p2, slot = {}) {
+export async function divisionPair(p1, p2, slot = {}) {
   const { seasonRoster } = await import('./division.js');
   const scope = await slotScope(slot);
   const map = await seasonRoster(scope.season);
@@ -228,7 +280,7 @@ async function divisionPair(p1, p2, slot = {}) {
 
 // Счёт в слоте всегда «от from_telegram_id», поэтому p1 = from_name.
 // force: организатор разрешил записать междивизионный матч руками.
-export async function writeConfirmedResult(slot, { force = false } = {}) {
+export async function writeConfirmedResult(slot, { force = false, journal = null } = {}) {
   if (!LEAGUE_RESULTS_SHEET_ID) return { status: 'skipped', reason: 'LEAGUE_RESULTS_SHEET_ID не задан' };
   const p1 = String(slot.from_name || '').trim();
   const p2 = String(slot.to_name || '').trim();
@@ -252,8 +304,8 @@ export async function writeConfirmedResult(slot, { force = false } = {}) {
     // обоими игроками, поэтому расхождение стоит проверить руками.
     const existing = await findExistingResultRow(p1, p2, dateSerial);
     if (existing) {
-      await batchUpdate(LEAGUE_RESULTS_SHEET_ID, centralWrites(existing.row, slot, parsed));
-      const division = await writeDivisionRow(p1, p2, parsed, pair, slot).catch(e => ({ status: 'error', reason: e.message }));
+      await batchUpdate(LEAGUE_RESULTS_SHEET_ID, centralWrites(existing.row, slot, parsed), journal);
+      const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal).catch(e => ({ status: 'error', reason: e.message }));
       return { status: 'duplicate', row: existing.row, division };
     }
     const row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
@@ -261,9 +313,9 @@ export async function writeConfirmedResult(slot, { force = false } = {}) {
       { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[dateSerial]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
       ...centralWrites(row, slot, parsed)
-    ]);
+    ], journal);
 
-    const division = await writeDivisionRow(p1, p2, parsed, pair, slot).catch(e => ({ status: 'error', reason: e.message }));
+    const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal).catch(e => ({ status: 'error', reason: e.message }));
     return { status: 'saved', row, division };
   } catch (e) {
     console.error('writeConfirmedResult failed:', e.message);
@@ -271,7 +323,7 @@ export async function writeConfirmedResult(slot, { force = false } = {}) {
   }
 }
 
-async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}) {
+async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal = null) {
   const pair = known && known.known !== undefined ? known : await divisionPair(p1, p2);
   if (!pair.known) return { status: 'player_not_found' };
   const { d1, d2 } = pair;
@@ -314,14 +366,18 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}) {
   // он нужен: в Fantasy, в истории дивизионов, в строке идущего сезона.
   // Пишем только если колонка в таблице есть и в ней пусто — чужие подписи
   // («Playoff S2», ручные пометки организатора) не трогаем.
+  let seasonWrite = { column: '', value: '', skipped: '' };
   if (season) {
     const cell = namedWrite(headers, info.row, ['competition','tournament'], `Season ${season}`)
       || namedWrite(headers, info.row, ['season','season_id','season_number'], season);
-    if (cell) {
+    if (!cell) seasonWrite.skipped = 'в Match_Log нет колонки Competition/Season';
+    else {
       const had = await getValues(spreadsheetId, cell.range).catch(() => []);
-      if (!String(had?.[0]?.[0] ?? '').trim()) extra.push(cell);
+      const current = String(had?.[0]?.[0] ?? '').trim();
+      if (current) seasonWrite.skipped = `в ячейке уже стоит «${current}»`;
+      else { extra.push(cell); seasonWrite = { column: cell.range, value: cell.values[0][0], skipped: '' }; }
     }
-  }
+  } else seasonWrite.skipped = 'сезон матча не определён';
   if (kind === 'technical') {
     const winner = info.reversed
       ? (String(slot.result_winner) === String(slot.from_telegram_id) ? 'p2' : String(slot.result_winner) ? 'p1' : '')
@@ -332,11 +388,64 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}) {
     const b = namedWrite(headers, info.row, ['p2_techloss'], p2Loss);
     if (a) extra.push(a); if (b) extra.push(b);
   }
-  await batchUpdate(spreadsheetId, writes.concat(extra));
+  // Снимок для карточки результата: место в дивизионе, форма и очки Fantasy
+  // «до» этого матча. Снимаем строго перед записью — после неё это состояние
+  // уже не восстановить простым чтением таблицы. Best-effort: карточка не
+  // обязана блокировать сохранение самого счёта.
+  await captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1 })
+    .catch(e => console.error('card context capture failed:', e.message));
+  await batchUpdate(spreadsheetId, writes.concat(extra), journal);
   // Результат записан — значит всё, что из него считается, устарело.
   // Без этого таблица дивизиона, места и профили жили старыми ещё пять минут.
   await refreshAfterResult().catch(e => console.error('refresh after result failed:', e.message));
-  return { status: 'saved', division: d1, row: info.row, reversed: info.reversed, playoff:playoff||null };
+  return { status: 'saved', division: d1, row: info.row, reversed: info.reversed, playoff:playoff||null,
+    season, season_write: seasonWrite, columns: headers.length, spreadsheet_id: spreadsheetId };
+}
+
+// Счёт от лица конкретного игрока (p1=slot.from_name или его разворот) для
+// Fantasy: то же правило, что и для записи в таблицу (RET/W-O — раздельная
+// строка-маркер, обычный счёт форматируется из уже распарсенного объекта).
+function scoreTextFor(slot, parsed, reversed) {
+  const kind = resultKind(slot);
+  if (kind === 'technical') return resultMarker(slot, reversed) || (slot.result_winner ? (reversed ? 'L/W' : 'W/L') : 'L/L');
+  const p = reversed ? reverseScore(parsed) : parsed;
+  const s = formatScore(p);
+  return kind === 'retired' ? s + ' RET' : s;
+}
+
+// Снимок контекста карточки результата: место в дивизионе «до» этого матча,
+// живая форма (W/L строго до него) и очки Fantasy за этот конкретный матч —
+// для ОБОИХ игроков, даже если кто-то из них не в текущем roster-каталоге
+// Fantasy: Костас хочет, чтобы очки считались всем, кто реально сыграл.
+// Цена по умолчанию 10 (как для дебютанта), если игрока нет в каталоге.
+async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1 }) {
+  const matchIdx = headers.indexOf('match');
+  let matchNumber = 0;
+  if (matchIdx >= 0) {
+    const cell = await getValues(spreadsheetId, `Match_Log!${colToLetter(matchIdx + 1)}${info.row}`).catch(() => []);
+    matchNumber = Number(cell?.[0]?.[0] || 0);
+  }
+  const [beforeTable, formP1, formP2] = await Promise.all([
+    getDivisionTable(d1, season, pair.group).catch(() => null),
+    recentFormBefore(spreadsheetId, p1, matchNumber).catch(() => []),
+    recentFormBefore(spreadsheetId, p2, matchNumber).catch(() => [])
+  ]);
+  const findPlace = name => beforeTable?.ok
+    ? beforeTable.players.find(x => String(x.name).toLowerCase() === String(name).toLowerCase())?.place
+    : undefined;
+  const catalog = await buildFantasyCatalog({ mode: 'live' }).catch(() => null);
+  const priceOf = name => catalog?.players?.find(p => fantasyPlayerKey(p.name) === fantasyPlayerKey(name))?.price ?? 10;
+  const bothTechnical = resultKind(slot) === 'technical' && !slot.result_winner;
+  const p1Won = !bothTechnical && String(slot.result_winner) === String(slot.from_telegram_id);
+  const p2Won = !bothTechnical && !p1Won;
+  const fp1 = bothTechnical ? 0 : scoreFantasyMatch({ score: scoreTextFor(slot, parsed, false), result: p1Won ? 'WIN' : 'LOSS' }, priceOf(p1), priceOf(p2)).total;
+  const fp2 = bothTechnical ? 0 : scoreFantasyMatch({ score: scoreTextFor(slot, parsed, true), result: p2Won ? 'WIN' : 'LOSS' }, priceOf(p2), priceOf(p1)).total;
+  rememberCardContext(slot.challenge_id, {
+    p1: { name: p1, place: findPlace(p1), form: formP1 },
+    p2: { name: p2, place: findPlace(p2), form: formP2 },
+    fp: { p1: fp1, p2: fp2 },
+    division: d1, season, group: pair.group
+  });
 }
 
 // Сброс кешей и подталкивание витрины.
