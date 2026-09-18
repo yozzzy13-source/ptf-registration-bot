@@ -151,9 +151,16 @@ export function scoreFantasyMatch(match={},playerPrice=10,opponentPrice=10){
  const out={appearance:2,win:won?10:0,sets:setWins*3,games,straight:won&&setWins===2&&sets.length===2&&!/RET/i.test(score)?3:0,bagels:bagels*2,upset,technical:0};
  out.total=out.appearance+out.win+out.sets+out.games+out.straight+out.bagels+out.upset;return out;
 }
-async function scores(catalog,extras=[]){
+// Костас: если игрок не входит в текущий состав Fantasy (не задрафтован ни в
+// один сезонный каталог), очки за его реальные матчи он всё равно должен
+// получать — эта логика нужна везде, где считаются очки, а не только для
+// команд. includeAll добавляет в подсчёт всех игроков лиги (getLeagueProfiles),
+// не только тех, кто попал в roster-каталог сезона; цена для них — базовая 10,
+// как для дебютанта, раз официального каталога для них нет.
+async function scores(catalog,extras=[],{includeAll=false}={}){
  const [history,profiles]=await Promise.all([getLeagueMatchHistory().catch(()=>new Map()),getLeagueProfiles().catch(()=>[])]),profilesByName=new Map(profiles.map(p=>[nk(p.name),p])),all=new Map(catalog.players.map(p=>[p.key,p]));
  for(const raw of extras||[]){if(!raw?.key||all.has(raw.key))continue;const pf=profilesByName.get(nk(raw.name))||{};all.set(raw.key,{key:raw.key,name:raw.name,price:n(raw.price,10),profile_id:pf.id||''})}
+ if(includeAll)for(const pf of profiles){const key=fantasyPlayerKey(pf.name);if(!key||all.has(key))continue;all.set(key,{key,name:pf.name,price:10,profile_id:pf.id||''})}
  const list=[...all.values()],byName=new Map(list.map(p=>[nk(p.name),p])),out=new Map();
  for(const p of list){
   const seen=new Set(),details=[];let total=0;
@@ -221,7 +228,7 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
  const teams=seasonRows.filter(x=>String(x.telegram_id)===String(id)).sort((a,b)=>n(a.team_slot,1)-n(b.team_slot,1));
  const team=teams[0]||null;
  const stored=seasonRows.flatMap(x=>js(x.picks_json,[]));
- const pointMap=await scores(catalog,stored),leaderboard=[],selected=new Map();
+ const pointMap=await scores(catalog,stored,{includeAll:true}),leaderboard=[],selected=new Map();
  // Одна формула на всех: и для рейтинга, и для собственных команд игрока.
  // Раньше очки черновика брались из рейтинга, а туда попадают только
  // подтверждённые составы, — и любой черновик показывал ровный ноль, хотя его
@@ -265,7 +272,11 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
   locking:lang==='ru'?'До дедлайна можно менять и подтверждённый состав. После дедлайна доступны только разрешённые замены.':'Edit even a confirmed squad until the deadline. After the deadline, only permitted transfers remain.',
   transfers:lang==='ru'?'После дедлайна: '+catalog.transfers+' замены. Замена официально снятого до первого матча игрока бесплатна.':'After the deadline: '+catalog.transfers+' transfers. Replacing an officially withdrawn player before their first match is free.'
  };
- return{lang,mode,is_test:mode==='test',entry_open:entryOpen,transfers_open:transfersOpen,preview_only:!entryOpen&&!locked,banner,season:catalog.season,budget:catalog.budget,roster_size:catalog.rosterSize,max_per_pool:2,transfers:catalog.transfers,open_at:catalog.openAt,lock_at:catalog.lockAt,locked,rules,rules_i18n:RULES,scoring:FANTASY_SCORING,pricing:FANTASY_PRICING,players:fantasyPlayers,player_leaderboard:playerLeaderboard,team:publicTeams[0]||null,teams:publicTeams,team_limit:2,leaderboard,owner_name:owner||''};
+ // Полный список очков по всей лиге, не только по roster-каталогу сезона —
+ // используется там, где Fantasy Points нужно показать любому игроку с
+ // реальными матчами, даже если он не входит в текущий состав для драфта.
+ const allScores=[...pointMap.values()].filter(x=>x.matches>0).map(x=>({key:x.key,name:x.name,total:x.total,matches:x.matches,details:x.details}));
+ return{lang,mode,is_test:mode==='test',entry_open:entryOpen,transfers_open:transfersOpen,preview_only:!entryOpen&&!locked,banner,season:catalog.season,budget:catalog.budget,roster_size:catalog.rosterSize,max_per_pool:2,transfers:catalog.transfers,open_at:catalog.openAt,lock_at:catalog.lockAt,locked,rules,rules_i18n:RULES,scoring:FANTASY_SCORING,pricing:FANTASY_PRICING,players:fantasyPlayers,player_leaderboard:playerLeaderboard,all_scores:allScores,team:publicTeams[0]||null,teams:publicTeams,team_limit:2,leaderboard,owner_name:owner||''};
 
 
 }

@@ -276,7 +276,7 @@ export async function findPlayerDivision(name, matchName, season = '') {
   return { found: true, season: map.season, ...hit };
 }
 
-async function readMatchLog(spreadsheetId) {
+export async function readMatchLog(spreadsheetId) {
   const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId, range: 'Match_Log!A:BZ' });
   const values = res.data.values || [];
   const headerRow = values.findIndex(r => (r || []).map(norm).includes('p1_id'));
@@ -288,6 +288,38 @@ async function readMatchLog(spreadsheetId) {
     return o;
   });
   return { headers, rows };
+}
+
+// Живая «форма» игрока (W/L) строго ДО матча с номером beforeMatch — читаем
+// прямо из Match_Log, а не из витрины профилей: та обновляется формулами
+// IMPORTRANGE с задержкой до получаса, и сразу после подтверждения счёта
+// показала бы устаревшую последовательность.
+export async function recentFormBefore(spreadsheetId, playerName, beforeMatch, limit = 5) {
+  const { rows } = await readMatchLog(spreadsheetId);
+  const target = txt(playerName).toLowerCase();
+  if (!target) return [];
+  const out = [];
+  for (const r of rows) {
+    const m = num(r.match);
+    if (!m || (beforeMatch && m >= beforeMatch)) continue;
+    const p1 = txt(r.player_1).toLowerCase(), p2 = txt(r.player_2).toLowerCase();
+    const isP1 = p1 === target, isP2 = p2 === target;
+    if (!isP1 && !isP2) continue;
+    const techA = filled(r.p1_techloss), techB = filled(r.p2_techloss);
+    const isTech = (techA || techB) && !yes(r.completed);
+    let win;
+    if (isTech) {
+      if (techA && techB) continue; // двойное техническое — победителя нет, в форму не считаем
+      win = techA ? isP2 : isP1;
+    } else if (yes(r.completed)) {
+      const winner = num(r.winner_id);
+      if (!winner) continue;
+      win = (isP1 && winner === num(r.p1_id)) || (isP2 && winner === num(r.p2_id));
+    } else continue;
+    out.push({ match: m, win });
+  }
+  out.sort((a, b) => a.match - b.match);
+  return out.slice(-limit).map(x => (x.win ? 'W' : 'L'));
 }
 
 async function readCrossGroupRows(letter, season) {
