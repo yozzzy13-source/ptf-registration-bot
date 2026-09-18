@@ -889,6 +889,20 @@ export async function handleMessage(msg) {
           + (missing.length ? `\n\nБез места (${missing.length}): ${escapeHtml(missing.slice(0, 10).join(', '))}` : ''));
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+// Матч ищем сначала по challenge_id (как раньше), а если это не он — по имени
+// игрока: challenge_id нигде не показывается человеку, а имя — то, что видно
+// в самой карточке результата. Матчей на разных языках может быть много, поэтому
+// при неоднозначности просим уточнить, а не берём случайный.
+function findConfirmedSlot(done, wanted) {
+  if (!wanted) return { slot: done.sort((a, b) => String(b.result_confirmed_at || '').localeCompare(String(a.result_confirmed_at || '')))[0] || null };
+  const byId = done.find(r => String(r.challenge_id) === wanted);
+  if (byId) return { slot: byId };
+  const needle = wanted.trim().toLowerCase();
+  const byName = done.filter(r => String(r.from_name || '').toLowerCase().includes(needle) || String(r.to_name || '').toLowerCase().includes(needle));
+  if (byName.length === 1) return { slot: byName[0] };
+  if (byName.length > 1) return { slot: null, many: byName };
+  return { slot: null };
+}
     if (text.startsWith('/result_test')) {
       // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
       // не трогаются — всё уходит только сюда.
@@ -897,10 +911,9 @@ export async function handleMessage(msg) {
         const wanted = String(text.split(/\s+/)[1] || '').trim();
         const rows = await allSlots();
         const done = rows.filter(r => String(r.result_status || '').toLowerCase() === 'confirmed');
-        const slot = wanted
-          ? done.find(r => String(r.challenge_id) === wanted)
-          : done.sort((a, b) => String(b.result_confirmed_at || '').localeCompare(String(a.result_confirmed_at || '')))[0];
-        if (!slot) return sendMessage(chatId, wanted ? 'Матч с таким id не найден.' : 'Подтверждённых результатов пока нет.');
+        const { slot, many } = findConfirmedSlot(done, wanted);
+        if (many) return sendMessage(chatId, `Нашёл несколько матчей на «${escapeHtml(wanted)}», уточните имя:\n` + many.slice(0, 10).map(m => `• <code>${escapeHtml(m.from_name || '')} — ${escapeHtml(m.to_name || '')}</code>`).join('\n'));
+        if (!slot) return sendMessage(chatId, wanted ? 'Матч не найден. Укажите имя игрока (как в карточке результата) или ничего — возьму последний.' : 'Подтверждённых результатов пока нет.');
         await sendMessage(chatId, `🧪 Предпросмотр: <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>. Никому, кроме вас, это не уходит.`);
         await previewResultPost(slot, chatId, { withButtons: msg.chat?.type === 'private' });
         return;
@@ -911,16 +924,15 @@ export async function handleMessage(msg) {
       // Id сообщения берётся из ссылки на пост — это последнее число в ней.
       const parts = text.split(/\s+/).slice(1);
       const messageId = Number(parts[0] || 0);
-      if (!messageId) return sendMessage(chatId, 'Как пользоваться: <code>/fix_result 1234</code> — номер сообщения из ссылки на пост в ленте. Вторым аргументом можно указать id матча, иначе беру последний результат.');
+      if (!messageId) return sendMessage(chatId, 'Как пользоваться: <code>/fix_result 1234</code> — номер сообщения из ссылки на пост в ленте. Вторым аргументом можно указать имя игрока из этого матча, иначе беру последний результат.');
       try {
         const { refreshResultPost } = await import('./matches.js');
         const wanted = String(parts[1] || '').trim();
         const rows = await allSlots();
         const done = rows.filter(r => String(r.result_status || '').toLowerCase() === 'confirmed');
-        const slot = wanted
-          ? done.find(r => String(r.challenge_id) === wanted)
-          : done.sort((a, b) => String(b.result_confirmed_at || '').localeCompare(String(a.result_confirmed_at || '')))[0];
-        if (!slot) return sendMessage(chatId, wanted ? 'Матч с таким id не найден.' : 'Подтверждённых результатов нет.');
+        const { slot, many } = findConfirmedSlot(done, wanted);
+        if (many) return sendMessage(chatId, `Нашёл несколько матчей на «${escapeHtml(wanted)}», уточните имя:\n` + many.slice(0, 10).map(m => `• <code>${escapeHtml(m.from_name || '')} — ${escapeHtml(m.to_name || '')}</code>`).join('\n'));
+        if (!slot) return sendMessage(chatId, wanted ? 'Матч не найден. Укажите имя игрока (как в карточке результата) или ничего — возьму последний.' : 'Подтверждённых результатов нет.');
         await refreshResultPost(slot, messageId, chatId);
         return sendMessage(chatId, `✅ Обновил карточку: <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>.`);
       } catch (e) {
