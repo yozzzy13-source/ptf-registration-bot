@@ -142,6 +142,29 @@ check((await results.getUnplayedOpponents('C','Alice One','2','1')).names.includ
 check((await results.getUnplayedOpponents('C','Carol Three','2','2')).played===1,'Schedule uses group 2 result');
 const server=await load('index.js');
 const util=await load('util.js');
+// /test_match набирают с телефона как получится. Здесь — ровно те строки,
+// которыми команда не заводилась: без разделителей, одними фамилиями, в нижнем
+// регистре. Все они должны находить обоих игроков и счёт целиком.
+{
+ const squad=[{name:'Ilia Izotov'},{name:'Viacheslav Poniiatovsky'},{name:'Yuriy B'}];
+ const resolve=raw=>{
+  const p=util.parseTestMatchInput(raw);
+  if(!p||!p.head)return {empty:true};
+  let a=null,b=null;
+  if(p.parts.length>=2){a=util.findRosterPlayer(squad,p.parts[0]).player||null;b=util.findRosterPlayer(squad,p.parts[1]).player||null}
+  if(!a||!b){const pair=util.findRosterPair(squad,p.head);if(pair.length===2){a=pair[0];b=pair[1]}}
+  return {winner:a?.name,loser:b?.name,score:p.score};
+ };
+ const joined=resolve('/test_match Ilia izotov Viacheslav Poniiatovsky 6:4 6:7 (8:10) 4:6');
+ check(joined.winner==='Ilia Izotov'&&joined.loser==='Viacheslav Poniiatovsky','Names without any separator still resolve in order');
+ check(joined.score==='6:4 6:7 (8:10) 4:6','Score with a tie-break in brackets survives parsing');
+ const surnames=resolve('/test_match izotov | poniiatovsky | 6:4 6:3');
+ check(surnames.winner==='Ilia Izotov'&&surnames.loser==='Viacheslav Poniiatovsky','Lowercase surnames resolve to full roster names');
+ const dashed=resolve('/test_match Izotov - Poniiatovsky 6:4 6:3');
+ check(dashed.winner==='Ilia Izotov'&&dashed.score==='6:4 6:3','Dash separator works as well as a pipe');
+ check(resolve('/test_match').empty,'Bare command asks for help instead of failing');
+ check(!resolve('/test_match Победитель | Проигравший | 6:4 6:3').winner,'Placeholder names match nobody');
+}
 async function request(method,p,id,body={}){
  const route=routes.find(r=>r.method===method&&r.p===p);assert.ok(route,'route '+p);
  const req={body:{...body},query:{...(method==='get'?body:{}),t:util.signWebAppToken(id)},path:p};
