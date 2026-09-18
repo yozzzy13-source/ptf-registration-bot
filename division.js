@@ -290,20 +290,23 @@ export async function readMatchLog(spreadsheetId) {
   return { headers, rows };
 }
 
-// Живая «форма» игрока (W/L) строго ДО матча с номером beforeMatch — читаем
-// прямо из Match_Log, а не из витрины профилей: та обновляется формулами
-// IMPORTRANGE с задержкой до получаса, и сразу после подтверждения счёта
-// показала бы устаревшую последовательность.
-export async function recentFormBefore(spreadsheetId, playerName, beforeMatch, limit = 5) {
+// Живая «форма» игрока (W/L) из Match_Log, а не из витрины профилей: та
+// обновляется формулами IMPORTRANGE с задержкой до получаса и сразу после
+// подтверждения счёта показала бы устаревшую последовательность.
+//
+// upTo — включительно: текущий матч в форму входит, поэтому даже у дебютанта
+// после первой игры на карточке появляется одна плашка, а не пустое место.
+// Имена сверяем терпимо: точка или регистр в таблицах не должны ничего ломать.
+export async function recentFormBefore(spreadsheetId, playerName, upTo, limit = 5) {
   const { rows } = await readMatchLog(spreadsheetId);
-  const target = txt(playerName).toLowerCase();
+  const target = txt(playerName);
   if (!target) return [];
+  const { sameName } = await import('./sheets.js');
   const out = [];
   for (const r of rows) {
     const m = num(r.match);
-    if (!m || (beforeMatch && m >= beforeMatch)) continue;
-    const p1 = txt(r.player_1).toLowerCase(), p2 = txt(r.player_2).toLowerCase();
-    const isP1 = p1 === target, isP2 = p2 === target;
+    if (!m || (upTo && m > upTo)) continue;
+    const isP1 = sameName(r.player_1, target), isP2 = sameName(r.player_2, target);
     if (!isP1 && !isP2) continue;
     const techA = filled(r.p1_techloss), techB = filled(r.p2_techloss);
     const isTech = (techA || techB) && !yes(r.completed);

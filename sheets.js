@@ -3,7 +3,25 @@ import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET
 import { nowISO, safe, parseSeasonNumber, directPhotoUrl } from './util.js';
 
 const cache = new Map();
+// Раньше кэш работал по принципу «протух — следующий ждёт чтение»: тому, кто
+// нажал кнопку через 20 секунд после соседа, доставался полный поход в Google.
+// Теперь ответ ВСЕГДА уходит из памяти, а устаревшее обновляется в фоне и
+// достаётся следующему. Ждать приходится только на совсем пустом кэше — то
+// есть один раз после старта сервиса.
+//
+// Ничего не протухает насовсем: устаревшая строка лучше крутилки. Там, где
+// свежесть обязательна (подтверждение результата), кэш чистится явно.
 const CACHE_MS = 20_000;
+const SHEET_FRESH_MS = {
+  [SHEETS.settings]: 10 * 60_000,
+  [SHEETS.botTexts]: 10 * 60_000,
+  [SHEETS.applicants]: 5 * 60_000,
+  [SHEETS.events]: 5 * 60_000,
+  [SHEETS.paymentMethods]: 10 * 60_000,
+  [SHEETS.applications]: 60_000
+};
+const freshMsFor = sheetName => SHEET_FRESH_MS[sheetName] ?? CACHE_MS;
+const refreshing = new Map();   // фоновое обновление — по одному на лист
 
 function colToA1(n) {
   let s = '';
@@ -314,6 +332,11 @@ let profilesCache = { t: 0, v: null };
 
 // Сбрасывается, когда бот записал подтверждённый счёт: следующий, кто откроет
 // экран, увидит уже новые цифры, а не пятиминутной давности.
+// Кэши, собранные поверх этих данных, живут в других файлах (снимок витрины
+// лиги — в index.js). Чтобы им не приходилось угадывать момент, они
+// подписываются здесь и сбрасываются вместе со всеми остальными.
+const leagueCacheHooks = new Set();
+export function onLeagueCacheInvalidated(fn) { if (typeof fn === 'function') leagueCacheHooks.add(fn); }
 export function invalidateLeagueCache() {
   masterPlayersCache = {t:0,rows:null};
   profilesCache = { t: 0, v: null };
@@ -324,6 +347,9 @@ export function invalidateLeagueCache() {
   seasonHistCache = { t: 0, v: null };
   websitePlayersCache = { t: 0, v: null };
   masterPhotoCache = { t: 0, v: null };
+  for (const hook of leagueCacheHooks) {
+    try { hook(); } catch (e) { console.error('league cache hook failed:', e.message); }
+  }
 }
 
 function pickNumber(v) {
@@ -738,10 +764,7 @@ const extraSheetsReady = new Map();
 // нужна там, где таблицу правили руками и хотят увидеть результат сразу.
 export function invalidateSheetCache() { cache.clear(); }
 
-export async function getRows(sheetName, { useCache=true } = {}) {
-  const key = `rows:${sheetName}`;
-  const c = cache.get(key);
-  if (useCache && c && Date.now() - c.t < CACHE_MS) return c.v;
+async function readSheet(sheetName) {
   const values = await valuesGet(`'${sheetName}'!A:BZ`);
   const headers = values[0] || [];
   const rows = values.slice(1).map((r, idx) => {
@@ -750,8 +773,32 @@ export async function getRows(sheetName, { useCache=true } = {}) {
     return obj;
   });
   const out = { headers, rows, values };
-  cache.set(key, { t: Date.now(), v: out });
+  cache.set(`rows:${sheetName}`, { t: Date.now(), v: out });
   return out;
+}
+// Фоновое обновление: результат никто не ждёт, ошибка только в лог — на руках
+// у человека остаются прошлые данные, и это лучше, чем ошибка на ровном месте.
+function refreshInBackground(sheetName) {
+  if (refreshing.has(sheetName)) return;
+  const task = readSheet(sheetName)
+    .catch(e => console.error(`фоновое чтение ${sheetName} не удалось:`, e.message))
+    .finally(() => refreshing.delete(sheetName));
+  refreshing.set(sheetName, task);
+}
+export async function getRows(sheetName, { useCache=true } = {}) {
+  const c = cache.get(`rows:${sheetName}`);
+  if (useCache && c) {
+    // Свежее — отдаём молча; устаревшее — тоже отдаём сразу, но ставим в фон
+    // перечитывание, чтобы следующий обращающийся получил новое.
+    if (Date.now() - c.t >= freshMsFor(sheetName)) refreshInBackground(sheetName);
+    return c.v;
+  }
+  return readSheet(sheetName);
+}
+// Прогрев: вызывается на старте и по таймеру, чтобы первый живой запрос не
+// платил за чтение. Ошибки не мешают — просто прогреется в следующий раз.
+export async function warmSheetCache(sheetNames = []) {
+  await Promise.all(sheetNames.map(name => readSheet(name).catch(() => null)));
 }
 
 // values.append сам ищет «таблицу» в диапазоне и дописывает ПОСЛЕ неё. Когда в
@@ -1365,51 +1412,6 @@ export async function getSegmentContacts(segment='all') {
 }
 
 
-const POLL_HEADERS = [
-  'poll_id','broadcast_id','question','option_1','votes_1','option_2','votes_2','option_3','votes_3','option_4','votes_4','option_5','votes_5','option_6','votes_6','option_7','votes_7','option_8','votes_8','option_9','votes_9','option_10','votes_10','total_votes','sent_count','last_updated','status'
-];
-
-function pollPatch({ poll_id, broadcast_id='', question='', options=[], total_votes=0, sent_count='', status='open' }) {
-  const patch = { poll_id, broadcast_id, question, total_votes, sent_count, last_updated: nowISO(), status };
-  options.slice(0, 10).forEach((o, idx) => {
-    patch[`option_${idx+1}`] = o.text || o;
-    patch[`votes_${idx+1}`] = o.voter_count ?? o.votes ?? 0;
-  });
-  return patch;
-}
-
-export async function upsertPollResult(row) {
-  await ensureSheetWithHeaders(SHEETS.pollResults, POLL_HEADERS, 210001013);
-  const { rows } = await getRows(SHEETS.pollResults, { useCache:false });
-  const found = rows.find(r => String(r.poll_id) === String(row.poll_id));
-  const patch = pollPatch(row);
-  if (found) {
-    if (!row.broadcast_id) delete patch.broadcast_id;
-    if (!row.sent_count) delete patch.sent_count;
-    if (!row.question) delete patch.question;
-    await updateObjectByRow(SHEETS.pollResults, found._rowNumber, patch);
-  }
-  else await appendObject(SHEETS.pollResults, patch);
-  return patch;
-}
-
-export async function findPollResultsByBroadcastId(broadcastId) {
-  await ensureSheetWithHeaders(SHEETS.pollResults, POLL_HEADERS, 210001013);
-  const { rows } = await getRows(SHEETS.pollResults, { useCache:false });
-  return rows.filter(r => String(r.broadcast_id) === String(broadcastId));
-}
-
-export function summarizePollRows(rows=[]) {
-  const totals = { total_votes:0, options:[] };
-  for (let i=1; i<=10; i++) {
-    const label = rows.find(r => r[`option_${i}`])?.[`option_${i}`] || '';
-    if (!label) continue;
-    const votes = rows.reduce((sum,r) => sum + Number(r[`votes_${i}`] || 0), 0);
-    totals.options.push({ text: label, votes });
-  }
-  totals.total_votes = totals.options.reduce((sum,o) => sum + Number(o.votes || 0), 0);
-  return totals;
-}
 
 
 export function isProfileCompleted(row={}) {

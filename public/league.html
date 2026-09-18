@@ -2710,20 +2710,43 @@ function toggleMatches(id){
 // ---------------------------------------------------------------- старт
 // ?as=<группа> — организатор смотрит приложение глазами выбранной группы.
 var asQ=(new URLSearchParams(location.search).get('as')||'').trim();
+// Очки Fantasy подставляются в список игроков: all_scores — это все игроки лиги
+// с реальными очками, players (состав сезона) поверх добавляет число команд,
+// которых у остальных попросту нет. Так очки видно у всех, а не только у состава.
+function applyFantasyScores(){
+  if(!fantasyData)return;
+  var fs={};
+  (fantasyData.all_scores||[]).forEach(function(x){fs[nameKey(x.name)]={points:x.total||0,teams:0}});
+  (fantasyData.players||[]).forEach(function(fp){fs[nameKey(fp.name)]={points:(fp.score&&fp.score.total)||0,teams:fp.selected_by||0}});
+  players.forEach(function(p){var x=fs[nameKey(p.name)]||{};p.fantasy_points=x.points||0;p.fantasy_teams=x.teams||0});
+}
+// Догрузка Fantasy после первой отрисовки. Что бы ни пошло не так — интерфейс
+// уже на экране и работает, поэтому ошибку просто пишем в консоль.
+function loadFantasyLater(){
+  fetch('/api/fantasy/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()})
+    .then(function(f){
+      if(!f||!f.ok)return;
+      fantasyData=f;fantasyAllowed=true;
+      applyFantasyScores();
+      if(VIEWS.indexOf('fantasy')<0&&Array.isArray(VIEWS)){VIEWS.push('fantasy');buildTabs()}
+      // Перерисовываем то, что человек видит прямо сейчас: на карточке игрока
+      // появляются очки, в списках — значки своих Fantasy-команд.
+      if(openId)renderPlayer(byId(openId));
+      else if(typeof mode!=='undefined'&&mode)showTab(mode);
+    })
+    .catch(function(e){console.log('fantasy later:',e&&e.message)});
+}
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
     if(!j.ok)throw new Error(j.code||j.error||(L?'Ошибка':'Error'));
-    players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy);
-    if(fantasyData){
-      // all_scores сначала — это все игроки лиги с реальными очками; players
-      // (roster-каталог сезона) перезаписывает их числом команд, которых у
-      // остальных попросту нет. Так очки видно у всех, а не только у состава.
-      var fs={};
-      (fantasyData.all_scores||[]).forEach(function(x){fs[nameKey(x.name)]={points:x.total||0,teams:0}});
-      (fantasyData.players||[]).forEach(function(fp){fs[nameKey(fp.name)]={points:(fp.score&&fp.score.total)||0,teams:fp.selected_by||0}});
-      players.forEach(function(p){var x=fs[nameKey(p.name)]||{};p.fantasy_points=x.points||0;p.fantasy_teams=x.teams||0});
-    }
+    players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy||j.fantasy_deferred);
+    applyFantasyScores();
+    // Fantasy считается тяжело, поэтому сервер её в первый ответ не кладёт:
+    // приложение рисуется сразу, а очки подтягиваются следом и подставляются
+    // на месте. Пока их нет, всё остальное уже работает.
+    if(j.fantasy_deferred)loadFantasyLater();
     photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     seasons=(j.seasons||[]).map(function(s){return Object.assign({},s,{label:(L?'Сезон ':'Season ')+s.number})});

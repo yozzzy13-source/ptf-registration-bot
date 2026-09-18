@@ -441,6 +441,37 @@ await sheets.setSetting('FANTASY_MODE','TEST');
 await sheets.setSetting('FANTASY_TEST_GROUP','');
 const noTest=await request('get','/api/league/bootstrap','1');
 check(noTest.body?.fantasy===null&&!noTest.body.tabs.includes('fantasy'),'League hides Fantasy from non-testers');
+// Скорость: Fantasy в первый ответ не кладётся, приложение рисуется сразу, а
+// очки догружаются вторым запросом. Доступ при этом решается как раньше.
+{
+ await sheets.setSetting('FANTASY_MODE','LIVE');
+ const fast=await request('get','/api/league/bootstrap','1');
+ check(fast.body?.fantasy===null&&fast.body?.fantasy_deferred===true,'Fantasy is deferred out of the first league payload');
+ check(fast.body?.fantasy_allowed===true,'Deferred Fantasy still reports access in the first payload');
+ const full=await request('get','/api/league/bootstrap','1',{with_fantasy:'1'});
+ check(full.body?.fantasy&&full.body?.fantasy_deferred===false,'Asking for Fantasy explicitly returns it in one request');
+ const leagueHtml=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(leagueHtml.includes('loadFantasyLater')&&leagueHtml.includes('fantasy_deferred'),'Мини-приложение догружает Fantasy после первой отрисовки');
+ await sheets.setSetting('FANTASY_MODE','TEST');
+}
+// Опросы и рассылка по рейтингу удалены целиком — ни команд, ни обработчиков.
+{
+ const botSource=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ const adminSource=await fs.readFile(path.join(root,'admin.js'),'utf8');
+ const tgSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(!/poll/i.test(botSource)&&!/poll/i.test(adminSource),'Опросы убраны из бота и админки');
+ check(!botSource.includes('/rating_broadcast')&&!botSource.includes('startMissingRatingBroadcast'),'Рассылка по рейтингу убрана');
+ check(!tgSource.includes("cmd:'overview'")&&tgSource.includes("cmd:'matches'"),'Осталась одна команда матчей вместо двух');
+ check(tgSource.includes('help_en'),'У команд есть английские описания для двуязычного /help');
+ check(botSource.includes('adminHelpText(l)')&&botSource.includes('ADMIN_HELP_ICON'),'Админский /help двуязычный и с эмодзи по разделам');
+ // «<id сообщения>» без экранирования Telegram считает HTML-тегом и молча съедает.
+ check(botSource.includes('escapeHtml(args)'),'Подсказка по аргументам в /help экранируется');
+ const { ADMIN_COMMAND_LIST } = await load('telegram.js');
+ const noEnglish = ADMIN_COMMAND_LIST.filter(c => !c.help_en && !c.short_en).map(c => c.cmd);
+ check(!noEnglish.length,'У каждой админской команды есть английское описание: '+noEnglish.join(', '));
+ const badArgs = ADMIN_COMMAND_LIST.filter(c => c.args && !c.args_en && /[а-яё]/i.test(c.args)).map(c => c.cmd);
+ check(!badArgs.length,'Русские подсказки аргументов переведены: '+badArgs.join(', '));
+}
 // --- словарь статусов -------------------------------------------------------
 // Статусы решают, кого пускать в лигу и кому уходят рассылки, поэтому словарь
 // закрываем тестами: старые значения из таблицы должны читаться как раньше.

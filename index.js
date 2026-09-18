@@ -4,10 +4,10 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
+import { onLeagueCacheInvalidated, warmSheetCache, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
-import { notifyNewApplication, handlePollUpdate, notifyAvatarVariant, paymentAutoOn } from './admin.js';
+import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
@@ -163,9 +163,14 @@ app.post('/webhook', async (req, res) => {
       seen.add(update.update_id);
       if (seen.size > 2000) seen.clear();
     }
-    if (update.message) await handleMessage(update.message);
-    else if (update.callback_query) await handleCallback(update.callback_query);
-    else if (update.poll) await handlePollUpdate(update.poll);
+    // Замер — чтобы «кажется, тормозит» превратилось в цифры. В лог пишем
+    // только то, что человек успевает заметить: всё, что дольше секунды.
+    const started = Date.now();
+    let kind = '';
+    if (update.message) { kind = 'сообщение ' + String(update.message.text || '').slice(0, 24); await handleMessage(update.message); }
+    else if (update.callback_query) { kind = 'кнопка ' + String(update.callback_query.data || '').slice(0, 24); await handleCallback(update.callback_query); }
+    const spent = Date.now() - started;
+    if (kind && spent > 1000) console.log(`медленно: ${kind} — ${spent} мс`);
   } catch (e) {
     console.error('webhook error', e);
   }
@@ -1002,10 +1007,17 @@ app.post('/api/league/wallet-topup', async (req, res) => {
   }
 });
 
-app.get('/api/league/bootstrap', async (req, res) => {
-  try {
-    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
-    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+// Общая часть витрины лиги одинакова для всех, кто её открывает: игроки, фото,
+// история матчей, события, сезоны, дивизионы и живые места. Собирается она
+// тяжело — десятки чтений таблиц, — поэтому считается один раз и живёт в памяти.
+// Устаревшее отдаётся сразу, а пересчёт идёт в фоне; после подтверждённого
+// результата снимок сбрасывается принудительно, чтобы там, где свежесть реально
+// нужна, она была мгновенной.
+const LEAGUE_SNAPSHOT_MS = 10 * 60 * 1000;
+const leagueSnapshot = { t: 0, v: null, building: null };
+export function invalidateLeagueSnapshot() { leagueSnapshot.t = 0; leagueSnapshot.v = null; }
+async function buildLeagueSnapshot() {
+  const started = Date.now();
     const [rawPlayers, history, events, seasonList] = await Promise.all([
       getLeagueProfiles(),
       getLeagueMatchHistory().catch(() => new Map()),
@@ -1109,6 +1121,27 @@ app.get('/api/league/bootstrap', async (req, res) => {
         return Object.keys(patch).length ? { ...m, ...patch } : m;
       });
     }
+  console.log(`league snapshot: собран за ${Date.now() - started} мс, игроков ${players.length}`);
+  return { seasons, players, photoByName, matches, events, divisions, current };
+}
+async function getLeagueSnapshot() {
+  const stale = !leagueSnapshot.v || Date.now() - leagueSnapshot.t >= LEAGUE_SNAPSHOT_MS;
+  if (stale && !leagueSnapshot.building) {
+    leagueSnapshot.building = buildLeagueSnapshot()
+      .then(v => { leagueSnapshot.v = v; leagueSnapshot.t = Date.now(); return v; })
+      .finally(() => { leagueSnapshot.building = null; });
+    leagueSnapshot.building.catch(e => console.error('league snapshot failed:', e.message));
+  }
+  // Есть хоть что-то — отдаём немедленно, даже если оно устарело.
+  return leagueSnapshot.v || leagueSnapshot.building;
+}
+
+app.get('/api/league/bootstrap', async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const { seasons, players, photoByName, matches, events, divisions, current } = await getLeagueSnapshot();
     // Нижнее меню зависит от того, кто смотрит: у гостя нет смысла в матчах и
     // расписании, у активного игрока — есть. Организатор видит всё.
     const group = await playerGroup(v.user.id, v.profile).catch(() => 'guest');
@@ -1120,10 +1153,16 @@ app.get('/api/league/bootstrap', async (req, res) => {
       ? MINIAPP_TABS.slice()
       : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
     const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isPlayersMasterMember }).catch(() => ({ allowed:false }));
+    // Fantasy — самая тяжёлая часть ответа: составы, цены, очки по всем игрокам
+    // и чтение листа команд мимо кэша. Держать из-за неё закрытым весь интерфейс
+    // незачем: по умолчанию не считаем, приложение рисуется сразу, а очки
+    // догружаются вторым запросом и подставляются на месте.
     // Apply the Players_Master + TEST gate to every Fantasy surface.
-    const fantasy = fantasyAccess.allowed
+    const wantFantasy = String(req.query.with_fantasy || '') === '1';
+    const fantasy = fantasyAccess.allowed && wantFantasy
       ? await getFantasyBootstrap(v.user.id, v.profile.name || '', v.lang, fantasyAccess.mode)
         .catch(e => { console.error('league fantasy:', e.message); return null; }) : null;
+    console.log(`league bootstrap: ${Date.now() - startedAt} мс${wantFantasy ? ', с Fantasy' : ''}`);
     res.json({
       ok: true,
       lang: v.lang,
@@ -1136,6 +1175,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
       view_as: viewAs,
       tabs: fantasyAccess.allowed ? tabs : tabs.filter(t => t !== 'fantasy'),
       fantasy_allowed: Boolean(fantasyAccess.allowed),
+      // Приложение по этому флагу знает, что очки сейчас подтянутся отдельно.
+      fantasy_deferred: Boolean(fantasyAccess.allowed && !wantFantasy),
       players,
       photos: photoByName,
       matches,
@@ -1646,6 +1687,18 @@ async function runDeadlineNudge() {
 
 app.listen(PORT, async () => {
   setMatchChangeHandler(queueMatchAttention);
+  // Снимок витрины лиги сбрасывается вместе с остальными кэшами — то есть сразу
+  // после подтверждённого результата, а не по таймеру.
+  onLeagueCacheInvalidated(invalidateLeagueSnapshot);
+  // Прогрев: собираем тяжёлое заранее и подновляем по таймеру, чтобы первый
+  // живой заход после простоя не платил за всех. Ошибки прогрева не важны —
+  // просто прогреется в следующий раз.
+  const warm = () => Promise.allSettled([
+    warmSheetCache([SHEETS.settings, SHEETS.botTexts, SHEETS.applicants, SHEETS.events]),
+    getLeagueSnapshot()
+  ]).catch(() => {});
+  warm();
+  setInterval(warm, 8 * 60 * 1000).unref();
   // Time can create a result task without a player pressing a button.
   setInterval(async()=>{try{const rows=await allSlots();queueMatchAttention([...new Set(rows.filter(s=>s.status==='accepted').flatMap(s=>[s.from_telegram_id,s.to_telegram_id]).filter(Boolean))]);}catch(e){console.error('attention sweep:',e.message);}},5*60*1000).unref();
   console.log(`PTF Registration Bot listening on ${PORT}`);

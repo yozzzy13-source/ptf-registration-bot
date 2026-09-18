@@ -1,5 +1,5 @@
-import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, sendPoll, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
-import { getSetting, setSetting, getRows, getSegmentContacts, getMissingRatingContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, upsertPollResult, findPollResultsByBroadcastId, summarizePollRows, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, getAllEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup, canonicalStatus, getPlayerLeagueInfo } from './sheets.js';
+import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
+import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, getAllEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup, canonicalStatus, getPlayerLeagueInfo } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
@@ -1497,52 +1497,6 @@ export async function sendRatingRequestTo(chatId, argument='') {
   return sendMessage(chatId, `✅ Отправил просьбу указать уровень: <b>${escapeHtml(player?.name || raw)}</b> (${lang})`);
 }
 
-export async function startMissingRatingBroadcast(chatId, adminId) {
-  const [missing, recheck] = await Promise.all([
-    getMissingRatingContacts('missing'),
-    getMissingRatingContacts('recheck')
-  ]);
-  adminState.set(String(adminId), { mode:'missing_rating_confirm', count:missing.length });
-  return sendMessage(chatId, `<b>Рассылка про уровень игрока</b>
-
-Без рейтинга вообще: <b>${missing.length}</b>
-Плюс те, чью цифру ты не подтверждал: <b>${recheck.length}</b>
-
-Подтверждённой считается анкета с меткой <code>ntrp:admin</code> в колонке <code>crm_tags</code>. Тексты одинаковые, отличается только охват.`, { reply_markup:{ inline_keyboard:[
-    [{ text:`📨 Только без рейтинга (${missing.length})`, callback_data:'bcconfirm_missing_rating' }],
-    [{ text:`📨 Все на перепрохождение (${recheck.length})`, callback_data:'bcconfirm_rating_recheck' }],
-    [{ text:'❌ Отмена', callback_data:'bccancel' }]
-  ] } });
-}
-
-// Повторный запуск той же рассылки — частая беда: адмнин жмёт кнопку дважды.
-// Состояние снимаем ДО отправки, поэтому второе нажатие уже ничего не делает.
-export async function executeMissingRatingBroadcast(callbackQuery, scope='missing') {
-  const adminId = callbackQuery.from.id;
-  const state = adminState.get(String(adminId));
-  if (!state || state.mode !== 'missing_rating_confirm') return;
-  adminState.delete(String(adminId));
-  const contacts = await getMissingRatingContacts(scope);
-  const broadcastId = uid('broadcast');
-  let sent = 0, failed = 0;
-  for (const c of contacts) {
-    const lang = c.language === 'ru' ? 'ru' : 'en';
-    try {
-      await sendMessage(c.telegram_id, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
-      sent++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:`missing_rating:${scope}` });
-      await new Promise(r => setTimeout(r, 45));
-    } catch (e) {
-      failed++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:lang, segment_filter:`missing_rating:${scope}` });
-    }
-  }
-  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:`missing_rating:${scope}`, language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-  return sendMessage(callbackQuery.message.chat.id, `✅ Рассылка про уровень отправлена
-
-Sent: <b>${sent}</b>
-Failed: <b>${failed}</b>`);
-}
 
 export async function startBroadcastWithMenu(chatId, adminId) {
   const contacts = await getSegmentContacts('all');
@@ -1592,83 +1546,6 @@ export async function executeBroadcastWithMenu(callbackQuery) {
 }
 
 
-export async function startBroadcastPoll(chatId, adminId, testOnly=false) {
-  const contacts = testOnly ? [{ telegram_id: adminId, name:'Admin', telegram_username:'', language:'mixed' }] : await getSegmentContacts('all');
-  adminState.set(String(adminId), { mode: 'broadcast_poll_message', segment: testOnly ? 'test' : 'all', count: contacts.length, testOnly });
-  await sendMessage(chatId, `<b>${testOnly ? 'Test anonymous poll' : 'Anonymous poll broadcast'}</b>
-
-Recipients: <b>${contacts.length}</b>
-
-Send the poll in this format:
-
-Question text
-Option 1
-Option 2
-Option 3
-
-The poll will be anonymous. Results will be saved in the <b>Poll Results</b> sheet and can be checked with /poll_stats.`);
-}
-
-export async function handleBroadcastPollMessage(msg, state) {
-  const text = (msg.text || msg.caption || '').trim();
-  if (!text) return sendMessage(msg.chat.id, 'Send poll question and options as text.');
-  const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
-  const question = lines[0] || '';
-  const options = lines.slice(1, 11);
-  if (!question || options.length < 2) return sendMessage(msg.chat.id, 'Format: first line is question, next lines are at least 2 answer options.');
-  adminState.set(String(msg.from.id), { ...state, mode: 'broadcast_poll_confirm', question, options });
-  await sendMessage(msg.chat.id, `<b>Poll preview</b>
-
-Recipients: <b>${state.count}</b>
-Question: <b>${escapeHtml(question)}</b>
-
-${options.map((o,i)=>`${i+1}. ${escapeHtml(o)}`).join('\n')}
-
-Send anonymous Telegram poll now?`, { reply_markup: { inline_keyboard: [[
-    { text: '✅ Send poll', callback_data: 'bcconfirm_poll' },
-    { text: '❌ Cancel', callback_data: 'bccancel' }
-  ]]} });
-}
-
-export async function executeBroadcastPoll(callbackQuery) {
-  const adminId = callbackQuery.from.id;
-  const state = adminState.get(String(adminId));
-  if (!state || state.mode !== 'broadcast_poll_confirm') return;
-  const contacts = state.testOnly ? [{ telegram_id: adminId, name:'Admin', telegram_username:'', language:'mixed' }] : await getSegmentContacts(state.segment || 'all');
-  const broadcastId = uid('poll');
-  let sent = 0, failed = 0;
-  for (const c of contacts) {
-    try {
-      const message = await sendPoll(c.telegram_id, state.question, state.options, { is_anonymous: true, allows_multiple_answers: false });
-      sent++;
-      if (message?.poll?.id) await upsertPollResult({ poll_id: message.poll.id, broadcast_id: broadcastId, question: state.question, options: state.options.map(text => ({ text, voter_count:0 })), total_votes:0, sent_count: contacts.length, status:'open' });
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'poll_anonymous' });
-      await new Promise(r => setTimeout(r, 45));
-    } catch (e) {
-      failed++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:'poll_anonymous' });
-    }
-  }
-  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'poll_anonymous', language:'mixed', message_text:state.question + '\n' + state.options.join('\n'), media_type:'poll', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-  adminState.delete(String(adminId));
-  await sendMessage(callbackQuery.message.chat.id, `✅ Poll broadcast finished\n\nBroadcast ID: <code>${escapeHtml(broadcastId)}</code>\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>\n\nResults will appear in the <b>Poll Results</b> sheet. You can also use:\n<code>/poll_stats ${escapeHtml(broadcastId)}</code>`);
-}
-
-export async function handlePollUpdate(poll) {
-  if (!poll?.id) return;
-  await upsertPollResult({ poll_id: poll.id, question: poll.question || '', options: poll.options || [], total_votes: poll.total_voter_count || 0, status: poll.is_closed ? 'closed' : 'open' });
-}
-
-export async function adminPollStats(chatId, text='') {
-  const broadcastId = String(text || '').replace('/poll_stats','').trim();
-  if (!broadcastId) return sendMessage(chatId, 'Usage: /poll_stats poll_xxxxx');
-  const rows = await findPollResultsByBroadcastId(broadcastId);
-  if (!rows.length) return sendMessage(chatId, 'No poll results found for this broadcast ID yet.');
-  const summary = summarizePollRows(rows);
-  const question = rows.find(r => r.question)?.question || 'Poll';
-  const body = summary.options.map(o => `• ${escapeHtml(o.text)} — <b>${Number(o.votes || 0)}</b>`).join('\n') || 'No votes yet.';
-  await sendMessage(chatId, `<b>Poll stats</b>\n\nBroadcast: <code>${escapeHtml(broadcastId)}</code>\nQuestion: <b>${escapeHtml(question)}</b>\nPoll copies: <b>${rows.length}</b>\nTotal votes: <b>${summary.total_votes}</b>\n\n${body}`);
-}
 
 export async function startBroadcast(chatId, adminId) {
   adminState.set(String(adminId), { mode: 'broadcast_segment' });

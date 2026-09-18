@@ -13,15 +13,29 @@ import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notify
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite, divisionPair, rollbackJournal } from './results.js';
 import { invalidateDivisionCache } from './division.js';
-import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, startBroadcastPoll, handleBroadcastPollMessage, executeBroadcastPoll, adminPollStats, startMissingRatingBroadcast, executeMissingRatingBroadcast, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
+import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
 import { authorizeSlot, sameScope } from './access.js';
 import { uiError } from './ui-errors.js';
 
 export const userState = new Map();
+// Язык человека меняется раз в жизни, а спрашивали его у таблицы на каждое
+// действие. Держим в памяти: ответ мгновенный, а таблица перечитывается только
+// когда мы этого человека ещё не видели.
+const langMemory = new Map();
+function cachedLang(from = {}) { return langMemory.get(String(from.id || '')) || ''; }
+export function rememberLang(telegramId, lang) {
+  const value = String(lang || '').toLowerCase();
+  if (telegramId && ['ru', 'en'].includes(value)) langMemory.set(String(telegramId), value);
+}
 async function userLang(from) {
+  const known = cachedLang(from);
+  if (known) return known;
   const saved = await findApplicantByTelegramId(from.id).catch(() => null);
-  return ['ru','en'].includes(String(saved?.language || '').toLowerCase()) ? String(saved.language).toLowerCase() : null;
+  const value = String(saved?.language || '').toLowerCase();
+  if (!['ru', 'en'].includes(value)) return null;
+  rememberLang(from.id, value);
+  return value;
 }
 function fallbackLang(lang) { return lang === 'ru' ? 'ru' : 'en'; }
 async function sendLanguageChoice(chatId) {
@@ -315,7 +329,7 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
   const ru = l === 'ru';
   const isAdminHere = isAdminUser(from.id)
     && (msg.chat?.type === 'group' || msg.chat?.type === 'supergroup' || await getSetting('admin_chat_id') === String(chatId) || msg.chat?.type === 'private');
-  if (isAdminHere) return sendMessage(chatId, adminHelpText());
+  if (isAdminHere) return sendMessage(chatId, adminHelpText(l));
 
   let active = false;
   try {
@@ -324,37 +338,55 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
   } catch (e) { console.error('help league check failed:', e.message); }
 
   const lines = ru ? [
-    '<b>🎾 Что умеет бот</b>',
+    '🎾 <b>Что умеет бот</b>',
     '',
     'Здесь ты подаёшь заявку в лигу, договариваешься о матчах, бронируешь корт и вносишь счёт.',
     '',
-    '<b>Команды</b>',
-    '/menu — главное меню',
+    '🏆 <b>Лига</b> — открывается кнопкой «Лига»',
+    'Таблицы дивизионов, годовая гонка, карточки игроков со статистикой и историей матчей, расписание, результаты, события и партнёры.',
+    '',
+    '🎾 <b>Матчи</b>',
     ...(active
-      ? ['/match — матчи: окна соперников, создать своё, мои матчи',
-         '/result — внести результат сыгранного матча',
+      ? ['/match — окна соперников, создать своё окно, мои матчи',
+         '/result — внести счёт сыгранного матча (подтверждает соперник)',
          '/book — забронировать корт']
       : ['<i>Матчи, результаты и бронь корта откроются после распределения по дивизионам.</i>']),
+    '',
+    ...(active ? ['✨ <b>Fantasy</b>', '/fantasy — собрать команду из игроков лиги и получать очки за их реальные матчи', ''] : []),
+    '👤 <b>Личное</b>',
+    '/menu — главное меню',
     '/results — лента результатов: включить или выключить',
     '/language — сменить язык',
+    '/avatar — выбрать аватарку для карточки игрока',
     '/cancel — отменить текущее действие',
-    '/help — этот список'
+    '/help — этот список',
+    '',
+    '💬 Написать организатору — кнопка «Связаться» ниже.'
   ] : [
-    '<b>🎾 What this bot does</b>',
+    '🎾 <b>What this bot does</b>',
     '',
     'Apply to the league, arrange matches, book a court and submit scores.',
     '',
-    '<b>Commands</b>',
-    '/menu — main menu',
+    '🏆 <b>League</b> — open it with the «League» button',
+    'Division tables, the Yearly Race, player cards with stats and match history, schedule, results, events and partners.',
+    '',
+    '🎾 <b>Matches</b>',
     ...(active
-      ? ['/match — matches: open slots, create your own, your matches',
-         '/result — submit a match result',
+      ? ['/match — open slots, create your own, your matches',
+         '/result — submit a match score (your opponent confirms it)',
          '/book — book a court']
       : ['<i>Matches, results and court booking open up once divisions are set.</i>']),
+    '',
+    ...(active ? ['✨ <b>Fantasy</b>', '/fantasy — build a squad of league players and score from their real matches', ''] : []),
+    '👤 <b>Your account</b>',
+    '/menu — main menu',
     '/results — results feed: on or off',
     '/language — change language',
+    '/avatar — pick the photo for your player card',
     '/cancel — cancel current action',
-    '/help — this list'
+    '/help — this list',
+    '',
+    '💬 To reach the organiser, use the «Contact» button below.'
   ];
   return sendMessage(chatId, lines.join('\n'), {
     reply_markup: { inline_keyboard: [
@@ -364,42 +396,66 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
   });
 }
 
-function adminHelpText() {
-  // Текст собирается из того же списка, что и меню по слэшу: добавил команду
-  // в ADMIN_COMMAND_LIST — она сама появилась и здесь, и там.
-  const order = ['Лига', 'Матчи', 'Панель и рассылки', 'Настройка', 'Прочее'];
-  const lines = ['<b>PTF — команды организатора</b>'];
-  for (const group of order) {
-    const items = ADMIN_COMMAND_LIST.filter(c => c.group === group);
-    if (!items.length) continue;
-    lines.push('', `<b>${group}</b>`);
-    for (const c of items) {
-      lines.push(`/${c.cmd}${c.args ? ' ' + c.args : ''} — ${c.help || c.short}`);
-    }
-  }
-  lines.push('', '<b>Кнопки, а не команды</b>',
+// Эмодзи у раздела — чтобы в длинном списке было видно, где что, а не сплошная
+// стена команд. Раздел берётся из ADMIN_COMMAND_LIST: добавил команду — она сама
+// встала и сюда, и в меню по слэшу.
+const ADMIN_HELP_ICON = { 'Лига':'🏆', 'Матчи':'🎾', 'Панель и рассылки':'📣', 'Настройка':'⚙️', 'Прочее':'🧰' };
+const ADMIN_HELP_GROUP_EN = { 'Лига':'League and players', 'Матчи':'Matches and results', 'Панель и рассылки':'Panel and broadcasts', 'Настройка':'Setup', 'Прочее':'Other' };
+const ADMIN_HELP_TAIL = {
+  ru: [
+    '', '👉 <b>Кнопками, а не командами</b>',
     '• На чеке за лигу три решения: <b>Approve</b> — участие подтверждено, <b>⏳ Оплата принята → Waitlist</b> — деньги приняли, место ждём, <b>Reject</b>.',
     '• Событие правится и удаляется в панели: удаление спрашивает, вернуть деньги на балансы или ты вернёшь переводом сам.',
     '• Возвраты переводом копятся во вкладке «Возвраты» — там же отмечаешь «отправил».',
-    '• Рассылка умеет слать записанным на событие: во вкладке «Рассылка» переключи «Кому» на «По событию», выбери ивент и кого из записанных (все / участвуют / лист ожидания / не оплатили). Счётчик покажет число получателей до отправки. Одно событие за раз; в тексте работают подстановки <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code>.',
+    '• Рассылка умеет слать записанным на событие: во вкладке «Рассылка» переключи «Кому» на «По событию», выбери ивент и кого из записанных (все / участвуют / лист ожидания / не оплатили). Счётчик покажет число получателей до отправки. В тексте работают подстановки <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code>.',
     '• Касса: игрок выбирается из списка, пополнение/списание/возврат — кнопками, комментарий обязателен.',
-    '• Вкладка «Кнопки» — что видит каждая группа игроков: вкладки мини-приложения, кнопки под сообщением и нижняя клавиатура в чате.',
-    '• Там же «Прислать в бот» и «Открыть мини-апп» — посмотреть всё глазами выбранной группы, без второго аккаунта.',
-    '', '<b>Дивизионы</b>',
-    '• Дивизион игрока и список его соперников берутся из таблицы дивизиона последнего сезона, лист <b>Division_Tracker</b>, список под заголовком «Player». Переносишь игрока — правишь только там: убрал из одной таблицы, добавил в другую.',
-    '• Статус (active / inactive) — из анкеты в Applicants. Нет статуса active — матчи закрыты, даже если игрок есть в сетке.',
-    '• Таблица предварительного состава участвует только в странице «Состав» и в счётчике заявок на событиях. На матчи она больше не влияет.',
+    '• Вкладка «Кнопки» — что видит каждая группа игроков: вкладки мини-приложения, кнопки под сообщением и нижняя клавиатура в чате. Там же «Прислать в бот» и «Открыть мини-апп» — посмотреть всё глазами выбранной группы, без второго аккаунта.',
+    '', '📊 <b>Дивизионы и результаты</b>',
+    '• Дивизион игрока и список соперников берутся из таблицы дивизиона последнего сезона, лист <b>Division_Tracker</b>, список под заголовком «Player». Переносишь игрока — правишь только там.',
+    '• Статус active/inactive — из анкеты. Нет active — матчи закрыты, даже если игрок есть в сетке.',
+    '• Подтверждённый счёт уходит в два места: строка в общий <b>Cross_Division_Match_Log</b> и счёт в строку пары в <b>Match_Log</b> дивизиона. Нет строки пары — счёт ляжет только в общий лог, бот скажет об этом в отчёте.',
     '• <code>/match_test</code> показывает, из какой таблицы, листа и строки бот взял дивизион.',
-    '• Подтверждённый счёт уходит в два места: строка в общий <b>Cross_Division_Match_Log</b> и счёт в готовую строку пары в <b>Match_Log</b> того дивизиона. Дивизион берётся из сеток сезона, Players_Master на это больше не влияет.',
-    '• Если строки пары в расписании дивизиона нет, счёт ляжет только в общий лог — бот напишет об этом прямо в отчёте.',
-    '• В сообщении о результате кнопки открывают мини-апп: карточки игроков и таблицу того дивизиона. Ссылок на сайт там больше нет.',
-    '', '<b>Где отвечает бот</b>',
-    '• Всё по конкретному игроку — активация, счёт, правка состава события, возвраты — приходит в тему этого игрока в админской группе. Темы нет — заводится сама.',
-    '• Аватарку игроку меняешь в панели, во вкладке «Игроки», кнопкой «Аватар» в его строке.',
-    '• Твой личный чат с ботом работает как у обычного игрока: там видно ровно то, что видит он.',
-    '• Команды выше отвечают там, где ты их набрал.',
-    '', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>',
-    '<i>Ответ игроку: Reply под его сообщением в топике.</i>');
+    '', '💬 <b>Где отвечает бот</b>',
+    '• Всё по конкретному игроку приходит в его тему в админской группе. Темы нет — заводится сама. Ответ игроку — Reply под его сообщением.',
+    '• Твой личный чат с ботом работает как у обычного игрока: видно ровно то, что видит он.',
+    '', '<i>Команды игрока (/match, /result, /book, /results) у вас тоже работают.</i>'
+  ],
+  en: [
+    '', '👉 <b>Buttons, not commands</b>',
+    '• A league payment slip offers three decisions: <b>Approve</b>, <b>⏳ Paid → Waitlist</b>, <b>Reject</b>.',
+    '• Events are edited and deleted in the panel; deleting asks whether to refund to balances or by transfer.',
+    '• Transfer refunds collect in the «Refunds» tab, where you mark them as sent.',
+    '• Broadcasts can target an event: switch «To» to «By event», pick the event and who from it (all / playing / waitlist / unpaid). The counter shows the recipients before sending. Placeholders <code>{event}</code>, <code>{date}</code>, <code>{time}</code>, <code>{venue}</code> work in the text.',
+    '• Balance: pick a player, then top up, charge or refund by buttons; a comment is required.',
+    '• The «Buttons» tab shows what each player group sees, and lets you preview it without a second account.',
+    '', '📊 <b>Divisions and results</b>',
+    '• A player’s division and opponents come from the latest season division sheet, tab <b>Division_Tracker</b>, the list under «Player».',
+    '• Status active/inactive comes from the application. Without active, matches stay closed.',
+    '• A confirmed score goes to two places: a row in <b>Cross_Division_Match_Log</b> and the pair row in the division <b>Match_Log</b>.',
+    '• <code>/match_test</code> shows which spreadsheet, sheet and row the division came from.',
+    '', '💬 <b>Where the bot replies</b>',
+    '• Everything about a player lands in that player’s topic in the admin group. Reply under their message to answer.',
+    '', '<i>Player commands (/match, /result, /book, /results) work for you too.</i>'
+  ]
+};
+function adminHelpText(lang = 'ru') {
+  const ru = lang !== 'en';
+  const order = ['Лига', 'Матчи', 'Панель и рассылки', 'Настройка', 'Прочее'];
+  const lines = [ru ? '🎾 <b>PTF — команды организатора</b>' : '🎾 <b>PTF — organiser commands</b>'];
+  for (const group of order) {
+    const items = ADMIN_COMMAND_LIST.filter(c => c.group === group);
+    if (!items.length) continue;
+    const title = ru ? group : (ADMIN_HELP_GROUP_EN[group] || group);
+    lines.push('', `${ADMIN_HELP_ICON[group] || '•'} <b>${title}</b>`);
+    for (const c of items) {
+      const text = ru ? (c.help || c.short) : (c.help_en || c.short_en || c.help || c.short);
+      // Подсказку по аргументам экранируем: в ней есть «<id сообщения>», и без
+      // экранирования Telegram считает это HTML-тегом и молча съедает кусок строки.
+      const args = ru ? c.args : (c.args_en || c.args);
+      lines.push(`/${c.cmd}${args ? ' ' + escapeHtml(args) : ''} — ${text}`);
+    }
+  }
+  lines.push(...ADMIN_HELP_TAIL[ru ? 'ru' : 'en']);
   return lines.join('\n');
 }
 
@@ -1099,7 +1155,7 @@ function findConfirmedSlot(done, wanted) {
       }
     }
     if (text === '/match_test') return adminMatchTest(msg);
-    if (text === '/overview' || text === '/matches') return adminMatchesOverview(msg);
+    if (text === '/matches') return adminMatchesOverview(msg);
     if (text === '/league') {
       return sendMessage(chatId, '<b>🏆 Лига — тест нового интерфейса</b>\n\nГодовая гонка, список игроков и карточка игрока. Пока видно только вам.', {
         reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть', web_app: { url: `${PUBLIC_URL}/league` } }]] }
@@ -1116,7 +1172,6 @@ function findConfirmedSlot(done, wanted) {
     if (text === '/messages') return adminMessages(chatId);
     // Рассылка «уточните свой уровень»: показывает два охвата и ждёт выбора.
     if (text.startsWith('/rating_to')) return sendRatingRequestTo(chatId, text.replace('/rating_to','').trim());
-    if (text === '/rating' || text === '/rating_broadcast') return startMissingRatingBroadcast(chatId, from.id);
     if (text.startsWith('/profile')) return adminProfile(chatId, text);
     if (text.startsWith('/whois')) return adminWhois(chatId, text);
     if (text === '/id_check') return adminIdCheck(chatId);
@@ -1142,7 +1197,6 @@ function findConfirmedSlot(done, wanted) {
     }
     if (aState?.mode === 'broadcast_message') return handleBroadcastMessage(msg, aState);
     if (aState?.mode === 'broadcast_menu_message') return handleBroadcastMenuMessage(msg, aState);
-    if (aState?.mode === 'broadcast_poll_message') return handleBroadcastPollMessage(msg, aState);
 
     if (msg.reply_to_message && (msg.reply_to_message.text || msg.reply_to_message.caption)) {
       const body = msg.reply_to_message.text || msg.reply_to_message.caption || '';
@@ -1274,24 +1328,28 @@ export async function handleCallback(q) {
   const msg = q.message;
   const chatId = msg.chat.id;
   const from = q.from || {};
-  const storedLang = await userLang(from);
-  const lang = fallbackLang(storedLang);
-
-  // Личные экраны — только в личке. Если игрок нажал кнопку на сообщении бота
-  // в общем чате (лига, админская группа), его меню, оплата и переписка не
-  // должны вываливаться туда у всех на виду. Отвечаем всплывающей подсказкой.
+  // Крутилка на кнопке гаснет только после ответа Телеграму, поэтому отвечаем
+  // ПЕРВЫМ делом. Раньше перед этим читался лист анкет ради языка — и человек
+  // смотрел на крутилку ровно столько, сколько шёл поход в Google. Для мгновенной
+  // подсказки берём язык из памяти (или из настроек самого Телеграма), а точный
+  // язык дочитываем уже после ответа, когда ждать никому не нужно.
   const inGroup = ['group', 'supergroup', 'channel'].includes(String(msg.chat.type || ''));
   if (inGroup && isPersonalCallback(data)) {
-    return answerCallbackQuery(q.id, lang === 'ru'
+    const quick = fallbackLang(cachedLang(from) || String(from.language_code || '').slice(0, 2));
+    return answerCallbackQuery(q.id, quick === 'ru'
       ? 'Это личный раздел — откройте его в чате с ботом.'
       : 'This is a personal section — open it in your chat with the bot.', true).catch(() => {});
   }
-  await answerCallbackQuery(q.id).catch(() => {});
+  answerCallbackQuery(q.id).catch(() => {});
+
+  const storedLang = await userLang(from);
+  const lang = fallbackLang(storedLang);
 
   if (data.startsWith('lang_select:')) {
     const selected = data.split(':')[1] === 'ru' ? 'ru' : 'en';
     const state = userState.get(String(chatId));
     await setUserLanguage(from, selected);
+    rememberLang(from.id, selected);
     // Если /start прилетел не к нам (старая сессия, перезапуск) — тема заведётся
     // здесь. Повторной карточки не будет: notifyNewLead смотрит на admin_topic_id.
     if (!isAdminUser(from.id)) registerLead({ ...from, language: selected }, 'language');
@@ -1666,9 +1724,6 @@ export async function handleCallback(q) {
     if (data.startsWith('bcseg:')) return handleBroadcastSegment(q, data.split(':')[1]);
     if (data === 'bcconfirm') return withBulkRetries(() => executeBroadcast(q));
     if (data === 'bcconfirm_menu') return withBulkRetries(() => executeBroadcastWithMenu(q));
-    if (data === 'bcconfirm_poll') return withBulkRetries(() => executeBroadcastPoll(q));
-    if (data === 'bcconfirm_missing_rating') return withBulkRetries(() => executeMissingRatingBroadcast(q));
-    if (data === 'bcconfirm_rating_recheck') return withBulkRetries(() => executeMissingRatingBroadcast(q, 'recheck'));
     if (data === 'bccancel') {
       adminState.delete(String(from.id));
       return sendMessage(chatId, 'Broadcast cancelled.');

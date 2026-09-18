@@ -227,6 +227,34 @@ async function playersIndex() {
   return index;
 }
 
+// Центральный лог бот заполнял наполовину: дата, имена и счёт писались, а сезон,
+// ID игроков и дивизионы оставались пустыми. Между тем именно по этим ID витрина
+// цепляет матч к профилям — без них матч не попадал ни в историю игрока, ни в
+// сезонные цифры, и сезон приходилось проставлять руками.
+// Пишем только в пустые ячейки: чужие пометки организатора не трогаем.
+async function centralMetaWrites(row, { p1, p2, pair }) {
+  const season = String(pair?.season || '').trim();
+  const master = await playersIndex().catch(() => ({}));
+  const idOf = name => master[norm(name)]?.id ?? '';
+  const divisionOf = (name, letter) => letter || master[norm(name)]?.division || '';
+  const wanted = [
+    ['D', season ? `Season ${season}` : ''],
+    ['E', idOf(p1)],
+    ['F', divisionOf(p1, pair?.d1)],
+    ['G', idOf(p2)],
+    ['H', divisionOf(p2, pair?.d2)]
+  ];
+  const current = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!D${row}:H${row}`).catch(() => []);
+  const have = current?.[0] || [];
+  const out = [];
+  wanted.forEach(([letter, value], i) => {
+    if (value === '' || value === undefined || value === null) return;
+    if (String(have[i] ?? '').trim()) return;
+    out.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!${letter}${row}`, values: [[value]] });
+  });
+  return out;
+}
+
 async function findDivisionRow(spreadsheetId, sheetName, p1, p2) {
   const values = await getValues(spreadsheetId, `${sheetName}!C2:E`);
   const t1 = norm(p1), t2 = norm(p2);
@@ -304,7 +332,8 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
     // обоими игроками, поэтому расхождение стоит проверить руками.
     const existing = await findExistingResultRow(p1, p2, dateSerial);
     if (existing) {
-      await batchUpdate(LEAGUE_RESULTS_SHEET_ID, centralWrites(existing.row, slot, parsed), journal);
+      await batchUpdate(LEAGUE_RESULTS_SHEET_ID,
+        centralWrites(existing.row, slot, parsed).concat(await centralMetaWrites(existing.row, { p1, p2, pair })), journal);
       const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal).catch(e => ({ status: 'error', reason: e.message }));
       return { status: 'duplicate', row: existing.row, division };
     }
@@ -312,7 +341,8 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
     await batchUpdate(LEAGUE_RESULTS_SHEET_ID, [
       { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[dateSerial]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
-      ...centralWrites(row, slot, parsed)
+      ...centralWrites(row, slot, parsed),
+      ...await centralMetaWrites(row, { p1, p2, pair })
     ], journal);
 
     const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal).catch(e => ({ status: 'error', reason: e.message }));
@@ -425,13 +455,19 @@ async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed
     const cell = await getValues(spreadsheetId, `Match_Log!${colToLetter(matchIdx + 1)}${info.row}`).catch(() => []);
     matchNumber = Number(cell?.[0]?.[0] || 0);
   }
-  const [beforeTable, formP1, formP2] = await Promise.all([
+  // Форму собираем по матчам ДО этого (его строка ещё пустая — счёт пишется
+  // ниже), а сам матч дописываем руками: Костас хочет видеть плашку даже у
+  // дебютанта, у которого этот матч — первый.
+  const previous = matchNumber ? matchNumber - 1 : 0;
+  const [beforeTable, historyP1, historyP2] = await Promise.all([
     getDivisionTable(d1, season, pair.group).catch(() => null),
-    recentFormBefore(spreadsheetId, p1, matchNumber).catch(() => []),
-    recentFormBefore(spreadsheetId, p2, matchNumber).catch(() => [])
+    recentFormBefore(spreadsheetId, p1, previous).catch(() => []),
+    recentFormBefore(spreadsheetId, p2, previous).catch(() => [])
   ]);
+  // Имена сверяем терпимо: «Yana D.» в составе и «Yana D» в матч-логе — один и
+  // тот же человек, а строгое сравнение оставляло карточку без места.
   const findPlace = name => beforeTable?.ok
-    ? beforeTable.players.find(x => String(x.name).toLowerCase() === String(name).toLowerCase())?.place
+    ? beforeTable.players.find(x => sameName(x.name, name))?.place
     : undefined;
   const catalog = await buildFantasyCatalog({ mode: 'live' }).catch(() => null);
   const priceOf = name => catalog?.players?.find(p => fantasyPlayerKey(p.name) === fantasyPlayerKey(name))?.price ?? 10;
@@ -440,9 +476,11 @@ async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed
   const p2Won = !bothTechnical && !p1Won;
   const fp1 = bothTechnical ? 0 : scoreFantasyMatch({ score: scoreTextFor(slot, parsed, false), result: p1Won ? 'WIN' : 'LOSS' }, priceOf(p1), priceOf(p2)).total;
   const fp2 = bothTechnical ? 0 : scoreFantasyMatch({ score: scoreTextFor(slot, parsed, true), result: p2Won ? 'WIN' : 'LOSS' }, priceOf(p2), priceOf(p1)).total;
+  // Двойное техническое поражение победителя не даёт — такой матч в форму не идёт.
+  const withCurrent = (history, won) => (bothTechnical ? history : [...history, won ? 'W' : 'L']).slice(-5);
   rememberCardContext(slot.challenge_id, {
-    p1: { name: p1, place: findPlace(p1), form: formP1 },
-    p2: { name: p2, place: findPlace(p2), form: formP2 },
+    p1: { name: p1, place: findPlace(p1), form: withCurrent(historyP1, p1Won) },
+    p2: { name: p2, place: findPlace(p2), form: withCurrent(historyP2, p2Won) },
     fp: { p1: fp1, p2: fp2 },
     division: d1, season, group: pair.group
   });

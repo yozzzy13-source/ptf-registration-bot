@@ -340,9 +340,13 @@ function statColumn(meta, side) {
   const x = PLATE.x[side];
   const pos = meta.position || {};
   let out = '';
-  if (Number.isFinite(pos.after)) {
+  // Место показываем всегда, когда игрок вообще есть в таблице дивизиона —
+  // даже если матчей у него ещё не было и двигаться было неоткуда. Стрелка
+  // появляется только при реальном изменении.
+  const rank = Number.isFinite(pos.after) ? pos.after : (Number.isFinite(pos.before) ? pos.before : null);
+  if (rank !== null) {
     const pill = rankPill(pos.before, pos.after);
-    out += plateSvg(x, PLATE.rankY, pill ? 122 : 96, 'DIVISION RANK', `#${pos.after}`, C.text, pill);
+    out += plateSvg(x, PLATE.rankY, pill ? 122 : 96, 'DIVISION RANK', `#${rank}`, C.text, pill);
   }
   if (Number.isFinite(meta.fp)) {
     out += plateSvg(x, PLATE.fpY, PLATE.fpH, 'FANTASY POINTS', `+${meta.fp}`, C.amber, null);
@@ -456,9 +460,12 @@ async function buildPlayerMetas(slot, winnerIsFrom) {
   try {
     if (ctx.division && ctx.season) {
       const { getDivisionTable } = await import('./division.js');
+      const { sameName } = await import('./sheets.js');
       const table = await getDivisionTable(ctx.division, ctx.season, ctx.group || '');
       if (table?.ok) {
-        const find = name => (table.players || []).find(p => txt(p.name).toLowerCase() === txt(name).toLowerCase());
+        // Сверяем имена терпимо: в составе может стоять «Yana D.», а в матч-логе
+        // «Yana D» — из-за точки место игрока на карточке просто не появлялось.
+        const find = name => (table.players || []).find(p => sameName(p.name, name));
         const p1row = find(ctx.p1?.name), p2row = find(ctx.p2?.name);
         if (p1row) fromMeta.position.after = p1row.place;
         if (p2row) toMeta.position.after = p2row.place;
