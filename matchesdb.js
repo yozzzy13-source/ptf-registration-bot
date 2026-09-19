@@ -581,32 +581,83 @@ export async function expireStaleSlots() {
 // приходит то, что накопилось.
 export const NIGHT_FROM_MIN = 22 * 60 + 30;   // 22:30
 export const NIGHT_TO_MIN = 8 * 60;           // 08:00
+// Час после подъёма: закрывать протухшее ровно в восемь нечестно — человек
+// только проснулся и ещё не видел напоминания. Даём ему время ответить.
+export const CLOSE_GRACE_MIN = 60;
 
-export function isNightHold(now = Date.now(), timeZone = TIMEZONE) {
+// Границы правятся в Settings без деплоя: night_quiet_from / night_quiet_to,
+// формат ЧЧ:ММ. Держим в памяти на пять минут — настройку меняют редко, а
+// дёргать таблицу на каждый слот незачем.
+const NIGHT_SETTINGS_MS = 5 * 60 * 1000;
+let nightWindowCache = { t: 0, v: { from: NIGHT_FROM_MIN, to: NIGHT_TO_MIN } };
+function parseClock(value, fallback) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return fallback;
+  const minutes = Number(m[1]) * 60 + Number(m[2]);
+  return Number.isFinite(minutes) && minutes >= 0 && minutes < 24 * 60 ? minutes : fallback;
+}
+export async function nightWindow() {
+  if (Date.now() - nightWindowCache.t < NIGHT_SETTINGS_MS) return nightWindowCache.v;
+  try {
+    const { getSetting } = await import('./sheets.js');
+    const [from, to] = await Promise.all([
+      getSetting('night_quiet_from').catch(() => ''),
+      getSetting('night_quiet_to').catch(() => '')
+    ]);
+    nightWindowCache = { t: Date.now(), v: { from: parseClock(from, NIGHT_FROM_MIN), to: parseClock(to, NIGHT_TO_MIN) } };
+  } catch { nightWindowCache = { t: Date.now(), v: { from: NIGHT_FROM_MIN, to: NIGHT_TO_MIN } }; }
+  return nightWindowCache.v;
+}
+export function localMinutes(now = Date.now(), timeZone = TIMEZONE) {
   const p = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })
     .formatToParts(new Date(now));
   const g = (t) => Number(p.find(x => x.type === t).value);
-  const minutes = (g('hour') % 24) * 60 + g('minute');
-  return minutes >= NIGHT_FROM_MIN || minutes < NIGHT_TO_MIN;
+  return (g('hour') % 24) * 60 + g('minute');
+}
+export function isNightHold(now = Date.now(), timeZone = TIMEZONE, win = nightWindowCache.v) {
+  const minutes = localMinutes(now, timeZone);
+  return minutes >= win.from || minutes < win.to;
+}
+// Закрывать протухшее можно только когда ночь кончилась и прошёл час на ответ.
+export function isCloseHold(now = Date.now(), timeZone = TIMEZONE, win = nightWindowCache.v) {
+  if (isNightHold(now, timeZone, win)) return true;
+  const minutes = localMinutes(now, timeZone);
+  return minutes >= win.to && minutes < win.to + CLOSE_GRACE_MIN;
+}
+// Утренний матч: три часа до него попадают в ночь, и будильник в пять утра
+// никому не нужен. Предупреждаем накануне вечером, до начала тихих часов.
+export function eveningNoticeDue(slot, now = Date.now(), timeZone = TIMEZONE, win = nightWindowCache.v) {
+  const start = slotStartMs(slot);
+  if (start === null || start <= now) return false;
+  if (!isNightHold(start - 3 * 3600000, timeZone, win)) return false;
+  const minutes = localMinutes(now, timeZone);
+  // Вечернее окно — последние полтора часа перед тишиной.
+  if (minutes < win.from - 90 || minutes >= win.from) return false;
+  const hoursLeft = (start - now) / 3600000;
+  return hoursLeft > 0 && hoursLeft <= 14;
 }
 
-export function remindersDue(slot, now = Date.now()) {
+export function remindersDue(slot, now = Date.now(), win = nightWindowCache.v) {
   const start = slotStartMs(slot);
   if (start === null) return '';
   const hours = (start - now) / 3600000;
   const sent = String(slot.reminder_sent || '').split(',').filter(Boolean);
-  // За три часа до матча — всегда: матч в 08:00 нужно не проспать.
-  if (hours >= 2.5 && hours <= 3.5 && !sent.includes('h3')) return 'h3';
-  if (hours >= 3.5 && hours <= 28 && !sent.includes('day') && !isNightHold(now)) return 'day';
+  // За три часа до матча — но не ночью: матч в 08:00 означал бы письмо в 05:00.
+  if (hours >= 2.5 && hours <= 3.5 && !sent.includes('h3') && !isNightHold(now, timeZoneOf(), win)) return 'h3';
+  // Вместо ночного будильника — «завтра в 08:00» накануне вечером.
+  if (!sent.includes('h3') && !sent.includes('eve') && eveningNoticeDue(slot, now, timeZoneOf(), win)) return 'eve';
+  if (hours >= 3.5 && hours <= 28 && !sent.includes('day') && !sent.includes('eve') && !isNightHold(now, timeZoneOf(), win)) return 'day';
   return '';
 }
+function timeZoneOf() { return TIMEZONE; }
 
 export async function listMatchesNeedingReminder(now = Date.now()) {
   const rows = await allSlots();
+  const win = await nightWindow();
   return rows
     .filter(r => String(r.status || '').toLowerCase() === 'accepted')
     .filter(r => String(r.result_status || '').toLowerCase() !== 'confirmed')
-    .map(r => ({ slot: r, kind: remindersDue(r, now) }))
+    .map(r => ({ slot: r, kind: remindersDue(r, now, win) }))
     .filter(x => x.kind);
 }
 
@@ -649,7 +700,10 @@ export async function matchesOverview(now = Date.now()) {
 export const NUDGE_FIRST_H = 2;
 export const NUDGE_SECOND_H = 4;
 export const NUDGE_CLOSE_H = 28;
-const NUDGE_STAGES = [['m20',1/3],['n1',2],['n2',4],['d1',24]];
+// Первая ступень — 15 минут (была 20). Ключ 'm20' оставлен намеренно: по нему
+// в таблице уже отмечены отправленные напоминания, и переименование заставило
+// бы бот написать всем этим людям заново.
+const NUDGE_STAGES = [['m20',0.25],['n1',2],['n2',4],['d1',24]];
 const marks = cell => String(cell || '').split(',').filter(Boolean);
 export function hoursBetween(fromMs,toMs) {
   return Number.isFinite(fromMs)&&Number.isFinite(toMs)?(toMs-fromMs)/3600000:0;
@@ -706,8 +760,15 @@ export function stuckItem(slot,now=Date.now()) {
   return stage?{...item,stage,step:reminderStep(slot,item.scope)}:null;
 }
 export async function listStuck(now=Date.now()) {
-  if(isNightHold(now))return [];
-  return (await allSlots()).map(s=>stuckItem(s,now)).filter(Boolean);
+  // Ночью повторные напоминания молчат: человек не должен просыпаться от того,
+  // что где-то не нажата кнопка. Первичные уведомления это не трогает — они
+  // идут в ответ на действие живого человека и уходят в любое время.
+  const win = await nightWindow();
+  if(isNightHold(now,TIMEZONE,win))return [];
+  const items=(await allSlots()).map(s=>stuckItem(s,now)).filter(Boolean);
+  // Закрытие протухшего ждёт не только утра, но и часа на ответ: иначе человек
+  // проснётся уже с закрытым вызовом, не увидев ни одного напоминания.
+  return isCloseHold(now,TIMEZONE,win)?items.filter(x=>x.stage!=='close'):items;
 }
 export async function isStuckCurrent(item) {
   const slot=await findSlot(item.slot.challenge_id);
