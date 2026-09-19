@@ -712,16 +712,18 @@ export async function adminBalanceChange({ telegramId, name, amount, reason = ''
 // осознанный отказ. Максимум два письма на событие, тихие часы соблюдаем.
 const nudgeKey = (eventId, key) => `ev_nudge_${key}_${eventId}`;
 const manualKey = (eventId) => `ev_nudge_manual_${eventId}`;
-const QUIET_FROM_H = 21;
-const QUIET_TO_H = 9;
-
-// Час по Пхукету: письма в три ночи никому не нужны.
-function phuketHour(now) {
-  return new Date(now + 7 * 3600000).getUTCHours();
-}
-export function isQuietHour(now = Date.now()) {
-  const h = phuketHour(now);
-  return h >= QUIET_FROM_H || h < QUIET_TO_H;
+// Тихие часы у событий были свои (21:00–09:00) и жили отдельно от матчей. Теперь
+// окно одно на весь бот — то же, что у напоминаний по матчам, и правится в
+// Settings ключами night_quiet_from / night_quiet_to.
+//
+// Под тишину попадает только напоминание «карточку видел, но не записался» —
+// это повтор про незавершённое действие. Сами карточки событий, приглашения из
+// листа ожидания и напоминания «событие завтра / через два часа» уходят в любое
+// время: это не давление, а информация, которую ждут.
+export async function isQuietHour(now = Date.now()) {
+  const { isNightHold, nightWindow } = await import('./matchesdb.js');
+  const win = await nightWindow();
+  return isNightHold(now, undefined, win);
 }
 
 // Момент закрытия записи: срок записи, а если его нет — начало события.
@@ -759,7 +761,7 @@ async function sendNudge(event, contacts) {
 }
 
 export async function runSignupNudges(now = Date.now()) {
-  if (isQuietHour(now)) return { sent: 0, quiet: true };
+  if (await isQuietHour(now)) return { sent: 0, quiet: true };
   const events = await listEvents().catch(() => []);
   let sent = 0;
   for (const event of events) {
