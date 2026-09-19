@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
-import { onLeagueCacheInvalidated, warmSheetCache, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
+import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn } from './admin.js';
@@ -1142,6 +1142,13 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const { seasons, players, photoByName, matches, events, divisions, current } = await getLeagueSnapshot();
+    // Партнёров держим отдельно от общего снимка: лист правится руками, и ждать
+    // общего пересчёта ради новой строки незачем — свой кэш у них короче.
+    // Подписи страницы приходят оттуда же, чтобы текст правился без деплоя.
+    const [partners, partnerTexts] = await Promise.all([
+      getPartners().catch(() => []),
+      getPartnersPageTexts().catch(() => ({}))
+    ]);
     // Нижнее меню зависит от того, кто смотрит: у гостя нет смысла в матчах и
     // расписании, у активного игрока — есть. Организатор видит всё.
     const group = await playerGroup(v.user.id, v.profile).catch(() => 'guest');
@@ -1182,6 +1189,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
       matches,
       events,
       divisions,
+      partners,
+      partner_texts: partnerTexts,
       fantasy
     });
   } catch (e) {
