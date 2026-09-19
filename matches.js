@@ -402,7 +402,14 @@ export function courtCancelMessage(slot) {
 export async function notifyMatchReminder(slot,kind='day') {
  for(const id of [slot.from_telegram_id,slot.to_telegram_id]) {
  if(!id)continue;const lang=await nudgeLang(id),ru=lang==='ru',author=String(id)===String(slot.from_telegram_id);
- const head=kind==='day'?(isToday(slot.agreed_date)?(ru?'Сегодня матч':'Match today'):(ru?'Завтра матч':'Match tomorrow')):(ru?'Матч через 3 часа':'Match in 3 hours');
+ // 'eve' — вечернее предупреждение об утреннем матче: три часа до него попадают
+ // в тихие часы, поэтому говорим накануне, а не будим в пять утра.
+ const at=String(slot.agreed_time||slot.time_from||'').trim();
+ const head=kind==='day'
+   ?(isToday(slot.agreed_date)?(ru?'Сегодня матч':'Match today'):(ru?'Завтра матч':'Match tomorrow'))
+   :kind==='eve'
+     ?(ru?('Завтра матч'+(at?' в '+at:'')):('Match tomorrow'+(at?' at '+at:'')))
+     :(ru?'Матч через 3 часа':'Match in 3 hours');
  const tail=slot.court_confirmed_at?(ru?'Корт подтверждён. Если планы изменились — предупредите соперника.':'Court confirmed. Let your opponent know if your plans change.'):(author?(ru?'Проверьте ответ площадки и подтвердите бронь корта.':'Check the venue’s reply and confirm your court booking.'):(ru?'Ожидается подтверждение брони от автора вызова.':'Waiting for the challenge creator to confirm the court booking.'));
  await sendMessage(id,'<b>🎾 '+head+'</b>\n\n'+agreedBlock(slot,lang)+'\n\n'+tail,{reply_markup:{inline_keyboard:[await contactRow(slot,id,lang),[{text:ru?'✖️ Отменить матч':'✖️ Cancel match',callback_data:'match_cancel:'+slot.challenge_id}],[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]].filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
  }return {start:slot.agreed_time||slot.time_from||''};
