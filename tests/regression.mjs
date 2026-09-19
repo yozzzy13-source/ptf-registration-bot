@@ -454,6 +454,31 @@ check(noTest.body?.fantasy===null&&!noTest.body.tabs.includes('fantasy'),'League
  check(leagueHtml.includes('loadFantasyLater')&&leagueHtml.includes('fantasy_deferred'),'Мини-приложение догружает Fantasy после первой отрисовки');
  await sheets.setSetting('FANTASY_MODE','TEST');
 }
+// Партнёры: весь экран берётся из листа Partners таблицы состава, поэтому
+// проверяем именно разбор — заголовки по-русски и по-английски, выключенные
+// строки, телефон в любом написании и порядок.
+{
+ put('161O5DWEJU-ik3XoDaUjWeTlm7T2Je98IFd_-DFhRBu8','Partners',[
+  ['Название','Описание','Картинка','Телефон','Сообщение','Ссылка','Категория','Порядок','Вкл'],
+  ['Racket Lab','Перетяжка за сутки','https://pic.test/a.png','+66 81 234 5678','Привет! Я {name} из PTF.','https://lab.test','Магазин','2','yes'],
+  ['Thanyapura','Шесть кортов','','66899999999','Здравствуйте, это {name}.','','Корты','1',''],
+  ['Старый партнёр','Больше не с нами','','66800000000','','','','3','нет'],
+  ['','','','','','','','','']
+ ]);
+ sheets.invalidatePartnersCache();
+ const list=await sheets.getPartners();
+ check(list.length===2,'Выключенные и пустые строки листа Partners не попадают в приложение');
+ check(list[0].name==='Thanyapura'&&list[1].name==='Racket Lab','Партнёры идут в порядке из колонки «Порядок»');
+ check(list[1].whatsapp==='66812345678','Телефон приводится к цифрам для ссылки WhatsApp');
+ check(list[1].phone_label==='+66 81 234 5678','Человеку показывается номер так, как он записан в таблице');
+ check(list[1].message.includes('{name}'),'Заготовка сообщения доезжает до приложения с подстановками');
+ check(list[1].photo&&list[1].link==='https://lab.test','Картинка и ссылка читаются из листа');
+ const withPartners=await request('get','/api/league/bootstrap','1');
+ check(Array.isArray(withPartners.body?.partners)&&withPartners.body.partners.length===2,'Партнёры приходят в приложение вместе с витриной');
+ const leagueSource=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(leagueSource.includes('function renderPartners')&&leagueSource.includes('wa.me/'),'Вкладка партнёров рисуется и ведёт в WhatsApp');
+ check(!leagueSource.includes('"tab off"')&&leagueSource.includes("'partners'"),'Партнёры стали настоящей вкладкой, а не заглушкой');
+}
 // Опросы и рассылка по рейтингу удалены целиком — ни команд, ни обработчиков.
 {
  const botSource=await fs.readFile(path.join(root,'bot.js'),'utf8');
