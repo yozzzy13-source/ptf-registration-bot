@@ -712,6 +712,111 @@ export async function attachWebsiteProfiles(players=[]) {
   return players;
 }
 
+// ---------------------------------------------------------------------------
+// Партнёры лиги. Лист «Partners» в той же таблице, что и состав участников:
+// Костас правит его руками, а вкладка в приложении просто показывает то, что там
+// лежит. Колонки ищем по заголовкам, а не по буквам, — тогда можно переставлять
+// столбцы и дописывать свои, ничего не ломая.
+//
+// Название | Описание | Картинка | Телефон/WhatsApp | Сообщение | Ссылка | Категория | Порядок | Вкл
+//
+// «Сообщение» — заготовка письма в WhatsApp, как у кортов: человек жмёт кнопку и
+// отправляет готовый текст. Подстановка {name} — имя игрока, {партнёр} — имя
+// партнёра; больше ничего выдумывать не нужно.
+const PARTNERS_SHEET = 'Partners';
+const PARTNERS_TEXT_SHEET = 'Partners_Page';
+let partnersCache = { t: 0, v: null };
+let partnersTextCache = { t: 0, v: null };
+export function invalidatePartnersCache() { partnersCache = { t: 0, v: null }; partnersTextCache = { t: 0, v: null }; }
+
+// Колонку ищем по заголовку, а не по букве: можно переставлять столбцы и
+// дописывать свои. Языковые варианты — тот же заголовок с пометкой RU или EN
+// («Описание RU», «Description EN»); если языковой колонки нет, берётся общая.
+const partnerField = (row, names, lang = '') => {
+  const wanted = lang ? names.flatMap(n => [`${n} ${lang}`, `${n}_${lang}`, `${lang} ${n}`]) : names;
+  for (const name of wanted) {
+    const hit = Object.keys(row).find(k => normalizeHeader(k) === normalizeHeader(name));
+    if (hit && safe(row[hit])) return safe(row[hit]);
+  }
+  return '';
+};
+// Значение на двух языках: если заполнена только общая колонка, она идёт в оба.
+const partnerPair = (row, names) => {
+  const plain = partnerField(row, names);
+  return { ru: partnerField(row, names, 'ru') || plain, en: partnerField(row, names, 'en') || plain };
+};
+async function readPartnersSheet(title) {
+  try {
+    return await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+  } catch (e) {
+    // Листа ещё нет — это не поломка: вкладка просто покажет пустое состояние.
+    console.log(`partners sheet «${title}» not read:`, e.message);
+    return null;
+  }
+}
+
+export async function getPartners() {
+  if (partnersCache.v && Date.now() - partnersCache.t < PROFILES_CACHE_MS) return partnersCache.v;
+  const values = await readPartnersSheet(PARTNERS_SHEET);
+  if (!values) { partnersCache = { t: Date.now(), v: [] }; return []; }
+  const headerIndex = values.findIndex(row => (row || []).some(cell =>
+    ['name', 'название', 'название ru', 'партнёр', 'партнер', 'partner'].includes(normalizeHeader(cell))));
+  if (headerIndex < 0) { partnersCache = { t: Date.now(), v: [] }; return []; }
+  const headers = values[headerIndex] || [];
+  const out = [];
+  for (const raw of values.slice(headerIndex + 1)) {
+    const row = {};
+    headers.forEach((h, i) => { if (safe(h)) row[safe(h)] = raw?.[i] ?? ''; });
+    const name = partnerPair(row, ['name', 'название', 'партнёр', 'партнер', 'partner']);
+    if (!name.ru && !name.en) continue;
+    const active = partnerField(row, ['active', 'вкл', 'показывать', 'status', 'статус']) || 'yes';
+    if (['no', 'false', '0', 'off', 'нет', 'выкл', 'hidden', 'скрыт'].includes(active.toLowerCase())) continue;
+    const phone = partnerField(row, ['whatsapp', 'телефон', 'phone', 'контакт', 'contact']);
+    out.push({
+      name: name.ru || name.en,
+      name_en: name.en || name.ru,
+      description: partnerPair(row, ['description', 'описание', 'about', 'текст']),
+      category: partnerPair(row, ['category', 'категория', 'type', 'тип']),
+      message: partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']),
+      photo: directPhotoUrl(partnerField(row, ['image', 'картинка', 'photo', 'фото', 'logo', 'логотип'])),
+      whatsapp: phone.replace(/[^0-9]/g, ''),
+      phone_label: phone,
+      link: partnerField(row, ['link', 'ссылка', 'site', 'сайт', 'url']),
+      order: Number(partnerField(row, ['order', 'порядок', 'sort'])) || 0
+    });
+  }
+  out.sort((a, b) => (a.order || 999) - (b.order || 999) || String(a.name).localeCompare(String(b.name)));
+  partnersCache = { t: Date.now(), v: out };
+  return out;
+}
+
+// Подписи самой страницы — заголовок, вводный текст, пустое состояние, надписи
+// на кнопках. Лист Partners_Page: Ключ | RU | EN. Листа нет или ключ не задан —
+// показывается встроенный текст, ничего не ломается.
+export async function getPartnersPageTexts() {
+  if (partnersTextCache.v && Date.now() - partnersTextCache.t < PROFILES_CACHE_MS) return partnersTextCache.v;
+  const values = await readPartnersSheet(PARTNERS_TEXT_SHEET);
+  const out = {};
+  if (values) {
+    const headerIndex = values.findIndex(row => (row || []).some(cell =>
+      ['key', 'ключ', 'поле', 'field'].includes(normalizeHeader(cell))));
+    const rows = headerIndex >= 0 ? values.slice(headerIndex + 1) : values;
+    const headers = headerIndex >= 0 ? (values[headerIndex] || []) : [];
+    const columnFor = names => headers.findIndex(h => names.includes(normalizeHeader(h)));
+    const ruAt = headerIndex >= 0 ? columnFor(['ru', 'рус', 'русский']) : 1;
+    const enAt = headerIndex >= 0 ? columnFor(['en', 'англ', 'английский', 'eng']) : 2;
+    for (const row of rows) {
+      const key = normalizeHeader(row?.[0]);
+      if (!key) continue;
+      const ru = safe(row?.[ruAt >= 0 ? ruAt : 1]);
+      const en = safe(row?.[enAt >= 0 ? enAt : 2]);
+      if (ru || en) out[key] = { ru: ru || en, en: en || ru };
+    }
+  }
+  partnersTextCache = { t: Date.now(), v: out };
+  return out;
+}
+
 export async function getManualParticipants(season = '') {
   const title = await manualParticipantsSheetTitle(season);
   const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
@@ -1601,7 +1706,7 @@ export async function playerGroup(telegramId, applicant = null) {
 // открывает приложение в пустоту.
 // «Расписание» слилось с «Матчами»: согласованные матчи теперь показываются
 // сверху той же вкладки, отдельного экрана для них больше нет.
-export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'fantasy'];
+export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'fantasy', 'partners'];
 // Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.
 export const ALWAYS_TABS = [];
 const tabsKey = (group) => `tabs_${group}`;
