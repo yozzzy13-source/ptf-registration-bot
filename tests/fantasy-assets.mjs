@@ -30,6 +30,9 @@ try {
   assert.equal(module.status,200,'Onboarding script must resolve through the production static mount');
   assert.match(module.headers.get('content-type'),/javascript/);
   const js=await module.text();
+  assert.match(js,/,'confirm-home','primary'/,'A complete draft must expose direct confirmation on the home screen');
+  assert.match(js,/Подтвердить и добавить в рейтинг/,'The direct confirmation action must explain the standings effect');
+  assert.match(js,/action:'lock'/,'Direct confirmation must lock the draft through the existing backend action');
   const dependency=js.match(/from ['"](\.\/fantasy-model\.js)['"]/)?.[1];
   assert.ok(dependency,'Locate shared slot model import');
   const model=await fetch(new URL(dependency,moduleUrl));
