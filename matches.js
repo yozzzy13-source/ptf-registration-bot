@@ -19,7 +19,7 @@ import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL } from './co
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
 
-const MATCH_BUTTON_EN = {"🎾 Играю":"🎾 I’m in","📲 Забронировать корт":"📲 Book court","💬 Написать сопернику":"💬 Message opponent","👤 Профиль игрока":"👤 Player profile","🎾 Мои матчи":"🎾 My matches","✅ Выбрать время и принять":"✅ Choose time and respond","❌ Отклонить":"❌ Decline","📲 Отменить бронь корта":"📲 Cancel court booking","🎾 Создать окно":"🎾 Create slot","✅ Принять":"✅ Accept","🕐 Другое время":"🕐 Different time","📍 Другой корт":"📍 Different court","✅ Корт подтвердил":"✅ Court confirmed","🕐 Изменить время":"🕐 Change time","📲 Открыть WhatsApp":"📲 Open WhatsApp","📅 Добавить в календарь":"📅 Add to calendar","🎾 Матчи":"🎾 Matches","✅ Подходит":"✅ Works for me","❌ Не могу":"❌ Cannot play","🕐 Предложить снова":"🕐 Propose again","✅ Подтверждаю":"✅ Confirm","❌ Не согласен":"❌ Disagree","📅 Обновить в календаре":"📅 Update calendar","🕐 Предложить другое время":"🕐 Suggest another time","📝 Внести результат":"📝 Submit result","✅ Записать всё равно":"✅ Record anyway","✖️ Отклонить":"✖️ Reject","📝 Внести заново":"📝 Resubmit","✖️ Отменить запрос":"✖️ Cancel request","✖️ Отменить матч":"✖️ Cancel match"};
+const MATCH_BUTTON_EN = {"🎾 Играю":"🎾 I’m in","📲 Забронировать корт":"📲 Book court","💬 Написать сопернику":"💬 Message opponent","👤 Профиль игрока":"👤 Player profile","🎾 Мои матчи":"🎾 My matches","✅ Выбрать время и принять":"✅ Choose time and respond","❌ Отклонить":"❌ Decline","📲 Отменить бронь корта":"📲 Cancel court booking","🎾 Создать окно":"🎾 Create slot","✅ Принять":"✅ Accept","🕐 Другое время":"🕐 Different time","📍 Другой корт":"📍 Different court","✅ Корт подтвердил":"✅ Court confirmed","🕐 Изменить время":"🕐 Change time","📲 Открыть WhatsApp":"📲 Open WhatsApp","📅 Добавить в календарь":"📅 Add to calendar","🎾 Матчи":"🎾 Matches","✅ Подходит":"✅ Works for me","❌ Не могу":"❌ Cannot play","🕐 Предложить снова":"🕐 Propose again","✅ Подтверждаю":"✅ Confirm","❌ Не согласен":"❌ Disagree","📅 Обновить в календаре":"📅 Update calendar","🕐 Предложить другое время":"🕐 Suggest another time","📝 Внести результат":"📝 Submit result","⏸ Матч не доигран":"⏸ Match unfinished","✅ Матч уже доигран":"✅ Match completed","✅ Записать всё равно":"✅ Record anyway","✖️ Отклонить":"✖️ Reject","📝 Внести заново":"📝 Resubmit","✖️ Отменить запрос":"✖️ Cancel request","✖️ Отменить матч":"✖️ Cancel match"};
 async function sendMessage(chatId,text,opts={}) {
   if (!opts.reply_markup || Number(chatId)<0) return telegramSendMessage(chatId,text,opts);
   const lang = (await findApplicantByTelegramId(chatId).catch(()=>null))?.language === 'ru' ? 'ru' : 'en';
@@ -554,8 +554,8 @@ export async function notifyStuckScore({slot,stage}) {
     if(!id)continue;const ru=(await nudgeLang(id))==='ru';
     await sendMessage(id,(ru?'<b>📊 Результат матча ещё не внесён</b>':'<b>📊 Your match result is still missing</b>')+'\n\n'
       +nudgeDetails(slot,ru?'ru':'en')+'\n\n'
-      +(ru?'Внесите счёт, чтобы соперник мог подтвердить его. Если матч не состоялся, сообщите организатору.':'Enter the score so your opponent can confirm it. If the match did not take place, contact the organiser.'),
-      {reply_markup:{inline_keyboard:[[{text:ru?'📝 Внести результат':'📝 Submit result',web_app:{url:PUBLIC_URL+'/match?tab=res'}}]]}});
+      +(ru?'Внесите счёт, чтобы соперник мог подтвердить его. Если матч ещё не завершён, отметьте его как недоигранный.':'Enter the score so your opponent can confirm it. If the match is not finished, mark it as unfinished.'),
+      {reply_markup:{inline_keyboard:[[{text:ru?'📝 Внести результат':'📝 Submit result',web_app:{url:PUBLIC_URL+'/match?result='+encodeURIComponent(slot.challenge_id)}}],[{text:ru?'⏸ Матч не доигран':'⏸ Match unfinished',callback_data:'match_unfinished:'+slot.challenge_id}]]}});
   }
 }
 export async function notifyScoreStalled(slot) {
@@ -689,7 +689,7 @@ function opponentOf(slot, telegramId) {
 
 // «Матч закончен — внесите результат». Уходит обоим после времени окончания.
 export async function notifyResultPrompt(slot) {
-  const kb = { inline_keyboard: [[{ text: '📝 Внести результат', web_app: { url: `${PUBLIC_URL}/match?result=${encodeURIComponent(slot.challenge_id)}` } }]] };
+  const kb = { inline_keyboard: [[{ text: '📝 Внести результат', web_app: { url: `${PUBLIC_URL}/match?result=${encodeURIComponent(slot.challenge_id)}` } }],[{ text: '⏸ Матч не доигран', callback_data: `match_unfinished:${slot.challenge_id}` }]] };
   for (const side of [slot.from_telegram_id, slot.to_telegram_id]) {
     if (!side) continue;
     const lang=await nudgeLang(side),ru=lang==='ru';
@@ -701,6 +701,48 @@ ${resultDateBlock(slot,lang)}
 
 ${ru?"Внесите счёт — соперник подтвердит, и матч попадёт в статистику лиги.":"Enter the score. Your opponent will confirm it before it is recorded in the league standings."}`, { reply_markup: kb }).catch(e => console.error('result prompt failed:', e.message));
   }
+}
+
+// Уведомление организатору отправляется всегда, независимо от настройки
+// фоновых копий матчей. Другой игрок получает одно сообщение без повторов.
+export async function notifyMatchUnfinished(slot,{actorId='',evidenceOnly=false}={}) {
+  const reporterId=String(actorId||slot.unfinished_by||'');
+  const reporter=String(slot.from_telegram_id)===reporterId
+    ?{id:reporterId,name:slot.from_name,username:slot.from_username}
+    :{id:reporterId,name:slot.to_name,username:slot.to_username};
+  const note=String(slot.unfinished_note||'').trim();
+  const photo=String(slot.unfinished_photo_file_id||'').trim();
+  let adminDelivery=null;
+  try {
+    const topic=await getOrCreatePlayerTopic({telegram_id:reporter.id,name:reporter.name,username:reporter.username});
+    const chatId=topic?.chatId||await getAdminChatId();
+    if(chatId) {
+      const body='<b>'+(evidenceOnly?'📎 Дополнение: матч не доигран':'⏸ Матч не доигран')+'</b>\n\n'
+        +escapeHtml(slot.from_name||'')+' — '+escapeHtml(slot.to_name||'')
+        +(slot.division?' · '+escapeHtml(slot.division):'')+'\n'
+        +resultDateBlock(slot,'ru')+'\n\n'
+        +'Сообщил: <b>'+escapeHtml(reporter.name||reporter.id||'Игрок')+'</b>'
+        +(note?'\nКомментарий: <i>'+escapeHtml(note)+'</i>':'\nКомментарий не добавлен.')
+        +'\n\nАвтоматические напоминания остановлены. После завершения игроки смогут внести результат.';
+      const opts=topic?.message_thread_id?{message_thread_id:topic.message_thread_id}:{};
+      adminDelivery=photo
+        ?await sendPhoto(chatId,photo,{caption:body,...opts}).catch(()=>sendMessage(chatId,body,opts))
+        :await sendMessage(chatId,body,opts);
+    }
+  } catch(e) { console.error('unfinished match admin notification failed:',e.message); }
+  if(!evidenceOnly) {
+    const other=opponentOf(slot,reporterId);
+    if(other.id) {
+      const lang=await nudgeLang(other.id),ru=lang==='ru';
+      await sendMessage(other.id,(ru?'<b>⏸ Матч отмечен как недоигранный</b>':'<b>⏸ Match marked unfinished</b>')+'\n\n'
+        +resultDateBlock(slot,lang)+'\n\n'
+        +(ru
+          ?escapeHtml(reporter.name||'Соперник')+' сообщил, что матч ещё не завершён. Напоминания остановлены. После завершения любой из вас сможет внести результат.'
+          :escapeHtml(reporter.name||'Your opponent')+' reported that the match is not finished. Reminders are paused. Either player can submit the result after the match is completed.'),
+        {reply_markup:{inline_keyboard:[[{text:ru?'✅ Матч уже доигран':'✅ Match completed',web_app:{url:PUBLIC_URL+'/match?result='+encodeURIComponent(slot.challenge_id)}}]]}}).catch(()=>null);
+    }
+  }
+  return adminDelivery;
 }
 
 // Стороны матча в порядке «победитель — проигравший».

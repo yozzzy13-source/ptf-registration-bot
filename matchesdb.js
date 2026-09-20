@@ -29,7 +29,8 @@ const SLOT_HEADERS = [
   'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
   'result_kind', 'result_points_from', 'result_points_to', 'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
   'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge',
-  'court_pending_at', 'court_nudge', 'score_nudge'
+  'court_pending_at', 'court_nudge', 'score_nudge',
+  'unfinished_by', 'unfinished_at', 'unfinished_note', 'unfinished_photo_file_id'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -392,7 +393,10 @@ export async function listMySlots(telegramId) {
   return rows
     .filter(r => String(r.from_telegram_id) === id || String(r.to_telegram_id) === id)
     .filter(r => !['cancelled', 'declined'].includes(String(r.status || '').toLowerCase()))
-    .filter(r => !isSlotPast(r))
+    // A played match stays in "My matches" until its result is resolved. This
+    // gives an unfinished match a stable way back to the score form.
+    .filter(r => !isSlotPast(r) || (String(r.status || '').toLowerCase() === 'accepted'
+      && String(r.result_status || '').toLowerCase() !== 'confirmed'))
     .sort((a, b) => firstDateMillis(a) - firstDateMillis(b));
 }
 
@@ -656,7 +660,7 @@ export async function listMatchesNeedingReminder(now = Date.now()) {
   const win = await nightWindow();
   return rows
     .filter(r => String(r.status || '').toLowerCase() === 'accepted')
-    .filter(r => String(r.result_status || '').toLowerCase() !== 'confirmed')
+    .filter(r => !['confirmed','unfinished'].includes(String(r.result_status || '').toLowerCase()))
     .map(r => ({ slot: r, kind: remindersDue(r, now, win) }))
     .filter(x => x.kind);
 }
@@ -683,6 +687,7 @@ export async function matchesOverview(now = Date.now()) {
     const start = slotStartMs(r);
     if (start !== null && start < now) {
       if (result === 'pending') out.awaitingResult.push({ ...r, _stage: 'verify' });
+      else if (result === 'unfinished') out.awaitingResult.push({ ...r, _stage: 'unfinished' });
       else out.awaitingResult.push({ ...r, _stage: 'missing' });
       continue;
     }
@@ -740,7 +745,7 @@ export function stuckItem(slot,now=Date.now()) {
       waiting:first?{id:String(slot.to_telegram_id),name:slot.to_name,username:slot.to_username}:awaitingSide(slot),
       proposer:first?{id:String(slot.from_telegram_id),name:slot.from_name,username:slot.from_username}:proposerSide(slot)};
     since=slot.responded_at||slot.created_at;done=marks(slot.nudge_sent);
-  } else if(status==='accepted'&&slot.result_status!=='confirmed') {
+  } else if(status==='accepted'&&!['confirmed','unfinished'].includes(String(slot.result_status||'').toLowerCase())) {
     const waitingFor=id=>String(id)===String(slot.from_telegram_id)?slot.to_telegram_id:slot.from_telegram_id;
     const proposal=parseTimeChange(slot.time_change);
     if(slot.result_status==='pending') {
@@ -983,10 +988,69 @@ export async function listResultTasks(telegramId) {
     if (String(r.status || '').toLowerCase() !== 'accepted') return false;
     const st = String(r.result_status || '').toLowerCase();
     if (st === 'confirmed') return false;
+    if (st === 'unfinished') return true;        // reminders pause, score entry stays available
     if (st === 'pending') return true;           // ждёт подтверждения одной из сторон
     const end = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
     return !Number.isNaN(end) && Date.now() > end + Number(r.duration_min || 120) * 60000;
   }).sort((a, b) => String(b.agreed_date).localeCompare(String(a.agreed_date)));
+}
+
+// Игрок может остановить напоминания, если матч фактически не завершён.
+// Статус общий для матча: любой участник позже сможет внести итоговый счёт.
+export async function markMatchUnfinished(challengeId, actor = {}, evidence = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok:false, reason:'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining:false });
+    if (!access.ok) return access;
+    if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok:false, reason:'not_accepted', slot };
+    const end = slotEndMs(slot);
+    if (end === null || end > Date.now()) return { ok:false, reason:'match_not_ended', slot };
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (!sides.includes(String(actor.telegram_id))) return { ok:false, reason:'not_a_player', slot };
+    const current = String(slot.result_status || '').toLowerCase();
+    if (current === 'confirmed') return { ok:false, reason:'already_confirmed', slot };
+    if (current && current !== 'unfinished') return { ok:false, reason:'result_started', slot };
+    const note = safe(evidence.note).slice(0, 1500);
+    const photo = safe(evidence.photoFileId);
+    const already = current === 'unfinished';
+    const patch = {
+      result_status:'unfinished',
+      unfinished_by:String(slot.unfinished_by || actor.telegram_id || ''),
+      unfinished_at:String(slot.unfinished_at || nowISO()),
+      unfinished_note:note || String(slot.unfinished_note || ''),
+      unfinished_photo_file_id:photo || String(slot.unfinished_photo_file_id || ''),
+      score_nudge:'', result_nudge:''
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent(already?'unfinished_evidence':'match_unfinished', merged, actor,
+      note || (photo ? 'photo' : 'without comment'));
+    return { ok:true, already, slot:merged };
+  });
+}
+
+export async function addMatchUnfinishedEvidence(challengeId, actor = {}, evidence = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok:false, reason:'not_found' };
+    const access = await authorizeSlot(slot, actor, { joining:false });
+    if (!access.ok) return access;
+    if (String(slot.result_status || '').toLowerCase() !== 'unfinished') return { ok:false, reason:'not_unfinished', slot };
+    const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
+    if (!sides.includes(String(actor.telegram_id))) return { ok:false, reason:'not_a_player', slot };
+    const note = safe(evidence.note).slice(0, 1500);
+    const photo = safe(evidence.photoFileId);
+    if (!note && !photo) return { ok:false, reason:'empty_evidence', slot };
+    const patch = {
+      unfinished_note:note || String(slot.unfinished_note || ''),
+      unfinished_photo_file_id:photo || String(slot.unfinished_photo_file_id || '')
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('unfinished_evidence', merged, actor, note || 'photo');
+    return { ok:true, slot:merged };
+  });
 }
 
 // Ручной матч: игроки договорились вне бота. Сразу создаётся согласованным,
@@ -1202,7 +1266,8 @@ export function pendingActionsFor(telegramId,rows,now=Date.now()) {
   else if(status==='pending'&&String(awaitingSide(s).id)===id&&!isSlotPast(s))tab='open';
   else if(status==='accepted'&&s.result_status!=='confirmed') {
    const proposal=parseTimeChange(s.time_change);
-   if(s.result_status==='pending') {if(String(s.result_by)!==id)tab='res';}
+   if(s.result_status==='unfinished') { /* reminders and badges stay paused */ }
+   else if(s.result_status==='pending') {if(String(s.result_by)!==id)tab='res';}
    else if(s.result_status==='disputed') {if(String(s.result_by)===id)tab='res';}
    else if(proposal) {if(String(proposal.by)!==id)tab='mine';}
    else if(!s.court_confirmed_at&&s.match_type!=='manual') {if(String(s.from_telegram_id)===id)tab='mine';}

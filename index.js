@@ -11,12 +11,12 @@ import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn } from './admi
 import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
-  notifyProposal, notifyResultPrompt, notifyResultForVerification, sendCourtRequests,
+  notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
 import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
-  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, createManualMatch,
+  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
@@ -719,21 +719,57 @@ function scoreFromBody(sets = []) {
 // Фото уходит в личку игроку, чтобы получить постоянный file_id — дальше карточки
 // и лента используют уже его. Сбой загрузки НЕ должен терять внесённый счёт:
 // сохраняем результат без фото и предупреждаем игрока.
-async function uploadResultPhoto(chatId, dataUrl) {
+async function uploadResultPhoto(chatId, dataUrl, caption = '📸 Фото матча', lang = 'ru', statusMode = false) {
   if (!dataUrl || typeof dataUrl !== 'string') return { fileId: '', warning: '' };
+  const ru=lang==='ru',savedRu=statusMode?'статус сохранён':'счёт сохранён';
   const m = dataUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
-  if (!m) return { fileId: '', warning: 'Фото не распознано — счёт сохранён без него.' };
+  if (!m) return { fileId: '', warning: ru?'Фото не распознано — '+savedRu+' без него.':'The photo was not recognised; the status was saved without it.' };
   const buf = Buffer.from(m[2], 'base64');
-  if (buf.length > 8 * 1024 * 1024) throw new Error('Фото больше 8 МБ — уменьшите размер');
+  if (buf.length > 8 * 1024 * 1024) throw new Error(ru?'Фото больше 8 МБ — уменьшите размер':'The photo is over 8 MB; please reduce its size');
   try {
-    const sent = await sendPhotoBuffer(chatId, buf, m[1], { caption: '📸 Фото матча' });
+    const sent = await sendPhotoBuffer(chatId, buf, m[1], { caption });
     const sizes = sent?.photo || [];
     return { fileId: sizes.length ? sizes[sizes.length - 1].file_id : '', warning: '' };
   } catch (e) {
     console.error('result photo upload failed:', e.message);
-    return { fileId: '', warning: 'Фото не загрузилось — счёт сохранён без него.' };
+    return { fileId: '', warning: ru?'Фото не загрузилось — '+savedRu+' без него.':'The photo could not be uploaded; the status was saved without it.' };
   }
 }
+
+app.post('/api/match/unfinished', async (req,res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    if(!v.canMatch&&!v.isAdmin)return res.status(403).json({ok:false,error:'division_required'});
+    const slot=await findSlot(b.challenge_id);
+    if(!slot)return res.status(404).json({ok:false,error:v.lang==='ru'?'Матч не найден.':'Match not found.'});
+    const participant=[String(slot.from_telegram_id),String(slot.to_telegram_id)].includes(String(v.user.id));
+    if(!participant)return res.status(403).json({ok:false,error:v.lang==='ru'?'Это не ваш матч.':'This is not your match.'});
+    let photo={fileId:'',warning:''};
+    try {
+      photo=await uploadResultPhoto(v.user.id,b.photo,v.lang==='ru'?'📸 Подтверждение: матч не доигран':'📸 Evidence: match unfinished',v.lang,true);
+    } catch(e) { return res.status(400).json({ok:false,error:e.message}); }
+    const saved=await markMatchUnfinished(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},{
+      note:safe(b.note),photoFileId:photo.fileId
+    });
+    if(!saved.ok) {
+      const ru=v.lang==='ru';
+      const errors={
+        not_found:ru?'Матч не найден.':'Match not found.',
+        not_accepted:ru?'Матч больше не активен.':'The match is no longer active.',
+        already_confirmed:ru?'Результат уже подтверждён.':'The result is already confirmed.',
+        result_started:ru?'По матчу уже внесён результат.':'A result has already been submitted.',
+        match_not_ended:ru?'Матч ещё не должен был завершиться.':'The match is not due to finish yet.',
+        not_a_player:ru?'Это не ваш матч.':'This is not your match.'
+      };
+      return res.status(409).json({ok:false,error:errors[saved.reason]||(ru?'Не удалось изменить статус матча.':'Could not update the match.')});
+    }
+    const delivered=await notifyMatchUnfinished(saved.slot,{actorId:v.user.id}).catch(e=>{
+      console.error('notifyMatchUnfinished failed:',e.message);return null;
+    });
+    res.json({ok:true,organizer_notified:Boolean(delivered),warning:photo.warning||''});
+  } catch(e) { console.error('unfinished match failed:',e);res.status(500).json({ok:false,error:e.message}); }
+});
 
 app.post('/api/match/result', async (req, res) => {
   try {
@@ -1738,8 +1774,10 @@ app.listen(PORT, async () => {
       }
       const due = await listMatchesNeedingResultPrompt();
       for (const slot of due) {
-        await notifyResultPrompt(slot).catch(e => console.error('result prompt failed:', e.message));
-        await markResultPromptSent(slot.challenge_id).catch(e => console.error('mark result prompt failed:', e.message));
+        const current=await findSlot(slot.challenge_id).catch(()=>null);
+        if(!current||current.result_status)continue;
+        await notifyResultPrompt(current).catch(e => console.error('result prompt failed:', e.message));
+        await markResultPromptSent(current.challenge_id).catch(e => console.error('mark result prompt failed:', e.message));
       }
       await expireStaleSlots().catch(e => console.error('expire slots failed:', e.message));
       await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));

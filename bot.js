@@ -7,9 +7,9 @@ import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml, parseTestMatchInput, findRosterPlayer, findRosterPair, matchNameKey } from './util.js';
 import { canAccessFantasyByTelegramId } from './fantasy.js';
 import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
-import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, cancelMatchmaking, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange } from './matchesdb.js';
+import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, cancelMatchmaking, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange, markMatchUnfinished, addMatchUnfinishedEvidence } from './matchesdb.js';
 import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
-  notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, broadcastResult,
+  notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, notifyMatchUnfinished, broadcastResult,
   timeChoiceKeyboard, timeChoiceText, notifyTimeChange, notifyTimeChangeAccepted, notifyTimeChangeRejected } from './matches.js';
 import { writeConfirmedResult, describeWrite, divisionPair, rollbackJournal } from './results.js';
 import { invalidateDivisionCache } from './division.js';
@@ -790,6 +790,36 @@ async function acceptChallenge(chatId,from,lang,challengeId){const ch=await upda
 async function declineChallenge(chatId,from,lang,challengeId){const ch=await updateMatchChallenge(challengeId,{status:'declined',responded_at:nowISO()}); if(!ch) return sendMessage(chatId,'Challenge not found.'); const fromLang=(await findApplicantByTelegramId(ch.from_telegram_id))?.language||'en'; await sendMessage(chatId,t(lang,'challenge_declined_to_target')); await sendMessage(ch.from_telegram_id,tt(fromLang,'challenge_declined_to_from',{name:ch.to_name||contactName(from)}));}
 async function forwardChallengeChat(msg,state){const from=msg.from||{}; const text=msg.text||msg.caption||'[media]'; await sendMessage(state.peerId,`<b>💬 Message from ${escapeHtml(contactName(from)||from.username||from.id)}</b>\n\n${escapeHtml(text)}`); await logMessage({message_id:uid('msg'),telegram_id:from.id,name:contactName(from),direction:'challenge_chat',message_type:'text',message_text:text,timestamp:nowISO(),related_event:state.challengeId,status:'sent'});}
 
+function unfinishedResultMarkup(challengeId,lang='en') {
+  const ru=lang==='ru';
+  return {inline_keyboard:[
+    [{text:ru?'✅ Матч уже доигран':'✅ Match completed',web_app:{url:PUBLIC_URL+'/match?result='+encodeURIComponent(challengeId)}}],
+    [{text:ru?'Без комментария':'Skip comment',callback_data:'match_unfinished_skip:'+challengeId}]
+  ]};
+}
+async function handleUnfinishedEvidence(msg,state,lang) {
+  const ru=lang==='ru',from=msg.from||{};
+  if(Number(state.expiresAt||0)<=Date.now()) {
+    userState.delete(String(msg.chat.id));
+    return sendMessage(msg.chat.id,ru?'Срок добавления сообщения истёк. Статус матча сохранён, результат можно внести позже.':'The message window expired. The match status is saved and you can submit the result later.',
+      {reply_markup:unfinishedResultMarkup(state.challengeId,lang)});
+  }
+  const photoFileId=msg.photo?.length?msg.photo[msg.photo.length-1].file_id:'';
+  const note=safe(msg.text||msg.caption||'').slice(0,1500);
+  if(!photoFileId&&!note) return sendMessage(msg.chat.id,ru?'Отправьте фотографию или обычное текстовое сообщение.':'Send a photo or a regular text message.');
+  const saved=await addMatchUnfinishedEvidence(state.challengeId,{telegram_id:from.id,name:contactName(from)},{note,photoFileId});
+  if(!saved.ok) {
+    userState.delete(String(msg.chat.id));
+    return sendMessage(msg.chat.id,ru?'Статус матча уже изменился. Откройте «Мои матчи».':'The match status has changed. Open My matches.');
+  }
+  const delivered=await notifyMatchUnfinished(saved.slot,{actorId:from.id,evidenceOnly:true}).catch(()=>null);
+  userState.delete(String(msg.chat.id));
+  return sendMessage(msg.chat.id,delivered
+    ?(ru?'✅ Сообщение передано организатору. Напоминания остановлены. Когда матч завершится, внесите результат.':'✅ Your message was sent to the organiser. Reminders are paused. Submit the result when the match is completed.')
+    :(ru?'Напоминания остановлены, но сообщение организатору не доставлено. Пожалуйста, свяжитесь с ним напрямую.':'Reminders are paused, but the organiser notification was not delivered. Please contact the organiser directly.'),
+    {reply_markup:unfinishedResultMarkup(state.challengeId,lang)});
+}
+
 async function forwardAdminTopicMessageToPlayer(msg, player) {
   if (!player?.telegram_id) return false;
   const text = msg.text || msg.caption || '';
@@ -1248,6 +1278,8 @@ function findConfirmedSlot(done, wanted) {
     return sendMessage(chatId, t(lang, 'selfie_received'), await menuMarkup(lang, from.id));
   }
 
+  if (state?.mode === 'unfinished_evidence') return handleUnfinishedEvidence(msg,state,lang);
+
   if (state?.mode === 'awaiting_payment_proof') {
     const handled = await handlePaymentProofSubmission(msg, lang, state).catch(e => {
       console.error('payment proof handling failed:', e.message);
@@ -1409,6 +1441,41 @@ export async function handleCallback(q) {
     return sendMessage(chatId, t(lang, 'selfie_prompt'));
   }
   if (data.startsWith('payment_menu:')) return handlePaymentMenu(chatId, lang, data.split(':')[1]);
+  if (data.startsWith('match_unfinished:')) {
+    const id=data.split(':')[1],slot=await findMatchSlot(id);
+    if(!slot)return sendMessage(chatId,lang==='ru'?'Матч не найден.':'Match not found.');
+    const ru=lang==='ru';
+    return sendMessage(chatId,(ru?'<b>⏸ Отметить матч как недоигранный?</b>':'<b>⏸ Mark this match unfinished?</b>')+'\n\n'
+      +(ru?'После подтверждения напоминания остановятся, а организатор получит уведомление. Когда матч завершится, результат можно будет внести обычным способом.':'After confirmation, reminders will stop and the organiser will be notified. You can submit the result normally after the match is completed.'),
+      {reply_markup:{inline_keyboard:[
+        [{text:ru?'Да, матч не доигран':'Yes, match unfinished',callback_data:'match_unfinished_ok:'+id}],
+        [{text:ru?'Назад':'Back',callback_data:'match_unfinished_cancel:'+id}]
+      ]}});
+  }
+  if (data.startsWith('match_unfinished_cancel:')) {
+    return sendMessage(chatId,lang==='ru'?'Действие отменено.':'Action cancelled.');
+  }
+  if (data.startsWith('match_unfinished_ok:')) {
+    const id=data.split(':')[1],ru=lang==='ru';
+    const saved=await markMatchUnfinished(id,{telegram_id:from.id,name:contactName(from)});
+    if(!saved.ok) {
+      const errors={already_confirmed:ru?'Результат уже подтверждён.':'The result is already confirmed.',result_started:ru?'По матчу уже внесён результат.':'A result has already been submitted.',match_not_ended:ru?'Матч ещё не должен был завершиться.':'The match is not due to finish yet.',not_accepted:ru?'Матч больше не активен.':'The match is no longer active.'};
+      return sendMessage(chatId,errors[saved.reason]||(ru?'Не удалось изменить статус матча.':'Could not update the match.'));
+    }
+    const delivered=saved.already?true:await notifyMatchUnfinished(saved.slot,{actorId:from.id}).catch(()=>null);
+    userState.set(String(chatId),{mode:'unfinished_evidence',challengeId:id,lang,expiresAt:Date.now()+24*60*60*1000});
+    return sendMessage(chatId,(delivered
+      ?(ru?'✅ Матч отмечен как недоигранный. Организатор уведомлён, напоминания остановлены.':'✅ The match is marked unfinished. The organiser was notified and reminders are paused.')
+      :(ru?'Матч отмечен как недоигранный, напоминания остановлены. Уведомление организатору не доставлено — свяжитесь с ним напрямую.':'The match is marked unfinished and reminders are paused. The organiser notification was not delivered; please contact them directly.'))
+      +'\n\n'+(ru?'Если нужно, отправьте сейчас фотографию или напишите сообщение — оно будет передано организатору.':'If needed, send a photo or write a message now; it will be forwarded to the organiser.'),
+      {reply_markup:unfinishedResultMarkup(id,lang)});
+  }
+  if (data.startsWith('match_unfinished_skip:')) {
+    const id=data.split(':')[1],state=userState.get(String(chatId));
+    if(state?.mode==='unfinished_evidence'&&state.challengeId===id)userState.delete(String(chatId));
+    return sendMessage(chatId,lang==='ru'?'Готово. Напоминания остановлены. После завершения матча внесите результат.':'Done. Reminders are paused. Submit the result after the match is completed.',
+      {reply_markup:{inline_keyboard:[[{text:lang==='ru'?'✅ Матч уже доигран':'✅ Match completed',web_app:{url:PUBLIC_URL+'/match?result='+encodeURIComponent(id)}}]]}});
+  }
   if (data.startsWith('crypto:')) {
     const methods = await getPaymentMethods().catch(() => []);
     return sendMessage(chatId, t(lang, 'choose_crypto_network'), { reply_markup: cryptoKeyboard(lang, data.split(':')[1], methods) });

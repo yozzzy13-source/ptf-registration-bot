@@ -201,7 +201,8 @@ var T={
       noTelegram:'У этого игрока пока нет Telegram в базе:',
       you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.',
       tRes:'Результат',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
-      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',resultType:'Тип результата',playedType:'Обычный',retiredType:'RET · матч не доигран',technicalType:'W/L · технический',bothTechnical:'Обоим',pointsFor:'Очки в таблицу',editResult:'Изменить результат',
+      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',resultType:'Тип результата',playedType:'Обычный',retiredType:'RET · снятие во время матча',technicalType:'W/L · технический',bothTechnical:'Обоим',pointsFor:'Очки в таблицу',editResult:'Изменить результат',
+      unfinishedBadge:'матч не доигран',markUnfinished:'⏸ Матч не доигран',matchCompleted:'✅ Матч уже доигран',unfinishedTitle:'Матч не доигран',unfinishedHint:'Подтвердите статус — напоминания остановятся, а организатор получит уведомление. После завершения результат можно внести обычным способом.',unfinishedPhoto:'Фото-подтверждение (необязательно)',unfinishedNote:'Сообщение организатору (необязательно)',unfinishedNotePh:'Например: дождь, закрыли корт или не хватило времени',unfinishedConfirm:'Подтвердить и остановить напоминания',unfinishedSaved:'✅ Организатор уведомлён. Напоминания остановлены. Результат можно внести после завершения матча.',unfinishedNoNotify:'Напоминания остановлены, но уведомление организатору не доставлено. Свяжитесь с ним напрямую.',unfinishedResume:'Напоминания остановлены. Внесение счёта вернёт матч в обычный процесс подтверждения.',
       set3mode:'Решающий сет',full:'Полный сет',mtb:'Чемпионский тай-брейк',noSet3:'Не игрался',
       winnerFirst:'Сначала отметьте победителя — счёт пишется от него.',
       scoreOrder:'Первым идёт счёт победителя.',
@@ -243,7 +244,8 @@ var T={
       noTelegram:'This player has no Telegram on file yet:',
       you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.',
       tRes:'Result',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
-      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',resultType:'Result type',playedType:'Played',retiredType:'RET · retired',technicalType:'W/L · technical',bothTechnical:'Both',pointsFor:'Standings points',editResult:'Edit result',
+      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',resultType:'Result type',playedType:'Played',retiredType:'RET · retired during play',technicalType:'W/L · technical',bothTechnical:'Both',pointsFor:'Standings points',editResult:'Edit result',
+      unfinishedBadge:'match unfinished',markUnfinished:'⏸ Match unfinished',matchCompleted:'✅ Match completed',unfinishedTitle:'Match unfinished',unfinishedHint:'Confirm this status to stop reminders and notify the organiser. You can submit the result normally after the match is completed.',unfinishedPhoto:'Evidence photo (optional)',unfinishedNote:'Message to the organiser (optional)',unfinishedNotePh:'For example: rain, court closed, or time ran out',unfinishedConfirm:'Confirm and stop reminders',unfinishedSaved:'✅ The organiser was notified. Reminders are paused. Submit the result when the match is completed.',unfinishedNoNotify:'Reminders are paused, but the organiser notification was not delivered. Contact the organiser directly.',unfinishedResume:'Reminders are paused. Submitting the score returns the match to the normal confirmation flow.',
       set3mode:'Deciding set',full:'Full set',mtb:'Match tie-break',noSet3:'Not played',
       winnerFirst:'Pick the winner first — the score is written from their side.',
       scoreOrder:'The winner’s score comes first.',
@@ -553,12 +555,12 @@ function renderMine(){
   }
   if(!myMatches.length){$('viewMine').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>'+historyBlock();return}
   $('viewMine').innerHTML=myMatches.map(function(s){
-    var agreed=s.status==='accepted';var pending=s.status==='pending';
+    var agreed=s.status==='accepted';var pending=s.status==='pending';var unfinished=String(s.result_status||'')==='unfinished';
     var iAmAuthor=String(s.from_telegram_id)===String(me&&me.id);
     var opp=iAmAuthor?{name:s.to_name,username:s.to_username}:{name:s.from_name,username:s.from_username};
     return '<div class="slot'+(agreed?' agreed':'')+'">'
       +'<div class="slot-head"><div><div class="who">'+esc(opp.name||X.waiting)+'</div>'
-      +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(X.agreed)+'</span>':(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
+      +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(unfinished?X.unfinishedBadge:X.agreed)+'</span>':(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
       +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?(s.agreed_time+'–'+min2hm(hm2min(s.agreed_time)+Number(s.duration_min||matchDuration))):s.time_from)+'</b></div>'
       +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))
          +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
@@ -579,11 +581,18 @@ function requestActions(s,opp){
 // Что можно сделать с согласованным матчем: написать, перенести время, отменить.
 // Перенос после подтверждения корта доступен только тому, кто корт подтверждал.
 function pendingTime(s){ return String(s.time_change||'').split('|')[0]||'' }
+function matchEnded(s){var d=String(s.agreed_date||''),t=String(s.agreed_time||s.time_from||'00:00');var end=Date.parse(d+'T'+t+':00+07:00')+Number(s.duration_min||matchDuration)*60000;return Number.isFinite(end)&&end<=Date.now()}
 function canRetime(s){return String(s.from_telegram_id)===String(me&&me.id)}
 function agreedActions(s,opp){
   var b='<div class="acts">';
-  var contact=matchContactUrl(s,opp);
+  var contact=matchContactUrl(s,opp),st=String(s.result_status||'');
   if(contact)b+='<button class="mini" onclick="openLink(\''+esc(contact)+'\')">💬 '+(L?'Написать':'Message')+'</button>';
+  if(matchEnded(s)){
+    if(st==='unfinished')b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.matchCompleted)+'</button>';
+    else if(!st){b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';b+='<button class="mini" onclick="openUnfinished(\''+esc(s.challenge_id)+'\')">'+esc(X.markUnfinished)+'</button>'}
+    else b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';
+    return b+'</div>';
+  }
   if(canRetime(s)&&!s.court_confirmed_at&&!pendingTime(s))b+='<button class="mini primary" onclick="bookingHelper(\''+esc(s.challenge_id)+'\',this)">'+esc(L?'📲 Забронировать корт':'📲 Book court')+'</button>';
   if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';
   b+='<button class="mini" onclick="cancelMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancelMatch)+'</button>';
@@ -780,9 +789,10 @@ function collectSets(prefix){
   return sets.filter(function(s){return s.a!==''&&s.b!==''});
 }
 var resPhoto='';
-function photoField(id){
-  return '<label>'+esc(X.photo)+'</label>'
-    +'<label class="photo-btn" for="'+id+'">📷 '+esc(X.photo)+'</label>'
+function photoField(id,label){
+  label=label||X.photo;
+  return '<label>'+esc(label)+'</label>'
+    +'<label class="photo-btn" for="'+id+'">📷 '+esc(label)+'</label>'
     +'<input type="file" id="'+id+'" accept="image/*" class="hidden" onchange="onPhoto(this)">'
     +'<img id="'+id+'prev" class="photo-prev hidden" alt="">';
 }
@@ -809,18 +819,19 @@ function renderRes(){
   var h='';
   if(resultSlotId){
     var s=resultTasks.filter(function(x){return x.challenge_id===resultSlotId})[0];
-    if(s)return renderResultForm(s);
+    if(s)return resultMode==='unfinished'?renderUnfinishedForm(s):renderResultForm(s);
   }
   if(!resultTasks.length)h+='<div class="empty">'+esc(X.emptyRes)+'</div>';
   else h+=resultTasks.map(function(s){
     var opp=isAdmin?{n:(s.from_name||'')+' — '+(s.to_name||'')}:(String(s.from_telegram_id)===String(me&&me.id)?{n:s.to_name}:{n:s.from_name});
-    var pending=s.result_status==='pending';
+    var pending=s.result_status==='pending',unfinished=s.result_status==='unfinished';
     var mine=String(s.result_by)===String(me&&me.id);
     return '<div class="slot'+(pending?' agreed':'')+'">'
       +'<div class="who">'+esc(opp.n||'')+'</div>'
       +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
-      +(pending?'<div class="meta"><span class="pill open">'+esc(mine?X.pendingRes:X.yourRes)+'</span> '+esc(s.result_score||'')+'</div>':'')
-      +'<div class="acts"><button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(pending&&!mine?X.yourRes:X.resTitle)+'</button></div>'
+      +(pending?'<div class="meta"><span class="pill open">'+esc(mine?X.pendingRes:X.yourRes)+'</span> '+esc(s.result_score||'')+'</div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
+      +'<div class="acts"><button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(unfinished?X.matchCompleted:(pending&&!mine?X.yourRes:X.resTitle))+'</button>'
+      +(!pending&&!unfinished?'<button class="mini" onclick="openUnfinished(\''+esc(s.challenge_id)+'\')">'+esc(X.markUnfinished)+'</button>':'')+'</div>'
       +'</div>';
   }).join('');
   h+='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
@@ -828,8 +839,29 @@ function renderRes(){
     +'<button class="primary" onclick="openManual()">'+esc(X.manual)+'</button></div>';
   $('viewRes').innerHTML=h;
 }
-function openResult(id){resultSlotId=id;renderRes()}
+function openResult(id){resultSlotId=id;resultMode='';renderRes()}
+function openResultFromMine(id){resultSlotId=id;resultMode='';showTab('res')}
+function openUnfinished(id){resultSlotId=id;resultMode='unfinished';showTab('res')}
 function backToRes(){resultSlotId='';resultMode='';resPhoto='';renderRes()}
+function renderUnfinishedForm(s){
+  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.unfinishedTitle)+'</h3>'
+    +'<div class="hint">'+esc((s.from_name||'')+' '+X.vs+' '+(s.to_name||'')+' · '+fmtDay(s.agreed_date))+'</div>'
+    +'<p>'+esc(X.unfinishedHint)+'</p>'
+    +photoField('uPhoto',X.unfinishedPhoto)
+    +'<label>'+esc(X.unfinishedNote)+'</label><textarea id="uNote" placeholder="'+esc(X.unfinishedNotePh)+'">'+esc(s.unfinished_note||'')+'</textarea>'
+    +'<button class="primary" onclick="submitUnfinished(\''+esc(s.challenge_id)+'\',this)">'+esc(X.unfinishedConfirm)+'</button>'
+    +'<button onclick="backToRes()">'+esc(X.back)+'</button><div id="uRes" class="res"></div></div>';
+}
+function submitUnfinished(id,btn){
+  var box=$('uRes');btn.disabled=true;box.className='res';box.textContent=X.sending;
+  fetch('/api/match/unfinished',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:id,photo:resPhoto,note:($('uNote').value||'').trim()
+  })}).then(function(r){return r.json()}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Error');
+    box.className='res ok';box.textContent=(j.organizer_notified?X.unfinishedSaved:X.unfinishedNoNotify)+(j.warning?' ⚠️ '+j.warning:'');
+    resPhoto='';setTimeout(function(){resultSlotId='';resultMode='';load(true)},1300);
+  }).catch(function(e){btn.disabled=false;box.className='res err';box.textContent='⛔ '+e.message});
+}
 function resultKindPicker(prefix){
   return '<label>'+esc(X.resultType)+'</label><div class="seg resultKind"><div class="s on" data-k="played" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.playedType)+'</div><div class="s" data-k="retired" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.retiredType)+'</div>'+(isAdmin?'<div class="s" data-k="technical" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.technicalType)+'</div>':'')+'</div>';
 }
@@ -860,6 +892,7 @@ function renderResultForm(s){
   var p1={id:String(s.from_telegram_id||''),n:s.from_name||''},p2={id:String(s.to_telegram_id||''),n:s.to_name||''};
   $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(s.result_status==='confirmed'&&isAdmin?X.editResult:X.resTitle)+'</h3>'
     +'<div class="hint">'+esc(p1.n)+' '+esc(X.vs)+' '+esc(p2.n)+' · '+esc(fmtDay(s.agreed_date))+'</div>'
+    +(s.result_status==='unfinished'?'<div class="empty" style="margin:12px 0">'+esc(X.unfinishedResume)+'</div>':'')
     +resultKindPicker('r')+'<label>'+esc(X.winner)+'</label><div class="hint">'+esc(X.winnerFirst)+'</div>'
     +'<div class="seg" id="rWinSeg"><div class="s" data-w="'+esc(p1.id)+'" data-n="'+esc(p1.n)+'" onclick="pickWinner(this,\'r\')">'+esc(p1.n)+'</div>'
     +'<div class="s" data-w="'+esc(p2.id)+'" data-n="'+esc(p2.n)+'" onclick="pickWinner(this,\'r\')">'+esc(p2.n)+'</div>'
