@@ -6,6 +6,7 @@ import { nowISO,parseSeasonNumber,uid } from './util.js';
 import { assignSlots } from './public/fantasy-model.js';
 
 export const FANTASY_DEFAULTS=Object.freeze({rosterSize:8,budget:88,maxPerPool:2,transfers:2});
+export const FANTASY_DATES=Object.freeze({entryDeadline:'2026-09-21T12:00:00+07:00',seasonEndAt:'2026-11-09T23:59:59+07:00'});
 export const FANTASY_SCORING=Object.freeze({appearance:2,win:10,setWon:3,gameWon:1,straightSets:3,bagelSet:2,walkoverWin:5,upset:{2:2,3:4,4:6},captainMultiplier:1.5});
 export const FANTASY_PRICING=Object.freeze({base:10,winRate:[[0,19.9,-1],[20,39.9,0],[40,59.9,1],[60,79.9,2],[80,100,3]],regularPlace:{1:2,2:1,3:1},playoff:{champion:2,finalist:1,semifinalist:1},promotionFactor:{same:1,oneLevel:0.5,twoLevels:0.25}});
 const TEAM_HEADERS=['team_id','telegram_id','owner_name','team_name','season','status','picks_json','captain_key','vice_key','budget_spent','transfers_used','created_at','updated_at','locked_at','team_slot'];
@@ -16,8 +17,8 @@ const RULES={
  en:{title:'PTF Fantasy — rules',intro:'PTF Fantasy is an open, free competition between league players\u2019 own teams: everyone builds up to two independent squads of 8 PTF players, including themselves, and scores points from their real Season 2 matches. Whoever\u2019s squad scores the most wins.',format:'The schedule depends on the division: Prime has 8 matches with 9 players; W has 5 group matches and 2 cross-group matches. Every official regular-season and playoff match counts in Fantasy.',squad:'Pick one player from PRIME, A, B, both C groups and both W groups. The eighth player is a free pick. You may select at most two from one group.',budget:'The budget is 88 credits. Prices freeze when squads lock.',pricing:'Base price is 10. Win rate adds −1 to +3, regular-season position up to +2, and playoffs up to +2. Promotion halves the premium for each level moved up. Debutants with no history cost 10; NTRP is not used.',locking:'You may edit a draft until the deadline. Once locked, the squad changes only through permitted transfers.',captain:'The captain scores ×1.5. The vice-captain takes over only if the captain officially withdraws before playing.',transfers:'You have two transfers after locking. Replacing a player who withdraws before playing does not use one.',scoring:'Match: +2 appearance, +10 win, +3 per set won, +1 per game won, +3 for a 2–0 win and +2 per 6–0 set. Beating a player priced 2/3/4+ higher adds +2/+4/+6. A walkover without play is only +5; a RET result uses the score actually played.',ranking:'The team with the most points wins and the final table highlights the top three. Ties are broken by fewer transfers, then by the earlier lock time.',tip:'For a first squad, use two proven players and fill the rest with balanced lower-priced picks.'}
 };
 const FANTASY_ERRORS={
- ru:{fantasy_access_denied:'Fantasy пока недоступно для вашего аккаунта.',fantasy_preview_only:'Сейчас доступен только просмотр Fantasy. Приём составов ещё не открыт.',fantasy_team_locked:'Состав уже зафиксирован. Используйте замену.',fantasy_deadline_passed:'Срок подачи составов уже завершён.',fantasy_team_not_locked:'Сначала зафиксируйте полный состав.',fantasy_invalid_transfer:'Эту замену выполнить нельзя. Проверьте выбранных игроков.',fantasy_no_transfers_left:'Лимит замен исчерпан.'},
- en:{fantasy_access_denied:'Fantasy is not available for your account yet.',fantasy_preview_only:'Fantasy is currently view-only. Squad entry has not opened yet.',fantasy_team_locked:'Your squad is already locked. Use a transfer.',fantasy_deadline_passed:'The squad deadline has passed.',fantasy_team_not_locked:'Lock a complete squad first.',fantasy_invalid_transfer:'This transfer is not valid. Check the selected players.',fantasy_no_transfers_left:'The transfer limit has been reached.'}
+ ru:{fantasy_access_denied:'Fantasy пока недоступно для вашего аккаунта.',fantasy_preview_only:'Сейчас доступен только просмотр Fantasy. Приём составов ещё не открыт.',fantasy_team_locked:'Состав уже зафиксирован. Используйте замену.',fantasy_deadline_passed:'Срок подачи составов уже завершён.',fantasy_team_not_locked:'Сначала зафиксируйте полный состав.',fantasy_invalid_transfer:'Эту замену выполнить нельзя. Проверьте выбранных игроков.',fantasy_no_transfers_left:'Лимит замен исчерпан.',fantasy_season_finished:'Соревнование Fantasy завершено. Итоговый рейтинг сохранён в истории.'},
+ en:{fantasy_access_denied:'Fantasy is not available for your account yet.',fantasy_preview_only:'Fantasy is currently view-only. Squad entry has not opened yet.',fantasy_team_locked:'Your squad is already locked. Use a transfer.',fantasy_deadline_passed:'The squad deadline has passed.',fantasy_team_not_locked:'Lock a complete squad first.',fantasy_invalid_transfer:'This transfer is not valid. Check the selected players.',fantasy_no_transfers_left:'The transfer limit has been reached.',fantasy_season_finished:'The Fantasy competition has ended. The final standings remain in history.'}
 };
 function failure(key,lang,code=400){const e=Error(FANTASY_ERRORS[lang==='ru'?'ru':'en'][key]||key);e.code=code;e.error_key=key;return e}
 const t=v=>String(v??'').trim();
@@ -89,15 +90,22 @@ function tips(p,lang){
  return{why,risks,captain};
 }
 async function settings(mode='live'){
- // Settings хранит ключи в едином верхнем регистре. Старые имена оставлены
- // только как fallback для существующих развёртываний до миграции таблицы.
- const [season,budget,openAt,deadline,rosterSize,transfers]=await Promise.all([
-   setting('FANTASY_SEASON','fantasy_season'), setting('FANTASY_BUDGET','fantasy_budget'),
+ const season=t(await setting('FANTASY_SEASON','fantasy_season'))||await latestSeason()||'2';
+ const [budget,openAt,entryOverride,seasonEndOverride,legacyDeadline,rosterSize,transfers]=await Promise.all([
+   setting('FANTASY_BUDGET','fantasy_budget'),
    setting('FANTASY_OPEN_AT',mode==='test'?'fantasy_test_open_at':'fantasy_open_at'),
+   setting(mode==='test'?'FANTASY_TEST_ENTRY_DEADLINE':'FANTASY_ENTRY_DEADLINE'),
+   setting(mode==='test'?'FANTASY_TEST_END_AT':'FANTASY_END_AT'),
    setting('FANTASY_DEADLINE',mode==='test'?'fantasy_test_lock_at':'fantasy_lock_at'),
-   setting('FANTASY_TEAM_SIZE','fantasy_team_size'), setting('FANTASY_TRANSFERS','fantasy_transfers')
+   setting('FANTASY_TEAM_SIZE','fantasy_team_size'),
+   setting('FANTASY_TRANSFERS','fantasy_transfers')
  ]);
- return{season:t(season)||await latestSeason()||'2',budget:Math.max(1,n(budget,FANTASY_DEFAULTS.budget)),openAt:t(openAt),lockAt:t(deadline),rosterSize:Math.max(1,n(rosterSize,FANTASY_DEFAULTS.rosterSize)),transfers:Math.max(0,n(transfers,FANTASY_DEFAULTS.transfers))};
+ // The old FANTASY_DEADLINE closed the whole flow on 20 September.
+ // Season 2 gets explicit campaign dates; the new Settings keys can override them.
+ const campaign=String(season)==='2';
+ const entryDeadline=t(entryOverride)||(campaign?FANTASY_DATES.entryDeadline:t(legacyDeadline));
+ const seasonEndAt=t(seasonEndOverride)||(campaign?FANTASY_DATES.seasonEndAt:'');
+ return{season,budget:Math.max(1,n(budget,FANTASY_DEFAULTS.budget)),openAt:t(openAt),lockAt:entryDeadline,entryDeadline,seasonEndAt,rosterSize:Math.max(1,n(rosterSize,FANTASY_DEFAULTS.rosterSize)),transfers:Math.max(0,n(transfers,FANTASY_DEFAULTS.transfers))};
 }
 let cache={key:'',at:0,value:null};
 export async function buildFantasyCatalog({lang='en',fresh=false,mode='live'}={}){
@@ -157,15 +165,23 @@ export function scoreFantasyMatch(match={},playerPrice=10,opponentPrice=10){
 // команд. includeAll добавляет в подсчёт всех игроков лиги (getLeagueProfiles),
 // не только тех, кто попал в roster-каталог сезона; цена для них — базовая 10,
 // как для дебютанта, раз официального каталога для них нет.
+function fantasyMatchTime(value){
+ const raw=t(value);if(!raw)return NaN;
+ const m=raw.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/);
+ if(m)return Date.parse(m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')+'T23:59:59+07:00');
+ if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return Date.parse(raw+'T23:59:59+07:00');
+ return Date.parse(raw);
+}
 async function scores(catalog,extras=[],{includeAll=false}={}){
  const [history,profiles]=await Promise.all([getLeagueMatchHistory().catch(()=>new Map()),getLeagueProfiles().catch(()=>[])]),profilesByName=new Map(profiles.map(p=>[nk(p.name),p])),all=new Map(catalog.players.map(p=>[p.key,p]));
  for(const raw of extras||[]){if(!raw?.key||all.has(raw.key))continue;const pf=profilesByName.get(nk(raw.name))||{};all.set(raw.key,{key:raw.key,name:raw.name,price:n(raw.price,10),profile_id:pf.id||''})}
  if(includeAll)for(const pf of profiles){const key=fantasyPlayerKey(pf.name);if(!key||all.has(key))continue;all.set(key,{key,name:pf.name,price:10,profile_id:pf.id||''})}
- const list=[...all.values()],byName=new Map(list.map(p=>[nk(p.name),p])),out=new Map();
+ const list=[...all.values()],byName=new Map(list.map(p=>[nk(p.name),p])),out=new Map(),cutoff=Date.parse(catalog.seasonEndAt||'');
  for(const p of list){
   const seen=new Set(),details=[];let total=0;
   for(const m of (p.profile_id?history.get(String(p.profile_id)):[])||[]){
    if(String(parseSeasonNumber(m.season,m.competition)||'')!==String(catalog.season))continue;
+   const playedAt=fantasyMatchTime(m.date);if(Number.isFinite(cutoff)&&Number.isFinite(playedAt)&&playedAt>cutoff)continue;
    const id=t(m.match_no)+'|'+nk(m.opponent)+'|'+t(m.date)+'|'+t(m.score);if(seen.has(id))continue;seen.add(id);
    const op=byName.get(nk(m.opponent)),points=scoreFantasyMatch(m,p.price,op?.price||10);total+=points.total;details.push({...m,points});
   }
@@ -181,14 +197,17 @@ async function seasonMatchCount(name,season){
  return seen.size;
 }
 async function fantasyMode(){const v=(await setting('FANTASY_MODE','fantasy_mode')).toLowerCase();return v==='live'?'live':(v==='off'||v==='closed')?'closed':'test'}
-export async function fantasyEntryOpen(mode='test',{afterDeadline=false}={}){
- if(mode==='closed')return false;
- const openAt=await setting('FANTASY_OPEN_AT',mode==='test'?'fantasy_test_open_at':'fantasy_open_at');
- const deadline=await setting('FANTASY_DEADLINE',mode==='test'?'fantasy_test_lock_at':'fantasy_lock_at');
- if(openAt&&Date.now()<Date.parse(openAt))return false;
- if(!afterDeadline&&deadline&&Date.now()>=Date.parse(deadline))return false;
+async function fantasySwitchOpen(mode){
  const v=(await setting(mode==='live'?'FANTASY_ENTRY_OPEN':'FANTASY_TEST_ENTRY_OPEN',mode==='live'?'fantasy_entry_open':'fantasy_test_entry_open')).toLowerCase();
  return ['1','yes','true','on','open'].includes(v);
+}
+export async function fantasyEntryOpen(mode='test',{afterDeadline=false}={}){
+ if(mode==='closed')return false;
+ const cfg=await settings(mode),now=Date.now();
+ if(cfg.openAt&&now<Date.parse(cfg.openAt))return false;
+ if(!await fantasySwitchOpen(mode))return false;
+ if(afterDeadline)return deadlinePassed(cfg.entryDeadline)&&!deadlinePassed(cfg.seasonEndAt);
+ return !deadlinePassed(cfg.entryDeadline);
 }
 const storeFor=mode=>mode==='test'?{teams:SHEETS.fantasyTestTeams,transfers:SHEETS.fantasyTestTransfers}:{teams:SHEETS.fantasyTeams,transfers:SHEETS.fantasyTransfers};
 async function ensureTesterSheet(){await ensureExtraSheet(SHEETS.fantasyTesters,TESTER_HEADERS)}
@@ -257,7 +276,7 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
  const playerLeaderboard=fantasyPlayers.map(p=>({key:p.key,profile_id:p.profile_id,name:p.name,division:p.division,group:p.group,pool_label:p.pool_label,photo:p.photo,price:p.price,points:p.score.total||0,matches:p.score.matches||0,selected_by:p.selected_by||0})).sort((a,b)=>b.points-a.points||b.selected_by-a.selected_by||b.price-a.price||a.name.localeCompare(b.name));
  playerLeaderboard.forEach((x,i)=>x.place=i+1);
 
- const locked=deadlinePassed(catalog.lockAt),transfersOpen=locked&&await fantasyEntryOpen(mode,{afterDeadline:true});
+ const locked=deadlinePassed(catalog.entryDeadline),seasonFinished=deadlinePassed(catalog.seasonEndAt),transfersOpen=locked&&!seasonFinished&&await fantasyEntryOpen(mode,{afterDeadline:true});
  const publicTeams=await Promise.all(teams.map(async row=>({...publicTeam(row),
   points:leaderboard.find(x=>x.team_id===row.team_id)?.points??teamScore(row).total,
   // Черновик очки набирает, но в рейтинг не попадает, пока его не подтвердили.
@@ -269,31 +288,33 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
   intro:lang==='ru'?'До двух независимых команд из '+catalog.rosterSize+' игроков PTF. Очки за реальные матчи сезона '+catalog.season+'.':'Up to two independent squads of '+catalog.rosterSize+' PTF players. Score from real Season '+catalog.season+' matches.',
   squad:lang==='ru'?'2 C и 2 W — по одному из каждой группы; 1 Prime, 1 A, 1 B и flex Prime/A/B. Не больше двух из одной группы.':'2 C and 2 W — one from each group; 1 Prime, 1 A, 1 B and flex Prime/A/B. At most two from one group.',
   budget:lang==='ru'?'Бюджет: '+catalog.budget+'.':'Budget: '+catalog.budget+'.',
-  locking:lang==='ru'?'До дедлайна можно менять и подтверждённый состав. После дедлайна доступны только разрешённые замены.':'Edit even a confirmed squad until the deadline. After the deadline, only permitted transfers remain.',
-  transfers:lang==='ru'?'После дедлайна: '+catalog.transfers+' замены. Замена официально снятого до первого матча игрока бесплатна.':'After the deadline: '+catalog.transfers+' transfers. Replacing an officially withdrawn player before their first match is free.'
+  locking:lang==='ru'?'До 21 сентября, 12:00 по Таиланду можно создавать и менять команды. После закрытия набора и до конца соревнования доступны только разрешённые замены.':'Create and edit squads until 21 September, 12:00 Thailand time. After entry closes and until the competition ends, only permitted transfers remain.',
+  transfers:lang==='ru'?'После закрытия набора и до 9 ноября включительно: '+catalog.transfers+' замены. Замена официально снявшегося до первого матча игрока бесплатна. После 9 ноября рейтинг становится итоговым и остаётся в истории.':'After entry closes and through 9 November: '+catalog.transfers+' transfers. Replacing a player who withdraws before playing does not use one. After 9 November, the standings become final and remain in history.'
  };
  // Полный список очков по всей лиге, не только по roster-каталогу сезона —
  // используется там, где Fantasy Points нужно показать любому игроку с
  // реальными матчами, даже если он не входит в текущий состав для драфта.
  const allScores=[...pointMap.values()].filter(x=>x.matches>0).map(x=>({key:x.key,name:x.name,total:x.total,matches:x.matches,details:x.details}));
- return{lang,mode,is_test:mode==='test',entry_open:entryOpen,transfers_open:transfersOpen,preview_only:!entryOpen&&!locked,banner,season:catalog.season,budget:catalog.budget,roster_size:catalog.rosterSize,max_per_pool:2,transfers:catalog.transfers,open_at:catalog.openAt,lock_at:catalog.lockAt,locked,rules,rules_i18n:RULES,scoring:FANTASY_SCORING,pricing:FANTASY_PRICING,players:fantasyPlayers,player_leaderboard:playerLeaderboard,all_scores:allScores,team:publicTeams[0]||null,teams:publicTeams,team_limit:2,leaderboard,owner_name:owner||''};
+ return{lang,mode,is_test:mode==='test',entry_open:entryOpen,transfers_open:transfersOpen,competition_open:locked&&!seasonFinished,season_finished:seasonFinished,phase:seasonFinished?'finished':entryOpen?'entry':locked?'competition':'preview',preview_only:!entryOpen&&!locked,banner,season:catalog.season,budget:catalog.budget,roster_size:catalog.rosterSize,max_per_pool:2,transfers:catalog.transfers,open_at:catalog.openAt,lock_at:catalog.entryDeadline,entry_deadline:catalog.entryDeadline,season_end_at:catalog.seasonEndAt,locked,rules,rules_i18n:RULES,scoring:FANTASY_SCORING,pricing:FANTASY_PRICING,players:fantasyPlayers,player_leaderboard:playerLeaderboard,all_scores:allScores,team:publicTeams[0]||null,teams:publicTeams,team_limit:2,leaderboard,owner_name:owner||''};
 
 
 }
 export async function validateFantasyTeam(input,lang,mode='test'){const c=await buildFantasyCatalog({lang,mode});return validateFantasySelection(input,c,{complete:input?.complete!==false,lang})}
 export async function saveFantasyTeam(id,owner,input={},lang='en',mode='test'){
  const c=await buildFantasyCatalog({lang,mode});
- if(deadlinePassed(c.lockAt))throw failure('fantasy_deadline_passed',lang);
+ if(deadlinePassed(c.entryDeadline))throw failure('fantasy_deadline_passed',lang);
  if(!await fantasyEntryOpen(mode))throw failure('fantasy_preview_only',lang,403);
- const use=storeFor(mode),teamSlot=Number(input.team_slot||1);if(![1,2].includes(teamSlot))throw failure('fantasy_invalid_transfer',lang);const old=await findTeam(id,c.season,mode,teamSlot);if(!old){const mine=(await getRows(use.teams,{useCache:false})).rows.filter(x=>String(x.telegram_id)===String(id)&&String(x.season)===String(c.season));if(mine.length>=2)throw failure('fantasy_invalid_transfer',lang);}if(deadlinePassed(c.lockAt))throw failure('fantasy_deadline_passed',lang);
+ const use=storeFor(mode),teamSlot=Number(input.team_slot||1);if(![1,2].includes(teamSlot))throw failure('fantasy_invalid_transfer',lang);const old=await findTeam(id,c.season,mode,teamSlot);if(!old){const mine=(await getRows(use.teams,{useCache:false})).rows.filter(x=>String(x.telegram_id)===String(id)&&String(x.season)===String(c.season));if(mine.length>=2)throw failure('fantasy_invalid_transfer',lang);}if(deadlinePassed(c.entryDeadline))throw failure('fantasy_deadline_passed',lang);
  const locking=input.action==='lock'||old?.status==='locked',v=validateFantasySelection(input,c,{complete:locking,lang});if(!v.ok){const e=Error(v.errors.join(' '));e.code=400;throw e}
  const now=nowISO(),patch={team_id:old?.team_id||uid('fantasy'),team_slot:teamSlot,telegram_id:String(id),owner_name:t(owner),team_name:t(input.team_name).slice(0,40)||(t(owner)||'PTF')+' Fantasy',season:c.season,status:locking?'locked':'draft',picks_json:JSON.stringify(v.picks.map(p=>({key:p.key,name:p.name,pool:p.pool,price:p.price}))),captain_key:t(input.captain_key),vice_key:t(input.vice_key),budget_spent:v.spent,transfers_used:n(old?.transfers_used),created_at:old?.created_at||now,updated_at:now,locked_at:locking?(old?.locked_at||now):''};
  if(old?._rowNumber)await updateObjectByRow(use.teams,old._rowNumber,patch);else await appendObject(use.teams,patch);return{team:publicTeam(patch),validation:{warnings:v.warnings,remaining:v.remaining}};
 }
 export async function transferFantasyPlayer(id,input={},lang='en',mode='test'){
+ const c=await buildFantasyCatalog({lang,mode});
+ if(deadlinePassed(c.seasonEndAt))throw failure('fantasy_season_finished',lang);
  if(!await fantasyEntryOpen(mode,{afterDeadline:true}))throw failure('fantasy_preview_only',lang,403);
- const c=await buildFantasyCatalog({lang,mode}),use=storeFor(mode),row=await findTeam(id,c.season,mode,Number(input.team_slot||1));if(!row||row.status!=='locked')throw failure('fantasy_team_not_locked',lang);
- if(!deadlinePassed(c.lockAt))throw failure('fantasy_invalid_transfer',lang);
+ const use=storeFor(mode),row=await findTeam(id,c.season,mode,Number(input.team_slot||1));if(!row||row.status!=='locked')throw failure('fantasy_team_not_locked',lang);
+ if(!deadlinePassed(c.entryDeadline))throw failure('fantasy_invalid_transfer',lang);
  const picks=js(row.picks_json,[]),outKey=t(input.player_out_key),inKey=t(input.player_in_key),old=picks.find(p=>p.key===outKey),incoming=c.players.find(p=>p.key===inKey);
  if(!old||!incoming||picks.some(p=>p.key===inKey))throw failure('fantasy_invalid_transfer',lang);
  const removed=!c.players.some(p=>p.key===outKey),forced=removed&&(await seasonMatchCount(old.name,c.season))===0,used=n(row.transfers_used);if(!forced&&used>=c.transfers)throw failure('fantasy_no_transfers_left',lang);
