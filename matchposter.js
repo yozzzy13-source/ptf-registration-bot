@@ -272,7 +272,6 @@ async function generateOneBackground(prompt, imageReferences) {
         model:MODEL,
         prompt,
         images:imageReferences,
-        input_fidelity:'high',
         quality:QUALITY,
         size:SIZE,
         n:1,
