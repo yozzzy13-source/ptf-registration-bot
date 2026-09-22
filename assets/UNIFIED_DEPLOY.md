@@ -1,0 +1,105 @@
+# Unified PTF Bot Deploy
+
+This repo keeps the registration bot as the main app and adds match results parsing inside the same Telegram webhook.
+
+## Routing
+
+- Private chat messages go to the existing registration flow.
+- Callback data starting with `PTF|` goes to the match results flow.
+- Messages in `RESULTS_CHAT_ID` + `RESULTS_TOPIC_ID` go to the match results parser.
+- Other updates keep using the existing registration bot logic.
+
+## Keep Existing Registration Variables
+
+Keep the variables already used by the registration bot:
+
+```text
+BOT_TOKEN
+PUBLIC_URL
+SPREADSHEET_ID
+GOOGLE_CREDENTIALS
+GOOGLE_DRIVE_OAUTH_CREDENTIALS
+MATCH_CARDS_DRIVE_FOLDER_ID
+CLUB_CHAT_URL
+DEFAULT_USDT_AMOUNT
+TIMEZONE
+ADMIN_IDS
+```
+
+## Add Results Variables
+
+```text
+RESULTS_SHEET_ID=1tisUxFOJZgaD95o8cQKSvWpH8ySY-ht3H4wdHCeCI0Q
+RESULTS_TIMEZONE=Asia/Bangkok
+RESULTS_CHAT_ID=-1003636628710
+RESULTS_TOPIC_ID=5
+RESULTS_CONFIRM_IN_TOPIC=true
+RESULTS_BROADCAST_ENABLED=true
+RESULTS_BROADCAST_DELAY_MS=700
+GOOGLE_DRIVE_OAUTH_CREDENTIALS=<JSON printed by npm run drive:authorize>
+MATCH_CARDS_DRIVE_FOLDER_ID=<optional fallback for a Shared Drive>
+RESULTS_MEDIA_PAIR_WINDOW_MS=180000
+RESULTS_MEDIA_WAIT_MS=120000
+RESULTS_WEBSITE_BASE_URL=https://www.phukettennis.com
+RESULTS_SEASON_NAME=Season 1
+RESULTS_DEFAULT_STAGE=Group Stage
+RESULTS_PLAYER_PROFILES_SPREADSHEET_ID=1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY
+RESULTS_PLAYER_PROFILES_SHEET_NAME=Frontend_Profile_All
+RESULTS_DIVISION_A_URL=https://www.phukettennis.com/division-a
+RESULTS_DIVISION_B_URL=https://www.phukettennis.com/division-b
+RESULTS_DIVISION_C_URL=https://www.phukettennis.com/division-c
+RESULTS_DIVISION_D_URL=https://www.phukettennis.com/division-d
+RESULTS_DIVISION_A_SPREADSHEET_ID=1nmiBnyqHiZ-EuLUNCqv7ANl34yWfAWdkSZyw7h8o6bU
+RESULTS_DIVISION_B_SPREADSHEET_ID=1d-yhcCTE2sZQanog-BK3EV-1yAz6DOb0X6N5c_Fnutc
+RESULTS_DIVISION_C_SPREADSHEET_ID=1GFGtFx_Cvt5YyoPZtT4zA6qTFduM5_GsHqr0eUT1a_s
+RESULTS_DIVISION_D_SPREADSHEET_ID=1XcEqirrUf8sNffLhz2gTkhhqcDigdqKFOt7kpP0ZQkM
+```
+
+The same `GOOGLE_CREDENTIALS` service account must have Editor access to:
+
+- registration spreadsheet from `SPREADSHEET_ID`
+- main results spreadsheet from `RESULTS_SHEET_ID`
+- player profile spreadsheet from `RESULTS_PLAYER_PROFILES_SPREADSHEET_ID`
+- all four division spreadsheets
+
+A service account cannot own files in a personal My Drive. Connect the Drive
+owner once with a Google Cloud **Desktop app** OAuth client:
+
+```bash
+npm run drive:authorize -- C:\\path\\to\\desktop-oauth-client.json
+```
+
+Open the printed URL, sign in as the Drive owner, then copy the single printed
+`GOOGLE_DRIVE_OAUTH_CREDENTIALS` variable to Railway and restart the service.
+The helper creates `PTF Match Cards Archive` in My Drive and updates
+`Settings.match_cards_drive_folder_id` itself. The folder may then be moved in
+the Drive interface without changing its id. Publish the OAuth consent screen
+for this private production app so its refresh token does not expire after the
+testing period.
+
+For a Google Workspace Shared Drive, the existing service account may be used
+instead: grant it access and set `MATCH_CARDS_DRIVE_FOLDER_ID` or the Settings
+key to that Shared Drive folder.
+
+The configured folder is the root of the automatic publishing archive. The bot creates:
+
+    Season <N>/<YYYY-MM>/Publishing/Match Cards/*_match.png
+    Season <N>/<YYYY-MM>/Publishing/Queue/*.json
+
+The PNG is the single 1080×1350 result card used by Telegram and the future
+Instagram carousel. Each JSON file is a versioned publication event: it points
+to the card and reserves the future 1080×1920 GPT Image poster output. Drop up
+to four transparent PNG, WebP, or SVG logos into assets/match-card-logos;
+files are picked up alphabetically on the next render without a code change.
+The same folder id can be set without a redeploy in `Settings` under
+`match_cards_drive_folder_id`; the sheet value takes priority over the environment variable.
+
+## Webhook
+
+Use only this unified Railway service for the bot token. Do not run the old separate results Railway with the same `BOT_TOKEN`.
+
+The existing registration startup calls `setWebhook()` and points Telegram to:
+
+```text
+PUBLIC_URL/webhook
+```

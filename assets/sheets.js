@@ -1,0 +1,1922 @@
+import { sheets as sheetsClient } from './google.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID, DIVISIONS_SPREADSHEET_ID, ADMIN_IDS, PUBLIC_URL } from './config.js';
+import { nowISO, safe, parseSeasonNumber, directPhotoUrl } from './util.js';
+
+const cache = new Map();
+// Раньше кэш работал по принципу «протух — следующий ждёт чтение»: тому, кто
+// нажал кнопку через 20 секунд после соседа, доставался полный поход в Google.
+// Теперь ответ ВСЕГДА уходит из памяти, а устаревшее обновляется в фоне и
+// достаётся следующему. Ждать приходится только на совсем пустом кэше — то
+// есть один раз после старта сервиса.
+//
+// Ничего не протухает насовсем: устаревшая строка лучше крутилки. Там, где
+// свежесть обязательна (подтверждение результата), кэш чистится явно.
+const CACHE_MS = 20_000;
+const SHEET_FRESH_MS = {
+  [SHEETS.settings]: 10 * 60_000,
+  [SHEETS.botTexts]: 10 * 60_000,
+  [SHEETS.applicants]: 5 * 60_000,
+  [SHEETS.events]: 5 * 60_000,
+  [SHEETS.paymentMethods]: 10 * 60_000,
+  [SHEETS.applications]: 60_000
+};
+const freshMsFor = sheetName => SHEET_FRESH_MS[sheetName] ?? CACHE_MS;
+const refreshing = new Map();   // фоновое обновление — по одному на лист
+
+function colToA1(n) {
+  let s = '';
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - m) / 26);
+  }
+  return s;
+}
+
+async function valuesGet(range) {
+  const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId: SPREADSHEET_ID, range });
+  return res.data.values || [];
+}
+async function valuesUpdate(range, values) {
+  await sheetsClient().spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values }
+  });
+}
+async function spreadsheetMeta() {
+  const res = await sheetsClient().spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+  return res.data;
+}
+
+
+async function valuesGetFromSpreadsheet(spreadsheetId, range) {
+  const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId, range });
+  return res.data.values || [];
+}
+async function spreadsheetMetaFor(spreadsheetId) {
+  const res = await sheetsClient().spreadsheets.get({ spreadsheetId });
+  return res.data;
+}
+function normalizeHeader(value='') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '');
+}
+function firstNonEmpty(row={}, keys=[]) {
+  for (const k of keys) {
+    const v = row[k];
+    if (v !== undefined && String(v).trim()) return String(v).trim();
+  }
+  return '';
+}
+// Лист состава. У каждого сезона свой лист в той же таблице: организатор
+// заводит новую вкладку, как только начинает собирать следующий сезон. Ищем по
+// номеру сезона в названии вкладки — «Season 3», «Сезон 3», «S3» читаются
+// одинаково. Если такой вкладки нет, остаётся та, что указана в настройках:
+// это состав текущего сезона, как было раньше.
+async function manualParticipantsSheetTitle(season = '') {
+  const meta = await spreadsheetMetaFor(PARTICIPANTS_SPREADSHEET_ID);
+  const sheets = meta.sheets || [];
+  const want = String(season || '').replace(/\D+/g, '');
+  if (want) {
+    const hit = sheets.find(s => {
+      const nums = String(s.properties?.title || '').match(/\d+/g) || [];
+      return nums.includes(want);
+    });
+    if (hit) return hit.properties.title;
+  }
+  const byId = sheets.find(s => String(s.properties?.sheetId || '') === String(PARTICIPANTS_SHEET_ID));
+  return byId?.properties?.title || sheets[0]?.properties?.title || 'Sheet1';
+}
+// ---------------------------------------------------------------------------
+// Manual participants sheet (separate spreadsheet, filled by hand).
+// Real layout of the sheet:
+//   [note rows: "The division has not yet been formed..."]
+//   [ blank | Players | Division Size ]
+//   [ PRIME | 0 | 8 ]  [ Division A | 4 | 8 | active ] ... [ Division Woman | 8 | 8 ]
+//   [ Name | ntrp | Division | status | ... contact columns ... ]
+//   [ player rows ]
+// Only public columns are exposed to the WebApp; contacts are never sent.
+// ---------------------------------------------------------------------------
+const PARTICIPANT_NAME_HEADERS = ['name','player','player_name','имя','имя_фамилия','фио','участник','игрок'];
+const PARTICIPANT_PUBLIC_KEYS = new Set(['name','ntrp','ntrp_raketo','raketo','rating','рейтинг','division','дивизион','group','группа','status','статус']);
+const DIVISION_LETTER_TO_NAME = { p:'PRIME', prime:'PRIME', w:'Division Woman', woman:'Division Woman', women:'Division Woman', ladies:'Division Woman', a:'Division A', b:'Division B', c:'Division C', d:'Division D', e:'Division E' };
+
+function isLikelyDivisionHeader(value='') {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return false;
+  return /^(prime|division\s*[a-z0-9]+|division\s*woman|women|woman|ladies|дивизион\s*[a-zа-я0-9]+)$/i.test(v);
+}
+function normalizeDivisionName(value='') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const v = raw.toLowerCase().replace(/^(division|дивизион)\s*/i, '').trim();
+  if (DIVISION_LETTER_TO_NAME[v]) return DIVISION_LETTER_TO_NAME[v];
+  if (isLikelyDivisionHeader(raw)) return raw;
+  return raw.length <= 2 ? `Division ${raw.toUpperCase()}` : raw;
+}
+function normalizeRating(value='') {
+  const v = String(value || '').trim().replace(/,/g, '.');
+  if (!v || ['unknown','не знаю','n/a','na','-','?'].includes(v.toLowerCase())) return '';
+  return v;
+}
+function normalizeStatus(value='') {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return '';
+  if (['active','активен','активный','активна','подтвержден','подтверждён','confirmed','paid'].includes(v)) return 'active';
+  if (['waitlist','wait list','waiting','лист ожидания','ожидание','pending'].includes(v)) return 'waitlist';
+  return v;
+}
+
+// --- статусы игрока в листе заявок -------------------------------------------
+//
+// Рабочих статусов ровно четыре: пусто (человек просто зашёл в бота), waitlist,
+// payment и active. Плюс inactive — единственный «выключатель» для тех, кому
+// отказали или кто ушёл; раньше под это было шесть разных слов, и три места в
+// коде понимали их по-разному.
+//
+// Старые значения из таблицы продолжаем понимать: canonicalStatus сводит их к
+// рабочим, так что руками в таблице править ничего не нужно — новые записи
+// пишутся уже по-новому, старые доживают свой век и читаются корректно.
+//
+// ВАЖНО: это словарь ТОЛЬКО для колонки status в листе заявок. У заявок и
+// платежей (application_status, payment_status) свой набор слов, он не меняется.
+export const APPLICANT_STATUS = { new:'', waitlist:'waitlist', payment:'payment', active:'active', inactive:'inactive' };
+const STATUS_ALIASES = {
+  lead:'', new:'', '':'',
+  waitlist:'waitlist', wait_list:'waitlist', waiting:'waitlist', pending:'waitlist',
+  application_received:'waitlist', submitted:'waitlist',
+  payment:'payment', waiting_payment:'payment', payment_required:'payment',
+  proof_received:'payment', payment_pending:'payment',
+  active:'active', confirmed:'active', approved:'active', payment_approved:'active', paid:'active',
+  inactive:'inactive', rejected:'inactive', declined:'inactive', refunded:'inactive',
+  blocked:'inactive', banned:'inactive', left:'inactive', unsubscribed:'inactive'
+};
+// Незнакомое значение возвращаем как есть: если организатор пометил строку
+// своим словом, мы его не стираем и не приравниваем к отказу.
+export function canonicalStatus(value='') {
+  const v = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!v) return '';
+  return Object.prototype.hasOwnProperty.call(STATUS_ALIASES, v) ? STATUS_ALIASES[v] : v;
+}
+export function isInactiveStatus(value='') { return canonicalStatus(value) === 'inactive'; }
+function isGenericPlayerCell(value='') {
+  const v = String(value || '').trim().toLowerCase();
+  return !v || ['name','player','players','participant','participants','имя','игрок','игроки','участник','участники','ntrp','raketo','rating','рейтинг','status','статус','country','страна','telegram','whatsapp','phone','телефон','division','дивизион'].includes(v);
+}
+function findParticipantsHeaderRow(values=[]) {
+  return values.findIndex(r => (r || []).some(c => PARTICIPANT_NAME_HEADERS.includes(normalizeHeader(c))));
+}
+function parseDivisionSummary(values=[], headerRowIndex=-1) {
+  // Rows above the player table where column A is a division name and column B/C hold numbers.
+  const limit = headerRowIndex >= 0 ? headerRowIndex : values.length;
+  const divisions = [];
+  let note = '';
+  for (let r = 0; r < limit; r++) {
+    const row = values[r] || [];
+    const first = String(row[0] || '').trim();
+    if (!note) {
+      const long = row.map(c => String(c || '').trim()).find(c => c.length > 40 && !/^\d/.test(c));
+      if (long) note = long;
+    }
+    if (!isLikelyDivisionHeader(first)) continue;
+    const size = Number(String(row[2] || '').replace(/[^0-9]/g, '')) || 0;
+    const declared = Number(String(row[1] || '').replace(/[^0-9]/g, '')) || 0;
+    divisions.push({ division: normalizeDivisionName(first), size, declared_count: declared, order: divisions.length });
+  }
+  return { divisions, note };
+}
+function parseParticipantRows(values=[], headerRowIndex=0) {
+  const headers = values[headerRowIndex] || [];
+  const normHeaders = headers.map(normalizeHeader);
+  const players = [];
+  for (let r = headerRowIndex + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    const raw = {};
+    headers.forEach((h, i) => { const key = normHeaders[i] || `col_${i+1}`; raw[key] = String(row[i] ?? '').trim(); });
+    const name = firstNonEmpty(raw, PARTICIPANT_NAME_HEADERS);
+    if (!name || isGenericPlayerCell(name)) continue;
+    const divisionRaw = firstNonEmpty(raw, ['division','дивизион','group','группа']);
+    const rating = normalizeRating(firstNonEmpty(raw, ['ntrp','ntrp_raketo','raketo','rating','рейтинг','рейтинг_ntrp']));
+    const status = normalizeStatus(firstNonEmpty(raw, ['status','статус']));
+    const fields = [];
+    headers.forEach((h, i) => {
+      const key = normHeaders[i];
+      const label = String(h || '').trim();
+      const value = String(row[i] ?? '').trim();
+      if (label && value && PARTICIPANT_PUBLIC_KEYS.has(key)) fields.push({ key, label, value });
+    });
+    // telegram_id из таблицы участников (если колонка заведена) — точная привязка вместо
+    // сопоставления по имени. В WebApp не отдаётся: остаётся только на сервере.
+    const telegramId = firstNonEmpty(raw, ['telegram_id','telegramid','tg_id','telegram']).replace(/^https?:\/\/t\.me\//,'').replace(/^@/,'');
+    players.push({ rowNumber: r + 1, name, division: normalizeDivisionName(divisionRaw), division_raw: divisionRaw, rating, status, telegram_id: /^\d+$/.test(telegramId) ? telegramId : '', fields });
+  }
+  return players;
+}
+function buildParticipantGroups(players=[], divisions=[]) {
+  const byName = new Map();
+  divisions.forEach(d => byName.set(d.division, { division: d.division, size: d.size || 0, order: d.order, players: [] }));
+  let extraOrder = divisions.length;
+  for (const p of players) {
+    const key = p.division || '';
+    if (!key) continue;
+    if (!byName.has(key)) byName.set(key, { division: key, size: 0, order: extraOrder++, players: [] });
+    byName.get(key).players.push(p);
+  }
+  const unassigned = players.filter(p => !p.division);
+  const groups = [...byName.values()].sort((a,b) => a.order - b.order).map(g => ({
+    division: g.division,
+    size: g.size,
+    count: g.players.length,
+    active: g.players.filter(p => p.status === 'active').length,
+    waitlist: g.players.filter(p => p.status === 'waitlist').length,
+    players: g.players
+  }));
+  if (unassigned.length) groups.push({ division: '', size: 0, count: unassigned.length, active: unassigned.filter(p => p.status === 'active').length, waitlist: unassigned.filter(p => p.status === 'waitlist').length, players: unassigned, unassigned: true });
+  return groups;
+}
+// ---------------------------------------------------------------------------
+// Website player pages (read-only backend sheet of phukettennis.com).
+// Used to make names in the participants list clickable and show avatars.
+// ---------------------------------------------------------------------------
+const WEBSITE_CACHE_MS = 5 * 60_000;
+let websitePlayersCache = { t: 0, v: null };
+
+function normalizePersonName(value='') {
+  return String(value || '').toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9\s]/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+const FIRST_NAME_ALIASES = {
+  alex:'alexander', alexandr:'alexander', aleksandr:'alexander', sasha:'alexander',
+  ilya:'ilia', ilia:'ilia', misha:'michael', mikhail:'michael', mike:'michael',
+  tim:'timofei', slava:'viacheslav', vyacheslav:'viacheslav', kostya:'kostas', konstantin:'kostas',
+  dima:'dmitry', dmitriy:'dmitry', dmitrii:'dmitry', sergey:'sergei', serge:'sergei',
+  andrey:'andrei', andrew:'andrei', evgeny:'evgenii', evgeniy:'evgenii', eugene:'evgenii',
+  nick:'nikolai', nikolay:'nikolai', vlad:'vladislav', dasha:'daria', darya:'daria', masha:'maria', mariya:'maria',
+  olya:'olga', anya:'anna', ksenia:'xenia', kseniya:'xenia', ira:'irina'
+};
+function nameKeys(value='') {
+  const norm = normalizePersonName(value);
+  if (!norm) return [];
+  const parts = norm.split(' ');
+  const keys = new Set([norm]);
+  if (parts.length >= 2) {
+    const first = FIRST_NAME_ALIASES[parts[0]] || parts[0];
+    const last = parts[parts.length - 1];
+    keys.add(`${first} ${last}`);
+    keys.add(`${last} ${first}`);
+    keys.add(`${first.slice(0,3)}* ${last}`);
+  }
+  return [...keys];
+}
+
+async function websitePlayersSheetTitle() {
+  const meta = await spreadsheetMetaFor(WEBSITE_SPREADSHEET_ID);
+  const sheets = meta.sheets || [];
+  const byId = sheets.find(sh => String(sh.properties?.sheetId || '') === String(WEBSITE_PLAYERS_SHEET_ID));
+  return byId?.properties?.title || null;
+}
+
+export async function getWebsitePlayers() {
+  if (websitePlayersCache.v && Date.now() - websitePlayersCache.t < WEBSITE_CACHE_MS) return websitePlayersCache.v;
+  const title = await websitePlayersSheetTitle();
+  if (!title) return [];
+  const values = await valuesGetFromSpreadsheet(WEBSITE_SPREADSHEET_ID, `'${title}'!A:AZ`);
+  const headerRowIndex = values.findIndex(r => {
+    const h = (r || []).map(normalizeHeader);
+    return h.includes('player_name') && (h.includes('profile_url_by_id') || h.includes('profile_url_by_name') || h.includes('player_slug'));
+  });
+  if (headerRowIndex < 0) return [];
+  const headers = values[headerRowIndex].map(normalizeHeader);
+  const masterPhotos = await getMasterPhotos();
+  const players = [];
+  for (let r = headerRowIndex + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    const obj = {};
+    headers.forEach((h, i) => { if (h) obj[h] = String(row[i] ?? '').trim(); });
+    if (!obj.player_name) continue;
+    const rel = obj.profile_url_by_id || obj.profile_url_by_name || (obj.player_id ? `/player-profile?playerId=${encodeURIComponent(obj.player_id)}&player=${encodeURIComponent(obj.player_name)}` : '');
+    if (!rel) continue;
+    players.push({
+      player_id: obj.player_id || '',
+      slug: obj.player_slug || '',
+      name: obj.player_name,
+      photo_url: [...masterPhotos].find(([name])=>sameName(name,obj.player_name))?.[1] || '',
+      division: obj.current_division || '',
+      profile_url: /^https?:\/\//i.test(rel) ? rel : `${WEBSITE_URL}${rel.startsWith('/') ? '' : '/'}${rel}`
+    });
+  }
+  websitePlayersCache = { t: Date.now(), v: players };
+  return players;
+}
+
+// ---------------------------------------------------------------------------
+// Витрина лиги для мини-приложения: годовая гонка, список игроков, карточка.
+//
+// Лист Frontend_Profile_All в таблице профилей — это готовый слой, который
+// собирает сайт: место в гонке, очки, матчи, победы, win rate, дивизион, NTRP,
+// опыт, национальность, форму, фото и достижения. Ничего не пересчитываем,
+// только читаем — иначе цифры в боте и на сайте разъедутся.
+// ---------------------------------------------------------------------------
+const PROFILE_SHEET_TITLE = 'Frontend_Profile_All';
+const PROFILES_CACHE_MS = 5 * 60 * 1000;
+let profilesCache = { t: 0, v: null };
+
+// Сбрасывается, когда бот записал подтверждённый счёт: следующий, кто откроет
+// экран, увидит уже новые цифры, а не пятиминутной давности.
+// Кэши, собранные поверх этих данных, живут в других файлах (снимок витрины
+// лиги — в index.js). Чтобы им не приходилось угадывать момент, они
+// подписываются здесь и сбрасываются вместе со всеми остальными.
+const leagueCacheHooks = new Set();
+export function onLeagueCacheInvalidated(fn) { if (typeof fn === 'function') leagueCacheHooks.add(fn); }
+export function invalidateLeagueCache() {
+  masterPlayersCache = {t:0,rows:null};
+  profilesCache = { t: 0, v: null };
+  eventsCache = { t: 0, v: null };
+  achCache = { t: 0, v: null };
+  historyCache = { t: 0, v: null };
+  seasonPointsCache = { t: 0, v: null };
+  seasonHistCache = { t: 0, v: null };
+  websitePlayersCache = { t: 0, v: null };
+  masterPhotoCache = { t: 0, v: null };
+  for (const hook of leagueCacheHooks) {
+    try { hook(); } catch (e) { console.error('league cache hook failed:', e.message); }
+  }
+}
+
+function pickNumber(v) {
+  const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.').replace('%', ''));
+  return Number.isFinite(n) ? n : 0;
+}
+function parseJsonCell(v) {
+  const raw = String(v ?? '').trim();
+  if (!raw || raw === '[]') return [];
+  try { const out = JSON.parse(raw); return Array.isArray(out) ? out : []; }
+  catch (e) { return []; }
+}
+// «WIN WIN LOST WIN» → ['W','W','L','W'] от старого к новому.
+function parseForm(v) {
+  return String(v ?? '').trim().split(/\s+/).filter(Boolean)
+    .map(x => x.toUpperCase().startsWith('W') ? 'W' : (x.toUpperCase().startsWith('L') ? 'L' : ''))
+    .filter(Boolean);
+}
+
+// Универсальное чтение листа «шапка + строки» из чужой таблицы.
+async function readNamedSheet(spreadsheetId, titles, mustHaveHeader) {
+  for (const title of (Array.isArray(titles) ? titles : [titles])) {
+    let values;
+    try { values = await valuesGetFromSpreadsheet(spreadsheetId, `'${title}'!A:BZ`); }
+    catch (e) { continue; }                       // листа с таким именем нет — пробуем следующее
+    const headerRowIndex = values.findIndex(r => (r || []).map(normalizeHeader).includes(mustHaveHeader));
+    if (headerRowIndex < 0) continue;
+    const headers = values[headerRowIndex].map(normalizeHeader);
+    const rows = [];
+    for (let r = headerRowIndex + 1; r < values.length; r++) {
+      const row = values[r] || [];
+      const o = {};
+      headers.forEach((h, i) => { if (h) o[h] = String(row[i] ?? '').trim(); });
+      rows.push(o);
+    }
+    return { headers, rows };
+  }
+  return { headers: [], rows: [] };
+}
+
+// История матчей: лист Match_History_All даёт по строке на игрока на матч,
+// со счётом уже развёрнутым в его сторону и готовой меткой WIN/LOST.
+let historyCache = { t: 0, v: null };
+export async function getLeagueMatchHistory() {
+  if (historyCache.v && Date.now() - historyCache.t < PROFILES_CACHE_MS) return historyCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Match_History_All', 'player_id');
+  // Пустая колонка Competition встречается: матч записан, а подпись сезона в
+  // строке таблицы дивизиона не стояла. Без сезона матч выпадал отовсюду — из
+  // Fantasy, из истории дивизионов, из строки идущего сезона. Считаем такие
+  // строки последним из известных сезонов: раньше него подписи проставлены,
+  // а пустыми остаются именно свежие.
+  const seen = rows.map(r => Number(parseSeasonNumber(r.season_id, r.season, r.season_number, r.competition)))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const fallbackSeason = seen.length ? String(Math.max(...seen)) : '';
+  const byPlayer = new Map();
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    if (!pid || !r.opponent_name) continue;
+    const item = {
+      match_no: r.match || r.match_no || r.source_match || '',
+      date: r.match_date || '',
+      competition: r.competition || '',
+      opponent_id: r.opponent_id || '',
+      opponent: r.opponent_name || '',
+      opponent_photo: r.opponent_photo_url || '',
+      opponent_division: r.opponent_division || '',
+      division: r.player_division || '',
+      // Сезон матча: сначала своя колонка, если она заполнена, иначе название
+      // соревнования — «Season 1», «Сезон 1», «Final S1» понимаются одинаково.
+      // Сезон нужен, чтобы клик по ярлыку дивизиона вёл в таблицу того самого сезона.
+      season: parseSeasonNumber(r.season_id, r.season, r.season_number, r.competition) || fallbackSeason,
+      result: String(r.result || '').toUpperCase().startsWith('W') ? 'WIN' : 'LOST',
+      score: r.score || ''
+    };
+    if (!byPlayer.has(pid)) byPlayer.set(pid, []);
+    byPlayer.get(pid).push(item);
+  }
+  // Свежие сверху: сортируем по номеру матча, он растёт со временем.
+  for (const list of byPlayer.values()) list.sort((a, b) => Number(b.match_no || 0) - Number(a.match_no || 0));
+  historyCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
+}
+
+// Фото игроков из Players_Master — это тот список, который организатор ведёт
+// руками и держит в актуальном состоянии. Он нужен там, где фото приходит из
+// таблиц дивизионов: те таблицы собираются в начале сезона и с тех пор не
+// обновляются, а новых игроков в них может не быть вовсе.
+// Ключ — имя: id в таблицах дивизионов свои и с общими не совпадают.
+let masterPhotoCache = { t: 0, v: null };
+export async function getMasterPhotos() {
+  if (masterPhotoCache.v && Date.now() - masterPhotoCache.t < PROFILES_CACHE_MS) return masterPhotoCache.v;
+  const out = new Map();
+  if (!DIVISIONS_SPREADSHEET_ID && !LEAGUE_RESULTS_SHEET_ID) return out;
+  const { rows } = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
+    .catch(() => ({ rows: [] }));
+  // Колонку с фото ищем не по точному имени: в таблице она называлась и
+  // player_photo, и photo_url, и просто «Фото». Берём первую подходящую, где
+  // действительно лежит ссылка, и приводим её к виду, который покажет браузер.
+  const photoKeys = new Set(['player_photo', 'photo', 'photo_url', 'player_photo_url', 'avatar', 'image', 'foto']);
+  const looksPhoto = (k) => photoKeys.has(k) || /photo|avatar|image|фото|аватар/i.test(k);
+  for (const r of rows) {
+    const name = String(r.player_name || '').trim();
+    if (!name) continue;
+    let url = '';
+    for (const [k, v] of Object.entries(r)) {
+      if (!looksPhoto(k)) continue;
+      const direct = directPhotoUrl(v);
+      if (direct) { url = direct; break; }
+    }
+    if (url) out.set(name, url);
+  }
+  masterPhotoCache = { t: Date.now(), v: out };
+  return out;
+}
+
+// Очки по сезонам: лист «Year ranking points» в главной таблице, колонки Season 1..10.
+// Заполняется вручную, поэтому читаем как есть и ничего не пересчитываем.
+let seasonPointsCache = { t: 0, v: null };
+async function getSeasonPoints() {
+  if (seasonPointsCache.v && Date.now() - seasonPointsCache.t < PROFILES_CACHE_MS) return seasonPointsCache.v;
+  const byPlayer = new Map();
+  if (!LEAGUE_RESULTS_SHEET_ID) return byPlayer;
+  const { headers, rows } = await readNamedSheet(LEAGUE_RESULTS_SHEET_ID,
+    ['Year ranking points', 'Year ranking points input'], 'player_id').catch(() => ({ headers: [], rows: [] }));
+  const seasonKeys = headers.filter(h => /^season_\d+$/.test(h));
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    if (!pid) continue;
+    const map = {};
+    for (const k of seasonKeys) {
+      const n = Number(k.replace('season_', ''));
+      const v = String(r[k] ?? '').trim();
+      if (v !== '') map[n] = pickNumber(v);
+    }
+    byPlayer.set(pid, map);
+  }
+  seasonPointsCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
+}
+
+// История сезонов: что за сезон, дивизион, место и очки. Место и итог плей-офф
+// в таблице пока не заполнены — тогда строка просто короче, врать не будем.
+let seasonHistCache = { t: 0, v: null };
+async function getSeasonHistory() {
+  if (seasonHistCache.v && Date.now() - seasonHistCache.t < PROFILES_CACHE_MS) return seasonHistCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Season_History_All', 'player_id');
+  const byPlayer = new Map();
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    const num = Number(r.season_number || 0);
+    if (!pid || !num) continue;
+    if (!byPlayer.has(pid)) byPlayer.set(pid, []);
+    byPlayer.get(pid).push({
+      number: num,
+      name: r.season_name || `Season ${num}`,
+      division: r.division || '',
+      regular_finish: r.regular_finish || '',
+      playoff: r.playoff_result || '',
+      position: r.final_position || '',
+      points: pickNumber(r.ranking_points || ''),
+      promotion: r.promotion_status || ''
+    });
+  }
+  for (const list of byPlayer.values()) list.sort((a, b) => b.number - a.number);
+  seasonHistCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
+}
+
+export async function getLeagueProfiles() {
+  if (profilesCache.v && Date.now() - profilesCache.t < PROFILES_CACHE_MS) return profilesCache.v;
+  const values = await valuesGetFromSpreadsheet(WEBSITE_SPREADSHEET_ID, `'${PROFILE_SHEET_TITLE}'!A:BZ`);
+  const headerRowIndex = values.findIndex(r => (r || []).map(normalizeHeader).includes('player_name'));
+  if (headerRowIndex < 0) return [];
+  const headers = values[headerRowIndex].map(normalizeHeader);
+  const at = (row, key) => {
+    const i = headers.indexOf(key);
+    return i < 0 ? '' : String(row[i] ?? '').trim();
+  };
+  const [avatarIds, masterPhotos] = await Promise.all([publishedAvatars().catch(() => new Map()), getMasterPhotos().catch(() => new Map())]);
+  const masterPhotoFor = name => [...masterPhotos].find(([n]) => sameName(n, name))?.[1] || '';
+  const out = [];
+  for (let r = headerRowIndex + 1; r < values.length; r++) {
+    const row = values[r] || [];
+    const name = at(row, 'player_name');
+    if (!name) continue;
+    out.push({
+      id: at(row, 'player_id'),
+      slug: at(row, 'player_slug'),
+      name,
+      photo: avatarIds.get(name.toLowerCase()) ? PUBLIC_URL+'/avatar/'+encodeURIComponent(avatarIds.get(name.toLowerCase()))+'.png' : masterPhotoFor(name),
+      division: at(row, 'current_division'),
+      position: pickNumber(at(row, 'position')),
+      points: pickNumber(at(row, 'total_ranking_points')),
+      seasons: pickNumber(at(row, 'seasons_played')),
+      matches: pickNumber(at(row, 'matches_played')),
+      wins: pickNumber(at(row, 'wins')),
+      losses: pickNumber(at(row, 'losses')),
+      win_rate: at(row, 'win_rate'),
+      status: at(row, 'status'),
+      division_position: at(row, 'division_position'),
+      form: parseForm(at(row, 'recent_form')),
+      ntrp: at(row, 'ntrp'),
+      experience: at(row, 'experience'),
+      nationality: at(row, 'nationality'),
+      gender: at(row, 'gender'),
+      hand: at(row, 'preferred_hand'),
+      style: at(row, 'playing_style'),
+      joined: at(row, 'joined_ptf'),
+      profile_url: at(row, 'profile_url_by_id') || at(row, 'profile_url_by_name'),
+      seasons_list: parseJsonCell(at(row, 'league_seasons_json')),
+      titles: parseJsonCell(at(row, 'title_achievements_json'))
+    });
+  }
+  // Сезоны собираем из трёх мест: сам список — из истории сезонов, очки за сезон —
+  // из листа годовой гонки (там их вводят руками), титулы и повышения — из достижений.
+  const [pointsBy, histBy, achBy] = await Promise.all([
+    getSeasonPoints().catch(() => new Map()),
+    getSeasonHistory().catch(() => new Map()),
+    getLeagueAchievements().catch(() => new Map())
+  ]);
+  for (const p of out) {
+    const pts = pointsBy.get(String(p.id)) || {};
+    const hist = histBy.get(String(p.id)) || [];
+    // Ручные достижения приоритетнее: у них есть тип, дата и сезон.
+    const manual = achBy.get(String(p.id)) || [];
+    if (manual.length) p.achievements = manual;
+    else p.achievements = (p.titles || []).map(t => ({
+      type: String(t.type || t.title || ''), title: String(t.type || t.title || ''),
+      date: '', season: '', priority: 99, notes: ''
+    })).filter(x => x.title);
+    const numbers = new Set([...hist.map(h => h.number), ...Object.keys(pts).map(Number)]);
+    const seasons = [...numbers].filter(Boolean).sort((a, b) => b - a).map(n => {
+      const h = hist.find(x => x.number === n) || {};
+      const titles = (p.titles || [])
+        .map(t => String(t.type || t.title || ''))
+        .filter(t => t && new RegExp(`season\\s*${n}\\b`, 'i').test(t));
+      const promo = (p.titles || [])
+        .map(t => String(t.type || t.title || ''))
+        .filter(t => /promotion|relegation/i.test(t));
+      return {
+        number: n,
+        name: h.name || `Season ${n}`,
+        division: h.division || (n === Math.max(...numbers) ? p.division : ''),
+        position: h.position || '',
+        regular_finish: h.regular_finish || '',
+        playoff: h.playoff || '',
+        promotion: h.promotion || (promo.length ? promo[0] : ''),
+        points: h.points || pts[n] || 0,
+        titles
+      };
+    });
+    if (seasons.length) p.seasons_list = seasons;
+  }
+
+  // Порядок как в годовой гонке: по месту, у кого места нет — в конец по очкам.
+  out.sort((a, b) => (a.position || 9999) - (b.position || 9999) || b.points - a.points);
+  profilesCache = { t: Date.now(), v: out };
+  return out;
+}
+
+// Достижения: отдельный лист, который заполняется руками. Тип достижения
+// определяет иконку на фронте, дата и сезон идут подписью.
+let achCache = { t: 0, v: null };
+export async function getLeagueAchievements() {
+  if (achCache.v && Date.now() - achCache.t < PROFILES_CACHE_MS) return achCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Achievements', 'player_id')
+    .catch(() => ({ rows: [] }));
+  const byPlayer = new Map();
+  for (const r of rows) {
+    const pid = String(r.player_id || '').trim();
+    const title = String(r.title || r.achievement_type || '').trim();
+    if (!pid || !title) continue;
+    if (!byPlayer.has(pid)) byPlayer.set(pid, []);
+    byPlayer.get(pid).push({
+      type: String(r.achievement_type || '').trim(),
+      title,
+      date: String(r.date || '').trim(),
+      season: String(r.season_id || '').trim(),
+      priority: pickNumber(r.display_priority || ''),
+      notes: String(r.notes || '').trim()
+    });
+  }
+  for (const list of byPlayer.values()) list.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+  achCache = { t: Date.now(), v: byPlayer };
+  return byPlayer;
+}
+
+// Турниры и события: реестр в таблице профилей. Пока пустой — раздел покажет
+// честную заглушку, а как только строки появятся, оживёт сам.
+let eventsCache = { t: 0, v: null };
+export async function getLeagueEvents() {
+  if (eventsCache.v && Date.now() - eventsCache.t < PROFILES_CACHE_MS) return eventsCache.v;
+  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID,
+    ['Tournament_History_All', 'Events'], 'event_id').catch(() => ({ rows: [] }));
+  const seen = new Map();
+  for (const r of rows) {
+    const id = String(r.event_id || '').trim();
+    const name = String(r.event_name || '').trim();
+    if (!id || !name) continue;
+    if (!seen.has(id)) {
+      seen.set(id, {
+        id, name,
+        type: r.competition_type || '',
+        format: r.format || '',
+        category: r.category || '',
+        start: r.start_date || '',
+        end: r.end_date || '',
+        url: r.source_url || '',
+        notes: r.notes || '',
+        players: []
+      });
+    }
+    const pname = String(r.player_name || '').trim();
+    if (pname) seen.get(id).players.push({
+      id: r.player_id || '', name: pname,
+      standing: r.standing || '', result: r.result_label || '',
+      won: r.matches_won || '', lost: r.matches_lost || '', points: r.points_earned || ''
+    });
+  }
+  const out = [...seen.values()].sort((a, b) => String(b.start).localeCompare(String(a.start)));
+  eventsCache = { t: Date.now(), v: out };
+  return out;
+}
+
+// Ссылка на страницу игрока на сайте по имени — для ленты результатов,
+// где имена победителя и проигравшего кликабельны.
+export async function getWebsiteProfileUrl(name) {
+  if (!name) return '';
+  let site = [];
+  try { site = await getWebsitePlayers(); } catch (e) { return ''; }
+  if (!site.length) return '';
+  const exact = new Map(), loose = new Map();
+  for (const sp of site) {
+    const keys = nameKeys(sp.name);
+    if (keys[0]) exact.set(keys[0], sp);
+    keys.slice(1).forEach(k => { if (!loose.has(k)) loose.set(k, sp); });
+  }
+  const keys = nameKeys(name);
+  const hit = (keys[0] && exact.get(keys[0])) || keys.slice(1).map(k => loose.get(k)).find(Boolean) || null;
+  return hit ? hit.profile_url : '';
+}
+
+// Adds profile_url / photo_url to manual participants when a website page exists for the same person.
+export async function attachWebsiteProfiles(players=[]) {
+  let site = [];
+  try { site = await getWebsitePlayers(); } catch (e) { console.error('website players load failed:', e.message); return players; }
+  if (!site.length) return players;
+  const exact = new Map();
+  const loose = new Map();
+  for (const sp of site) {
+    const keys = nameKeys(sp.name);
+    if (keys[0]) exact.set(keys[0], sp);
+    keys.slice(1).forEach(k => { if (!loose.has(k)) loose.set(k, sp); });
+  }
+  for (const p of players) {
+    const keys = nameKeys(p.name);
+    const hit = (keys[0] && exact.get(keys[0])) || keys.slice(1).map(k => loose.get(k)).find(Boolean) || null;
+    if (hit) { p.profile_url = hit.profile_url; p.photo_url = hit.photo_url; p.website_player_id = hit.player_id; }
+  }
+  return players;
+}
+
+// ---------------------------------------------------------------------------
+// Партнёры лиги. Лист «Partners» в той же таблице, что и состав участников:
+// Костас правит его руками, а вкладка в приложении просто показывает то, что там
+// лежит. Колонки ищем по заголовкам, а не по буквам, — тогда можно переставлять
+// столбцы и дописывать свои, ничего не ломая.
+//
+// Название | Описание | Картинка | Телефон/WhatsApp | Сообщение | Ссылка | Категория | Порядок | Вкл
+//
+// «Сообщение» — заготовка письма в WhatsApp, как у кортов: человек жмёт кнопку и
+// отправляет готовый текст. Подстановка {name} — имя игрока, {партнёр} — имя
+// партнёра; больше ничего выдумывать не нужно.
+const PARTNERS_SHEET = 'Partners';
+const PARTNERS_TEXT_SHEET = 'Partners_Page';
+let partnersCache = { t: 0, v: null };
+let partnersTextCache = { t: 0, v: null };
+export function invalidatePartnersCache() { partnersCache = { t: 0, v: null }; partnersTextCache = { t: 0, v: null }; }
+
+// Колонку ищем по заголовку, а не по букве: можно переставлять столбцы и
+// дописывать свои. Языковые варианты — тот же заголовок с пометкой RU или EN
+// («Описание RU», «Description EN»); если языковой колонки нет, берётся общая.
+const partnerField = (row, names, lang = '') => {
+  const wanted = lang ? names.flatMap(n => [`${n} ${lang}`, `${n}_${lang}`, `${lang} ${n}`]) : names;
+  for (const name of wanted) {
+    const hit = Object.keys(row).find(k => normalizeHeader(k) === normalizeHeader(name));
+    if (hit && safe(row[hit])) return safe(row[hit]);
+  }
+  return '';
+};
+// Значение на двух языках: если заполнена только общая колонка, она идёт в оба.
+const partnerPair = (row, names) => {
+  const plain = partnerField(row, names);
+  return { ru: partnerField(row, names, 'ru') || plain, en: partnerField(row, names, 'en') || plain };
+};
+async function readPartnersSheet(title) {
+  try {
+    return await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+  } catch (e) {
+    // Листа ещё нет — это не поломка: вкладка просто покажет пустое состояние.
+    console.log(`partners sheet «${title}» not read:`, e.message);
+    return null;
+  }
+}
+
+export async function getPartners() {
+  if (partnersCache.v && Date.now() - partnersCache.t < PROFILES_CACHE_MS) return partnersCache.v;
+  const values = await readPartnersSheet(PARTNERS_SHEET);
+  if (!values) { partnersCache = { t: Date.now(), v: [] }; return []; }
+  const headerIndex = values.findIndex(row => (row || []).some(cell =>
+    ['name', 'название', 'название ru', 'партнёр', 'партнер', 'partner'].includes(normalizeHeader(cell))));
+  if (headerIndex < 0) { partnersCache = { t: Date.now(), v: [] }; return []; }
+  const headers = values[headerIndex] || [];
+  const out = [];
+  for (const raw of values.slice(headerIndex + 1)) {
+    const row = {};
+    headers.forEach((h, i) => { if (safe(h)) row[safe(h)] = raw?.[i] ?? ''; });
+    const name = partnerPair(row, ['name', 'название', 'партнёр', 'партнер', 'partner']);
+    if (!name.ru && !name.en) continue;
+    const active = partnerField(row, ['active', 'вкл', 'показывать', 'status', 'статус']) || 'yes';
+    if (['no', 'false', '0', 'off', 'нет', 'выкл', 'hidden', 'скрыт'].includes(active.toLowerCase())) continue;
+    const phone = partnerField(row, ['whatsapp', 'телефон', 'phone', 'контакт', 'contact']);
+    out.push({
+      name: name.ru || name.en,
+      name_en: name.en || name.ru,
+      description: partnerPair(row, ['description', 'описание', 'about', 'текст']),
+      category: partnerPair(row, ['category', 'категория', 'type', 'тип']),
+      message: partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']),
+      photo: directPhotoUrl(partnerField(row, ['image', 'картинка', 'photo', 'фото', 'logo', 'логотип'])),
+      whatsapp: phone.replace(/[^0-9]/g, ''),
+      phone_label: phone,
+      link: partnerField(row, ['link', 'ссылка', 'site', 'сайт', 'url']),
+      order: Number(partnerField(row, ['order', 'порядок', 'sort'])) || 0
+    });
+  }
+  out.sort((a, b) => (a.order || 999) - (b.order || 999) || String(a.name).localeCompare(String(b.name)));
+  partnersCache = { t: Date.now(), v: out };
+  return out;
+}
+
+// Подписи самой страницы — заголовок, вводный текст, пустое состояние, надписи
+// на кнопках. Лист Partners_Page: Ключ | RU | EN. Листа нет или ключ не задан —
+// показывается встроенный текст, ничего не ломается.
+export async function getPartnersPageTexts() {
+  if (partnersTextCache.v && Date.now() - partnersTextCache.t < PROFILES_CACHE_MS) return partnersTextCache.v;
+  const values = await readPartnersSheet(PARTNERS_TEXT_SHEET);
+  const out = {};
+  if (values) {
+    const headerIndex = values.findIndex(row => (row || []).some(cell =>
+      ['key', 'ключ', 'поле', 'field'].includes(normalizeHeader(cell))));
+    const rows = headerIndex >= 0 ? values.slice(headerIndex + 1) : values;
+    const headers = headerIndex >= 0 ? (values[headerIndex] || []) : [];
+    const columnFor = names => headers.findIndex(h => names.includes(normalizeHeader(h)));
+    const ruAt = headerIndex >= 0 ? columnFor(['ru', 'рус', 'русский']) : 1;
+    const enAt = headerIndex >= 0 ? columnFor(['en', 'англ', 'английский', 'eng']) : 2;
+    for (const row of rows) {
+      const key = normalizeHeader(row?.[0]);
+      if (!key) continue;
+      const ru = safe(row?.[ruAt >= 0 ? ruAt : 1]);
+      const en = safe(row?.[enAt >= 0 ? enAt : 2]);
+      if (ru || en) out[key] = { ru: ru || en, en: en || ru };
+    }
+  }
+  partnersTextCache = { t: Date.now(), v: out };
+  return out;
+}
+
+export async function getManualParticipants(season = '') {
+  const title = await manualParticipantsSheetTitle(season);
+  const values = await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+  const parsed = parseManualParticipantsValues(values);
+  await attachWebsiteProfiles(parsed.players); // groups reference the same player objects
+  // Пустой лист нового сезона — это не ошибка: состав ещё собирают. Отдаём его
+  // как есть, вместе с названием вкладки, чтобы экран мог честно сказать об этом.
+  return { ...parsed, sheet: title, season: String(season || '') };
+}
+export function parseManualParticipantsValues(values=[]) {
+  if (!values.length) return { players: [], groups: [], divisions: [], note: '', totals: { total:0, active:0, waitlist:0 } };
+  const headerRowIndex = findParticipantsHeaderRow(values);
+  const { divisions, note } = parseDivisionSummary(values, headerRowIndex);
+  const players = headerRowIndex >= 0 ? parseParticipantRows(values, headerRowIndex) : [];
+  const groups = buildParticipantGroups(players, divisions);
+  const totals = { total: players.length, active: players.filter(p => p.status === 'active').length, waitlist: players.filter(p => p.status === 'waitlist').length };
+  return { players, groups, divisions, note, totals };
+}
+
+async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
+  const meta = await spreadsheetMeta();
+  const exists = meta.sheets?.some(s => s.properties?.title === sheetName);
+  if (!exists) {
+    const props = { title: sheetName, gridProperties: { rowCount: 1000, columnCount: Math.max(headers.length, 20), frozenRowCount: 1 } };
+    if (sheetId) props.sheetId = sheetId;
+    await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [{ addSheet: { properties: props } }] } });
+  }
+  const values = await valuesGet(`'${sheetName}'!A1:BZ1`).catch(() => []);
+  const current = values[0] || [];
+  const merged = [...current];
+  for (const h of headers) if (!merged.includes(h)) merged.push(h);
+  if (merged.length && merged.join('|') !== current.join('|')) await valuesUpdate(`'${sheetName}'!A1:${colToA1(merged.length)}1`, [merged]);
+  cache.clear();
+  return merged;
+}
+
+// Заводит вспомогательный лист (события, записи, деньги) и дописывает недостающие
+// заголовки. Существующие колонки не трогаем — только добавляем свои в конец.
+export async function ensureExtraSheet(sheetName, headers) {
+  const key = `extra:${sheetName}`;
+  if (!extraSheetsReady.has(key)) {
+    extraSheetsReady.set(key, ensureSheetWithHeaders(sheetName, headers)
+      .catch(e => { extraSheetsReady.delete(key); throw e; }));
+  }
+  return extraSheetsReady.get(key);
+}
+const extraSheetsReady = new Map();
+
+// Сбросить кэш листов. Записи через бота делают это сами; отдельная кнопка
+// нужна там, где таблицу правили руками и хотят увидеть результат сразу.
+export function invalidateSheetCache() { cache.clear(); }
+
+async function readSheet(sheetName) {
+  const values = await valuesGet(`'${sheetName}'!A:BZ`);
+  const headers = values[0] || [];
+  const rows = values.slice(1).map((r, idx) => {
+    const obj = { _rowNumber: idx + 2 };
+    headers.forEach((h, i) => obj[h] = r[i] ?? '');
+    return obj;
+  });
+  const out = { headers, rows, values };
+  cache.set(`rows:${sheetName}`, { t: Date.now(), v: out });
+  return out;
+}
+// Фоновое обновление: результат никто не ждёт, ошибка только в лог — на руках
+// у человека остаются прошлые данные, и это лучше, чем ошибка на ровном месте.
+function refreshInBackground(sheetName) {
+  if (refreshing.has(sheetName)) return;
+  const task = readSheet(sheetName)
+    .catch(e => console.error(`фоновое чтение ${sheetName} не удалось:`, e.message))
+    .finally(() => refreshing.delete(sheetName));
+  refreshing.set(sheetName, task);
+}
+export async function getRows(sheetName, { useCache=true } = {}) {
+  const c = cache.get(`rows:${sheetName}`);
+  if (useCache && c) {
+    // Свежее — отдаём молча; устаревшее — тоже отдаём сразу, но ставим в фон
+    // перечитывание, чтобы следующий обращающийся получил новое.
+    if (Date.now() - c.t >= freshMsFor(sheetName)) refreshInBackground(sheetName);
+    return c.v;
+  }
+  return readSheet(sheetName);
+}
+// Прогрев: вызывается на старте и по таймеру, чтобы первый живой запрос не
+// платил за чтение. Ошибки не мешают — просто прогреется в следующий раз.
+export async function warmSheetCache(sheetNames = []) {
+  await Promise.all(sheetNames.map(name => readSheet(name).catch(() => null)));
+}
+
+// values.append сам ищет «таблицу» в диапазоне и дописывает ПОСЛЕ неё. Когда в
+// лист попадает почти пустая строка (лид, у которого заполнено одно поле),
+// Google определяет границы таблицы по ней и следующую строку начинает правее —
+// новые анкеты уехали в колонки BT..CD, и дальше сдвиг только рос. Поэтому
+// адрес строки считаем сами и пишем строго от колонки A.
+// Записи выстраиваем в очередь на лист: два одновременных сохранения иначе
+// вычислят один и тот же номер строки и затрут друг друга.
+// uniqueBy — последняя защита от дублей: проверяем «такой уже есть» не до
+// постановки в очередь, а прямо перед записью. Иначе два сохранения подряд оба
+// видят лист без нужной строки и заводят по анкете на одного человека.
+// Лист имеет фиксированный размер сетки. values.append дорисовывал строки сам,
+// а прямая запись — нет: как только анкеты доходят до последней строки листа,
+// Google отвечает «Range exceeds grid limits». Поэтому перед записью
+// добавляем строки, причём с запасом, чтобы не дёргать API на каждой анкете.
+const gridInfo = new Map();
+async function ensureRowCapacity(sheetName, rowNumber) {
+  let info = gridInfo.get(sheetName);
+  if (!info || rowNumber > info.rowCount) {
+    const meta = await spreadsheetMeta();
+    const props = meta.sheets?.find(s => s.properties?.title === sheetName)?.properties;
+    if (!props) return;
+    info = { sheetId: props.sheetId, rowCount: Number(props.gridProperties?.rowCount || 0) };
+    gridInfo.set(sheetName, info);
+  }
+  if (rowNumber <= info.rowCount) return;
+  const add = Math.max(rowNumber - info.rowCount, 200);
+  await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [
+    { appendDimension: { sheetId: info.sheetId, dimension: 'ROWS', length: add } }
+  ] } });
+  gridInfo.set(sheetName, { ...info, rowCount: info.rowCount + add });
+}
+
+const appendQueue = new Map();
+export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
+  const prev = appendQueue.get(sheetName) || Promise.resolve();
+  const task = prev.catch(() => {}).then(async () => {
+    const { headers, rows, values } = await getRows(sheetName, { useCache:false });
+    if (!headers.length) throw new Error(`Sheet "${sheetName}" has no header row`);
+    const write = (rowNumber, data) => valuesUpdate(
+      `'${sheetName}'!A${rowNumber}:${colToA1(headers.length)}${rowNumber}`,
+      [headers.map(h => data[h] ?? '')]
+    );
+    const wanted = uniqueBy ? String(obj[uniqueBy] ?? '').trim() : '';
+    if (wanted) {
+      const twin = rows.find(r => String(r[uniqueBy] ?? '').trim() === wanted);
+      if (twin?._rowNumber) {
+        // Дозаполняем только пустые поля. Иначе строка лида (status: lead,
+        // profile_completed: no) откатила бы назад полноценную анкету игрока,
+        // который просто ещё раз нажал «старт».
+        const merged = { ...twin };
+        for (const [k, v] of Object.entries(obj)) {
+          if (String(merged[k] ?? '').trim() === '' && String(v ?? '').trim() !== '') merged[k] = v;
+        }
+        await write(twin._rowNumber, merged);
+        cache.clear();
+        return { ...merged, _rowNumber: twin._rowNumber, isNew: false };
+      }
+    }
+    const target = values.length + 1;
+    await ensureRowCapacity(sheetName, target);
+    await write(target, obj);
+    cache.clear();
+    return { ...obj, _rowNumber: target, isNew: true };
+  });
+  appendQueue.set(sheetName, task);
+  return task;
+}
+
+// Физическое удаление строки. Нужно ровно там, где след не нужен вовсе —
+// удалённое событие не должно оставаться серой строкой в списке. Всё остальное
+// по-прежнему помечаем статусом, а не стираем.
+export async function deleteRow(sheetName, rowNumber) {
+  if (!rowNumber || rowNumber < 2) return false;
+  const meta = await spreadsheetMeta();
+  const props = meta.sheets?.find(s => s.properties?.title === sheetName)?.properties;
+  if (!props) return false;
+  await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [
+    { deleteDimension: { range: { sheetId: props.sheetId, dimension: 'ROWS', startIndex: rowNumber - 1, endIndex: rowNumber } } }
+  ] } });
+  gridInfo.delete(sheetName);
+  cache.clear();
+  return true;
+}
+
+export async function updateObjectByRow(sheetName, rowNumber, patch) {
+  const { headers, rows } = await getRows(sheetName, { useCache:false });
+  const current = rows.find(r => r._rowNumber === rowNumber) || {};
+  const merged = { ...current, ...patch };
+  const values = headers.map(h => merged[h] ?? '');
+  const endCol = colToA1(headers.length);
+  await valuesUpdate(`'${sheetName}'!A${rowNumber}:${endCol}${rowNumber}`, [values]);
+  cache.clear();
+}
+
+export async function getSetting(key) {
+  const { rows } = await getRows(SHEETS.settings);
+  return rows.find(r => r.key === key)?.value || '';
+}
+export async function setSetting(key, value, description='') {
+  const { rows } = await getRows(SHEETS.settings, { useCache:false });
+  const found = rows.find(r => r.key === key);
+  if (found) await updateObjectByRow(SHEETS.settings, found._rowNumber, { value, updated_at: nowISO(), description: description || found.description });
+  else await appendObject(SHEETS.settings, { key, value, description, updated_at: nowISO() });
+}
+
+export async function getBotText(text_key, language='en') {
+  const lang = language === 'ru' ? 'ru' : 'en';
+  const { rows } = await getRows(SHEETS.botTexts);
+  return rows.find(r => r.text_key === text_key && r.language === lang) || rows.find(r => r.text_key === text_key && r.language === 'en') || null;
+}
+
+// Статусы событий. В таблице Events организатор пишет их по-разному, поэтому
+// сводим написания к четырём состояниям и больше ничего не выдумываем:
+//   open     — набор открыт, заявку оставить можно;
+//   live     — идёт сейчас, заявок не принимаем;
+//   waitlist — набор в следующий сезон, можно встать в лист ожидания;
+//   archived — прошло: карточку показываем, набора нет.
+export const EVENT_STATUS = { open:'open', live:'live', waitlist:'waitlist', archived:'archived' };
+const EVENT_STATUS_ALIASES = {
+  open:['open','registration_open','registration','signup','набор','открыт','открыта'],
+  // active — это «сезон идёт»: играем, но набор уже закрыт.
+  live:['live','active','running','in_progress','started','ongoing','идёт','идет','в процессе'],
+  waitlist:['waitlist','wait_list','next_season','upcoming','queue','лист ожидания','ожидание','следующий сезон'],
+  archived:['archived','archive','closed','finished','done','past','completed','архив','завершено','закрыто','прошло']
+};
+export function canonicalEventStatus(value = '') {
+  const v = safe(value).toLowerCase().replace(/[\s-]+/g, '_');
+  if (!v) return EVENT_STATUS.open;
+  for (const [key, list] of Object.entries(EVENT_STATUS_ALIASES)) {
+    if (list.some(a => a.replace(/[\s-]+/g, '_') === v)) return key;
+  }
+  return EVENT_STATUS.archived;
+}
+// Можно ли оставить заявку на событие с таким статусом.
+export function eventJoinable(status = '') {
+  const s = canonicalEventStatus(status);
+  return s === EVENT_STATUS.open || s === EVENT_STATUS.waitlist;
+}
+
+// Все события с приведённым статусом — для витрины: новичку показываем и то,
+// что уже прошло, чтобы он видел живую лигу, а не пустой экран.
+export async function getAllEvents() {
+  const { rows } = await getRows(SHEETS.events, { useCache:false });
+  return rows
+    .filter(r => safe(r.event_id) || safe(r.event_name) || safe(r.event_name_en) || safe(r.event_name_ru))
+    .filter(r => !['hidden','draft','no','false','0'].includes(safe(r.visible).toLowerCase()) && safe(r.status).toLowerCase() !== 'hidden')
+    .map(r => ({ ...r, status_code: canonicalEventStatus(r.status), joinable: eventJoinable(r.status) }))
+    .sort((a,b) => Number(a.sort_order || 999) - Number(b.sort_order || 999));
+}
+
+export async function getActiveEvents() {
+  return (await getAllEvents()).filter(r => r.joinable);
+}
+
+export async function getPaymentMethods() {
+  const { rows } = await getRows(SHEETS.paymentMethods, { useCache:false });
+  return rows.filter(r => safe(r.status) === 'active');
+}
+
+
+function normKey(value='') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function compactKey(value='') {
+  return normKey(value).replace(/[^a-zа-яё0-9]+/gi, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function eventAliases(event={}) {
+  const aliases = new Set();
+  [event.event_id, event.event_name, event.event_name_en, event.event_name_ru, event.title, event.name]
+    .filter(Boolean)
+    .forEach(v => {
+      aliases.add(compactKey(v));
+      aliases.add(normKey(v));
+    });
+  const id = normKey(event.event_id);
+  if (id === 'league_s2' || id.includes('season2') || id.includes('s2')) {
+    ['league s2','league_s2','season 2','season2','second season','second league season','второй сезон','2 сезон','сезон 2']
+      .forEach(v => aliases.add(compactKey(v)));
+  }
+  return [...aliases].filter(Boolean);
+}
+
+function rowMatchesEvent(row={}, event={}) {
+  const aliases = eventAliases(event);
+  const eventId = normKey(event.event_id);
+  if (eventId && normKey(row.event_id) === eventId) return true;
+  const hay = compactKey([
+    row.event_id,
+    row.event_name,
+    row.last_application_event,
+    row.crm_tags,
+    row.notes,
+    row.source_event,
+    row.event
+  ].filter(Boolean).join(' '));
+  if (!hay) return false;
+  return aliases.some(a => a && (hay === compactKey(a) || hay.includes(compactKey(a))));
+}
+
+function applicantKey(row={}) {
+  const tg = String(row.telegram_id || '').trim();
+  if (tg) return `tg:${tg}`;
+  const username = String(row.telegram_username || row.telegram || '').replace(/^https?:\/\/t\.me\//,'').replace(/^t\.me\//,'').replace(/^@/,'').trim().toLowerCase();
+  if (username) return `u:${username}`;
+  const name = compactKey(row.name || row.player_name || '');
+  return name ? `n:${name}` : '';
+}
+
+export async function getEventPlayers(event={}) {
+  const [{ rows: applications }, { rows: applicants }] = await Promise.all([
+    getRows(SHEETS.applications, { useCache:false }),
+    getRows(SHEETS.applicants, { useCache:false })
+  ]);
+
+  const applicantsByKey = new Map();
+  for (const a of applicants) {
+    const key = applicantKey(a);
+    if (key) applicantsByKey.set(key, a);
+    const tg = String(a.telegram_id || '').trim();
+    if (tg) applicantsByKey.set(`tg:${tg}`, a);
+    const username = String(a.telegram_username || a.telegram || '').replace(/^https?:\/\/t\.me\//,'').replace(/^t\.me\//,'').replace(/^@/,'').trim().toLowerCase();
+    if (username) applicantsByKey.set(`u:${username}`, a);
+  }
+
+  const out = new Map();
+  const add = (row={}, source='applications') => {
+    const key = applicantKey(row);
+    if (!key) return;
+    const profile = applicantsByKey.get(key) || (row.telegram_id ? applicantsByKey.get(`tg:${row.telegram_id}`) : null) || row;
+    const name = String(profile.name || row.player_name || row.name || '').trim();
+    if (!name) return;
+    const prev = out.get(key) || {};
+    out.set(key, {
+      telegram_id: profile.telegram_id || row.telegram_id || prev.telegram_id || '',
+      telegram_username: profile.telegram_username || row.telegram_username || prev.telegram_username || '',
+      name,
+      status: profile.status || row.application_status || prev.status || '',
+      application_status: row.application_status || prev.application_status || '',
+      payment_status: row.payment_status || prev.payment_status || '',
+      source
+    });
+  };
+
+  applications.filter(r => rowMatchesEvent(r, event)).forEach(r => add(r, 'applications'));
+  applicants.filter(r => rowMatchesEvent(r, event)).forEach(r => add(r, 'applicants'));
+
+  return [...out.values()]
+    .filter(p => p.name)
+    .sort((a,b) => String(a.name).localeCompare(String(b.name), 'en', { sensitivity:'base' }));
+}
+
+export async function enrichEventsWithStats(events=[]) {
+  let manualPlayers = [];
+  try { const data = await getManualParticipants(); manualPlayers = Array.isArray(data) ? data : (data.players || []); } catch (e) { manualPlayers = []; }
+  const manualCount = manualPlayers.length;
+  const enriched = [];
+  for (const ev of events) {
+    enriched.push({ ...ev, applications_count: manualCount, players_count: manualCount });
+  }
+  return enriched;
+}
+
+
+// Колонки аватарки. Дописываем в конец листа: вставлять их между существующими
+// незачем — эти поля служебные и глазами их читать не нужно.
+let avatarColumnsReady = null;
+// Instagram и согласие на публикацию храним раздельно. Наличие ника не означает
+// согласия на фото, а отказ от публикации не стирает Instagram игрока.
+let instagramColumnReady = null;
+export async function ensureInstagramColumn() {
+  if (!instagramColumnReady) {
+    instagramColumnReady = ensureSheetWithHeaders(SHEETS.applicants, [
+      'instagram', 'instagram_status', 'instagram_updated_at',
+      'photo_publication_consent', 'photo_publication_consent_at'
+    ])
+      .catch(e => { instagramColumnReady = null; throw e; });
+  }
+  return instagramColumnReady;
+}
+
+export async function saveInstagramAccount(telegramId, instagram = '', status = 'PROVIDED') {
+  await ensureInstagramColumn();
+  return updateApplicantByTelegramId(telegramId, {
+    instagram,
+    instagram_status: status === 'NO_ACCOUNT' ? 'NO_ACCOUNT' : 'PROVIDED',
+    instagram_updated_at: nowISO()
+  });
+}
+
+export async function savePhotoPublicationConsent(telegramId, allowed) {
+  await ensureInstagramColumn();
+  return updateApplicantByTelegramId(telegramId, {
+    photo_publication_consent: allowed ? 'YES' : 'NO',
+    photo_publication_consent_at: nowISO()
+  });
+}
+
+export async function ensureAvatarColumns() {
+  if (!avatarColumnsReady) {
+    avatarColumnsReady = ensureSheetWithHeaders(SHEETS.applicants,
+      ['avatar_status', 'avatar_file_id', 'avatar_options', 'avatar_attempts', 'avatar_stub', 'avatar_error', 'avatar_updated_at'])
+      .catch(e => { avatarColumnsReady = null; throw e; });
+  }
+  return avatarColumnsReady;
+}
+
+// Кто уже получил опубликованную аватарку. Ключ — имя игрока: витрина живёт в
+// другой таблице и знает игроков по именам, а не по telegram_id.
+export async function publishedAvatars() {
+  const { rows } = await getRows(SHEETS.applicants, { useCache: true });
+  const out = new Map();
+  for (const r of rows) {
+    if (!String(r.avatar_file_id || '').trim()) continue;
+    if (!r.telegram_id) continue;
+    const name = String(r.name || '').trim().toLowerCase();
+    if (name) out.set(name, String(r.telegram_id));
+  }
+  return out;
+}
+
+let applicantAdminColumnsReady = null;
+export async function ensureApplicantAdminColumns() {
+  // Header check hits the Sheets metadata API; do it once per process.
+  if (!applicantAdminColumnsReady) {
+    applicantAdminColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['admin_topic_id','admin_topic_name','admin_topic_chat_id','admin_topic_created_at','admin_topic_last_used_at','results_optout'])
+      .catch(e => { applicantAdminColumnsReady = null; throw e; });
+  }
+  return applicantAdminColumnsReady;
+}
+
+// Minimal lead row so every Telegram user has exactly one Applicants row that can hold admin_topic_id.
+export async function ensureApplicantLead(user={}) {
+  const telegramId = user.id || user.telegram_id || '';
+  if (!telegramId) return null;
+  const username = user.username || user.telegram_username || '';
+  const existing = await findApplicantByTelegramIdentity({ id: telegramId, username });
+  if (existing) return existing;
+  const name = user.name || [user.first_name, user.last_name].filter(Boolean).join(' ') || '';
+  const newRow = {
+    date: nowISO(), created_at: nowISO(), updated_at: nowISO(),
+    name, status: APPLICANT_STATUS.new, division: 'pending',
+    telegram_id: telegramId, telegram_username: username, telegram: username ? `t.me/${username}` : '',
+    language: ['ru','en'].includes(String(user.language || '').toLowerCase()) ? String(user.language).toLowerCase() : '',
+    source: 'telegram_lead', crm_tags: 'lead', profile_completed: 'no', selfie_status: 'optional_missing'
+  };
+  await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
+  return { ...newRow, _rowNumber: null };
+}
+
+export async function findApplicantByAdminTopicId(topicId) {
+  await ensureApplicantAdminColumns();
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  return rows.find(r => String(r.admin_topic_id || '') === String(topicId));
+}
+
+export async function updateApplicantAdminTopic(telegramId, patch, user={}) {
+  await ensureApplicantAdminColumns();
+  const found = await findApplicantByTelegramId(telegramId) || (user?.username ? await findApplicantByTelegramIdentity({ id: telegramId, username: user.username }) : null);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { ...patch, updated_at: nowISO() });
+  return { ...found, ...patch };
+}
+
+// Опознание игрока идёт на каждый запрос мини-приложения и на каждое сообщение
+// боту, поэтому читаем лист из кэша (20 секунд). Любая запись в таблицу кэш
+// сбрасывает, так что свежесозданная анкета находится сразу.
+export async function findApplicantByTelegramId(telegramId) {
+  const { rows } = await getRows(SHEETS.applicants);
+  return rows.find(r => String(r.telegram_id) === String(telegramId));
+}
+
+export async function findApplicantByTelegramIdentity(userOrProfile={}) {
+  const { rows } = await getRows(SHEETS.applicants);
+  const telegramId = userOrProfile.id || userOrProfile.telegram_id || '';
+  const usernameRaw = userOrProfile.username || userOrProfile.telegram_username || '';
+  const username = String(usernameRaw || '').replace(/^@/,'').toLowerCase();
+  if (telegramId) {
+    const byId = rows.find(r => String(r.telegram_id) === String(telegramId));
+    if (byId) return byId;
+  }
+  if (username) {
+    return rows.find(r => {
+      const u1 = String(r.telegram_username || '').replace(/^@/,'').toLowerCase();
+      const u2 = String(r.telegram || '').replace(/^https?:\/\/t\.me\//,'').replace(/^t\.me\//,'').replace(/^@/,'').toLowerCase();
+      return u1 === username || u2 === username;
+    });
+  }
+  return null;
+}
+
+// Строка игрока могла попасть в таблицу без telegram_id — анкету заводили руками
+// или переносили из старой базы. Тогда бот узнаёт человека только по нику: из
+// кнопки под сообщением узнаёт, а из нижней клавиатуры (там в адресе лишь id) —
+// уже нет, и тот же игрок видит меню как посторонний. Поэтому, узнав его по
+// нику, сразу дописываем id — со следующего раза сработают оба пути.
+export async function healApplicantId(row, telegramId) {
+  const id = String(telegramId || '').trim();
+  if (!row?._rowNumber || !id) return false;
+  if (String(row.telegram_id || '').trim() === id) return false;
+  try {
+    await updateObjectByRow(SHEETS.applicants, row._rowNumber, { telegram_id: id });
+    row.telegram_id = id;
+    console.log(`healApplicantId: ${row.name || row._rowNumber} → ${id}`);
+    return true;
+  } catch (e) { console.error('healApplicantId failed:', e.message); return false; }
+}
+
+export async function setUserLanguage(user={}, language='en') {
+  const lang = language === 'ru' ? 'ru' : 'en';
+  const telegramId = user.id || user.telegram_id || '';
+  const username = user.username || user.telegram_username || '';
+  const name = user.name || [user.first_name, user.last_name].filter(Boolean).join(' ') || '';
+  const existing = await findApplicantByTelegramIdentity({ id: telegramId, username });
+  if (existing) {
+    await updateObjectByRow(SHEETS.applicants, existing._rowNumber, { language: lang, telegram_id: telegramId || existing.telegram_id, telegram_username: username || existing.telegram_username, telegram: username ? `t.me/${username}` : existing.telegram, updated_at: nowISO() });
+    return { ...existing, language: lang };
+  }
+  const newRow = {
+    date: nowISO(),
+    created_at: nowISO(),
+    updated_at: nowISO(),
+    name,
+    status: APPLICANT_STATUS.new,
+    division: 'pending',
+    telegram_id: telegramId,
+    telegram_username: username,
+    telegram: username ? `t.me/${username}` : '',
+    language: lang,
+    source: 'telegram_language_select',
+    crm_tags: 'language_selected',
+    profile_completed: 'no',
+    selfie_status: 'optional_missing'
+  };
+  await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
+  return newRow;
+}
+
+export async function upsertApplicant(profile) {
+  const existing = await findApplicantByTelegramIdentity(profile);
+  const patch = {
+    name: profile.name,
+    ntrp: profile.ntrp,
+    status: canonicalStatus(profile.status || existing?.status || APPLICANT_STATUS.new),
+    experience: profile.experience,
+    gender: profile.gender,
+    age: profile.gender === 'female' ? '' : profile.age,
+    country_of_origin: profile.country_of_origin,
+    telegram: profile.telegram || profile.telegram_username || '',
+    whatsapp: profile.whatsapp,
+    notes: profile.notes,
+    telegram_id: profile.telegram_id,
+    telegram_username: profile.telegram_username,
+    language: profile.language || existing?.language || '',
+    source: profile.source || 'registration_bot',
+    updated_at: nowISO(),
+    last_application_event: profile.last_application_event,
+    selfie_status: profile.selfie_status || existing?.selfie_status || 'optional_missing',
+    selfie_file_id: profile.selfie_file_id || existing?.selfie_file_id || '',
+    crm_tags: profile.crm_tags || existing?.crm_tags || 'league_interested',
+    application_count: Number(existing?.application_count || 0) + (profile.increment_application_count ? 1 : 0),
+    profile_completed: 'yes',
+    allow_match_challenges: profile.allow_match_challenges || existing?.allow_match_challenges || 'yes',
+    player_profile_url: profile.player_profile_url || existing?.player_profile_url || ''
+  };
+  if (existing) {
+    await updateObjectByRow(SHEETS.applicants, existing._rowNumber, patch);
+    return { ...existing, ...patch, _rowNumber: existing._rowNumber, isNew:false };
+  }
+  const newRow = { division:'pending', date: nowISO(), created_at: nowISO(), ...patch };
+  const saved = await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
+  return { ...newRow, _rowNumber: saved?._rowNumber ?? null, isNew: saved?.isNew !== false };
+}
+
+export async function createApplication(app) {
+  await appendObject(SHEETS.applications, app);
+  return app;
+}
+
+export async function findApplicationByTelegramEvent(telegramId, eventId) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  return rows
+    .filter(r => String(r.telegram_id) === String(telegramId) && String(r.event_id) === String(eventId))
+    .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))[0] || null;
+}
+
+
+export async function findLatestApplicationByTelegramId(telegramId) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  return rows
+    .filter(r => String(r.telegram_id) === String(telegramId))
+    .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))[0] || null;
+}
+
+export async function findLatestPayableApplicationByTelegramId(telegramId) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const statuses = new Set(['payment_required','waiting_payment','proof_received','approved']);
+  return rows
+    .filter(r => String(r.telegram_id) === String(telegramId))
+    .filter(r => statuses.has(String(r.payment_status || '').toLowerCase()) || ['waiting_payment','proof_received','payment_approved','active'].includes(String(r.application_status || '').toLowerCase()))
+    .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))[0] || null;
+}
+
+export async function createOrUpdateApplication(app) {
+  const existing = await findApplicationByTelegramEvent(app.telegram_id, app.event_id);
+  if (existing) {
+    const existingAppStatus = String(existing.application_status || '').toLowerCase();
+    const existingPaymentStatus = String(existing.payment_status || '').toLowerCase();
+    const protectedAppStatus = ['active','payment_approved','proof_received'].includes(existingAppStatus);
+    const protectedPaymentStatus = ['approved','proof_received'].includes(existingPaymentStatus);
+    const patch = {
+      ...app,
+      application_id: existing.application_id || app.application_id,
+      submitted_at: existing.submitted_at || app.submitted_at,
+      updated_at: nowISO()
+    };
+    if (protectedAppStatus) patch.application_status = existing.application_status;
+    if (protectedPaymentStatus) patch.payment_status = existing.payment_status;
+    if (existing.payment_proof_status) patch.payment_proof_status = existing.payment_proof_status;
+    if (existing.payment_proof_file_id) patch.payment_proof_file_id = existing.payment_proof_file_id;
+    await updateObjectByRow(SHEETS.applications, existing._rowNumber, patch);
+    return { ...existing, ...patch, isUpdated:true };
+  }
+  await appendObject(SHEETS.applications, app);
+  return { ...app, isUpdated:false };
+}
+
+export async function findApplication(applicationId) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  return rows.find(r => r.application_id === applicationId);
+}
+
+export async function updateApplication(applicationId, patch) {
+  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const found = rows.find(r => r.application_id === applicationId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.applications, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
+export async function updateApplicantStatusByTelegramId(telegramId, status) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+  // Единственная точка записи статуса игрока: что бы ни прислал вызывающий код
+  // (waiting_payment, rejected, confirmed...), в таблицу уходит рабочее слово.
+  const clean = canonicalStatus(status);
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { status: clean, updated_at: nowISO() });
+  return { ...found, status: clean };
+}
+
+export async function logMessage(row) { return appendObject(SHEETS.messages, row); }
+export async function logPayment(row) { return appendObject(SHEETS.payments, row); }
+export async function logBroadcast(row) { return appendObject(SHEETS.broadcasts, row); }
+export async function logBroadcastResult(row) { return appendObject(SHEETS.broadcastLogs, row); }
+
+export async function updatePayment(paymentId, patch) {
+  const { rows } = await getRows(SHEETS.payments, { useCache:false });
+  const found = rows.find(r => r.payment_id === paymentId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.payments, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
+
+function isMissingRatingValue(value='') {
+  const rating = String(value || '').trim().toLowerCase();
+  return !rating || ['unknown','не знаю','dont know','don\'t know','n/a','na','-'].includes(rating);
+}
+
+export function hasMissingRating(row={}) {
+  return isMissingRatingValue(row.ntrp || row.racket_rating || '');
+}
+
+// Откуда взялась цифра рейтинга, помечаем меткой в crm_tags: ntrp:player —
+// вписал сам, ntrp:test — прошёл тест, ntrp:admin — поставил организатор.
+// Отдельную колонку не заводим: вставка колонки в лист сдвигает всё правее
+// неё и ломает формулы витрины, которые ссылаются на буквы столбцов.
+export function ratingSourceOf(row = {}) {
+  const m = String(row.crm_tags || '').match(/ntrp:(player|test|admin)/i);
+  return m ? m[1].toLowerCase() : '';
+}
+export function withRatingSourceTag(tags = '', source = '') {
+  const clean = String(tags || '').split(',').map(v => v.trim()).filter(v => v && !/^ntrp:/i.test(v));
+  if (source) clean.push(`ntrp:${source}`);
+  return clean.join(',');
+}
+
+// Рейтинг стоит перепройти, если его нет вовсе или если цифру никто не
+// подтверждал: старый тест сильно завышал середину, а поставленное
+// организатором значение трогать не нужно.
+export function needsRatingCheck(row={}) {
+  if (hasMissingRating(row)) return true;
+  return ratingSourceOf(row) !== 'admin';
+}
+
+// scope: 'missing' — только те, у кого рейтинга нет;
+//        'recheck'  — плюс те, чью цифру организатор не подтверждал.
+export async function getMissingRatingContacts(scope='missing') {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const wanted = scope === 'recheck' ? needsRatingCheck : hasMissingRating;
+  return rows.filter(r => {
+    if (!r.telegram_id) return false;
+    if (!wanted(r)) return false;
+    if (isInactiveStatus(r.status)) return false;
+    // Avoid pure language-only leads with no actual profile data.
+    return Boolean(r.name || r.telegram_username || r.whatsapp || r.experience || r.country_of_origin || r.gender);
+  });
+}
+
+export async function getSegmentContacts(segment='all') {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  return rows.filter(r => {
+    if (!r.telegram_id) return false;
+    // Раньше статус сравнивался как есть: «Active» с большой буквы или с лишним
+    // пробелом молча выкидывал человека из всех сегментов рассылки.
+    const status = canonicalStatus(r.status);
+    if (segment === 'all') return true;
+    if (segment === 'active') return status === 'active';
+    if (segment === 'waitlist') return status === 'waitlist';
+    if (segment === 'payment') return status === 'payment';
+    if (segment === 'missing_rating') return hasMissingRating(r);
+    if (segment === 'missing_selfie') return status === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received';
+    if (segment === 'ru') return r.language === 'ru';
+    if (segment === 'en') return r.language !== 'ru';
+    if (segment === 'season2') return String(r.last_application_event || '').includes('Season 2') || String(r.last_application_event || '').includes('league_s2');
+    return String(r.crm_tags || '').includes(segment) || status === canonicalStatus(segment);
+  });
+}
+
+
+
+
+export function isProfileCompleted(row={}) {
+  const rating = String(row.ntrp || row.racket_rating || '').trim().toLowerCase();
+  // Раньше здесь был свой список исключений, и в нём забыли rejected — отклонённый
+  // человек продолжал открывать мини-приложение лиги. Теперь выключатель один.
+  return Boolean(row.telegram_id && row.name && row.gender && row.country_of_origin && row.experience && row.whatsapp && rating && rating !== 'unknown' && !isInactiveStatus(row.status));
+}
+
+export async function createMatchChallenge(row) {
+  await appendObject(SHEETS.matchChallenges, row);
+  return row;
+}
+
+export async function findMatchChallenge(challengeId) {
+  const { rows } = await getRows(SHEETS.matchChallenges, { useCache:false });
+  return rows.find(r => r.challenge_id === challengeId);
+}
+
+export async function updateMatchChallenge(challengeId, patch) {
+  const { rows } = await getRows(SHEETS.matchChallenges, { useCache:false });
+  const found = rows.find(r => r.challenge_id === challengeId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.matchChallenges, found._rowNumber, patch);
+  return { ...found, ...patch };
+}
+
+export async function updateApplicantByTelegramId(telegramId, patch) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, { ...patch, updated_at: nowISO() });
+  return { ...found, ...patch };
+}
+
+export async function getAllApplicants() {
+  return (await getRows(SHEETS.applicants, { useCache:false })).rows;
+}
+
+export async function markSelfieRequested(telegramId) {
+  const found = await findApplicantByTelegramId(telegramId);
+  if (!found) return null;
+  const currentCount = Number(found.selfie_reminder_count || 0);
+  await updateObjectByRow(SHEETS.applicants, found._rowNumber, {
+    selfie_status: found.selfie_status === 'received' ? 'received' : 'requested',
+    selfie_requested_at: nowISO(),
+    selfie_reminder_count: currentCount + 1,
+    updated_at: nowISO()
+  });
+  return { ...found, selfie_status: found.selfie_status === 'received' ? 'received' : 'requested', selfie_requested_at: nowISO(), selfie_reminder_count: currentCount + 1 };
+}
+
+export async function getBotMenuRows(parent='main', language='en'){try{const {rows}=await getRows(SHEETS.botMenu,{useCache:false});const lang=language==='ru'?'ru':'en';return rows.filter(r=>String(r.status||'active').toLowerCase()==='active'&&String(r.parent||'main')===String(parent)&&String(r.language||'en')===lang).sort((a,b)=>Number(a.row||999)-Number(b.row||999)||Number(a.sort_order||999)-Number(b.sort_order||999));}catch(e){return []}}
+
+
+// ===========================================================================
+// МАТЧИ МЕЖДУ ИГРОКАМИ
+// Открытое окно: игрок публикует своё свободное время в топик своего дивизиона,
+// любой из этого дивизиона может его забрать. Адресный вызов: то же окно, но
+// сразу закреплённое за конкретным соперником.
+// Обе формы живут в одном листе Match Challenges (колонка match_type).
+// ===========================================================================
+// Кто игрок в лиге. Два разных вопроса — два разных источника:
+//   дивизион  — таблица дивизиона последнего сезона (лист Division_Tracker);
+//               организатор правит её, когда переносит игрока, и больше нигде;
+//   статус    — анкета в Applicants (active / inactive / waitlist).
+// Ручная таблица предварительного состава здесь больше не участвует: она нужна
+// только для страницы «Состав» и живёт своей жизнью.
+export function sameName(a = '', b = '') {
+  const x = nameKeys(a), y = nameKeys(b);
+  return x.some(k => y.includes(k));
+}
+
+// Membership is independent of Applicants.status; identity still comes from Applicants.
+let masterPlayersCache = {t:0,rows:null};
+export async function getMasterPlayers() {
+  if (masterPlayersCache.rows && Date.now()-masterPlayersCache.t < CACHE_MS) return masterPlayersCache.rows;
+  const { rows } = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID,
+    ['Players_Master', 'Players Master'], 'player_name');
+  const players = rows.filter(r => String(r.player_name || '').trim());
+  masterPlayersCache = {t:Date.now(),rows:players};
+  return players;
+}
+export async function getPlayerLeagueInfo(profile = {}) {
+  const telegramId = String(profile.telegram_id || profile.id || '').trim();
+  const row = telegramId ? await findApplicantByTelegramId(telegramId) : null;
+  const name = String(row?.name || profile.name || '').trim();
+  const admin = ADMIN_IDS.includes(telegramId);
+  const master = name ? (await getMasterPlayers()).find(p => sameName(p.player_name, name)) : null;
+  const base = { member: Boolean(master), admin, found:false, division:'', group:'', season:'',
+    name: master?.player_name || name, status: row?.status || profile.status || '', matched_by: master ? 'players_master' : '' };
+  if (!master && !admin) return base;
+  const { findPlayerDivision } = await import('./division.js');
+  const hit = name ? await findPlayerDivision(base.name, sameName) : null;
+  if (!hit?.found) return base;
+  return { ...base, found:true, division:hit.division, season:hit.season, letter:hit.letter, group:hit.group || '',
+    source:{sheet:hit.source,season:hit.season,row:hit.row,spreadsheet_id:hit.spreadsheet_id} };
+}
+
+export async function getPlayerDivision(profile = {}) {
+  return (await getPlayerLeagueInfo(profile)).division;
+}
+
+// Все живые пользователи бота — для ленты результатов. Лига идёт для всех, кто в боте,
+// а не только для тех, кто попал в текущий состав дивизионов: результат видят все,
+// кроме тех, кто отписался или был отклонён.
+// Список схлопнулся в один статус: см. canonicalStatus выше.
+
+// Отписка касается ТОЛЬКО ленты результатов: свои матчи, оплаты и ответы админа
+// приходят по-прежнему. Хранится одним флагом, отдельного статуса не заводим.
+export function isResultsMuted(row = {}) {
+  return ['yes','true','1','off','muted'].includes(String(row.results_optout || '').trim().toLowerCase());
+}
+
+export async function setResultsOptOut(telegramId, muted) {
+  return updateApplicantByTelegramId(telegramId, { results_optout: muted ? 'yes' : '' });
+}
+
+export async function isResultsMutedFor(telegramId) {
+  const row = await findApplicantByTelegramId(telegramId).catch(() => null);
+  return row ? isResultsMuted(row) : false;
+}
+
+export async function getAllBotSubscribers() {
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const id = String(r.telegram_id || '').trim();
+    if (!id || seen.has(id)) continue;
+    if (isInactiveStatus(r.status)) continue;
+    if (isResultsMuted(r)) continue;   // сам отписался от ленты результатов
+    seen.add(id);
+    out.push({ telegram_id: id, name: r.name || '', language: r.language || '' });
+  }
+  return out;
+}
+
+// Все игроки действующих дивизионов с Telegram — для напоминаний по матчам.
+// Состав берём из таблиц дивизионов последнего сезона, анкету — из Applicants.
+export async function getAllActiveLeaguePlayers() {
+  const { seasonRoster } = await import('./division.js');
+  const [{ rows: applicants }, map] = await Promise.all([
+    getRows(SHEETS.applicants),
+    seasonRoster().catch(() => ({ players: [] }))
+  ]);
+  const byKey = new Map();
+  for (const a of applicants) {
+    if (!a.telegram_id) continue;
+    for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
+  }
+  const out = [];
+  for (const p of (map.players || [])) {
+    const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+    if (!hit) continue;
+    if (!(await getMasterPlayers()).some(m => sameName(m.player_name, hit.name))) continue;
+    if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+    out.push({ telegram_id: String(hit.telegram_id), name: p.name,
+      division: p.division, season: map.season, group: p.group || '', language: hit.language || '' });
+  }
+  return out;
+}
+
+// Группа игрока — одна на весь бот: по ней решается и доступ к событиям,
+// и набор вкладок в мини-приложении.
+//   active   — игрок найден в Players_Master или является админом;
+//   waitlist — оплата принята, место в дивизионе ждёт;
+//   applied  — заявка есть, оплаты нет;
+//   guest    — все остальные, включая тех, кто просто открыл бота.
+export const PLAYER_GROUPS = ['active', 'waitlist', 'applied', 'guest'];
+export async function playerGroup(telegramId, applicant = null) {
+  const who = applicant || await findApplicantByTelegramId(telegramId).catch(() => null);
+  const status = canonicalStatus(who?.status);
+  const league = await getPlayerLeagueInfo({ ...(who || {}), telegram_id: telegramId });
+  if (league.member || league.admin) return 'active';
+  const app = await findLatestApplicationByTelegramId(telegramId).catch(() => null);
+  const paid = ['approved', 'payment_approved'].includes(String(app?.payment_status || '').toLowerCase());
+  if (status === 'waitlist' && paid) return 'waitlist';
+  if (app || who?.telegram_id) return 'applied';
+  return 'guest';
+}
+
+// --- нижнее меню мини-приложения --------------------------------------------
+//
+// Какие вкладки видит группа игроков и в каком порядке. Настраивается из
+// админки, хранится в Settings одной строкой на группу. Пустая строка = набор по
+// умолчанию, то есть всё. «Лига» (главная) есть у всех всегда: без неё человек
+// открывает приложение в пустоту.
+// «Расписание» слилось с «Матчами»: согласованные матчи теперь показываются
+// сверху той же вкладки, отдельного экрана для них больше нет.
+export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'fantasy', 'partners'];
+// Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.
+export const ALWAYS_TABS = [];
+const tabsKey = (group) => `tabs_${group}`;
+
+// Пустая строка = «не настраивали» и означает полный набор. Чтобы можно было
+// оставить группу совсем без вкладок, пустой выбор пишем словом none.
+const NONE = 'none';
+
+export async function getGroupTabs(group) {
+  const raw = String(await getSetting(tabsKey(group)).catch(() => '')).trim();
+  if (raw === NONE) return [];
+  const picked = raw.split(',').map(s => s.trim()).filter(s => MINIAPP_TABS.includes(s));
+  const out = picked.length ? picked : MINIAPP_TABS.slice();
+  for (const t of ALWAYS_TABS) if (!out.includes(t)) out.unshift(t);
+  return out;
+}
+
+export async function setGroupTabs(group, tabs = []) {
+  if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
+  const picked = (Array.isArray(tabs) ? tabs : []).map(s => String(s).trim()).filter(s => MINIAPP_TABS.includes(s));
+  for (const t of ALWAYS_TABS) if (!picked.includes(t)) picked.unshift(t);
+  await setSetting(tabsKey(group), picked.length ? picked.join(',') : NONE, 'Вкладки мини-приложения для группы');
+  return picked;
+}
+
+export async function allGroupTabs() {
+  const out = {};
+  for (const g of PLAYER_GROUPS) out[g] = await getGroupTabs(g);
+  return out;
+}
+
+// --- кнопки под сообщением бота ---------------------------------------------
+//
+// То самое стартовое меню, которое человек видит в переписке с ботом. Тексты и
+// адреса кнопок не меняются никогда — настраивается только то, кто их видит.
+export const BOT_MENU_BUTTONS = ['events', 'join_event', 'waitlist', 'matches', 'participants', 'league', 'about', 'how', 'yearly', 'pass', 'contact'];
+const buttonsKey = (group) => `btns_${group}`;
+
+// «Лига» есть у всех групп: не-член, нажав её, не упирается в ошибку, а получает
+// объяснение и кнопку «Заполнить анкету» — то есть это вход в лигу, а не тупик.
+// Скрыть её можно только целиком, выключив группе все кнопки словом none.
+const ALWAYS_BUTTONS = ['league'];
+function withAlwaysButtons(list, allowed) {
+  const out = list.slice();
+  for (const must of ALWAYS_BUTTONS) {
+    if (allowed.includes(must) && !out.includes(must)) out.push(must);
+  }
+  return out;
+}
+
+export async function getGroupButtons(group) {
+  const raw = String(await getSetting(buttonsKey(group)).catch(() => '')).trim();
+  if (raw === NONE) return [];
+  const picked = raw.split(',').map(s => s.trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
+  return picked.length ? withAlwaysButtons(picked, BOT_MENU_BUTTONS) : BOT_MENU_BUTTONS.slice();
+}
+
+export async function setGroupButtons(group, list = []) {
+  if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
+  const raw = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => BOT_MENU_BUTTONS.includes(s));
+  // Дописываем «Лигу» и при сохранении, иначе галочка в панели будет снята, а
+  // кнопка всё равно показывается — расхождение, которое сложно объяснить.
+  const picked = raw.length ? withAlwaysButtons(raw, BOT_MENU_BUTTONS) : raw;
+  await setSetting(buttonsKey(group), picked.length ? picked.join(',') : NONE, 'Кнопки меню бота для группы');
+  return picked;
+}
+
+export async function allGroupButtons() {
+  const out = {};
+  for (const g of PLAYER_GROUPS) out[g] = await getGroupButtons(g);
+  return out;
+}
+
+// Что показывать конкретному человеку под сообщением бота.
+export async function buttonsFor(telegramId, applicant = null) {
+  const group = await playerGroup(telegramId, applicant).catch(() => 'guest');
+  return getGroupButtons(group).catch(() => BOT_MENU_BUTTONS.slice());
+}
+
+// --- постоянная клавиатура внизу чата ---------------------------------------
+//
+// Третий набор кнопок и единственный, который человек видит всегда. Раскладка
+// раньше была жёстко зашита по состоянию игрока — теперь она тоже настраивается
+// по группам, иначе галочки в панели расходятся с тем, что на экране.
+export const KEYBOARD_BUTTONS = ['events', 'matches', 'result', 'court', 'league', 'squad', 'apply', 'pay', 'contact', 'menu'];
+// Что показываем, пока организатор ничего не настроил. У активного «Меню» нет:
+// под сообщением у него кнопок и так нет, и нажатие выдавало пустую строку.
+export const DEFAULT_KEYBOARD = {
+  active:   ['matches', 'court', 'league', 'squad', 'contact'],
+  waitlist: ['league', 'squad', 'contact'],
+  applied:  ['pay', 'league', 'squad', 'contact'],
+  guest:    ['apply', 'league', 'squad', 'contact']
+};
+const kbKey = (group) => `kb_${group}`;
+
+export async function getGroupKeyboard(group) {
+  const raw = String(await getSetting(kbKey(group)).catch(() => '')).trim();
+  if (raw === NONE) return [];
+  const picked = raw.split(',').map(s => s.trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
+  return picked.length ? withAlwaysButtons(picked, KEYBOARD_BUTTONS) : (DEFAULT_KEYBOARD[group] || DEFAULT_KEYBOARD.guest).slice();
+}
+
+export async function setGroupKeyboard(group, list = []) {
+  if (!PLAYER_GROUPS.includes(group)) throw new Error(`Неизвестная группа: ${group}`);
+  const raw = (Array.isArray(list) ? list : []).map(s => String(s).trim()).filter(s => KEYBOARD_BUTTONS.includes(s));
+  const picked = raw.length ? withAlwaysButtons(raw, KEYBOARD_BUTTONS) : raw;
+  await setSetting(kbKey(group), picked.length ? picked.join(',') : NONE, 'Нижняя клавиатура для группы');
+  return picked;
+}
+
+export async function allGroupKeyboards() {
+  const out = {};
+  for (const g of PLAYER_GROUPS) out[g] = await getGroupKeyboard(g);
+  return out;
+}
+
+// Набор нижних кнопок для конкретного человека.
+export async function keyboardForGroup(telegramId, applicant = null) {
+  const group = await playerGroup(telegramId, applicant).catch(() => 'guest');
+  return getGroupKeyboard(group);
+}
+
+// Доступ к матчам — только у активных игроков текущего состава.
+export async function isActiveLeaguePlayer(profile = {}) {
+  const info = await getPlayerLeagueInfo(profile);
+  return info.member || info.admin;
+}
+
+// Соперники: состав того же дивизиона из таблицы дивизиона, у кого есть анкета
+// с telegram_id. Имя в сетке связывается с анкетой по имени — другого ключа в
+// таблицах дивизионов нет.
+export async function getDivisionOpponents(division, excludeTelegramId = '', season = '', group = '') {
+  if (!division) return [];
+  const { seasonRoster, divisionLetter } = await import('./division.js');
+  const letter = divisionLetter(division);
+  // Составы сезона уже собраны и лежат в кэше — второй раз в таблицы не ходим.
+  const [{ rows: applicants }, map] = await Promise.all([
+    getRows(SHEETS.applicants),
+    seasonRoster(season).catch(() => ({ players: [] }))
+  ]);
+  const master = await getMasterPlayers();
+  const roster = (map.players || []).filter(p => p.letter === letter && String(p.group || '') === String(group || ''));
+  const byKey = new Map();
+  for (const a of applicants) {
+    if (!a.telegram_id) continue;
+    for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
+  }
+  // Фото и ссылку на профиль по-прежнему берём с витрины сайта.
+  const site = await getWebsitePlayers().catch(() => []);
+  const siteByKey = new Map();
+  for (const sp of site) for (const k of nameKeys(sp.name || '')) if (!siteByKey.has(k)) siteByKey.set(k, sp);
+
+  const out = [];
+  {
+    for (const p of roster) {
+      const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
+      if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
+      // Снятых и неактивных не показываем: статус живёт в анкете.
+      if (!master.some(m => sameName(m.player_name, hit.name))) continue;
+      if (out.some(o => String(o.telegram_id) === String(hit.telegram_id))) continue;
+      const sp = nameKeys(p.name).map(k => siteByKey.get(k)).find(Boolean) || {};
+      out.push({
+        telegram_id: String(hit.telegram_id),
+        name: p.name,
+        username: hit.telegram_username || '',
+        rating: hit.ntrp || hit.rating || '',
+        status: hit.status || '',
+        language: hit.language || '',
+        profile_url: sp.profile_url || '',
+        photo_url: hit.avatar_file_id ? `${(await import('./config.js')).PUBLIC_URL}/avatar/${hit.telegram_id}.png` : sp.photo_url || ''
+      });
+    }
+  }
+  // Add only the pre-approved W1/W2 opponents. The rest of each group
+  // remains isolated, and inactive players are still filtered exactly as above.
+  const crossPairs=[
+    ['Olga Sauer','Masha Geveling'],['Olga Sauer','Yana D'],['Marina Banatskaia','Elena Ian'],['Marina Banatskaia','Irina Strembitska'],
+    ['Daria Kozitskaya','Tatiana Sokolova'],['Daria Kozitskaya','Xenia Hors'],['Hyunjung Moon','Masha Geveling'],['Hyunjung Moon','Irina Strembitska'],
+    ['Anna Ermolina','Elena Ian'],['Anna Ermolina','Yana D'],['Maria Evangelista','Tatiana Sokolova'],['Maria Evangelista','Xenia Hors']
+  ];
+  if(letter==='W'&&String(group||'')){
+    const mine=applicants.find(a=>String(a.telegram_id)===String(excludeTelegramId));
+    const wanted=crossPairs.flatMap(([a,b])=>sameName(a,mine?.name)?[b]:sameName(b,mine?.name)?[a]:[]);
+    for(const name of wanted){
+      const rp=(map.players||[]).find(x=>x.letter==='W'&&sameName(x.name,name));
+      const hit=nameKeys(name).map(k=>byKey.get(k)).find(Boolean);
+      if(!rp||!hit||!master.some(m=>sameName(m.player_name,hit.name))||out.some(o=>String(o.telegram_id)===String(hit.telegram_id)))continue;
+      const sp=nameKeys(rp.name).map(k=>siteByKey.get(k)).find(Boolean)||{};
+      out.push({telegram_id:String(hit.telegram_id),name:rp.name,username:hit.telegram_username||'',rating:hit.ntrp||hit.rating||'',status:hit.status||'',language:hit.language||'',cross_group:true,profile_url:sp.profile_url||'',photo_url:sp.photo_url||''});
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity:'base' }));
+}

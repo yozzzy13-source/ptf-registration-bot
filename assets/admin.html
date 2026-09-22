@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PTF · панель организатора</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    /* Панель открывается с телефона (iPhone 16 Pro Max, 440 px в ширину), поэтому
+       свёрстана мобильной: разделы — полосой у большого пальца внизу, таблицы на
+       узком экране превращаются в карточки, у всего кликабельного минимум 44 px,
+       поля 16 px — иначе iOS зумит страницу при фокусе. На широком экране те же
+       блоки просто разъезжаются в колонки. */
+    :root{--bg:#0e0e10;--card:#191a1d;--card2:#212328;--line:#2e3138;--text:#f4f1ec;--muted:#9a958d;
+      --accent:#ef5f00;--accent2:#ff8a2a;--danger:#ff6b6b;--ok:#61d67f;--r:16px;--bar:74px}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{margin:0;background:var(--bg);color:var(--text);
+      font:15px/1.45 Inter,system-ui,-apple-system,"SF Pro Text",Segoe UI,Arial,sans-serif;
+      padding:0 14px calc(var(--bar) + 18px + env(safe-area-inset-bottom));-webkit-text-size-adjust:100%}
+    .wrap{max-width:1180px;margin:0 auto}
+    /* Шапка липнет к верху: имя раздела и «Обновить» всегда под рукой. */
+    .top{position:sticky;top:0;z-index:40;display:flex;gap:10px;align-items:center;justify-content:space-between;
+      padding:calc(10px + env(safe-area-inset-top)) 0 10px;background:linear-gradient(180deg,var(--bg) 76%,rgba(14,14,16,0));backdrop-filter:blur(8px)}
+    h1{margin:0;font-size:19px;letter-spacing:-.2px}
+    .top .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+    .muted{color:var(--muted)}
+    .ico{flex:0 0 auto;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+      border:1px solid var(--line);border-radius:13px;background:var(--card);color:var(--text);font-size:17px;cursor:pointer}
+    .ico:active{background:var(--card2)}
+    #status{font-size:12px;color:var(--muted);min-height:16px}
+
+    /* Сводка по цифрам — под спойлером: нужна редко, а место занимала всегда. */
+    details.fold>summary{cursor:pointer;list-style:none;font-weight:800;font-size:14px;
+      min-height:44px;display:flex;align-items:center;gap:8px}
+    details.fold>summary::-webkit-details-marker{display:none}
+    details.fold>summary:after{content:'▾';color:var(--muted);margin-left:auto;font-size:13px}
+    details.fold[open]>summary:after{content:'▴'}
+    .statFold{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:6px 14px;margin:2px 0 10px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin:4px 0 12px}
+    .stat{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:9px 11px}
+    .stat b{font-size:18px;color:var(--accent2);display:block;line-height:1.15}
+    .stat span{font-size:10px;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)}
+
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin:10px 0}
+    .card h3{margin:0 0 4px;font-size:16px}
+    .card>p.muted{margin:0 0 10px;font-size:12.5px}
+    label{display:block;font-size:11px;font-weight:800;color:#cfcac2;margin:10px 0 5px;letter-spacing:.3px}
+    input,select,textarea{width:100%;min-height:44px;padding:11px 12px;border-radius:12px;border:1px solid var(--line);
+      background:var(--card2);color:var(--text);font-size:16px;font-family:inherit}
+    input:focus,select:focus,textarea:focus{outline:0;border-color:var(--accent)}
+    textarea{min-height:96px;resize:vertical;line-height:1.4}
+    input[type=checkbox]{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
+    .filters{display:grid;grid-template-columns:1fr;gap:2px 12px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:center}
+    .actions label{margin:0;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0}
+    .btn{border:0;border-radius:13px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+      font-weight:800;font-size:14px;min-height:44px;padding:0 16px;cursor:pointer;flex:1 1 auto}
+    .btn.secondary{background:var(--card2);color:var(--text);border:1px solid var(--line)}
+    .btn.danger{background:var(--danger);color:#1a0d0d}
+    .btn.small{min-height:38px;padding:0 12px;font-size:13px;flex:0 0 auto}
+    .btn:active{transform:translateY(1px)}
+    .pill{display:inline-block;padding:4px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:11.5px}
+    .chip{display:inline-block;padding:3px 8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);
+      font-size:11px;margin:1px 3px 1px 0;color:#ddd;cursor:pointer}
+    .ok{color:var(--ok)} .err{color:var(--danger)} .hidden{display:none!important}
+    .num{font-variant-numeric:tabular-nums;text-align:right}
+    .ok-n{color:var(--ok);font-weight:800} .fail-n{color:var(--danger);font-weight:800}
+
+    /* Таблицы. На широком экране обычная таблица, на телефоне каждая строка
+       становится карточкой, а второстепенные колонки (.lo) прячутся — по-другому
+       на 440 px получается только горизонтальная прокрутка, а это мучение. */
+    .tableWrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);margin-top:12px;background:#141518}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--line);padding:10px 12px;text-align:left;font-size:13px;vertical-align:middle}
+    th{position:sticky;top:0;background:#22242a;color:#ddd;z-index:1;font-size:11px;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
+    tr:last-child td{border-bottom:0}
+    .msg{color:#c9c4bc;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .logs{background:#131418} .logs table{background:transparent} .logs td{font-size:12px;padding:6px 10px}
+    .logs .fail td{color:#ffb3b3}
+    .hist tr.row{cursor:pointer} .hist tr.row.open{background:var(--card2)}
+
+    @media(max-width:760px){
+      table{min-width:0}
+      thead{display:none}
+      /* Шапка у части таблиц собирается строкой из th прямо в table — на узком
+         экране от неё остаются висящие подписи, поэтому прячем такую строку. */
+      th{display:none}
+      tr:has(th){display:none}
+      tbody tr,table>tr{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 13px;border-bottom:1px solid var(--line)}
+      tbody td,table>tr>td{border:0;padding:0;font-size:13.5px}
+      td.lo,th.lo{display:none}
+      td.grow{flex:1 1 auto;min-width:52%}
+      td .btn{flex:0 0 auto}
+      .msg{max-width:100%;white-space:normal}
+    }
+    @media(min-width:700px){.filters{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}}
+
+    /* Разделы — полосой внизу, в зоне большого пальца. Влезает пять, остальные
+       доезжают прокруткой: прятать их в «Ещё» — значит потерять половину панели. */
+    .tabs{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;gap:4px;
+      padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+      background:rgba(14,14,16,.94);backdrop-filter:blur(16px);border-top:1px solid var(--line);
+      overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{flex:0 0 auto;min-width:72px;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:3px;padding:6px 8px;border:0;border-radius:14px;background:transparent;color:var(--muted);
+      font:700 10.5px/1.15 inherit;cursor:pointer;text-align:center}
+    .tab i{font-style:normal;font-size:19px;line-height:1}
+    .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+    @media(min-width:900px){
+      body{padding-bottom:24px}
+      .tabs{position:sticky;top:60px;bottom:auto;border-top:0;border-bottom:1px solid var(--line);
+        padding:8px 0;background:var(--bg);backdrop-filter:none;margin-bottom:6px}
+      .tab{flex-direction:row;min-height:44px;gap:7px;font-size:13px;padding:0 14px}
+      .tab i{font-size:15px}
+    }
+
+    /* Список получателей и подсказки по имени. */
+    .rcp{border:1px solid var(--line);border-radius:14px;background:#141518;max-height:340px;overflow:auto;margin:8px 0 4px}
+    .rcp .r{display:flex;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;min-height:48px}
+    .rcp .r:last-child{border-bottom:0}
+    .rcp .r.on{background:rgba(239,95,0,.12)}
+    .rcp .r input{width:22px;flex:0 0 auto}
+    .rcp .nm{font-weight:700;font-size:13.5px}
+    .rcp .sub{font-size:11.5px;color:var(--muted)}
+    .rcp .tags{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+    .rcpbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+    .rcpbar .cnt{font-size:12px;color:var(--muted);margin-left:auto}
+    .pick{position:relative}
+    .pick .sug{position:absolute;left:0;right:0;top:100%;z-index:30;background:#232529;border:1px solid var(--line);
+      border-radius:14px;margin-top:4px;max-height:280px;overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+    .pick .sug div{padding:12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:14px;min-height:48px}
+    .pick .sug div:last-child{border-bottom:0}
+    .pick .sug div:hover,.pick .sug div.hi{background:var(--card2)}
+    .pick .sug .sub{font-size:11.5px;color:var(--muted)}
+    .picked{display:inline-flex;align-items:center;gap:10px;margin-top:8px;padding:8px 12px;border-radius:999px;
+      background:var(--card2);border:1px solid var(--line);font-size:13px}
+    .picked .x{cursor:pointer;color:var(--muted);font-weight:800;padding:0 4px}
+    .codes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+    .codes span{padding:9px 12px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:13px;cursor:pointer}
+    .prev{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:13px;margin:8px 0;font-size:14px;line-height:1.55}
+    .prev .pbtn{display:inline-block;margin:4px 6px 0 0;padding:7px 12px;border-radius:11px;background:#2c2f35;border:1px solid var(--line);font-size:12.5px}
+    .prev .warn{color:var(--danger);font-weight:800;margin-top:8px}
+    .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+    .toolbar input{width:auto;min-width:180px;flex:1 1 180px}
+    .toolbar label{margin:0;display:flex;gap:8px;align-items:center;font-size:13px;text-transform:none;letter-spacing:0}
+
+    /* Касса: карточка игрока, крупный баланс, действия кнопками. */
+    .bal{display:flex;align-items:baseline;gap:10px;margin:12px 0 4px}
+    .bal b{font-size:30px;color:var(--accent2);font-variant-numeric:tabular-nums}
+    .bal span{font-size:13px;color:var(--muted)}
+    .who{display:flex;align-items:center;gap:12px}
+    .who .av{width:44px;height:44px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
+      display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--accent2)}
+    .who .nm{font-weight:800;font-size:16px}
+    .ops{display:flex;gap:8px;margin-top:12px}
+    .ops .btn{flex:1 1 0}
+    .amts{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+    .amts .chip{padding:10px 14px;font-size:14px;font-weight:700}
+    .amts .chip.on{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
+    .hist2{margin-top:14px}
+    .hist2 .row2{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)}
+    .hist2 .row2:last-child{border-bottom:0}
+    .hist2 .amt{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .hist2 .plus{color:var(--ok)} .hist2 .minus{color:var(--danger)}
+    .hist2 .d{font-size:11.5px;color:var(--muted)}
+  </style>
+</head>
+<body><div class="wrap">
+  <div class="top">
+    <div><h1>PTF · панель</h1><div class="sub" id="status">Загружаю…</div></div>
+    <button class="ico" onclick="reload()" title="Обновить">⟳</button>
+  </div>
+  <details class="fold statFold" id="statFold"><summary>Сводка по базе</summary><div class="grid" id="stats"></div></details>
+  <div class="tabs" id="tabBar"><button class="tab active" data-tab="players"><i>👥</i>Игроки</button><button class="tab" data-tab="events"><i>🎾</i>События</button><button class="tab" data-tab="balances"><i>💰</i>Касса</button><button class="tab" data-tab="broadcast"><i>📣</i>Рассылка</button><button class="tab" data-tab="direct"><i>💬</i>Личное</button><button class="tab" data-tab="refunds"><i>↩️</i>Возвраты</button><button class="tab" data-tab="menu"><i>🎛</i>Кнопки</button><button class="tab" data-tab="selfie"><i>🖼</i>Селфи</button><button class="tab" data-tab="rating"><i>📈</i>Рейтинг</button><button class="tab" data-tab="history"><i>🕔</i>История</button></div>
+  <div class="card" id="filtersCard">
+    <details class="fold" id="filtersFold"><summary>Фильтры</summary>
+    <div class="filters" style="margin-top:8px">
+      <div><label>Статус</label><select id="fStatus"><option value="">Все</option></select></div>
+      <div><label>Дивизион</label><select id="fDivision"><option value="">Все</option></select></div>
+      <div><label>Язык</label><select id="fLanguage"><option value="">Все</option><option value="ru">RU</option><option value="en">EN / другой</option></select></div>
+      <div><label>Селфи</label><select id="fSelfie"><option value="">Все</option><option value="missing">Нет</option><option value="requested">Запросили</option><option value="received">Есть</option></select></div>
+      <div><label>NTRP (Raketo)</label><select id="fRating"><option value="">Все</option><option value="missing">Нет</option><option value="set">Указан</option></select></div>
+      <div><label>Событие</label><select id="fEvent"><option value="">Все</option></select></div>
+      <div><label>Поиск</label><input id="fSearch" placeholder="имя или @ник" /></div>
+    </div>
+    <div class="actions" style="margin-top:9px"><button class="btn" onclick="applyFilters()">Применить</button><button class="btn secondary" onclick="clearFilters()">Сбросить</button><button class="btn secondary" onclick="selectFiltered()">Отметить всех</button><button class="btn secondary" onclick="clearSelection()">Снять отметки</button></div>
+    </details>
+    <div class="muted" id="countLine" style="margin-top:8px"></div>
+  </div>
+  <div id="tabPlayers" class="card"><h3>Игроки</h3><div class="tableWrap"><table id="playersTable"></table></div></div>
+  <div id="tabBroadcast" class="card hidden"><h3>Рассылка</h3><p class="muted">Отметь получателей в списке ниже. Если не отмечен никто — уйдёт всем, кто попал под фильтры.</p><div class="rcpbar"><button class="btn secondary" onclick="selectFiltered()">Выбрать всех</button><button class="btn secondary" onclick="clearSelection()">Снять выделение</button><span class="cnt" id="rcpCount"></span></div><div class="rcp" id="rcpList"></div><textarea id="broadcastText" placeholder="Текст рассылки. HTML-разметка работает."></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast()">Предпросмотр</button></div><div id="broadcastPreview" class="prev hidden"></div><label>Кнопка под сообщением</label><select id="broadcastButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendBroadcast()">Отправить рассылку</button></div><div id="broadcastResult" class="muted"></div></div>
+  <div id="tabDirect" class="card hidden"><h3>Личное сообщение</h3><p class="muted">Найди игрока по имени — Telegram ID вводить не нужно.</p><div class="pick"><input id="directPick" placeholder="Начни вводить имя или @ник" autocomplete="off" oninput="pickInput(this.value)" onkeydown="pickKey(event)" onblur="setTimeout(pickClose,150)"/><div class="sug hidden" id="directSug"></div></div><div id="directChosen"></div><input id="directId" class="hidden" placeholder="telegram_id"/><textarea id="directText" placeholder="Текст сообщения игроку"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="directButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Отправить</button></div><div id="directResult" class="muted"></div></div>
+  <div id="tabSelfie" class="card hidden"><h3>Нет селфи</h3><p class="muted">Запросить селфи у активных игроков, у которых его ещё нет. Берём отмеченных или тех, кто попал под фильтры.</p><div class="actions"><button class="btn" onclick="requestSelfies()">Запросить селфи</button></div><div id="selfieResult" class="muted"></div></div>
+  <div id="tabHistory" class="card hidden"><h3>История рассылок</h3><div class="toolbar"><input id="hSearch" placeholder="поиск по тексту, сегменту, админу" oninput="renderHistory()"/><label><input type="checkbox" id="hFailedOnly" onchange="renderHistory()"> только с ошибками</label><button class="btn secondary" onclick="loadHistory()">Обновить</button><span class="muted" id="hCount"></span></div><div class="tableWrap"><table id="historyTable" class="hist"></table></div></div>
+  <div id="tabEvents" class="card hidden"><h3>Events</h3>
+    <p class="muted">Создай карточку, потом нажми «Предпросмотр» — бот пришлёт её тебе в чат такой, какой её увидят игроки, с кнопками подтверждения и рассылки.</p>
+    <div class="filters" style="grid-template-columns:repeat(3,1fr)">
+      <div><label>Название RU</label><input id="evTitleRu" placeholder="Вечеринка PTF"/></div>
+      <div><label>Название EN</label><input id="evTitleEn" placeholder="PTF Party"/></div>
+      <div><label>Место</label><input id="evPlace" placeholder="The Peak Racket Park"/></div>
+      <div><label>Ссылка на локацию</label><input id="evPlaceUrl" placeholder="https://maps.app.goo.gl/…"/></div>
+      <div><label>Дата</label><select id="evDate"></select></div>
+      <div><label>Время</label><select id="evTime"></select></div>
+      <div><label>Запись до</label><select id="evDeadline"></select></div>
+      <div><label>Цена, ฿</label><input id="evPrice" type="number" placeholder="500"/></div>
+      <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = та же"/></div>
+      <div><label>Вместимость</label><input id="evCapacity" type="number" placeholder="16"/></div>
+      <div><label>Максимум гостей</label><input id="evMaxGuests" type="number" placeholder="1"/></div>
+      <div><label>Возврат, часов до</label><input id="evRefund" type="number" placeholder="12"/></div>
+      <div><label>Кому</label><select id="evAudience" onchange="evAudienceChanged()">
+        <option value="all">Всем в боте</option>
+        <option value="active">Только активным игрокам</option>
+        <option value="personal">Лично выбранным</option>
+      </select></div>
+      <div><label>Дивизион</label><select id="evDivision"><option value="">Любой</option></select></div>
+    </div>
+    <div id="evPickWrap" class="hidden" style="margin-top:6px">
+      <label>Кого приглашаем</label>
+      <div class="pick"><input id="evPick" placeholder="начни вводить имя" oninput="evPickInput(this.value)" onkeydown="evPickKey(event)" autocomplete="off"/><div id="evPickSug" class="sug hidden"></div></div>
+      <div id="evInvited" class="rcp" style="margin-top:6px"></div>
+      <div class="muted" id="evInvitedCount">Никого не выбрано</div>
+    </div>
+    <label>Описание RU</label><textarea id="evDescRu" placeholder="Что за событие, что взять с собой"></textarea>
+    <label>Описание EN</label><textarea id="evDescEn"></textarea>
+    <div class="actions" style="margin-top:8px">
+      <label><input type="checkbox" id="evPaid" checked> нужна оплата</label>
+      <label><input type="checkbox" id="evGuests"> можно с собой</label>
+      <label><input type="checkbox" id="evInviteOnly"> только по приглашению</label>
+    </div>
+    <div class="actions"><button class="btn" onclick="saveEvent()">Сохранить</button><button class="btn secondary" onclick="previewEvent()">Предпросмотр в боте</button><button class="btn secondary" onclick="newEvent()">Новое событие</button></div>
+    <div id="evResult" class="muted"></div>
+    <div class="tableWrap" style="margin-top:12px"><table id="eventsTable"></table></div>
+  </div>
+  <div id="tabBalances" class="card hidden"><h3>Касса</h3>
+    <p class="muted">Найди игрока, посмотри депозит и проведи операцию. Комментарий обязателен — по нему потом понятно, за что.</p>
+    <div class="pick"><input id="balPick" placeholder="Начни вводить имя или @ник" autocomplete="off"
+      oninput="balPickInput(this.value)" onkeydown="balPickKey(event)" onblur="setTimeout(balPickClose,160)"/>
+      <div class="sug hidden" id="balSug"></div></div>
+    <div id="balCard" class="hidden">
+      <div class="who" style="margin-top:14px"><div class="av" id="balAv"></div>
+        <div><div class="nm" id="balWho"></div><div class="muted" id="balSubWho"></div></div></div>
+      <div class="bal"><b id="balNow">0</b><span>฿ на депозите</span></div>
+      <div class="ops">
+        <button class="btn" onclick="balOp('add')">＋ Пополнить</button>
+        <button class="btn secondary" onclick="balOp('sub')">− Списать</button>
+        <button class="btn secondary" onclick="balOp('refund')">↩︎ Вернуть</button>
+      </div>
+      <div id="balForm" class="hidden">
+        <label id="balFormLabel"></label>
+        <div class="amts" id="balPresets"></div>
+        <input id="balAmount" type="number" inputmode="numeric" placeholder="сумма, ฿" oninput="balPresetSync()"/>
+        <label>Комментарий — обязательно</label>
+        <div class="codes" id="balComments"></div>
+        <input id="balComment" placeholder="за что"/>
+        <div class="actions"><button class="btn" id="balGo" onclick="balSubmit()">Провести</button>
+          <button class="btn secondary small" onclick="balCloseOp()">Отмена</button></div>
+      </div>
+      <div id="balResult" class="muted" style="margin-top:8px"></div>
+      <div class="hist2" id="balHistory"></div>
+    </div>
+    <div class="actions"><button class="btn secondary" onclick="loadBalances()">Обновить список</button></div>
+    <div class="tableWrap"><table id="balancesTable"></table></div>
+  </div>
+  <div id="tabRefunds" class="card hidden"><h3>Ожидают ручного возврата</h3>
+    <p class="muted">Сюда попадают возвраты, которые ты решил отправить переводом сам. Отметь «отправил» — игроку уйдёт уведомление, строка уедет в архив.</p>
+    <div class="actions"><button class="btn secondary" onclick="loadRefunds()">Обновить</button><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rfAll" style="width:auto" onchange="loadRefunds()"> показывать отправленные</label></div>
+    <div id="rfResult" class="muted"></div>
+    <div class="tableWrap" style="margin-top:12px"><table id="refundsTable"></table></div>
+  </div>
+  <div id="tabMenu" class="card hidden"><h3>Кнопки по группам</h3>
+    <p class="muted">Что видит каждая группа игроков. Тексты кнопок и то, куда они ведут, не меняются — только видимость и порядок.</p>
+    <label>Группа</label>
+    <select id="menuGroup" onchange="renderTabs()"></select>
+    <details class="fold" open style="margin-top:12px"><summary>📱 Вкладки внизу мини-приложения</summary>
+      <div id="menuGrid"></div></details>
+    <details class="fold" open style="margin-top:10px"><summary>💬 Кнопки под сообщением бота</summary>
+      <div id="btnGrid"></div></details>
+    <details class="fold" open style="margin-top:10px"><summary>⌨️ Нижняя клавиатура в чате</summary>
+      <div id="kbGrid"></div>
+      <div class="muted" style="margin-top:6px">Матчи, Результат и Корт показываются только игрокам действующего состава — остальным эти экраны всё равно откажут.</div>
+    </details>
+    <div class="actions"><button class="btn" onclick="saveTabs()">Сохранить</button><button class="btn secondary" onclick="loadTabs()">Обновить</button></div>
+    <div id="menuResult" class="muted"></div>
+    <label style="margin-top:14px">Проверить</label>
+    <div class="actions" style="margin-top:0">
+      <button class="btn secondary" onclick="previewAs()">👁 Прислать в бот</button>
+      <button class="btn secondary" onclick="openAs()">📱 Открыть мини-апп</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Бот пришлёт сообщение с кнопками этой группы, а мини-апп откроется с её набором вкладок. Нижняя клавиатура в чате при этом не меняется — она твоя.</div>
+    <div id="previewResult" class="muted"></div>
+  </div>
+  <div id="tabRating" class="card hidden"><h3>Нет рейтинга NTRP</h3><p class="muted">Отправить кнопку «указать рейтинг» отмеченным игрокам или всем, кто попал под фильтры и без рейтинга.</p><div class="actions"><button class="btn" onclick="requestRatings()">Запросить рейтинг</button></div><div id="ratingResult" class="muted"></div></div>
+</div>
+<script>
+const tg=window.Telegram?.WebApp; tg?.ready(); tg?.expand(); const initData=tg?.initData||''; let contacts=[],filtered=[],selected=new Set();
+const $=id=>document.getElementById(id); function status(t,err=false){$('status').innerHTML=err?`<span class="err">${t}</span>`:t}
+function filters(){return {status:$('fStatus').value,division:$('fDivision').value,language:$('fLanguage').value,selfie_status:$('fSelfie').value,rating:$('fRating').value,event:$('fEvent').value,search:$('fSearch').value.trim(),selected_ids:[...selected]}}
+function noSelectionFilters(){const f=filters(); delete f.selected_ids; return f}
+function matches(c){const f=noSelectionFilters(); const n=v=>String(v||'').toLowerCase(); if(f.status&&n(c.status)!==n(f.status))return false;if(f.division&&n(c.division)!==n(f.division))return false;if(f.language){if(f.language==='ru'&&n(c.language)!=='ru')return false;if(f.language==='en'&&n(c.language)==='ru')return false}if(f.selfie_status){if(f.selfie_status==='missing'){if(n(c.selfie_status)==='received')return false}else if(n(c.selfie_status)!==n(f.selfie_status))return false}if(f.event&&!n(c.last_application_event).includes(n(f.event)))return false;if(f.rating==='missing'&&!c.missing_rating)return false;if(f.rating==='set'&&c.missing_rating)return false;if(f.search){const hay=[c.name,c.telegram_username,c.telegram_id,c.whatsapp,c.country,c.crm_tags].map(n).join(' ');if(!hay.includes(n(f.search)))return false}return true}
+function renderStats(stats){const labels={contacts:'Contacts',applications:'Applications',active:'Active',waitlist:'Waitlist',unpaid:'Unpaid / waiting',proofReceived:'Proof received',paid:'Paid approved',rejectedPayments:'Payment rejected',paidThb:'Paid THB',paidUsdt:'Paid USDT',missingSelfie:'Missing selfies'};$('stats').innerHTML=Object.entries(stats).map(([k,v])=>`<div class="stat"><b>${v}</b><span>${labels[k]||k}</span></div>`).join('')}
+function optionize(id,arr){const el=$(id);const first=el.querySelector('option')?.outerHTML||'<option value="">Все</option>';el.innerHTML=first+arr.map(x=>`<option value="${x}">${x}</option>`).join('')}
+function renderTable(){filtered=contacts.filter(matches);$('countLine').textContent=`Найдено: ${filtered.length} · отмечено: ${selected.size}`;let html='<thead><tr><th><input type="checkbox" onchange="toggleAll(this.checked)"></th><th>Игрок</th><th>Статус</th><th>Дивизион</th><th class="lo">NTRP</th><th class="lo">Selfie</th><th class="lo">Язык</th><th class="lo">Ник</th><th class="lo">Событие</th><th class="lo">Страна</th><th class="lo">WhatsApp</th><th></th></tr></thead><tbody>';html+=filtered.map(c=>`<tr><td><input type="checkbox" ${selected.has(String(c.telegram_id))?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)"></td><td class="grow"><b>${esc(c.name)}</b><br><span class="muted">${c.telegram_username?'@'+esc(c.telegram_username)+' · ':''}${esc(c.telegram_id)}</span></td><td><span class="pill">${esc(c.status)}</span></td><td>${esc(c.division)}</td><td class="lo">${c.missing_rating?'<span class="err">—</span>':esc(c.ntrp)}</td><td class="lo">${esc(c.selfie_status)}</td><td class="lo">${esc(c.language)}</td><td class="lo">${c.telegram_username?'@'+esc(c.telegram_username):''}</td><td class="lo">${esc(c.last_application_event)}</td><td class="lo">${esc(c.country)}</td><td class="lo">${esc(c.whatsapp)}</td><td>${String(c.status||'').toLowerCase()==='active'?'':`<button class="btn secondary" onclick="event.stopPropagation();activatePlayer('${c.telegram_id}')">Активировать</button>`}</td></tr>`).join('');html+='</tbody>';$('playersTable').innerHTML=html;renderRecipients()}
+function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function toggleOne(id,on){if(on)selected.add(String(id));else selected.delete(String(id));renderTable()} function toggleAll(on){filtered.forEach(c=>on?selected.add(String(c.telegram_id)):selected.delete(String(c.telegram_id)));renderTable()} function selectFiltered(){filtered.forEach(c=>selected.add(String(c.telegram_id)));renderTable()} function clearSelection(){selected.clear();renderTable()} function applyFilters(){renderTable()} function clearFilters(){['fStatus','fDivision','fLanguage','fSelfie','fRating','fEvent','fSearch'].forEach(id=>$(id).value='');renderTable()}
+async function api(path,body=null){const opts=body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,...body})}:{};const url=body?path:path+(path.includes('?')?'&':'?')+'initData='+encodeURIComponent(initData);const r=await fetch(url,opts);const j=await r.json();if(!j.ok)throw new Error(j.error||'Error');return j}
+async function reload(){try{status('Загружаю…');const j=await api('/api/admin/bootstrap');contacts=j.contacts||[];renderStats(j.stats||{});optionize('fStatus',j.statuses||[]);optionize('fDivision',j.divisions||[]);
+  // Список событий для фильтра: из листа Events плюс то, что реально стоит у игроков.
+  const evNames=[...new Set([...(j.events||[]).map(e=>e.event_name||e.name||'').filter(Boolean),
+    ...contacts.map(c=>c.last_application_event||'').filter(Boolean)])].sort();
+  optionize('fEvent',evNames);
+  // Дивизионы для фильтра рассылки события — тот же список, что и в фильтрах игроков.
+  const dv=$('evDivision');
+  if(dv)dv.innerHTML='<option value="">Любой</option>'+(j.divisions||[]).map(d=>{
+    const k=String(d).replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    return `<option value="${esc(k)}">${esc(d)}</option>`;
+  }).join('');
+  initEventPickers();evRenderInvited();evAudienceChanged();
+  renderCodes(j.link_codes||[]);renderTable();status('Готово')}catch(e){status(e.message,true)}}
+function renderCodes(list){const html=list.map(c=>`<span onclick="insertCode('${esc(c.code)}')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('');$('codeChips').innerHTML=html;
+  const d=$('directCodeChips');if(d)d.innerHTML=list.map(c=>`<span onclick="insertCode('${esc(c.code)}','directText')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('')}
+function insertCode(code,target){const t=$(target||'broadcastText');const tag='{'+code+'}';const a=t.selectionStart||t.value.length;const b=t.selectionEnd||a;t.value=t.value.slice(0,a)+(a&&t.value[a-1]!=='\n'?'\n\n':'')+tag+t.value.slice(b);t.focus();t.selectionStart=t.selectionEnd=a+tag.length+2}
+async function previewBroadcast(){const box=$('broadcastPreview');try{const j=await api('/api/admin/broadcast-preview',{message:$('broadcastText').value,lang:'ru'});box.classList.remove('hidden');const btns=(j.buttons||[]).map(b=>`<span class="pbtn">${esc(b)}</span>`).join('');box.innerHTML=j.text.replace(/\n/g,'<br>')+(btns?'<div style="margin-top:10px">'+btns+'</div>':'')+(j.inline?`<div class="muted" style="margin-top:8px">ссылок в тексте: ${j.inline}</div>`:'')+((j.unknown||[]).length?`<div class="warn">⚠️ неизвестные коды: ${esc(j.unknown.join(', '))}</div>`:'')}catch(e){box.classList.remove('hidden');box.innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function sendBroadcast(){try{if(!confirm('Отправить рассылку?'))return;const message=$('broadcastText').value.trim();const useSelected=selected.size>0;const j=await api('/api/admin/broadcast',{message,button:$('broadcastButton').value,filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('broadcastResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b> — подробности во вкладке «История»`;history=[]}catch(e){$('broadcastResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function sendDirect(){try{const id=$('directId').value.trim()||[...selected][0];if(!id)throw new Error('Сначала выбери игрока');const message=$('directText').value.trim();const j=await api('/api/admin/direct-message',{telegram_id:id,message,button:$('directButton').value});$('directResult').innerHTML='✅ Отправлено'}catch(e){$('directResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function requestSelfies(){try{if(!confirm('Запросить селфи у отфильтрованных активных игроков?'))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-selfie',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('selfieResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b>`;await reload()}catch(e){$('selfieResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+async function requestRatings(){try{if(!confirm('Запросить рейтинг NTRP?'))return;const useSelected=selected.size>0;const j=await api('/api/admin/request-rating',{filters:useSelected?{selected_ids:[...selected]}:noSelectionFilters()});$('ratingResult').innerHTML=`✅ Ушло: <b>${j.sent}</b>, ошибок: <b>${j.failed}</b>, получателей: <b>${j.recipients}</b>`;await reload()}catch(e){$('ratingResult').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+let history=[],openId='',logsCache={};
+function segLabel(s){if(!s)return '';try{const f=JSON.parse(s);if(f.selected_ids)return `selected: ${f.selected_ids.length}`;const parts=Object.entries(f).filter(([k,v])=>v&&k!=='selected_ids').map(([k,v])=>`${k}=${v}`);return parts.length?parts.join(', '):'all'}catch{return s}}
+function fmtDate(v){if(!v)return '';const d=new Date(v);return Number.isNaN(d.getTime())?String(v).slice(0,16):d.toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}
+async function loadHistory(){try{$('hCount').textContent='Загружаю…';const j=await api('/api/admin/broadcasts');history=j.broadcasts||[];logsCache={};renderHistory()}catch(e){$('hCount').innerHTML=`<span class="err">${esc(e.message)}</span>`}}
+function renderHistory(){const q=$('hSearch').value.trim().toLowerCase();const fo=$('hFailedOnly').checked;const rows=history.filter(b=>(!fo||b.failed>0)&&(!q||[b.message_text,b.segment_filter,b.admin_name,b.broadcast_id].join(' ').toLowerCase().includes(q)));$('hCount').textContent=`${rows.length} из ${history.length}`;let html='<thead><tr><th>Дата</th><th class="lo">Админ</th><th class="lo">Кому</th><th>Сообщение</th><th class="num">Ушло</th><th class="num">Ошибок</th></tr></thead><tbody>';for(const b of rows){const open=openId===b.broadcast_id;html+=`<tr class="row ${open?'open':''}" onclick="toggleLogs('${esc(b.broadcast_id)}')"><td>${esc(fmtDate(b.created_at))}</td><td class="lo">${esc(b.admin_name)}</td><td class="lo"><span class="chip">${esc(segLabel(b.segment_filter))}</span>${b.media_type&&b.media_type!=='text'?`<span class="chip">${esc(b.media_type)}</span>`:''}</td><td class="grow"><div class="msg" title="${esc(b.message_text)}">${esc(b.message_text.replace(/<[^>]+>/g,''))}</div></td><td class="num ok-n">${b.sent}/${b.recipients}</td><td class="num ${b.failed?'fail-n':'muted'}">${b.failed}</td></tr>`;if(open)html+=`<tr class="logs"><td colspan="6" id="logs-${esc(b.broadcast_id)}">${renderLogs(b.broadcast_id)}</td></tr>`}html+='</tbody>';$('historyTable').innerHTML=html}
+function renderLogs(id){const l=logsCache[id];if(!l)return '<span class="muted">Загружаю получателей…</span>';if(!l.length)return '<span class="muted">Пофамильного журнала по этой рассылке нет.</span>';return `<table><tbody>${l.map(r=>`<tr class="${r.status==='failed'?'fail':''}"><td>${r.status==='failed'?'❌':'✅'}</td><td><b>${esc(r.name||'')}</b> ${r.telegram_username?'@'+esc(r.telegram_username):''} <span class="muted">${esc(r.telegram_id)}</span></td><td>${esc(r.language)}</td><td>${esc(fmtDate(r.sent_at))}</td><td>${esc(r.error||'')}</td></tr>`).join('')}</tbody></table>`}
+async function toggleLogs(id){openId=openId===id?'':id;renderHistory();if(openId&&!logsCache[id]){try{const j=await api('/api/admin/broadcast-logs?broadcast_id='+encodeURIComponent(id));logsCache[id]=j.logs||[];}catch(e){logsCache[id]=[{status:'failed',name:'Load error',error:e.message}]}if(openId===id)renderHistory()}}
+
+// --- события -----------------------------------------------------------------
+// Карточка живёт как черновик, пока организатор не подтвердит её в боте.
+let evEditing='';
+// Дата и время выбираются из списков: руками получалось «13.092026», и такая
+// карточка уходила игрокам как есть.
+const EV_DAYS=90;
+function pad2(n){return String(n).padStart(2,'0')}
+function dmy(d){return pad2(d.getDate())+'.'+pad2(d.getMonth()+1)+'.'+d.getFullYear()}
+const EV_WD=['вс','пн','вт','ср','чт','пт','сб'];
+function evDateOptions(){
+  const out=['<option value="">— выбери дату —</option>'];
+  const now=new Date();now.setHours(12,0,0,0);
+  for(let i=0;i<EV_DAYS;i++){
+    const d=new Date(now.getTime()+i*86400000);const v=dmy(d);
+    out.push(`<option value="${v}">${v} · ${EV_WD[d.getDay()]}</option>`);
+  }
+  return out.join('');
+}
+function evTimeOptions(){
+  const out=['<option value="">— выбери время —</option>'];
+  for(let h=6;h<=22;h++)for(const m of ['00','30']){
+    if(h===22&&m==='30')continue;
+    const v=pad2(h)+':'+m;out.push(`<option value="${v}">${v}</option>`);
+  }
+  return out.join('');
+}
+function shiftDate(v,days){
+  const m=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(v||''));
+  if(!m)return '';
+  const d=new Date(Number(m[3]),Number(m[2])-1,Number(m[1]),12,0,0);
+  return dmy(new Date(d.getTime()+days*86400000));
+}
+// Значение может быть не из списка (старая карточка) — добавляем его отдельным
+// пунктом, иначе правка молча стёрла бы дату.
+function evSetSelect(id,value){
+  const el=$(id);const v=String(value||'').trim();
+  if(v&&![...el.options].some(o=>o.value===v))
+    el.insertAdjacentHTML('beforeend',`<option value="${esc(v)}">${esc(v)}</option>`);
+  el.value=v;
+}
+function initEventPickers(){
+  $('evDate').innerHTML=evDateOptions();
+  $('evDeadline').innerHTML=evDateOptions();
+  $('evTime').innerHTML=evTimeOptions();
+  // «Запись до» по умолчанию — за день до события.
+  $('evDate').onchange=()=>{ if(!$('evDeadline').value)evSetSelect('evDeadline',shiftDate($('evDate').value,-1)) };
+}
+
+// --- кого приглашаем ---------------------------------------------------------
+let evInvited=new Map(),evPickIdx=-1,evPickRows=[];
+function evAudienceChanged(){
+  $('evPickWrap').classList.toggle('hidden',$('evAudience').value!=='personal');
+}
+function evRenderInvited(){
+  const box=$('evInvited');
+  const list=[...evInvited.values()];
+  $('evInvitedCount').textContent=list.length?`Выбрано: ${list.length}`:'Никого не выбрано';
+  box.innerHTML=list.length?list.map(c=>`<label class="r on"><input type="checkbox" checked onchange="evInviteOff('${esc(c.telegram_id)}')"><span><span class="nm">${esc(c.name||c.telegram_id)}</span> <span class="sub">${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}</span></span></label>`).join(''):'';
+}
+function evInviteOff(id){evInvited.delete(String(id));evRenderInvited()}
+function evPickMatches(q){
+  const s=String(q||'').trim().toLowerCase().replace(/^@/,'');
+  if(!s)return [];
+  return (contacts||[]).filter(c=>!evInvited.has(String(c.telegram_id))&&(
+    String(c.name||'').toLowerCase().includes(s)||
+    String(c.telegram_username||'').toLowerCase().includes(s)||
+    String(c.telegram_id||'').includes(s))).slice(0,8);
+}
+function evPickInput(q){
+  evPickRows=evPickMatches(q);evPickIdx=-1;
+  const box=$('evPickSug');
+  if(!evPickRows.length){box.classList.add('hidden');box.innerHTML='';return}
+  box.innerHTML=evPickRows.map((c,i)=>`<div onclick="evPickChoose(${i})"><b>${esc(c.name||'—')}</b> <span class="sub">${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}${c.division?' · '+esc(c.division):''}</span></div>`).join('');
+  box.classList.remove('hidden');
+}
+function evPickChoose(i){
+  const c=evPickRows[i];if(!c)return;
+  evInvited.set(String(c.telegram_id),c);
+  $('evPick').value='';$('evPickSug').classList.add('hidden');$('evPickSug').innerHTML='';
+  evRenderInvited();
+}
+function evPickKey(e){
+  const box=$('evPickSug');if(box.classList.contains('hidden'))return;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    evPickIdx=Math.max(0,Math.min(evPickRows.length-1,evPickIdx+(e.key==='ArrowDown'?1:-1)));
+    [...box.children].forEach((el,i)=>el.classList.toggle('on',i===evPickIdx));
+  } else if(e.key==='Enter'){ e.preventDefault();evPickChoose(evPickIdx<0?0:evPickIdx); }
+  else if(e.key==='Escape'){ box.classList.add('hidden'); }
+}
+
+function evForm(){return{
+  event_id:evEditing,
+  title_ru:$('evTitleRu').value.trim(),title_en:$('evTitleEn').value.trim(),
+  description_ru:$('evDescRu').value.trim(),description_en:$('evDescEn').value.trim(),
+  date:$('evDate').value.trim(),time:$('evTime').value.trim(),
+  place:$('evPlace').value.trim(),place_url:$('evPlaceUrl').value.trim(),
+  price_thb:$('evPrice').value||'',guest_price_thb:$('evGuestPrice').value||'',
+  capacity:$('evCapacity').value||'',signup_deadline:$('evDeadline').value.trim(),
+  payment_required:$('evPaid').checked,guests_allowed:$('evGuests').checked,
+  max_guests:$('evMaxGuests').value||'',refund_hours:$('evRefund').value||'',
+  audience:$('evAudience').value,
+  audience_division:$('evDivision').value,
+  invite_only:$('evInviteOnly').checked,
+  invited_ids:[...evInvited.keys()]
+}}
+function newEvent(){
+  evEditing='';
+  ['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evPlace','evPlaceUrl','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');
+  $('evAudience').value='all';$('evDivision').value='';$('evInviteOnly').checked=false;
+  evInvited=new Map();evRenderInvited();evAudienceChanged();
+  $('evResult').textContent='Новая карточка';
+}
+async function saveEvent(){
+  try{const j=await api('/api/admin/event-save',{event:evForm()});evEditing=j.event.event_id;
+    $('evResult').innerHTML='<span class="ok">Сохранено: '+j.event.event_id+'</span>';loadEvents()}
+  catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// Ручная перерассылка тем, кто не записался. Сам текст и защита от спама — в боте.
+async function nudgeEvent(id){
+  try{ await api('/api/admin/event-nudge',{event_id:id});
+    $('evResult').innerHTML='<span class="ok">Напоминание запущено — отчёт придёт в бот.</span>' }
+  catch(e){ $('evResult').innerHTML='<span class="err">'+e.message+'</span>' }
+}
+async function previewEvent(){
+  try{if(!evEditing)await saveEvent();
+    await api('/api/admin/event-preview',{event_id:evEditing});
+    $('evResult').innerHTML='<span class="ok">Карточка ушла тебе в бот — подтверди там.</span>'}
+  catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+function editEvent(id){
+  const e=(evData||[]).find(x=>x.event_id===id);if(!e)return;
+  evEditing=id;
+  $('evTitleRu').value=e.title_ru||'';$('evTitleEn').value=e.title_en||'';
+  $('evDescRu').value=e.description_ru||'';$('evDescEn').value=e.description_en||'';
+  evSetSelect('evDate',e.date||'');evSetSelect('evTime',e.time||'');
+  $('evPlace').value=e.place||'';$('evPlaceUrl').value=e.place_url||'';
+  $('evPrice').value=e.price_thb||'';$('evGuestPrice').value=e.guest_price_thb==null?'':e.guest_price_thb;
+  $('evCapacity').value=e.capacity||'';evSetSelect('evDeadline',e.signup_deadline||'');
+  $('evMaxGuests').value=e.max_guests||'';$('evRefund').value=e.refund_hours||'';
+  $('evPaid').checked=!!e.payment_required;$('evGuests').checked=!!e.guests_allowed;
+  $('evAudience').value=e.audience||'all';
+  $('evDivision').value=e.audience_division||'';
+  $('evInviteOnly').checked=!!e.invite_only;
+  evInvited=new Map();
+  (e.invited_ids||[]).forEach(id=>{
+    const c=(contacts||[]).find(x=>String(x.telegram_id)===String(id));
+    evInvited.set(String(id),c||{telegram_id:String(id),name:String(id)});
+  });
+  evRenderInvited();evAudienceChanged();
+  $('evResult').textContent='Правим: '+(e.title_ru||e.event_id);
+  window.scrollTo(0,0);
+}
+let evData=[];
+async function loadEvents(){
+  try{const j=await api('/api/admin/events');evData=j.events||[];
+    $('eventsTable').innerHTML='<tr><th>Событие</th><th>Когда</th><th>Статус</th><th>Мест</th><th class="lo">Записей</th><th></th></tr>'
+      +evData.map(e=>'<tr><td class="grow"><b>'+esc(e.title_ru||e.title_en||e.event_id)+'</b></td><td>'+esc([e.date,e.time].filter(Boolean).join(' '))+'</td>'
+        +'<td><span class="pill">'+esc(e.status)+'</span></td><td class="num">'+(e.capacity?e.seats+' / '+e.capacity:e.seats)+'</td>'
+        +'<td class="num lo">'+e.signups+'</td>'
+        +'<td><button class="btn secondary" onclick="editEvent(\''+e.event_id+'\')">Править</button> '
+        +'<button class="btn danger" onclick="deleteEvent(\''+e.event_id+'\')">Удалить</button> '
+        +(e.status==='published'?'<button class="btn secondary" onclick="nudgeEvent(\''+e.event_id+'\')">Напомнить</button>':'')
+        +'</td></tr>').join('')}
+  catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// Проверка «глазами группы»: сообщение с её кнопками уходит мне в бот, а
+// мини-апп открывается с её набором вкладок прямо здесь, в том же окне.
+async function previewAs(){
+  $('previewResult').textContent='Отправляю…';
+  try{const j=await api('/api/admin/preview-as',{group:menuGroup()});
+    $('previewResult').innerHTML='<span class="ok">Готово — посмотри сообщение в чате с ботом ('+j.buttons+' кнопок под сообщением, '+j.keyboard+' внизу).</span>'}
+  catch(e){$('previewResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+function openAs(){location.href='/league?as='+encodeURIComponent(menuGroup())}
+
+// --- удаление события ---------------------------------------------------------
+// Спрашиваем один раз и на всё событие: как возвращать деньги. Дальше бот сам
+// оповещает записавшихся, правит разосланные карточки и стирает строку.
+async function deleteEvent(id){
+  const e=(evData||[]).find(x=>x.event_id===id)||{};
+  const name=e.title_ru||e.title_en||id;
+  let impact={people:0,paid:0};
+  try{impact=await api('/api/admin/event-impact?event_id='+encodeURIComponent(id))}catch(_){}
+  const who=impact.people?('Записано: '+impact.people+(impact.paid?(', оплачено на '+impact.paid+' ฿'):', оплат не было')):'Записавшихся нет.';
+  if(!confirm('Удалить «'+name+'»?\n\n'+who+'\nСобытие исчезнет совсем, разосланные карточки станут «событие отменено».'))return;
+  let mode='balance';
+  if(impact.paid>0){
+    mode=confirm('Вернуть '+impact.paid+' ฿ на балансы игроков?\n\nОК — вернуть на балансы.\nОтмена — верну переводом сам (бот запишет долг в список).')?'balance':'manual';
+  }
+  $('evResult').textContent='Удаляю…';
+  try{
+    const j=await api('/api/admin/event-delete',{event_id:id,refund_mode:mode});
+    const tail=mode==='manual'&&j.owed?(' К возврату вручную: '+j.owed+' ฿ — смотри вкладку «Возвраты».'):(j.refund_sum?(' Возвращено на депозиты: '+j.refund_sum+' ฿.'):'');
+    $('evResult').innerHTML='<span class="ok">Удалено. Оповещено: '+(j.told||0)+'.'+tail+'</span>';
+    if(evEditing===id)newEvent();
+    loadEvents();
+  }catch(e){$('evResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// --- ручные возвраты ----------------------------------------------------------
+let rfData=[];
+async function loadRefunds(){
+  try{
+    const j=await api('/api/admin/refunds'+($('rfAll').checked?'?all=1':''));
+    rfData=j.refunds||[];
+    $('refundsTable').innerHTML='<tr><th class="lo">Когда</th><th>Игрок</th><th class="lo">Событие</th><th>Сумма</th><th>Статус</th><th></th></tr>'
+      +(rfData.length?rfData.map(r=>'<tr><td class="lo">'+esc((r.created_at||'').slice(0,10))+'</td><td class="grow"><b>'+esc(r.name||r.telegram_id)+'</b></td>'
+        +'<td class="lo">'+esc(r.event_title||'')+'</td><td class="num"><b>'+r.amount_thb+' ฿</b></td>'
+        +'<td><span class="pill">'+(r.status==='sent'?'отправлен':'ждёт')+'</span></td>'
+        +'<td>'+(r.status==='sent'?'':'<button class="btn" onclick="refundSent(\''+r.refund_id+'\')">Отправил</button>')+'</td></tr>').join('')
+        :'<tr><td colspan="6" class="muted">Ничего не ждёт возврата.</td></tr>');
+    $('rfResult').textContent='';
+  }catch(e){$('rfResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+async function refundSent(id){
+  try{await api('/api/admin/refund-sent',{refund_id:id,sent:true});loadRefunds()}
+  catch(e){$('rfResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// --- кнопки по группам --------------------------------------------------------
+// Две настройки в одном месте: вкладки внизу мини-приложения и кнопки под
+// сообщением бота. Одна группа на экране — на телефоне четыре колонки галочек
+// читать невозможно. Содержание кнопок не меняем, только видимость и порядок.
+const TAB_NAMES={home:'Лига',div:'Дивизионы',race:'Гонка',players:'Игроки',matches:'Матчи',events:'События',about:'О лиге'};
+const BTN_NAMES={join_event:'🎾 Заявка на событие',matches:'🎾 Мои матчи',participants:'👥 Состав',league:'🏆 Лига',
+  about:'ℹ️ О лиге',how:'📖 Как работает лига',yearly:'⭐ Гонка года',pass:'💳 Оплатить взнос',contact:'💬 Связаться'};
+const GROUP_NAMES={active:'Активные',waitlist:'Лист ожидания',applied:'Заявка без оплаты',guest:'Все остальные'};
+const KB_NAMES={matches:'🎾 Мои матчи',result:'📊 Результат',court:'📅 Корт',league:'🏆 Лига',
+  squad:'👥 Состав',apply:'🎾 Заявка',pay:'💳 Оплатить',contact:'💬 Связаться',menu:'🏠 Меню'};
+let tabsState={},btnsState={},kbState={},tabsAll=[],btnsAll=[],kbAll=[],tabsAlways=[];
+function menuGroup(){return $('menuGroup').value||'active'}
+async function loadTabs(){
+  try{
+    const j=await api('/api/admin/tabs');
+    tabsAll=j.all||[];btnsAll=j.allButtons||[];kbAll=j.allKeyboard||[];tabsAlways=j.always||[];
+    tabsState=j.tabs||{};btnsState=j.buttons||{};kbState=j.keyboard||{};
+    const sel=$('menuGroup');
+    if(!sel.options.length)sel.innerHTML=Object.keys(GROUP_NAMES).map(g=>'<option value="'+g+'">'+esc(GROUP_NAMES[g])+'</option>').join('');
+    renderTabs();$('menuResult').textContent='';
+  }catch(e){$('menuResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+function menuRows(gridId,state,all,names,kind){
+  const g=menuGroup();
+  const on=state[g]||[];
+  const off=all.filter(t=>on.indexOf(t)<0);
+  const rows=on.map(t=>'<div class="r on"><input type="checkbox" checked onchange="menuToggle(\''+kind+'\',\''+t+'\')"'
+      +(tabsAlways.indexOf(t)>=0&&kind==='tabs'?' disabled':'')+'>'
+      +'<span class="nm">'+esc(names[t]||t)+'</span>'
+      +'<span class="tags"><span class="chip" onclick="menuMove(\''+kind+'\',\''+t+'\',-1)">↑</span>'
+      +'<span class="chip" onclick="menuMove(\''+kind+'\',\''+t+'\',1)">↓</span></span></div>').join('')
+    +off.map(t=>'<div class="r"><input type="checkbox" onchange="menuToggle(\''+kind+'\',\''+t+'\')">'
+      +'<span class="nm muted">'+esc(names[t]||t)+'</span></div>').join('');
+  $(gridId).innerHTML='<div class="rcp">'+rows+'</div>'
+    +(on.length?'':'<div class="muted" style="margin-top:6px">Ничего не отмечено — эта группа не увидит ни одной кнопки.</div>');
+}
+function renderTabs(){
+  menuRows('menuGrid',tabsState,tabsAll,TAB_NAMES,'tabs');
+  menuRows('btnGrid',btnsState,btnsAll,BTN_NAMES,'btns');
+  menuRows('kbGrid',kbState,kbAll,KB_NAMES,'kb');
+  $('previewResult').textContent='';
+}
+function menuState(kind){return kind==='tabs'?tabsState:(kind==='btns'?btnsState:kbState)}
+function menuToggle(kind,t){
+  if(kind==='tabs'&&tabsAlways.indexOf(t)>=0)return;
+  const st=menuState(kind),g=menuGroup();
+  const on=(st[g]||[]).slice();const i=on.indexOf(t);
+  if(i>=0)on.splice(i,1);else on.push(t);
+  st[g]=on;renderTabs();
+}
+function menuMove(kind,t,step){
+  const st=menuState(kind),g=menuGroup();
+  const on=(st[g]||[]).slice();const i=on.indexOf(t);const j=i+step;
+  if(i<0||j<0||j>=on.length)return;
+  on.splice(j,0,on.splice(i,1)[0]);
+  st[g]=on;renderTabs();
+}
+// Старые имена оставлены: ими пользуются проверки и привычные вызовы.
+function tabToggle(g,t){const st=tabsState;const on=(st[g]||[]).slice();const i=on.indexOf(t);if(i>=0)on.splice(i,1);else on.push(t);st[g]=on;renderTabs()}
+function tabMove(g,t,step){const on=(tabsState[g]||[]).slice();const i=on.indexOf(t);const j=i+step;if(i<0||j<0||j>=on.length)return;on.splice(j,0,on.splice(i,1)[0]);tabsState[g]=on;renderTabs()}
+async function saveTabs(){
+  $('menuResult').textContent='Сохраняю…';
+  try{const j=await api('/api/admin/tabs',{tabs:tabsState,buttons:btnsState,keyboard:kbState});
+    tabsState=j.tabs||tabsState;btnsState=j.buttons||btnsState;kbState=j.keyboard||kbState;renderTabs();
+    $('menuResult').innerHTML='<span class="ok">Сохранено. Мини-апп подхватит при следующем открытии, нижняя клавиатура — при следующем сообщении боту.</span>'}
+  catch(e){$('menuResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// --- касса --------------------------------------------------------------------
+// Никакого ввода id руками: игрок выбирается из списка, операция — кнопкой,
+// комментарий обязателен. Логика повторяет кассу тренерского бота.
+let balList=[],balWho=null,balMode='',balSugItems=[],balSugHi=-1;
+const BAL_PRESETS=[500,1000,3000,5000];
+const BAL_NOTES={
+  add:['пополнение депозита','предоплата за события','перевод на карту'],
+  sub:['оплата участия','оплата события','корректировка'],
+  refund:['возврат за событие','возврат взноса','отмена сезона']
+};
+const BAL_TITLES={add:'Сколько пополняем',sub:'Сколько списываем',refund:'Сколько возвращаем переводом'};
+
+async function loadBalances(){
+  try{
+    const j=await api('/api/admin/balances');balList=j.balances||[];
+    $('balancesTable').innerHTML='<tr><th>Игрок</th><th class="lo">Telegram ID</th><th class="num">Депозит</th></tr>'
+      +(balList.length?balList.map(b=>'<tr onclick="balOpen(\''+esc(b.telegram_id)+'\')" style="cursor:pointer">'
+        +'<td class="grow"><b>'+esc(b.name||b.telegram_id)+'</b></td>'
+        +'<td class="lo muted">'+esc(b.telegram_id)+'</td>'
+        +'<td class="num"><b>'+b.balance+' ฿</b></td></tr>').join('')
+        :'<tr><td class="muted">Движений по депозитам пока не было.</td></tr>')}
+  catch(e){$('balResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+// Поиск игрока — по всей базе, а не только по тем, у кого уже есть депозит.
+function balPickInput(v){
+  const q=String(v||'').trim().toLowerCase();
+  const box=$('balSug');
+  if(q.length<2){box.classList.add('hidden');balSugItems=[];return}
+  balSugItems=(contacts||[]).filter(c=>[c.name,c.telegram_username,c.telegram_id].map(x=>String(x||'').toLowerCase()).join(' ').includes(q)).slice(0,25);
+  balSugHi=-1;
+  box.innerHTML=balSugItems.length
+    ? balSugItems.map((c,i)=>'<div onmousedown="balPick('+i+')"><b>'+esc(c.name||c.telegram_id)+'</b>'
+        +'<div class="sub">'+(c.telegram_username?'@'+esc(c.telegram_username)+' · ':'')+esc(c.status||'')+'</div></div>').join('')
+    : '<div class="muted" style="padding:12px">Никого не нашли</div>';
+  box.classList.remove('hidden');
+}
+function balPickKey(e){
+  if(!balSugItems.length)return;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();balSugHi=Math.max(0,Math.min(balSugItems.length-1,balSugHi+(e.key==='ArrowDown'?1:-1)));
+    [...$('balSug').children].forEach((d,i)=>d.classList.toggle('hi',i===balSugHi));
+  } else if(e.key==='Enter'){e.preventDefault();balPick(balSugHi<0?0:balSugHi)}
+  else if(e.key==='Escape')balPickClose();
+}
+function balPickClose(){$('balSug').classList.add('hidden')}
+function balPick(i){const c=balSugItems[i];if(!c)return;balPickClose();$('balPick').value='';balOpen(c.telegram_id,c)}
+
+async function balOpen(id,contact){
+  const c=contact||(contacts||[]).find(x=>String(x.telegram_id)===String(id))
+    ||balList.find(x=>String(x.telegram_id)===String(id))||{telegram_id:id,name:String(id)};
+  balWho={telegram_id:String(c.telegram_id),name:c.name||String(c.telegram_id),
+    username:c.telegram_username||'',status:c.status||''};
+  $('balCard').classList.remove('hidden');
+  $('balWho').textContent=balWho.name;
+  $('balAv').textContent=(balWho.name||'?').trim().charAt(0).toUpperCase();
+  $('balSubWho').textContent=[balWho.username?'@'+balWho.username:'',balWho.status].filter(Boolean).join(' · ');
+  $('balResult').textContent='';balCloseOp();
+  $('balNow').textContent='…';$('balHistory').innerHTML='';
+  try{
+    const j=await api('/api/admin/balance-history?telegram_id='+encodeURIComponent(balWho.telegram_id));
+    $('balNow').textContent=j.balance;
+    $('balHistory').innerHTML=(j.history||[]).length
+      ? (j.history||[]).map(h=>'<div class="row2"><div><div>'+esc(h.description||h.type)+'</div>'
+          +'<div class="d">'+esc(fmtDate(h.date))+' · '+esc(h.type)+'</div></div>'
+          +'<div class="amt '+(h.amount>=0?'plus':'minus')+'">'+(h.amount>=0?'+':'')+h.amount+' ฿</div></div>').join('')
+      : '<div class="muted">Операций пока не было.</div>';
+  }catch(e){$('balResult').innerHTML='<span class="err">'+e.message+'</span>'}
+  $('balCard').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function balOp(mode){
+  if(!balWho)return;
+  balMode=mode;
+  $('balForm').classList.remove('hidden');
+  $('balFormLabel').textContent=BAL_TITLES[mode];
+  $('balPresets').innerHTML=BAL_PRESETS.map(a=>'<span class="chip" onclick="balSetAmount('+a+')">'+a+' ฿</span>').join('');
+  $('balComments').innerHTML=(BAL_NOTES[mode]||[]).map(t=>'<span onclick="balSetNote(\''+esc(t)+'\')">'+esc(t)+'</span>').join('');
+  $('balAmount').value='';$('balComment').value='';$('balResult').textContent='';
+  $('balGo').textContent=mode==='add'?'Пополнить':(mode==='sub'?'Списать':'Записать возврат');
+  $('balForm').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function balCloseOp(){balMode='';$('balForm').classList.add('hidden')}
+function balSetAmount(v){$('balAmount').value=v;balPresetSync()}
+function balSetNote(t){$('balComment').value=t}
+function balPresetSync(){
+  const v=Number($('balAmount').value||0);
+  [...$('balPresets').children].forEach((c,i)=>c.classList.toggle('on',BAL_PRESETS[i]===v));
+}
+async function balSubmit(){
+  const amount=Math.abs(Number($('balAmount').value||0));
+  const comment=$('balComment').value.trim();
+  if(!balWho)return;
+  if(!amount)return $('balResult').innerHTML='<span class="err">Укажи сумму</span>';
+  if(!comment)return $('balResult').innerHTML='<span class="err">Комментарий обязателен</span>';
+  const body={telegram_id:balWho.telegram_id,name:balWho.name,comment};
+  try{
+    let j;
+    if(balMode==='refund')j=await api('/api/admin/balance-refund',{...body,amount});
+    else j=await api('/api/admin/balance-change',{...body,amount:balMode==='sub'?-amount:amount});
+    // Сначала перечитываем карточку, и только потом пишем итог: иначе обновление
+    // истории стирает сообщение, ради которого всё и делалось.
+    const done='<span class="ok">Готово. Депозит: '+j.balance+' ฿'
+      +(balMode==='refund'?'. Долг записан во вкладку «Возвраты».':'')+'</span>';
+    balCloseOp();
+    await balOpen(balWho.telegram_id);
+    $('balResult').innerHTML=done;
+    loadBalances();
+  }catch(e){$('balResult').innerHTML='<span class="err">'+e.message+'</span>'}
+}
+
+// Подтверждение участия прямо из таблицы: игрок становится активным и получает
+// приветствие — то же, что и после одобрения оплаты.
+async function activatePlayer(id){
+  if(!confirm('Подтвердить участие и отправить приветствие?'))return;
+  try{ await api('/api/admin/activate-player',{telegram_id:id});
+    status('Участие подтверждено'); await reload() }
+  catch(e){ status(e.message,true) }
+}
+
+// --- получатели прямо в рассылке ------------------------------------------
+// Список повторяет текущие фильтры и живёт на той же вкладке: отметил галочки
+// и отправил, не переключаясь на «Игроков».
+function renderRecipients(){
+  const box=$('rcpList'); if(!box)return;
+  const cnt=$('rcpCount');
+  if(cnt)cnt.textContent=`Под фильтрами: ${filtered.length}. Отмечено: ${selected.size}.`;
+  if(!filtered.length){box.innerHTML='<div class="r"><span class="sub">Никто не подходит под фильтры</span></div>';return}
+  box.innerHTML=filtered.slice(0,300).map(c=>{
+    const on=selected.has(String(c.telegram_id));
+    return `<label class="r ${on?'on':''}">`
+      +`<input type="checkbox" ${on?'checked':''} onchange="toggleOne('${c.telegram_id}',this.checked)">`
+      +`<span><span class="nm">${esc(c.name)}</span>`
+      +`<span class="sub"> ${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}</span></span>`
+      +`<span class="tags"><span class="chip">${esc(c.status||'')}</span>`
+      +(c.division?`<span class="chip">${esc(c.division)}</span>`:'')
+      +(c.language?`<span class="chip">${esc(c.language)}</span>`:'')+`</span></label>`;
+  }).join('')+(filtered.length>300?'<div class="r"><span class="sub">Показаны первые 300 — сузь фильтры</span></div>':'');
+}
+
+// --- выбор игрока по имени -------------------------------------------------
+// Telegram ID помнить не нужно: начинаешь вводить имя — появляются варианты.
+let pickIdx=-1,pickRows=[];
+function pickMatches(q){
+  const s=String(q||'').trim().toLowerCase().replace(/^@/,'');
+  if(!s)return [];
+  return contacts.filter(c=>{
+    const name=String(c.name||'').toLowerCase();
+    const user=String(c.telegram_username||'').toLowerCase();
+    return name.includes(s)||user.includes(s)||String(c.telegram_id).includes(s);
+  }).slice(0,8);
+}
+function pickInput(q){
+  pickRows=pickMatches(q); pickIdx=-1;
+  const box=$('directSug');
+  if(!pickRows.length){box.classList.add('hidden');box.innerHTML='';return}
+  box.classList.remove('hidden');
+  box.innerHTML=pickRows.map((c,i)=>`<div onmousedown="pickChoose(${i})">`
+    +`<b>${esc(c.name)}</b>`
+    +`<div class="sub">${c.telegram_username?'@'+esc(c.telegram_username)+' · ':''}${esc(c.telegram_id)}`
+    +`${c.division?' · '+esc(c.division):''}${c.status?' · '+esc(c.status):''}</div></div>`).join('');
+}
+function pickChoose(i){
+  const c=pickRows[i]; if(!c)return;
+  $('directId').value=String(c.telegram_id);
+  $('directPick').value='';
+  $('directChosen').innerHTML=`<span class="picked"><b>${esc(c.name)}</b>`
+    +`<span class="sub">${c.telegram_username?'@'+esc(c.telegram_username):esc(c.telegram_id)}</span>`
+    +`<span class="x" onclick="pickClear()">✕</span></span>`;
+  pickClose();
+}
+function pickClear(){ $('directId').value=''; $('directChosen').innerHTML=''; }
+function pickClose(){ const b=$('directSug'); if(b){b.classList.add('hidden');b.innerHTML=''} pickIdx=-1 }
+function pickKey(e){
+  const box=$('directSug'); if(!box||box.classList.contains('hidden'))return;
+  const items=[...box.querySelectorAll('div')];
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    pickIdx=e.key==='ArrowDown'?Math.min(pickIdx+1,items.length-1):Math.max(pickIdx-1,0);
+    items.forEach((el,i)=>el.classList.toggle('hi',i===pickIdx));
+  } else if(e.key==='Enter'){
+    e.preventDefault();
+    pickChoose(pickIdx>=0?pickIdx:0);
+  } else if(e.key==='Escape'){ pickClose() }
+}
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+  // Активный раздел подтягиваем в видимую часть полосы: на телефоне вкладок
+  // больше, чем помещается, и иначе непонятно, где ты находишься.
+  b.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+  window.scrollTo({top:0,behavior:'smooth'});
+  ['Players','Broadcast','Direct','Selfie','Rating','History','Events','Balances','Refunds','Menu'].forEach(t=>$('tab'+t).classList.add('hidden'));$('tab'+b.dataset.tab[0].toUpperCase()+b.dataset.tab.slice(1)).classList.remove('hidden');$('filtersCard').classList.toggle('hidden',['history','events','balances','refunds','menu'].includes(b.dataset.tab));
+  if(b.dataset.tab==='history'&&!history.length)loadHistory();
+  if(b.dataset.tab==='broadcast')renderRecipients();
+  if(b.dataset.tab==='events')loadEvents();
+  if(b.dataset.tab==='balances')loadBalances();
+  if(b.dataset.tab==='refunds')loadRefunds();
+  if(b.dataset.tab==='menu')loadTabs()});reload();
+</script></body></html>

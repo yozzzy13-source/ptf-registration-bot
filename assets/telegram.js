@@ -1,0 +1,307 @@
+import fetch from 'node-fetch';
+import { BOT_TOKEN, PUBLIC_URL, CLUB_CHAT_URL } from './config.js';
+
+const API = `${(process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/$/, '')}/bot${BOT_TOKEN}`;
+
+const migratedChats = new Map();
+
+function normalizePayload(payload = {}) {
+  if (payload.chat_id !== undefined && payload.chat_id !== null) {
+    const key = String(payload.chat_id);
+    if (migratedChats.has(key)) return { ...payload, chat_id: migratedChats.get(key) };
+  }
+  return payload;
+}
+
+async function rawCall(method, payload = {}) {
+  const res = await fetch(`${API}/${method}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json().catch(() => ({}));
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Telegram отвечает 429 (error_code:429, parameters.retry_after=N) при превышении
+// лимитов — раньше это просто роняло рассылку с ошибкой и результат/уведомление
+// терялось. Теперь ждём ровно столько, сколько просит Telegram (+небольшой запас),
+// и повторяем сам запрос — без этого масштабирование числа игроков рано или
+// поздно начинает терять сообщения на каждой массовой рассылке.
+// Ожидание лимитов включается ТОЧЕЧНО, а не для всего подряд.
+//
+// Раньше повторы стояли на каждом обращении к Telegram. Пока лимиты не
+// упирались, это ничего не стоило; как только пошли массовые рассылки, нажатие
+// кнопки стало ждать в общей очереди по несколько секунд. Интерфейс должен
+// отвечать сразу и лучше промахнётся, а рассылка пусть терпеливо ждёт — ей
+// спешить некуда, а терять сообщения нельзя.
+const MAX_RETRY_429 = 6;
+let bulkDepth = 0;
+export async function withBulkRetries(fn) {
+  bulkDepth++;
+  try { return await fn(); } finally { bulkDepth--; }
+}
+async function callWithRetry(doRequest, method) {
+  let json = await doRequest();
+  if (!bulkDepth) {
+    // Интерактив: один раз сообщаем в лог и выходим, не заставляя человека ждать.
+    if (json && json.ok === false && json.error_code === 429) {
+      console.warn(`Telegram 429 on ${method}: пропускаю ожидание (интерактивный вызов)`);
+    }
+    return json;
+  }
+  for (let attempt = 0; json && json.ok === false && json.error_code === 429 && attempt < MAX_RETRY_429; attempt++) {
+    const waitSec = Number(json.parameters?.retry_after) || 1;
+    console.warn(`Telegram 429 on ${method}: ждём ${waitSec}s (попытка ${attempt + 1}/${MAX_RETRY_429})`);
+    await sleep((waitSec + 0.3) * 1000);
+    json = await doRequest();
+  }
+  return json;
+}
+
+async function call(method, payload = {}) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  const normalized = normalizePayload(payload);
+  let json = await callWithRetry(() => rawCall(method, normalized), method);
+
+  // Telegram group -> supergroup migration.
+  // Without this retry, admin notifications can break the whole WebApp submit flow.
+  const migrateTo = json?.parameters?.migrate_to_chat_id;
+  if (!json.ok && migrateTo && normalized.chat_id !== undefined && normalized.chat_id !== null) {
+    const oldChatId = String(normalized.chat_id);
+    const newChatId = String(migrateTo);
+    migratedChats.set(oldChatId, newChatId);
+    console.warn(`Telegram chat migrated: ${oldChatId} -> ${newChatId}`);
+    json = await callWithRetry(() => rawCall(method, { ...normalized, chat_id: newChatId }), method);
+  }
+
+  if (!json.ok) {
+    const err = new Error(`${method}: ${JSON.stringify(json)}`);
+    err.telegram = json;
+    throw err;
+  }
+  return json.result;
+}
+
+export const sendMessage = (chat_id, text, opts={}) => call('sendMessage', {
+  chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...opts
+});
+export const editMessageText = (chat_id, message_id, text, opts={}) => call('editMessageText', {
+  chat_id, message_id, text, parse_mode: 'HTML', disable_web_page_preview: true, ...opts
+});
+export const answerCallbackQuery = (callback_query_id, text='', show_alert=false) => call('answerCallbackQuery', { callback_query_id, text, show_alert });
+// Правка уже отправленного сообщения. Картинку меняем по file_id — тогда это
+// обычный JSON-запрос, без загрузки файла заново. Телеграм разрешает боту
+// править свои сообщения только первые 48 часов.
+export const editMessageMedia = (chat_id, message_id, media, opts={}) => call('editMessageMedia', { chat_id, message_id, media, ...opts });
+export const editMessageCaption = (chat_id, message_id, caption, opts={}) => call('editMessageCaption', { chat_id, message_id, caption, parse_mode: 'HTML', ...opts });
+export const deleteMessage = (chat_id, message_id) => call('deleteMessage', { chat_id, message_id });
+export const sendPhoto = (chat_id, photo, opts={}) => call('sendPhoto', { chat_id, photo, parse_mode: 'HTML', ...opts });
+export const sendDocument = (chat_id, document, opts={}) => call('sendDocument', { chat_id, document, parse_mode: 'HTML', ...opts });
+export const sendVideo = (chat_id, video, opts={}) => call('sendVideo', { chat_id, video, parse_mode: 'HTML', ...opts });
+export const sendVoice = (chat_id, voice, opts={}) => call('sendVoice', { chat_id, voice, parse_mode: 'HTML', ...opts });
+export const sendAudio = (chat_id, audio, opts={}) => call('sendAudio', { chat_id, audio, parse_mode: 'HTML', ...opts });
+export const sendVideoNote = (chat_id, video_note, opts={}) => call('sendVideoNote', { chat_id, video_note, ...opts });
+export const sendSticker = (chat_id, sticker, opts={}) => call('sendSticker', { chat_id, sticker, ...opts });
+export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
+export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
+export const getChat = (chat_id) => call('getChat', { chat_id });
+export const getWebhookInfo = () => call('getWebhookInfo', {});
+
+// Фото из мини-приложения приходит бинарём — его нужно отправить multipart-ом,
+// обычный JSON-вызов принимает только file_id или URL.
+// ВАЖНО: здесь берём глобальный fetch (undici из Node), а не node-fetch.
+// Смешивание node-fetch с глобальными FormData/Blob давало на отправке фото
+// «Invalid state: chunk ArrayBuffer is zero-length or detached» — тело формы
+// разъезжалось между двумя реализациями. Плюс копируем байты в свой Uint8Array:
+// Buffer из Node — это view на общий пул памяти, который может быть переиспользован.
+export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', opts = {}) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  if (!buffer || !buffer.length) throw new Error('sendPhoto: пустой файл');
+  const ext = String(mimeType).split('/')[1] || 'jpg';
+  const bytes = new Uint8Array(buffer.length);
+  bytes.set(buffer);
+  const form = new FormData();
+  form.append('chat_id', String(chat_id));
+  // Подписи у нас с HTML-разметкой, как и у всех остальных отправок.
+  for (const [k, v] of Object.entries({ parse_mode: 'HTML', ...opts })) {
+    if (v === undefined || v === null || v === '') continue;
+    form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+  }
+  form.append('photo', new Blob([bytes], { type: mimeType }), `result.${ext}`);
+  const send = async () => {
+    const res = await globalThis.fetch(`${API}/sendPhoto`, { method: 'POST', body: form });
+    return res.json().catch(() => ({}));
+  };
+  const json = await callWithRetry(send, 'sendPhoto');
+  if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
+  return json.result;
+}
+export async function sendPhotoAlbumBuffers(chat_id, items = []) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  if (!Array.isArray(items) || items.length < 2 || items.length > 10) throw new Error('sendMediaGroup: нужно от 2 до 10 фотографий');
+  const form = new FormData();
+  form.append('chat_id', String(chat_id));
+  const media = [];
+  items.forEach((item, index) => {
+    const buffer = item?.buffer;
+    if (!buffer?.length) throw new Error('sendMediaGroup: пустой файл');
+    const mimeType = String(item.mimeType || 'image/jpeg');
+    const ext = mimeType.split('/')[1] || 'jpg';
+    const bytes = new Uint8Array(buffer.length);
+    bytes.set(buffer);
+    const field = 'photo' + index;
+    media.push({ type:'photo', media:'attach://' + field });
+    form.append(field, new Blob([bytes], { type:mimeType }), field + '.' + ext);
+  });
+  form.append('media', JSON.stringify(media));
+  const res = await globalThis.fetch(API + '/sendMediaGroup', { method:'POST', body:form });
+  const json = await res.json().catch(() => ({}));
+  if (!json.ok) throw new Error('sendMediaGroup: ' + JSON.stringify(json));
+  return json.result;
+}
+export const getMe = () => call('getMe', {});
+
+export async function setWebhook() {
+  if (!PUBLIC_URL) throw new Error('PUBLIC_URL env is empty');
+  // drop_pending_updates НЕ ставим: при рестарте/деплое Telegram держит недоставленные апдейты
+  // и повторяет их — с drop_pending_updates:true присланный в этот момент скриншот оплаты
+  // терялся навсегда. Дубли отсекает кэш update_id в index.js.
+  return call('setWebhook', { url: `${PUBLIC_URL}/webhook`, allowed_updates: ['message','callback_query','poll'] });
+}
+
+// Подсказка команд в Telegram — общая для всех, поэтому админские команды раньше
+// висели и у игроков. Теперь списки разведены по scope: игрокам — свой короткий,
+// админскому чату и личке админа — полный.
+//
+// Команды матчей (/match, /result, /book) в базовый список НЕ входят: их бот
+// добавляет персонально тем, кто в активном составе (setChatCommands ниже).
+export const PLAYER_COMMANDS = {
+  en: [
+    { command: 'avatar', description: 'My avatar versions' },
+    { command: 'fantasy', description: 'PTF Fantasy: build your squad' },
+  { command: 'menu', description: 'Main menu' },
+    { command: 'help', description: 'What the bot can do' },
+    { command: 'results', description: 'Results feed on / off' },
+    { command: 'language', description: 'Choose language' },
+    { command: 'cancel', description: 'Cancel current action' }
+  ],
+  ru: [
+    { command: 'fantasy', description: 'PTF Fantasy: собрать команду' },
+    { command: 'menu', description: 'Главное меню' },
+    { command: 'help', description: 'Что умеет бот' },
+    { command: 'results', description: 'Лента результатов вкл / выкл' },
+    { command: 'language', description: 'Выбрать язык' },
+    { command: 'cancel', description: 'Отменить текущее действие' }
+  ]
+};
+
+export const MATCH_COMMANDS = {
+  en: [
+    { command: 'match', description: 'Matches: open slots and challenges' },
+    { command: 'result', description: 'Submit a match result' },
+    { command: 'book', description: 'Book a court' }
+  ],
+  ru: [
+    { command: 'match', description: 'Матчи: окна и вызовы' },
+    { command: 'result', description: 'Внести результат матча' },
+    { command: 'book', description: 'Забронировать корт' }
+  ]
+};
+
+// Рассылки (в том числе опросы и их статистика) живут в админской панели —
+// в подсказке команд их нет, чтобы не было двух путей к одному и тому же.
+// ЕДИНЫЙ список команд организатора. Из него собираются и меню по слэшу, и
+// текст /help — чтобы новая команда не могла попасть в одно место и потеряться
+// в другом. Добавил строку сюда — она появилась везде.
+export const ADMIN_COMMAND_LIST = [
+  { cmd:'admin',        group:'Панель и рассылки', short:'Админ-панель',
+    short_en:'Admin panel', help_en:'admin panel: players, filters, broadcasts, events (edit and delete), balances, manual refunds', help:'админ-панель: игроки, фильтры, рассылки, события (правка и удаление), балансы, ручные возвраты, кнопки меню по группам' },
+  { cmd:'stats',        group:'Лига', short:'Статистика', short_en:'Stats', help_en:'applications, payments and statuses at a glance', help:'заявки, оплаты, статусы' },
+  { cmd:'pending',      group:'Лига', short:'Заявки в работе', short_en:'Applications in progress', help_en:'applications waiting for a payment check', help:'заявки, ждущие проверки оплаты' },
+  { cmd:'profile',      group:'Лига', short:'Карточка игрока', args_en:'@username or telegram_id', args:'@ник или telegram_id',
+    short_en:'Player card', help_en:'a player card with buttons: approve, send an invoice, write to them', help:'карточка игрока с кнопками: подтвердить участие, выставить счёт, написать' },
+  { cmd:'payment_auto', group:'Лига', short:'Счёт сразу или после подтверждения', args:'on|off',
+    short_en:'Invoice now or after approval', help_en:'whether the league invoice goes out at once or only after your button', help:'счёт на участие уходит игроку сразу или только после вашей кнопки' },
+  { cmd:'events',       group:'Лига', short:'События', short_en:'Events', help_en:'active events', help:'активные события' },
+  { cmd:'messages',     group:'Лига', short:'Сообщения игроков', short_en:'Player messages', help_en:'the latest messages from players', help:'последние сообщения от игроков' },
+  { cmd:'whois',        group:'Настройка', short:'Что бот видит по игроку', args_en:'@username or telegram_id', args:'@ник или telegram_id',
+    short_en:'What the bot sees', help_en:'whether the player is recognised by id, which group they are in and which buttons they get', help:'узнаётся ли игрок по id, какая у него группа и какие кнопки ему достаются' },
+  { cmd:'id_check',     group:'Настройка', short:'Проверка telegram_id',
+    short_en:'telegram_id check', help_en:'who has no telegram_id and where duplicates are — they make menus differ', help:'у кого в базе нет telegram_id и где дубли — из-за них меню у игрока разное' },
+  { cmd:'photos',       group:'Настройка', short:'Откуда берутся аватарки',
+    short_en:'Where avatars come from', help_en:'how many photos come from Players_Master, the showcase and own avatars, and who has none', help:'сколько фото читается из Players_Master, витрины и своих аватарок, и у кого фото нет' },
+  { cmd:'matches',      group:'Матчи', short:'Сводка матчей', short_en:'Matches overview',
+    help:'назначенные матчи, где не подтверждён корт, кто не ответил, где нет счёта, открытые окна',
+    help_en:'scheduled matches, courts not confirmed, who has not replied, missing scores, open slots' },
+  { cmd:'league',       group:'Матчи', short:'Витрина лиги', short_en:'League app', help_en:'open the league app', help:'открыть витрину лиги' },
+  { cmd:'fantasy',      group:'Матчи', short:'Fantasy во вкладке лиги',
+    short_en:'Fantasy tab', help_en:'open the league straight on the Fantasy tab — the same button players get', help:'открыть лигу сразу на вкладке Fantasy — та же кнопка, что уходит игрокам' },
+  { cmd:'rating_to',    group:'Панель и рассылки', short:'Запрос уровня одному', short_en:'Ask one player for level', args_en:'@username', args:'@ник',
+    help:'запрос уровня одному игроку', help_en:'ask a single player to confirm their level' },
+  { cmd:'links',        group:'Панель и рассылки', short:'Коды разделов', short_en:'Section codes', help_en:'section codes for broadcasts', help:'коды разделов для рассылок' },
+  { cmd:'admin_init',   group:'Настройка', short:'Сделать чат админским',
+    short_en:'Make this chat the admin chat', help_en:'bind the current chat as the admin one (once, in the right group)', help:'привязать текущий чат как админский (один раз, в нужной группе)' },
+  { cmd:'results_here', group:'Настройка', short:'Лента результатов сюда',
+    short_en:'Results feed here', help_en:'bind the results feed to the current topic', help:'привязать ленту результатов к текущей теме' },
+  { cmd:'topic_sync',   group:'Настройка', short:'Привязать темы',
+    short_en:'Link topics', help_en:'link existing topics to the current admin group', help:'привязать существующие темы к текущей админской группе' },
+  { cmd:'topic_backfill', group:'Настройка', short:'Добрать темы', args_en:'[how many]', args:'[сколько]',
+    short_en:'Backfill topics', help_en:'create topics for people who already wrote but got none; 25 per run by default', help:'завести темы тем, кто уже взаимодействовал, но темы не получил; по умолчанию 25 за раз' },
+  { cmd:'topic_test',   group:'Настройка', short:'Проверка топиков', short_en:'Topics check', help_en:'check the webhook and player topics', help:'проверка вебхука и топиков игроков' },
+  { cmd:'profile_refresh', group:'Настройка', short:'Обновить витрину профилей', args:'[go]',
+    short_en:'Refresh the profile showcase', help_en:'show the IMPORTRANGE formulas in the showcase; with «go» force them to recalculate now', help:'показать формулы IMPORTRANGE в витрине профилей; с «go» — заставить их пересчитаться сейчас' },
+  { cmd:'places', group:'Настройка', short:'Проверить места в дивизионах', args_en:'[season]', args:'[сезон]',
+    short_en:'Check division places', help_en:'what the bot sees in the live division sheets and whether names match the showcase', help:'что бот видит в живых таблицах дивизионов и совпали ли имена с витриной профилей; кого там нет — у того в карточке не будет номера места' },
+  { cmd:'result_test',  group:'Матчи', short:'Предпросмотр карточки результата', args_en:'[player name]', args:'[имя игрока]',
+    short_en:'Preview a result card', help_en:'see how the card and text will go to the feed and to a DM, on a real match; nobody but you receives it', help:'показать, как карточка и текст уйдут в ленту и в личку, на настоящем матче; вторым словом можно назвать игрока, иначе берётся последний результат; никому, кроме вас, не отправляется' },
+  { cmd:'test_match',   group:'Матчи', short:'Боевой тест результата с откатом', args_en:'<winner | loser | score>', args:'<победитель | проигравший | счёт>',
+    short_en:'Live result test with rollback', help_en:'run a match through the whole chain for real: both logs, the season, places, form and Fantasy points, then the card. Nothing is published — the card comes only to you, with a «Roll back» button. Score is written winner-first: /test_match Ivan | Peter | 6:4 6:3', help:'прогнать матч по всей цепочке по-настоящему: запись в общий лог и в таблицу дивизиона, сезон, пересчёт мест, снимок формы и очков Fantasy, карточка. В ленту и игрокам ничего не уходит — карточка приходит только вам, а под ней кнопка «Откатить», которая возвращает таблицы в исходное состояние. Счёт пишется от победителя: /test_match Иван | Пётр | 6:4 6:3' },
+  { cmd:'fix_result',   group:'Матчи', short:'Перевыпустить карточку результата', args_en:'<message id> [player name]', args:'<id сообщения> [имя игрока]',
+    short_en:'Reissue a result card', help_en:'replace the picture, text and buttons of an already published result; the message id is the last number in its link; editing works for 48 hours', help:'заменить картинку, текст и кнопки у уже опубликованного результата в ленте; id сообщения — последнее число в ссылке на пост, вторым аргументом можно назвать игрока, иначе берётся последний результат; править можно первые 48 часов' },
+  { cmd:'match_test',   group:'Настройка', short:'Проверка таблиц', short_en:'Sheets check', help_en:'match sheets, league sheets and the division registry; also re-reads the registry', help:'таблицы матчей, таблицы лиги и реестр дивизионов; заодно перечитывает реестр' },
+  { cmd:'avatar',       group:'Прочее', short:'Мои варианты аватарки', short_en:'My avatar options', help_en:'my avatar options', help:'мои варианты аватарки' },
+  { cmd:'help',         group:'Прочее', short:'Все команды', short_en:'All commands', help_en:'this list', help:'этот список' },
+  { cmd:'menu',         group:'Прочее', short:'Главное меню', short_en:'Main menu', help_en:'main menu', help:'главное меню' },
+  { cmd:'cancel',       group:'Прочее', short:'Отменить действие', short_en:'Cancel', help_en:'cancel the current action', help:'отменить текущее действие' }
+];
+
+// Меню по слэшу: Telegram берёт только имя и короткое описание.
+export const ADMIN_COMMANDS = ADMIN_COMMAND_LIST.map(c => ({
+  command: c.cmd, description: c.short.slice(0, 256)
+}));
+
+// Персональный список для одного чата. commands:[] снимает переопределение,
+// и человек снова видит общий список.
+export async function setChatCommands(chatId, commands) {
+  return call('setMyCommands', { commands, scope: { type: 'chat', chat_id: chatId } });
+}
+
+export async function setCommands() {
+  await call('setMyCommands', { commands: PLAYER_COMMANDS.en });
+  await call('setMyCommands', { commands: PLAYER_COMMANDS.en, scope: { type: 'all_private_chats' } });
+  await call('setMyCommands', { commands: PLAYER_COMMANDS.ru, scope: { type: 'all_private_chats' }, language_code: 'ru' });
+  return { ok: true };
+}
+
+export function inlineKeyboard(rows) { return { inline_keyboard: rows }; }
+export function webAppButton(text, path='/apply') { return { text, web_app: { url: `${PUBLIC_URL}${path}` } }; }
+export function urlButton(text, url) { return { text, url }; }
+export const clubChatButton = (text) => urlButton(text, CLUB_CHAT_URL);
+
+// Скачивание файла, который игрок прислал боту. Нужно, чтобы отдать селфи
+// генератору, а готовую аватарку — витрине: file_id у Telegram вечный, поэтому
+// он же служит нам хранилищем картинок.
+export async function getFileBuffer(fileId) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  const meta = await call('getFile', { file_id: fileId });
+  const path = meta?.file_path || meta?.result?.file_path || '';
+  if (!path) throw new Error('Telegram не отдал путь к файлу');
+  const res = await globalThis.fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${path}`);
+  if (!res.ok) throw new Error(`Не удалось скачать файл: ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const ext = String(path).split('.').pop().toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  return { buffer, mime, path };
+}

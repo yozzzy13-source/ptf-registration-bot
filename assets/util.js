@@ -1,0 +1,163 @@
+import crypto from 'crypto';
+import { DateTime } from 'luxon';
+import { BOT_TOKEN, TIMEZONE } from './config.js';
+
+export const nowISO = () => DateTime.now().setZone(TIMEZONE).toISO({ suppressMilliseconds: true });
+export const safe = (v) => String(v ?? '').trim();
+export const uid = (prefix='id') => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+export const langOf = (code) => String(code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+export const escapeHtml = (s='') => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// ---------------------------------------------------------------- /test_match
+// Разбор команды тестового прогона. Набирают её с телефона одной рукой, поэтому
+// жёсткий формат «Имя | Имя | счёт» на практике не работает: разделитель
+// забывается, фамилия пишется без имени, регистр любой. Правило простое —
+// счёт начинается с первого токена вида «6:4», всё до него имена, а имена
+// сверяются с составом сезона: точное совпадение, вхождение или поиск обоих
+// прямо внутри слитной строки.
+export const matchNameKey = v => String(v || '').toLowerCase().normalize('NFD')
+  .replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9а-яё]+/gi, '');
+
+export function parseTestMatchInput(raw = '') {
+  const cleaned = String(raw || '').replace(/^\/test_match(@\S+)?\s*/i, '').trim();
+  if (!cleaned) return null;
+  const tokens = cleaned.split(/\s+/);
+  const at = tokens.findIndex(t => /^\(?\d{1,2}\s*[:\-–]\s*\d{1,2}/.test(t));
+  const score = at >= 0 ? tokens.slice(at).join(' ') : '';
+  const head = (at >= 0 ? tokens.slice(0, at) : tokens).join(' ').replace(/[|;,\-–—]+$/, '').trim();
+  const parts = head.split(/\s*[|;]\s*|\s+[-–—]\s+|\s+vs\.?\s+/i).map(x => x.trim()).filter(Boolean);
+  return { head, score, parts };
+}
+// Один игрок по куску имени: точное совпадение, иначе вхождение в любую сторону.
+export function findRosterPlayer(players = [], wanted = '') {
+  const w = matchNameKey(wanted);
+  if (!w) return { none: true };
+  const exact = players.filter(p => matchNameKey(p.name) === w);
+  if (exact.length === 1) return { player: exact[0] };
+  const part = players.filter(p => matchNameKey(p.name).includes(w) || w.includes(matchNameKey(p.name)));
+  if (part.length === 1) return { player: part[0] };
+  if (part.length > 1) return { many: part };
+  return { none: true };
+}
+// Оба игрока из слитной строки, по порядку появления: «Ilia izotov Viacheslav
+// Poniiatovsky» → победитель Ilia Izotov, проигравший Viacheslav Poniiatovsky.
+export function findRosterPair(players = [], head = '') {
+  const hay = matchNameKey(head), hits = [];
+  for (const p of players) {
+    const key = matchNameKey(p.name);
+    if (!key) continue;
+    const at = hay.indexOf(key);
+    if (at >= 0) hits.push({ p, at, len: key.length });
+  }
+  hits.sort((a, b) => a.at - b.at || b.len - a.len);
+  const picked = [];
+  for (const h of hits) if (!picked.some(x => h.at < x.at + x.len && x.at < h.at + h.len)) picked.push(h);
+  return picked.map(x => x.p);
+}
+
+// Номер сезона из чего угодно, что встречается в таблицах: отдельная колонка
+// season_id, выпадашка «Season 1» / «Сезон 1», подпись матча «Semifinal S1» или
+// «Round 3 S2». Раньше понимался только формат S1, поэтому «Season 1» из колонки
+// Competition давал пустой сезон — и вся история теряла привязку к дивизиону.
+// Аргументы перебираются по порядку, первый распознанный выигрывает.
+export function parseSeasonNumber(...values) {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (!s) continue;
+    if (/^\d{1,2}$/.test(s)) return s;                       // просто «2»
+    let m = s.match(/(?:season|сезон)\s*[.:#№-]?\s*(\d{1,2})/i);
+    if (m) return m[1];                                      // «Season 1», «Сезон 2»
+    m = s.match(/(?:^|[^\p{L}\d])s\s*[.:#-]?\s*(\d{1,2})(?![\p{L}\d])/iu);
+    if (m) return m[1];                                      // «Final S1», «Round 3 S2»
+  }
+  return '';
+}
+
+export function parseInitData(initData='') {
+  const params = new URLSearchParams(initData);
+  const userRaw = params.get('user');
+  let user = null;
+  try { user = userRaw ? JSON.parse(userRaw) : null; } catch {}
+  return { params, user };
+}
+
+export function verifyTelegramInitData(initData='') {
+  if (!BOT_TOKEN || !initData) return false;
+  const params = new URLSearchParams(initData);
+  const hash = params.get('hash');
+  if (!hash) return false;
+  params.delete('hash');
+  const dataCheckString = [...params.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(BOT_TOKEN).digest();
+  const calculated = crypto.createHmac('sha256', secret).update(dataCheckString).digest('hex');
+  try { return crypto.timingSafeEqual(Buffer.from(calculated), Buffer.from(hash)); }
+  catch { return false; }
+}
+
+export function chunk(arr, n) {
+  const out = [];
+  for (let i=0; i<arr.length; i+=n) out.push(arr.slice(i, i+n));
+  return out;
+}
+
+// ------------------------------------------------------- вход по подписанной ссылке
+// Мини-приложение, открытое из постоянной клавиатуры, не получает initData:
+// Telegram отдаёт его только inline-кнопкам, кнопке Menu и прямым ссылкам.
+// Чтобы кнопка открывала раздел в ОДИН тап и при этом знала, кто пришёл,
+// бот вшивает в её адрес короткий токен, подписанный секретом бота.
+// Клавиатура персональная — этот адрес видит только её владелец.
+const TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+function tokenSecret() {
+  return crypto.createHmac('sha256', 'PTFWebAppLink').update(BOT_TOKEN || '').digest();
+}
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+export function signWebAppToken(telegramId, ttlMs = TOKEN_TTL_MS) {
+  const id = String(telegramId || '');
+  if (!id || !BOT_TOKEN) return '';
+  const exp = Date.now() + ttlMs;
+  const payload = `${id}.${exp}`;
+  const sig = b64url(crypto.createHmac('sha256', tokenSecret()).update(payload).digest()).slice(0, 27);
+  return `${payload}.${sig}`;
+}
+
+// Возвращает telegram_id или '' — при неверной подписи, просрочке и любом мусоре.
+export function verifyWebAppToken(token = '') {
+  const raw = String(token || '');
+  const parts = raw.split('.');
+  if (parts.length !== 3) return '';
+  const [id, exp, sig] = parts;
+  if (!/^\d+$/.test(id) || !/^\d+$/.test(exp)) return '';
+  if (Number(exp) < Date.now()) return '';
+  const expected = b64url(crypto.createHmac('sha256', tokenSecret()).update(`${id}.${exp}`).digest()).slice(0, 27);
+  if (expected.length !== sig.length) return '';
+  try { if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(sig))) return ''; }
+  catch { return ''; }
+  return id;
+}
+
+// Ссылка на фото из таблицы в вид, который браузер реально покажет в <img>.
+// Самая частая причина «имя совпадает, ссылка стоит, а аватарки нет» — обычная
+// ссылка «поделиться» с Google Диска: она открывает страницу просмотра, а не
+// картинку, и тег <img> по ней получает HTML. Вытаскиваем id файла и собираем
+// прямой адрес. Всё остальное (включая уже прямые ссылки) отдаём как есть.
+export function directPhotoUrl(value = '') {
+  const raw = String(value || '').trim().replace(/^["']|["']$/g, '');
+  if (!raw) return '';
+  // =IMAGE("…") — в таблицах пишут и так; вытаскиваем адрес из формулы.
+  const img = /^=?\s*image\s*\(\s*["']([^"']+)["']/i.exec(raw);
+  const url = img ? img[1].trim() : raw;
+  if (!/^https?:\/\//i.test(url)) return '';
+  if (!/drive\.google\.com/i.test(url)) return url;
+  const id = (/\/file\/d\/([\w-]{10,})/.exec(url)
+    || /[?&]id=([\w-]{10,})/.exec(url)
+    || /\/d\/([\w-]{10,})/.exec(url) || [])[1];
+  if (!id) return url;
+  return `https://drive.google.com/thumbnail?id=${id}&sz=w800`;
+}

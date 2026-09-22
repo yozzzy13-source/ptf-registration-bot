@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PTF · панель организатора</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    /* Панель открывается с телефона (iPhone 16 Pro Max, 440 px в ширину), поэтому
+       свёрстана мобильной: разделы — полосой у большого пальца внизу, таблицы на
+       узком экране превращаются в карточки, у всего кликабельного минимум 44 px,
+       поля 16 px — иначе iOS зумит страницу при фокусе. На широком экране те же
+       блоки просто разъезжаются в колонки. */
+    :root{--bg:#0e0e10;--card:#191a1d;--card2:#212328;--line:#2e3138;--text:#f4f1ec;--muted:#9a958d;
+      --accent:#ef5f00;--accent2:#ff8a2a;--danger:#ff6b6b;--ok:#61d67f;--r:16px;--bar:74px}
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+    body{margin:0;background:var(--bg);color:var(--text);
+      font:13.5px/1.35 Inter,system-ui,-apple-system,"SF Pro Text",Segoe UI,Arial,sans-serif;
+      padding:0 14px calc(var(--bar) + 18px + env(safe-area-inset-bottom));-webkit-text-size-adjust:100%}
+    /* Плотный режим по просьбе Костаса: меньше строк на элемент, меньше кегль —
+       больше данных помещается на экран без прокрутки. Поля ввода — исключение:
+       16px и 44px высота там нарочно, iOS иначе зумит страницу при фокусе. */
+    .wrap{max-width:1180px;margin:0 auto}
+    /* Шапка липнет к верху: имя раздела и «Обновить» всегда под рукой. */
+    .top{position:sticky;top:0;z-index:40;display:flex;gap:10px;align-items:center;justify-content:space-between;
+      padding:calc(10px + env(safe-area-inset-top)) 0 10px;background:linear-gradient(180deg,var(--bg) 76%,rgba(14,14,16,0));backdrop-filter:blur(8px)}
+    h1{margin:0;font-size:16.5px;letter-spacing:-.2px}
+    .top .sub{font-size:10.5px;color:var(--muted);margin-top:1px}
+    .muted{color:var(--muted)}
+    .ico{flex:0 0 auto;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;
+      border:1px solid var(--line);border-radius:13px;background:var(--card);color:var(--text);font-size:17px;cursor:pointer}
+    .ico:active{background:var(--card2)}
+    #status{font-size:12px;color:var(--muted);min-height:16px}
+
+    /* Сводка по цифрам — под спойлером: нужна редко, а место занимала всегда. */
+    details.fold>summary{cursor:pointer;list-style:none;font-weight:800;font-size:12.5px;
+      min-height:38px;display:flex;align-items:center;gap:8px}
+    details.fold>summary::-webkit-details-marker{display:none}
+    details.fold>summary:after{content:'▾';color:var(--muted);margin-left:auto;font-size:12px}
+    details.fold[open]>summary:after{content:'▴'}
+    .statFold{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:4px 12px;margin:2px 0 8px}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:6px;margin:3px 0 9px}
+    .stat{background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:7px 9px}
+    .stat b{font-size:16px;color:var(--accent2);display:block;line-height:1.1}
+    .stat span{font-size:9px;letter-spacing:.25px;text-transform:uppercase;color:var(--muted)}
+
+    .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:11px;margin:7px 0}
+    .card h3{margin:0 0 3px;font-size:14px}
+    .card>p.muted{margin:0 0 8px;font-size:11.5px}
+    label{display:block;font-size:10px;font-weight:800;color:#cfcac2;margin:8px 0 4px;letter-spacing:.25px}
+    input,select,textarea{width:100%;min-height:44px;padding:11px 12px;border-radius:12px;border:1px solid var(--line);
+      background:var(--card2);color:var(--text);font-size:16px;font-family:inherit}
+    input:focus,select:focus,textarea:focus{outline:0;border-color:var(--accent)}
+    textarea{min-height:168px;resize:vertical;line-height:1.5}
+    #broadcastText,#broadcastTextEn,#directText{min-height:220px}
+    #evDescRu,#evDescEn{min-height:132px}
+    input[type=checkbox]{width:22px;height:22px;min-height:0;accent-color:var(--accent)}
+    .filters{display:grid;grid-template-columns:1fr;gap:2px 12px}
+    .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+    .actions label{margin:0;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;text-transform:none;letter-spacing:0}
+    .btn{border:0;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+      font-weight:800;font-size:12.5px;min-height:40px;padding:0 13px;cursor:pointer;flex:1 1 auto}
+    .btn.secondary{background:var(--card2);color:var(--text);border:1px solid var(--line)}
+    .btn.danger{background:var(--danger);color:#1a0d0d}
+    .btn.small{min-height:34px;padding:0 10px;font-size:11.5px;flex:0 0 auto}
+    .btn:active{transform:translateY(1px)}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:10.5px}
+    .chip{display:inline-block;padding:2px 7px;border-radius:999px;background:var(--card2);border:1px solid var(--line);
+      font-size:10px;margin:1px 3px 1px 0;color:#ddd;cursor:pointer}
+    .ok{color:var(--ok)} .err{color:var(--danger)} .hidden{display:none!important}
+    .photoStrip{display:flex;gap:8px;overflow:auto;padding:8px 0}.photoStrip .pv{position:relative;flex:0 0 76px}.photoStrip img{width:76px;height:76px;border-radius:12px;object-fit:cover;border:1px solid var(--line)}.photoStrip button{position:absolute;right:-4px;top:-5px;width:23px;height:23px;border-radius:50%;padding:0;margin:0;background:var(--danger);color:white;border:0;font-size:12px}
+    .num{font-variant-numeric:tabular-nums;text-align:right}
+    .ok-n{color:var(--ok);font-weight:800} .fail-n{color:var(--danger);font-weight:800}
+
+    /* Таблицы. На широком экране обычная таблица, на телефоне каждая строка
+       становится карточкой, а второстепенные колонки (.lo) прячутся — по-другому
+       на 440 px получается только горизонтальная прокрутка, а это мучение. */
+    .tableWrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);margin-top:9px;background:#141518}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;font-size:12px;vertical-align:middle}
+    th{position:sticky;top:0;background:#22242a;color:#ddd;z-index:1;font-size:10px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+    tr:last-child td{border-bottom:0}
+    .msg{color:#c9c4bc;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .logs{background:#131418} .logs table{background:transparent} .logs td{font-size:11px;padding:4px 8px}
+    .logs .fail td{color:#ffb3b3}
+    .hist tr.row{cursor:pointer} .hist tr.row.open{background:var(--card2)}
+
+    @media(max-width:760px){
+      table{min-width:0}
+      thead{display:none}
+      /* Шапка у части таблиц собирается строкой из th прямо в table — на узком
+         экране от неё остаются висящие подписи, поэтому прячем такую строку. */
+      th{display:none}
+      tr:has(th){display:none}
+      tbody tr,table>tr{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 10px;border-bottom:1px solid var(--line)}
+      tbody td,table>tr>td{border:0;padding:0;font-size:12px}
+      td.lo,th.lo{display:none}
+      td.grow{flex:1 1 auto;min-width:52%}
+      td .btn{flex:0 0 auto}
+      .msg{max-width:100%;white-space:normal}
+    }
+    @media(min-width:700px){.filters{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}}
+
+    /* Разделы — полосой внизу, в зоне большого пальца. Влезает пять, остальные
+       доезжают прокруткой: прятать их в «Ещё» — значит потерять половину панели. */
+    .tabs{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;gap:4px;
+      padding:6px 8px calc(6px + env(safe-area-inset-bottom));
+      background:rgba(14,14,16,.94);backdrop-filter:blur(16px);border-top:1px solid var(--line);
+      overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{flex:0 0 auto;min-width:64px;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:2px;padding:4px 6px;border:0;border-radius:12px;background:transparent;color:var(--muted);
+      font:700 9.5px/1.1 inherit;cursor:pointer;text-align:center}
+    .tab i{font-style:normal;font-size:17px;line-height:1}
+    .tab.active{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+    @media(min-width:900px){
+      body{padding-bottom:20px}
+      .tabs{position:sticky;top:52px;bottom:auto;border-top:0;border-bottom:1px solid var(--line);
+        padding:6px 0;background:var(--bg);backdrop-filter:none;margin-bottom:5px}
+      .tab{flex-direction:row;min-height:38px;gap:6px;font-size:11.5px;padding:0 12px}
+      .tab i{font-size:13px}
+    }
+
+    /* Список получателей и подсказки по имени. */
+    .rcp{border:1px solid var(--line);border-radius:12px;background:#141518;max-height:320px;overflow:auto;margin:6px 0 3px}
+    .rcp .r{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;min-height:40px}
+    .rcp .r:last-child{border-bottom:0}
+    .rcp .r.on{background:rgba(239,95,0,.12)}
+    .rcp .r input{width:20px;flex:0 0 auto}
+    .rcp .nm{font-weight:700;font-size:12px}
+    .rcp .sub{font-size:10.5px;color:var(--muted)}
+    .rcp .tags{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+    .rcpbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+    .rcpbar .cnt{font-size:12px;color:var(--muted);margin-left:auto}
+    .pick{position:relative}
+    .pick .sug{position:absolute;left:0;right:0;top:100%;z-index:30;background:#232529;border:1px solid var(--line);
+      border-radius:14px;margin-top:4px;max-height:280px;overflow:auto;box-shadow:0 18px 40px rgba(0,0,0,.5)}
+    .pick .sug div{padding:12px;cursor:pointer;border-bottom:1px solid var(--line);font-size:14px;min-height:48px}
+    .pick .sug div:last-child{border-bottom:0}
+    .pick .sug div:hover,.pick .sug div.hi{background:var(--card2)}
+    .pick .sug .sub{font-size:11.5px;color:var(--muted)}
+    .picked{display:inline-flex;align-items:center;gap:10px;margin-top:8px;padding:8px 12px;border-radius:999px;
+      background:var(--card2);border:1px solid var(--line);font-size:13px}
+    .picked .x{cursor:pointer;color:var(--muted);font-weight:800;padding:0 4px}
+    /* Переключатель «или-или»: кому шлём и кого из записанных берём. */
+    .seg{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px}
+    .seg .s{flex:1 1 auto;min-width:96px;min-height:44px;display:flex;align-items:center;justify-content:center;
+      text-align:center;padding:8px 12px;border-radius:12px;background:var(--card2);border:1px solid var(--line);
+      font-size:13.5px;font-weight:700;color:var(--muted);cursor:pointer;user-select:none}
+    .seg .s.on{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
+    .seg .s:active{opacity:.75}
+    #bcWho{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;color:var(--muted)}
+    #bcWho span{padding:4px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line)}
+    .codes{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+    .codes span{padding:9px 12px;border-radius:999px;background:var(--card2);border:1px solid var(--line);font-size:13px;cursor:pointer}
+    .prev{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px;margin:6px 0;font-size:12.5px;line-height:1.45}
+    .prev .pbtn{display:inline-block;margin:3px 5px 0 0;padding:6px 10px;border-radius:10px;background:#2c2f35;border:1px solid var(--line);font-size:11.5px}
+    .prev .warn{color:var(--danger);font-weight:800;margin-top:6px}
+    .toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    .toolbar input{width:auto;min-width:180px;flex:1 1 180px}
+    .toolbar label{margin:0;display:flex;gap:6px;align-items:center;font-size:12px;text-transform:none;letter-spacing:0}
+
+    /* Касса: карточка игрока, крупный баланс, действия кнопками. */
+    .bal{display:flex;align-items:baseline;gap:8px;margin:9px 0 3px}
+    .bal b{font-size:25px;color:var(--accent2);font-variant-numeric:tabular-nums}
+    .bal span{font-size:11.5px;color:var(--muted)}
+    .who{display:flex;align-items:center;gap:10px}
+    .who .av{width:38px;height:38px;border-radius:50%;background:var(--card2);border:1px solid var(--line);
+      display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--accent2)}
+    .who .nm{font-weight:800;font-size:14px}
+    .ops{display:flex;gap:6px;margin-top:9px}
+    .ops .btn{flex:1 1 0}
+    .amts{display:flex;gap:6px;flex-wrap:wrap;margin-top:3px}
+    .amts .chip{padding:8px 12px;font-size:12.5px;font-weight:700}
+    .amts .chip.on{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent;color:#fff}
+    .hist2{margin-top:10px}
+    .hist2 .row2{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line)}
+    .hist2 .row2:last-child{border-bottom:0}
+    .hist2 .amt{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .hist2 .plus{color:var(--ok)} .hist2 .minus{color:var(--danger)}
+    .hist2 .d{font-size:10.5px;color:var(--muted)}
+    .searchwrap{position:relative}
+    .psug{position:absolute;left:0;right:0;top:calc(100% - 2px);z-index:15;background:var(--card2);border:1px solid var(--line);
+      border-radius:11px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.4)}
+    .psug .pi{padding:9px 12px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line)}
+    .psug .pi:last-child{border-bottom:0}
+    .psug .pi:hover,.psug .pi:active{background:var(--card)}
+  </style>
+</head>
+<body><div class="wrap">
+  <div class="top">
+    <div><h1>PTF · панель</h1><div class="sub" id="status">Загружаю…</div></div>
+    <button class="ico" onclick="reload()" title="Обновить">⟳</button>
+  </div>
+  <details class="fold statFold" id="statFold"><summary>Сводка по базе</summary><div class="grid" id="stats"></div></details>
+  <div class="tabs" id="tabBar"><button class="tab active" data-tab="players"><i>👥</i>Игроки</button><button class="tab" data-tab="events"><i>🎾</i>События</button><button class="tab" data-tab="balances"><i>💰</i>Касса</button><button class="tab" data-tab="broadcast"><i>📣</i>Рассылка</button><button class="tab" data-tab="direct"><i>💬</i>Личное</button><button class="tab" data-tab="refunds"><i>↩️</i>Возвраты</button><button class="tab" data-tab="menu"><i>🎛</i>Кнопки</button><button class="tab" data-tab="history"><i>🕔</i>История</button></div>
+  <div class="card" id="filtersCard">
+    <details class="fold" id="filtersFold"><summary>Фильтры</summary>
+    <div class="filters" style="margin-top:8px">
+      <div><label>Статус</label><select id="fStatus"><option value="">Все</option></select></div>
+      <div><label>Дивизион</label><select id="fDivision"><option value="">Все</option></select></div>
+      <div><label>Язык</label><select id="fLanguage"><option value="">Все</option><option value="ru">RU</option><option value="en">EN / другой</option></select></div>
+      <div><label>Селфи</label><select id="fSelfie"><option value="">Все</option><option value="missing">Нет</option><option value="requested">Запросили</option><option value="received">Есть</option></select></div>
+      <div><label>NTRP (Raketo)</label><select id="fRating"><option value="">Все</option><option value="missing">Нет</option><option value="set">Указан</option></select></div>
+      <div><label>Instagram</label><select id="fInstagram"><option value="">Все</option><option value="provided">Указан</option><option value="none">Нет аккаунта</option><option value="missing">Не ответил</option></select></div>
+      <div><label>Фото / аватары</label><select id="fConsent"><option value="">Все</option><option value="yes">Разрешил</option><option value="no">Не разрешил</option><option value="missing">Не ответил</option></select></div>
+      <div><label>Событие</label><select id="fEvent"><option value="">Все</option></select></div>
+      <div><label>Поиск</label><div class="searchwrap"><input id="fSearch" placeholder="имя или @ник" autocomplete="off" oninput="fSearchInput(this.value)" onblur="fSearchBlur()"><div id="fSearchSug" class="psug hidden"></div></div></div>
+    </div>
+    <div class="actions" style="margin-top:9px"><button class="btn" onclick="applyFilters()">Применить</button><button class="btn secondary" onclick="clearFilters()">Сбросить</button><button class="btn secondary" onclick="selectFiltered()">Отметить всех</button><button class="btn secondary" onclick="clearSelection()">Снять отметки</button></div><div class="actions" style="margin-top:9px;border-top:1px solid var(--line);padding-top:9px"><button class="btn secondary" onclick="requestSelfies()">🖼 Запросить селфи</button><button class="btn secondary" onclick="requestRatings()">📈 Запросить рейтинг</button><button class="btn secondary" onclick="requestInstagramAccounts()">📸 Собрать Instagram</button><button class="btn secondary" onclick="requestPhotoConsent()">✅ Собрать согласия</button></div><div class="muted" style="margin-top:6px">Запрос уходит отмеченным игрокам, а если никто не отмечен — всем, кто попал под фильтры. Instagram и разрешение на публикацию собираются отдельными сообщениями.</div><div id="selfieResult" class="muted"></div><div id="ratingResult" class="muted"></div><div id="instagramResult" class="muted"></div><div id="consentResult" class="muted"></div>
+    </details>
+    <div class="muted" id="countLine" style="margin-top:8px"></div>
+  </div>
+  <div id="avPanel" class="card hidden"><h3>Аватарка игрока</h3>
+    <div class="who"><div class="av" id="avAv"></div>
+      <div><div class="nm" id="avName"></div><div class="muted" id="avSub"></div></div></div>
+    <div id="avBig" style="margin-top:10px"></div>
+    <p class="muted" style="margin-top:8px">Фото обрежется по центру в квадрат 1024×1024 — как у остальных карточек. Игрок получит уведомление.</p>
+    <input type="file" accept="image/*" id="avFile" style="display:none" onchange="avPickFile(this)"/>
+    <div class="actions"><button class="btn" id="avUpBtn" onclick="document.getElementById('avFile').click()">Загрузить фото</button>
+      <button class="btn secondary" id="avClrBtn" onclick="avClear()">Убрать аватарку</button>
+      <button class="btn secondary" onclick="avClose()">Закрыть</button></div>
+    <div id="avResult" class="muted" style="margin-top:8px"></div>
+  </div>
+  <div id="tabPlayers" class="card"><h3>Игроки</h3><div class="tableWrap"><table id="playersTable"></table></div></div>
+  <div id="tabBroadcast" class="card hidden"><h3>Рассылка</h3>
+    <label>Кому</label>
+    <div class="seg" id="bcMode">
+      <div class="s on" data-m="players" onclick="bcMode('players')">По игрокам</div>
+      <div class="s" data-m="event" onclick="bcMode('event')">По событию</div>
+    </div>
+    <div id="bcEventBox" class="hidden">
+      <label>Событие</label>
+      <select id="bcEvent" onchange="bcCount()"><option value="">— выбери событие —</option></select>
+      <label>Кто из записанных</label>
+      <div class="seg" id="bcScope">
+        <div class="s on" data-s="all" onclick="bcScope('all')">Все</div>
+        <div class="s" data-s="confirmed" onclick="bcScope('confirmed')">Участвуют</div>
+        <div class="s" data-s="waitlist" onclick="bcScope('waitlist')">Лист ожидания</div>
+        <div class="s" data-s="unpaid" onclick="bcScope('unpaid')">Не оплатили</div>
+      </div>
+      <div class="muted" id="bcCount" style="margin-top:8px">Выбери событие</div>
+      <details class="fold statFold" id="bcWhoFold"><summary>Кто получит</summary><div id="bcWho"></div></details>
+      <p class="muted" style="margin-top:8px">В тексте можно писать <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code> — подставятся из выбранного события.</p>
+    </div>
+    <div id="bcPlayersBox">
+      <p class="muted">Отметь получателей в списке ниже. Если не отмечен никто — уйдёт всем, кто попал под фильтры.</p><div class="rcpbar"><button class="btn secondary" onclick="selectFiltered()">Выбрать всех</button><button class="btn secondary" onclick="clearSelection()">Снять выделение</button><span class="cnt" id="rcpCount"></span></div><div class="rcp" id="rcpList"></div>
+    </div>
+    <label>Текст RU</label><textarea id="broadcastText" placeholder="Текст рассылки. HTML-разметка работает."></textarea><label>Текст EN</label><textarea id="broadcastTextEn" placeholder="English broadcast text"></textarea><div class="muted">Для смешанной аудитории заполните оба языка. Каждый игрок получит только свой вариант.</div>
+    <label>Фотографии — до 10</label><input id="broadcastPhotoInput" type="file" accept="image/jpeg,image/png" multiple onchange="bcPhotoPick(this)"><div class="muted">Сначала получатель увидит текст, затем фотографию или альбом.</div><div id="broadcastPhotoPreview" class="photoStrip"></div>
+    <details class="fold" style="margin-top:12px"><summary>Добавить кнопки к сообщению</summary><div style="padding-top:8px"><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="codeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="broadcastButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select></div></details>
+    <div class="actions" style="margin-bottom:6px"><button class="btn secondary" onclick="previewBroadcast('ru')">Предпросмотр RU</button><button class="btn secondary" onclick="previewBroadcast('en')">Предпросмотр EN</button></div><div id="broadcastPreview" class="prev hidden"></div><div class="actions"><button class="btn" onclick="sendBroadcast()">Отправить рассылку</button></div><div id="broadcastResult" class="muted"></div></div>
+  <div id="tabDirect" class="card hidden"><h3>Личное сообщение</h3><p class="muted">Найди игрока по имени — Telegram ID вводить не нужно.</p><div class="pick"><input id="directPick" placeholder="Начни вводить имя или @ник" autocomplete="off" oninput="pickInput(this.value)" onkeydown="pickKey(event)" onblur="setTimeout(pickClose,150)"/><div class="sug hidden" id="directSug"></div></div><div id="directChosen"></div><input id="directId" class="hidden" placeholder="telegram_id"/><textarea id="directText" placeholder="Текст сообщения игроку"></textarea><label>Разделы бота — нажми, чтобы вставить в текст</label><div id="directCodeChips" class="codes"></div><label>Кнопка под сообщением</label><select id="directButton"><option value="">Без кнопки</option><option value="participants">👥 Состав сезона</option><option value="join_event">🏆 Заявка на событие</option><option value="payment">💳 Оплата</option><option value="main">🏠 Главное меню</option></select><div class="actions"><button class="btn" onclick="sendDirect()">Отправить</button></div><div id="directResult" class="muted"></div></div>
+  
+  <div id="tabHistory" class="card hidden"><h3>История рассылок</h3><div class="toolbar"><input id="hSearch" placeholder="поиск по тексту, сегменту, админу" oninput="renderHistory()"/><label><input type="checkbox" id="hFailedOnly" onchange="renderHistory()"> только с ошибками</label><button class="btn secondary" onclick="loadHistory()">Обновить</button><span class="muted" id="hCount"></span></div><div class="tableWrap"><table id="historyTable" class="hist"></table></div></div>
+  <div id="tabEvents" class="card hidden"><h3>События</h3>
+    <p class="muted">Создай карточку, потом нажми «Предпросмотр» — бот пришлёт её тебе в чат такой, какой её увидят игроки, с кнопками подтверждения и рассылки.</p>
+    <div class="filters" style="grid-template-columns:repeat(3,1fr)">
+      <div><label>Название RU</label><input id="evTitleRu" placeholder="Вечеринка PTF"/></div>
+      <div><label>Название EN</label><input id="evTitleEn" placeholder="PTF Party"/></div>
+      <div><label>Место</label><input id="evPlace" placeholder="The Peak Racket Park"/></div>
+      <div><label>Ссылка на локацию</label><input id="evPlaceUrl" placeholder="https://maps.app.goo.gl/…"/></div>
+      <div><label>Дата</label><select id="evDate"></select></div>
+      <div><label>Время</label><select id="evTime"></select></div><div><label>Окончание (необязательно)</label><input id="evEndTime" type="time"></div>
+      <div><label>Запись до</label><select id="evDeadline"></select></div>
+      <div><label>Цена, ฿</label><input id="evPrice" type="number" placeholder="500"/></div>
+      <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = та же"/></div>
+      <div><label>Вместимость</label><input id="evCapacity" type="number" placeholder="16"/></div>
+      <div><label>Максимум гостей</label><input id="evMaxGuests" type="number" placeholder="1"/></div>
+      <div><label>Возврат, часов до</label><input id="evRefund" type="number" placeholder="12"/></div>
+      <div><label>Кому</label><select id="evAudience" onchange="evAudienceChanged()">
+        <option value="all">Всем в боте</option>
+        <option value="active">Только активным игрокам</option>
+        <option value="personal">Лично выбранным</option>
+      </select></div>
+      <div><label>Дивизион</label><select id="evDivision"><option value="">Любой</option></select></div>
+    </div>
+    <div id="evPickWrap" class="hidden" style="margin-top:6px">
+      <label>Кого приглашаем</label>
+      <div class="pick"><input id="evPick" placeholder="начни вводить имя" oninput="evPickInput(this.value)" onkeydown="evPickKey(event)" autocomplete="off"/><div id="evPickSug" class="sug hidden"></div></div>
+      <div id="evInvited" class="rcp" style="margin-top:6px"></div>
+      <div class="muted" id="evInvitedCount">Никого не выбрано</div>
+    </div>
+    <label>Описание RU</label><textarea id="evDescRu" placeholder="Что за событие, что взять с собой"></textarea>
+    <label>Описание EN</label><textarea id="evDescEn"></textarea>
+    <div class="actions" style="margin-top:8px">
+      <label><input type="checkbox" id="evPaid" checked> нужна оплата</label>
+      <label><input type="checkbox" id="evGuests"> можно с собой</label>
+      <label><input type="checkbox" id="evInviteOnly"> только по приглашению</label>
+    </div>
+    <div class="actions"><button class="btn" onclick="saveEvent()">Сохранить</button><button class="btn secondary" onclick="previewEvent()">Предпросмотр в боте</button><button class="btn secondary" onclick="newEvent()">Новое событие</button></div>
+    <div id="evResult" class="muted"></div>
+    <div class="tableWrap" style="margin-top:12px"><table id="eventsTable"></table></div>
+  </div>
+  <div id="tabBalances" class="card hidden"><h3>Касса</h3>
+    <p class="muted">Найди игрока, посмотри депозит и проведи операцию. Комментарий обязателен — по нему потом понятно, за что.</p>
+    <div class="pick"><input id="balPick" placeholder="Начни вводить имя или @ник" autocomplete="off"
+      oninput="balPickInput(this.value)" onkeydown="balPickKey(event)" onblur="setTimeout(balPickClose,160)"/>
+      <div class="sug hidden" id="balSug"></div></div>
+    <div id="balCard" class="hidden">
+      <div class="who" style="margin-top:14px"><div class="av" id="balAv"></div>
+        <div><div class="nm" id="balWho"></div><div class="muted" id="balSubWho"></div></div></div>
+      <div class="bal"><b id="balNow">0</b><span>฿ на депозите</span></div>
+      <div class="ops">
+        <button class="btn" onclick="balOp('add')">＋ Пополнить</button>
+        <button class="btn secondary" onclick="balOp('sub')">− Списать</button>
+        <button class="btn secondary" onclick="balOp('refund')">↩︎ Вернуть</button>
+      </div>
+      <div id="balForm" class="hidden">
+        <label id="balFormLabel"></label>
+        <div class="amts" id="balPresets"></div>
+        <input id="balAmount" type="number" inputmode="numeric" placeholder="сумма, ฿" oninput="balPresetSync()"/>
+        <label>Комментарий — обязательно</label>
+        <div class="codes" id="balComments"></div>
+        <input id="balComment" placeholder="за что"/>
+        <div class="actions"><button class="btn" id="balGo" onclick="balSubmit()">Провести</button>
+          <button class="btn secondary small" onclick="balCloseOp()">Отмена</button></div>
+      </div>
+      <div id="balResult" class="muted" style="margin-top:8px"></div>
+      <div class="hist2" id="balHistory"></div>
+    </div>
+    <div class="actions"><button class="btn secondary" onclick="loadBalances()">Обновить список</button></div>
+    <div class="tableWrap"><table id="balancesTable"></table></div>
+  </div>
+  <div id="tabRefunds" class="card hidden"><h3>Ожидают ручного возврата</h3>
+    <p class="muted">Сюда попадают возвраты, которые ты решил отправить переводом сам. Отметь «отправил» — игроку уйдёт уведомление, строка уедет в архив.</p>
+    <div class="actions"><button class="btn secondary" onclick="loadRefunds()">Обновить</button><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rfAll" style="width:auto" onchange="loadRefunds()"> показывать отправленные</label></div>
+    <div id="rfResult" class="muted"></div>
+    <div class="tableWrap" style="margin-top:12px"><table id="refundsTable"></table></div>
+  </div>
+  <div id="tabMenu" class="card hidden"><h3>Кнопки по группам</h3>
+    <p class="muted">Что видит каждая группа игроков. Тексты кнопок и то, куда они ведут, не меняются — только видимость и порядок.</p>
+    <label>Группа</label>
+    <select id="menuGroup" onchange="renderTabs()"></select>
+    <details class="fold" open style="margin-top:12px"><summary>📱 Вкладки внизу мини-приложения</summary>
+      <div id="menuGrid"></div></details>
+    <details class="fold" open style="margin-top:10px"><summary>💬 Кнопки под сообщением бота</summary>
+      <div id="btnGrid"></div></details>
+    <details class="fold" open style="margin-top:10px"><summary>⌨️ Нижняя клавиатура в чате</summary>
+      <div id="kbGrid"></div>
+      <div class="muted" style="margin-top:6px">Лига и бронирование доступны игрокам из Players_Master. Для вызовов и результатов нужен состав дивизиона и группы.</div>
+    </details>
+    <div class="actions"><button class="btn" onclick="saveTabs()">Сохранить</button><button class="btn secondary" onclick="loadTabs()">Обновить</button></div>
+    <div id="menuResult" class="muted"></div>
+    <label style="margin-top:14px">Проверить</label>
+    <div class="actions" style="margin-top:0">
+      <button class="btn secondary" onclick="previewAs()">👁 Прислать в бот</button>
+      <button class="btn secondary" onclick="openAs()">📱 Открыть мини-апп</button>
+    </div>
+    <div class="muted" style="margin-top:6px">Бот пришлёт сообщение с кнопками этой группы, а мини-апп откроется с её набором вкладок. Нижняя клавиатура в чате при этом не меняется — она твоя.</div>
+    <div id="previewResult" class="muted"></div>
+  </div>
+  
+</div>
+<script src="/public/admin-l10n.js"></script><script>
+(async function(){
+  var tg=window.Telegram&&window.Telegram.WebApp;
+  var fallback=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code||'en';
+  window.PTF_LANG=fallback.indexOf('ru')===0?'ru':'en';
+  try { var j=await (await fetch('/api/ui-language?initData='+encodeURIComponent(tg&&tg.initData||''))).json();if(j.lang)window.PTF_LANG=j.lang; } catch(e){}
+  document.documentElement.lang=window.PTF_LANG;
+  var walk=function(n){
+    if(n.nodeType===1&&/^(SCRIPT|STYLE|CODE|TEXTAREA)$/.test(n.nodeName))return;
+    if(n.nodeType===3){var t=n.nodeValue.trim();if(ADMIN_EN[t])n.nodeValue=n.nodeValue.replace(t,AUI(t));}
+    if(n.nodeType===1)['placeholder','title','aria-label'].forEach(function(a){var v=n.getAttribute(a);if(v&&ADMIN_EN[v])n.setAttribute(a,AUI(v));});
+    Array.from(n.childNodes).forEach(walk);
+  };walk(document.body);
+  var script=document.createElement('script');script.src='/public/admin-ui.js';document.body.appendChild(script);
+})();
+</script></body></html>

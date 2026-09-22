@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PTF Matches</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* Палитра лиги: та же, что в витрине, чтобы экраны матчей не выглядели
+   отдельным приложением. Старые имена переменных сохранены — так правка
+   не задевает разметку и логику. */
+:root{
+  --bg:#0A0A0B;--card:#111010;--card2:#0D0C0B;--text:#EFEBE4;--muted:#B9B1A5;
+  --accent:#E8A45C;--accent2:#C9873C;--border:#2A2521;--line2:#221F1B;
+  --danger:#C2695E;--green:#8FBF9A;--green2:#2A3A2E;--yellow:#C9A76A;--champ:#D9C7A3;
+  --accBg:var(--accBg);--accBg2:var(--accBg2);--accLine:var(--accLine);--onAcc:var(--onAcc);--avBg:var(--avBg);
+  --grain:var(--grain);--fadeNone:var(--fadeNone);
+}
+/* Светлая тема Court — те же роли, другой свет. Выбор общий с витриной лиги. */
+html[data-theme="light"]{
+  --bg:#F2F5F1;--card:#FFFFFF;--card2:#EBF0EA;--text:#16211A;--muted:#4C5A50;
+  --accent:#1F6B44;--accent2:#145236;--border:#C7D3C5;--line2:#DDE5DB;
+  --danger:#B04A2E;--green:#1F6B44;--green2:#E1F0E7;--yellow:#8E9A2E;--champ:#6E7A22;
+  --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--onAcc:#FFFFFF;--avBg:#E7EDE6;
+  --grain:rgba(0,0,0,.02);--fadeNone:rgba(242,245,241,0);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;
+background:var(--bg);color:var(--text);min-height:100vh;padding:0 14px 40px;position:relative}
+.grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+background-image:radial-gradient(var(--grain) .5px,transparent .5px);background-size:3px 3px}
+.wrap{position:relative;z-index:1}
+.wrap{max-width:620px;margin:0 auto}
+h1{font-size:22px;font-weight:800;letter-spacing:-.6px;margin:14px 0 4px}
+.sub{color:var(--muted);font-size:13px;line-height:1.45;margin:0 0 12px}
+.tabs{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 0;background:linear-gradient(180deg,var(--bg) 78%,var(--fadeNone));margin-bottom:4px}
+.tab{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
+.tab.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
+/* Ход за тобой — вкладка «Вызовы» горит, иначе входящее предложение легко проспать. */
+.tab.hot{color:var(--accent);border-color:var(--accLine)}
+.tab.hot:after{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:5px;vertical-align:middle;animation:pulseDot 1.6s ease-in-out infinite}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:16px;margin:0 0 12px}
+label{display:block;font-size:10px;letter-spacing:1.1px;text-transform:uppercase;font-weight:800;color:var(--muted);margin:12px 0 6px}
+label:first-of-type{margin-top:0}
+select,input,textarea{width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-size:15px;font-family:inherit}
+textarea{min-height:60px;resize:vertical}
+.row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
+button{width:100%;border:0;border-radius:14px;padding:15px;font-size:15px;font-weight:900;margin-top:14px;cursor:pointer;background:var(--card2);color:var(--text);border:1px solid var(--border);font-family:inherit}
+button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--onAcc);border:0;font-weight:900}
+button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11px}
+.dowhead,.datestrip{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.dowhead{padding:0 0 4px}
+.dowlabel{text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.3px;opacity:.5;font-weight:800}
+.daycell{padding:9px 4px 7px;border-radius:12px;background:var(--card2);text-align:center;cursor:pointer;border:1px solid var(--border);transition:.15s;user-select:none;min-width:0}
+.daycell.sel{background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--onAcc);border-color:var(--accent)}
+.daycell.past{opacity:.22;cursor:default;border-color:transparent}
+.daycell .dnum{font-size:17px;font-weight:800;line-height:1.15}
+.daycell .dmon{font-size:9px;opacity:.6;font-weight:700;margin-top:2px}
+.slot{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:16px;padding:14px;margin:0 0 10px}
+.slot.mine{border-left-color:var(--green)}
+.slot.agreed{border-left-color:var(--green)}
+.slot-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.av{width:38px;height:38px;border-radius:50%;flex:0 0 38px;background:var(--avBg);object-fit:cover;object-position:50% 32%;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;color:var(--mute,var(--muted))}
+.who{font-weight:800;font-size:15px;line-height:1.25}
+.when{font-size:14px;margin:2px 0}
+.meta{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.5}
+.pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10.5px;font-weight:800;border:1px solid var(--line2);background:var(--card2);color:var(--muted);margin:2px 4px 2px 0}
+.pill.acc{background:var(--green2);border-color:var(--accLine);color:var(--green)}
+.pill.open{background:var(--accBg);border-color:var(--accLine);color:var(--accent)}
+.acts{display:flex;gap:8px;margin-top:10px}
+.opp{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:14px;background:var(--card2);margin-bottom:8px;cursor:pointer}
+.opp.sel{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg))}
+.opp .who{font-size:14px}
+.hint{color:var(--muted);font-size:12px;line-height:1.5;margin-top:8px}
+.muted{color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;text-align:center;padding:26px 10px;line-height:1.5}
+.res{margin-top:12px;font-size:14px;line-height:1.5}
+.res.ok{background:var(--green2);border:1px solid var(--accLine);color:var(--green);padding:12px;border-radius:12px}
+.res.err{color:var(--danger)}
+.hidden{display:none}
+.seg{display:flex;gap:8px;margin-bottom:4px}
+.seg .s{flex:1;text-align:center;padding:10px 6px;border-radius:12px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;color:var(--muted)}
+.seg .s.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
+.daycell.on{background:linear-gradient(180deg,var(--accent),var(--accent2));color:var(--onAcc);border-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:9px 13px;border-radius:999px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
+.chip.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-end;justify-content:center;z-index:50}
+.sheet{background:var(--card);border:1px solid var(--border);border-radius:20px 20px 0 0;padding:18px 16px 22px;width:100%;max-width:620px;max-height:88vh;overflow:auto}
+.sheet h3{margin:0 0 4px;font-size:17px}
+.setrow{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;margin-bottom:8px}
+.setrow .lbl{font-size:12px;font-weight:800;color:var(--muted);min-width:44px}
+.setrow .dash{text-align:center;color:var(--muted);font-weight:800}
+.tbrow{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;margin:0 0 10px;padding-left:0}
+.tbrow .lbl{font-size:11px;color:var(--muted);font-weight:700;min-width:44px}
+.scorehead{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;margin:0 0 4px}
+.scorehead .lbl{min-width:44px}
+.scorehead .nm{font-size:12px;font-weight:800;color:var(--muted);text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scorehead .nm.win{color:var(--text)}
+.scorehead .dash{text-align:center;color:var(--muted);font-weight:800}
+.photo-btn{display:block;width:100%;padding:14px;border-radius:12px;border:1px dashed var(--accLine);background:var(--card2);color:var(--accent);text-align:center;font-size:13px;font-weight:800;cursor:pointer}
+.photo-prev{width:100%;border-radius:12px;margin-top:8px;max-height:220px;object-fit:cover}
+
+/* Календарь: сразу видны две недели, остальное открывается свайпом или тапом
+   по язычку — иначе три ряда дат съедают весь экран. */
+.dtwrap{position:relative;overflow:hidden;transition:max-height .3s ease}
+.dtwrap.open{max-height:none!important}
+.dtwrap:not(.open):after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;
+  pointer-events:none;background:linear-gradient(180deg,var(--fadeNone),var(--card))}
+.dtmore{margin-top:6px;display:flex;align-items:center;justify-content:center;gap:7px;
+  padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--card2);
+  color:var(--muted);font-size:11px;font-weight:800;cursor:pointer;user-select:none}
+.dtmore i{font-style:normal;font-size:12px;line-height:1}
+
+/* Переключатель темы — те же два ярлычка, что в витрине лиги. */
+.ttop{display:flex;align-items:center;gap:10px}
+.ttop h1{flex:1 1 auto;min-width:0}
+.thsw{display:flex;gap:3px;padding:3px;border:1px solid var(--border);border-radius:999px;
+  background:var(--card);flex:0 0 auto}
+.thsw button{width:27px;height:24px;border:0;border-radius:999px;background:transparent;
+  color:var(--muted);font-size:13px;line-height:1;cursor:pointer;padding:0;display:flex;
+  align-items:center;justify-content:center;font-family:inherit}
+.thsw button.on{background:var(--accBg);color:var(--accent);box-shadow:0 0 0 1px var(--accLine) inset}
+</style>
+</head>
+<body>
+<script>
+// Тема общая с витриной лиги: выбор хранится на устройстве под тем же ключом.
+try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
+  document.documentElement.setAttribute('data-theme',_th); }catch(e){}
+</script>
+<div class="grain"></div>
+<div class="wrap">
+  <div class="ttop"><h1 id="title">Матчи</h1>
+    <div class="thsw" id="thSw">
+      <button type="button" data-th="dark" title="Тёмная тема">☾</button>
+      <button type="button" data-th="light" title="Светлая тема">☀</button>
+    </div>
+  </div>
+  <p class="sub" id="sub"></p>
+  <div class="tabs">
+    <div class="tab on" data-t="mine" id="tabMine">Расписание</div>
+    <div class="tab" data-t="open" id="tabOpen">Вызовы</div>
+    <div class="tab hidden" data-t="book" id="tabBook">Корт</div>
+    <div class="tab" data-t="res" id="tabRes">Результат</div>
+  </div>
+  <div id="viewOpen"><div class="empty">Загружаем…</div></div>
+  <div id="viewNew" class="hidden"></div>
+  <div id="viewMine" class="hidden"></div>
+  <div id="viewRes" class="hidden"></div>
+  <div id="viewBook" class="hidden"></div>
+</div>
+<script>
+var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
+var initData=(tg&&tg.initData)||'';
+var linkToken=new URLSearchParams(location.search).get('t')||'';
+var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
+var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+var unplayed={known:false,names:[]};
+var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
+var T={
+  ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
+      tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
+      emptyOpen:'Сейчас нет открытых окон в твоём дивизионе. Создай своё — соперник увидит его в чате дивизиона.',
+      emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
+      modeOpen:'🔓 Открытое окно',modeDirect:'🎯 Конкретный соперник',
+      court:'Корты (можно несколько)',courtAny:'Не важно — договоримся',courtOther:'Другая площадка',
+      date:'Даты (можно несколько)',time:'Интервал, когда тебе удобно',from:'с',to:'до',dur:'Длительность',timeHint:'Укажи «с» и «до» — соперник выберет внутри этого интервала конкретный слот на 2 часа.',pickTime:'Время матча',durFixed:'Матч — 2 часа',needDate:'Выбери хотя бы одну дату',pickTitle:'Выбери дату, время и корт',pickDate:'Дата',pickCourt:'Корт',accept:'✅ Отправить предложение',anyCourt:'Договоримся на месте',multi:'вариантов: ',sent:'✅ Предложение отправлено. Соперник подтвердит или предложит своё — я сообщу.',counterTitle:'Встречное предложение',counterHint:'Предложи свои дату, время и корт — соперник подтвердит или ответит своим вариантом.',counterSend:'🔄 Отправить встречное',pendingLbl:'ждёт ответа',yourTurn:'твой ход',
+      comment:'Комментарий (необязательно)',commentPh:'например: могу подвинуться на час',
+      opp:'Соперник',send:'📲 Сформировать заявку',sending:'Отправляю…',
+      okOpen:'✅ Окно опубликовано в чате твоего дивизиона. Как только кто-то нажмёт «Играю», я пришлю контакты соперника.',
+      okDirect:'✅ Вызов отправлен. Я сообщу, когда соперник ответит.',
+      play:'🎾 Играю',cancel:'Снять окно',cancelAsk:'Снять это окно? Оно исчезнет из чата дивизиона.',
+      needOpp:'Выбери соперника',needRange:'Интервал короче длительности матча',
+      hintOpen:'Окно уйдёт в чат твоего дивизиона. Любой игрок дивизиона сможет его забрать.',
+      hintDirect:'Вызов уйдёт лично выбранному игроку.',
+      hintRange:'Отметь все удобные дни и корты — соперник выберет конкретные.',
+      retime:'🕐 Перенести',cancelMatch:'✖️ Отменить',courtOk:'корт подтверждён',timePending:'ждёт подтверждения времени',
+      retimeTitle:'Перенести время матча',retimeHint:'Дата и корт остаются прежними. Соперник подтвердит новое время — тогда оно станет основным.',
+      retimeSend:'🕐 Отправить сопернику',retimeSent:'✅ Новое время отправлено сопернику на подтверждение.',
+      cancelMatchAsk:'Отменить матч? Соперник получит уведомление, договариваться придётся заново.',
+      unplayedTitle:'Ещё не сыграно',unplayedHint:'Соперники по дивизиону, с которыми матч ещё не сыгран. Нажмите на имя — отправим вызов.',
+      noTelegram:'У этого игрока пока нет Telegram в базе:',
+      you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.',
+      tRes:'Результат',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
+      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',
+      set3mode:'Решающий сет',full:'Полный сет',mtb:'Чемпионский тай-брейк',noSet3:'Не игрался',
+      winnerFirst:'Сначала отметьте победителя — счёт пишется от него.',
+      scoreOrder:'Первым идёт счёт победителя.',
+      set3hint:'По сетам 1:1 — укажите, как игрался решающий сет.',
+      photo:'Фото матча (необязательно)',note:'Комментарий (необязательно)',
+      sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
+      manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
+      manualHint:'Выберите соперника, дату и корт — счёт так же уйдёт ему на подтверждение.',courtManual:'Например, Rawai — можно не указывать',
+      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',needWinner:'Выберите победителя',
+      vs:'против',back:'⬅️ Назад',
+      tBook:'Бронь корта',bookTitle:'Забронировать корт',
+      bookHint:'Это отдельная бронь, не привязанная к матчу лиги. Отметьте площадки — бот подготовит по сообщению на каждую, а отправите вы сами из WhatsApp.',
+      bookTime:'Время начала',bookDur:'Длительность',bookCourtsLbl:'Площадки (можно несколько)',
+      bookSend:'📲 Сформировать запросы',bookOk:'✅ Запросы готовы — они пришли вам в чат с ботом. Откройте WhatsApp и отправьте.',
+      needCourts:'Отметьте хотя бы одну площадку',
+      bookNote:'Бот ничего не отправляет сам: он только готовит текст и ссылку. Ответы кортов приходят вам в WhatsApp.',
+      h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
+  en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
+      tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
+      emptyOpen:'No open slots in your division right now. Create one — your division will see it in chat.',
+      emptyMine:'No scheduled matches or open slots yet.',
+      modeOpen:'🔓 Open slot',modeDirect:'🎯 Specific opponent',
+      court:'Courts (multiple)',courtAny:'Any — we will agree',courtOther:'Other venue',
+      date:'Dates (multiple)',time:'When it suits you',from:'from',to:'to',dur:'Duration',timeHint:'Set “from” and “to” — your opponent picks a concrete 2-hour slot inside it.',pickTime:'Match time',durFixed:'Match is 2 hours',needDate:'Pick at least one date',pickTitle:'Pick a date, time and court',pickDate:'Date',pickCourt:'Court',accept:'✅ Send proposal',anyCourt:'Agree on the spot',multi:'options: ',sent:'✅ Proposal sent. Your opponent will confirm or counter — I will let you know.',counterTitle:'Counter-proposal',counterHint:'Offer your date, time and court — the other player confirms or answers with their own.',counterSend:'🔄 Send counter',pendingLbl:'awaiting answer',yourTurn:'your turn',
+      comment:'Comment (optional)',commentPh:'e.g. can shift by an hour',
+      opp:'Opponent',send:'📲 Create request',sending:'Sending…',
+      okOpen:'✅ Slot published in your division chat. As soon as someone taps “I’m in”, I’ll send you their contact.',
+      okDirect:'✅ Challenge sent. I’ll let you know when they reply.',
+      play:'🎾 I’m in',cancel:'Withdraw',cancelAsk:'Withdraw this slot? It disappears from the division chat.',
+      needOpp:'Pick an opponent',needRange:'The window is shorter than the match duration',
+      hintOpen:'The slot goes to your division chat. Any player from the division can take it.',
+      hintDirect:'The challenge goes privately to the selected player.',
+      hintRange:'Mark every day and court that suits you — your opponent picks the exact ones.',
+      retime:'🕐 Reschedule',cancelMatch:'✖️ Cancel',courtOk:'court confirmed',timePending:'new time pending',
+      retimeTitle:'Reschedule the match',retimeHint:'Date and court stay the same. Once your opponent confirms, the new time becomes final.',
+      retimeSend:'🕐 Send to opponent',retimeSent:'✅ New time sent to your opponent for confirmation.',
+      cancelMatchAsk:'Cancel this match? Your opponent will be notified and you will have to arrange it again.',
+      unplayedTitle:'Still to play',unplayedHint:'Division opponents you have not played yet. Tap a name to send a challenge.',
+      noTelegram:'This player has no Telegram on file yet:',
+      you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.',
+      tRes:'Result',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
+      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',
+      set3mode:'Deciding set',full:'Full set',mtb:'Match tie-break',noSet3:'Not played',
+      winnerFirst:'Pick the winner first — the score is written from their side.',
+      scoreOrder:'The winner’s score comes first.',
+      set3hint:'Sets are 1:1 — say how the deciding set was played.',
+      photo:'Match photo (optional)',note:'Comment (optional)',
+      sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
+      manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
+      manualHint:'Pick the opponent, date and court — the score goes to them for confirmation too.',courtManual:'For example, Rawai — optional',
+      pendingRes:'awaiting confirmation',yourRes:'confirm the score',needWinner:'Pick the winner',
+      vs:'vs',back:'⬅️ Back',
+      tBook:'Book a court',bookTitle:'Book a court',
+      bookHint:'A standalone booking, not tied to a league match. Tick the venues — the bot prepares one message per venue, and you send them yourself from WhatsApp.',
+      bookTime:'Start time',bookDur:'Duration',bookCourtsLbl:'Venues (multiple)',
+      bookSend:'📲 Create requests',bookOk:'✅ Requests are ready — they are in your chat with the bot. Open WhatsApp and send.',
+      needCourts:'Tick at least one venue',
+      bookNote:'The bot never sends anything itself: it only prepares the text and the link. Venue replies come to your WhatsApp.',
+      h1:'1h',h15:'1.5h',h2:'2h',h25:'2.5h',h3:'3h'}
+};
+var X=L?T.ru:T.en;
+var $=function(id){return document.getElementById(id)};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+function pad(n){return n<10?'0'+n:''+n}
+function min2hm(m){return pad(Math.floor(m/60)%24)+':'+pad(m%60)}
+function hm2min(hm){var p=String(hm).split(':');return (parseInt(p[0],10)||0)*60+(parseInt(p[1],10)||0)}
+// Шаг 30 минут делаем через <select>: у <input type="time"> атрибут step игнорируется
+// системным WebView Telegram на iOS, и игрок может выкрутить произвольную минуту.
+function timeOptions(sel,minHM,maxHM){
+  var minM=minHM?hm2min(minHM):6*60,maxM=maxHM?hm2min(maxHM):22*60+30,o='';
+  for(var m=Math.ceil(minM/30)*30;m<=maxM;m+=30){var hm=pad(Math.floor(m/60))+':'+pad(m%60);o+='<option value="'+hm+'"'+(hm===sel?' selected':'')+'>'+hm+'</option>'}
+  return o;
+}
+// Две недели видно всегда, третья — по свайпу вверх/вниз внутри календаря
+// или тапом по язычку. Высоту считаем по реальной ячейке, а не на глаз.
+// Тема: ключ общий с витриной лиги, поэтому выбор переносится между экранами.
+function applyTheme(name){
+  var th=name==='light'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',th);
+  try{ localStorage.setItem('ptf_theme',th) }catch(e){}
+  var bg=th==='light'?'#F2F5F1':'#0A0A0B';
+  try{ if(tg&&tg.setHeaderColor)tg.setHeaderColor(bg) }catch(e){}
+  try{ if(tg&&tg.setBackgroundColor)tg.setBackgroundColor(bg) }catch(e){}
+  var box=document.getElementById('thSw');
+  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
+    b.classList.toggle('on',b.getAttribute('data-th')===th);
+  });
+}
+function initTheme(){
+  var box=document.getElementById('thSw');
+  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
+    b.onclick=function(){ applyTheme(b.getAttribute('data-th')) };
+  });
+  var cur='dark';
+  try{ var v=localStorage.getItem('ptf_theme'); if(v==='light'||v==='dark')cur=v }catch(e){}
+  applyTheme(cur);
+}
+initTheme();
+
+function dtMore(){
+  return '<div class="dtmore" data-more="1"><i>⌄</i>'+(L?'Ещё даты':'More dates')+'</div>';
+}
+function foldStrips(){
+  var list=document.querySelectorAll('.dtwrap.fold:not([data-ready])');
+  [].forEach.call(list,function(w){
+    w.setAttribute('data-ready','1');
+    var cell=w.querySelector('.daycell');
+    if(!cell)return;
+    var h=cell.getBoundingClientRect().height;
+    if(!h)return;
+    w.style.maxHeight=Math.round(h*2+6)+'px';
+    var tab=w.nextElementSibling;
+    var toggle=function(open){
+      w.classList.toggle('open',open);
+      if(tab&&tab.classList.contains('dtmore')){
+        tab.innerHTML='<i>'+(open?'⌃':'⌄')+'</i>'+(open?(L?'Свернуть':'Less'):(L?'Ещё даты':'More dates'));
+      }
+    };
+    if(tab&&tab.classList.contains('dtmore'))tab.onclick=function(){ toggle(!w.classList.contains('open')) };
+    var y0=null;
+    w.addEventListener('touchstart',function(e){ y0=e.touches[0].clientY },{passive:true});
+    w.addEventListener('touchmove',function(e){
+      if(y0===null)return;
+      var dy=e.touches[0].clientY-y0;
+      if(Math.abs(dy)<26)return;
+      toggle(dy>0);
+      y0=null;
+    },{passive:true});
+  });
+}
+function isoDate(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())}
+function fmtDay(iso){
+  var d=new Date(iso+'T00:00:00');if(isNaN(d))return iso;
+  var wd=(L?['Вс','Пн','Вт','Ср','Чт','Пт','Сб']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'])[d.getDay()];
+  var mo=(L?['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'])[d.getMonth()];
+  return wd+', '+d.getDate()+' '+mo;
+}
+function initials(n){return String(n||'').split(/\s+/).filter(Boolean).slice(0,2).map(function(s){return s[0].toUpperCase()}).join('')}
+function avatar(p){return p&&p.photo_url?'<img class="av" src="'+esc(p.photo_url)+'" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'av\',textContent:\''+esc(initials(p.name))+'\'}))">':'<span class="av">'+esc(initials(p&&p.name))+'</span>'}
+
+// Вкладок четыре: Расписание, Вызовы, Корт, Результат. «Создать вызов» — это не
+// отдельная вкладка, а экран внутри «Вызовов»: подсветка остаётся на них.
+function showTab(t){
+  mode=t;
+  var onTab=(t==='new')?'open':t;
+  ['open','new','mine','res','book'].forEach(function(k){
+    var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===onTab);
+    $('view'+k[0].toUpperCase()+k.slice(1)).classList.toggle('hidden',k!==t);
+  });
+  if(t==='open')renderOpen();else if(t==='new')renderNew();else if(t==='mine')renderMine();else if(t==='res')renderRes();else renderBook();
+  markCalls();
+  window.scrollTo(0,0);
+}
+// Точка на «Вызовах», когда ход за мной: входящее предложение или встречное.
+function callsWaiting(){
+  return (myMatches||[]).filter(function(s){
+    return s.status==='pending' && String(s.pending_by)!==String(me&&me.id);
+  }).length;
+}
+function markCalls(){
+  var tab=$('tabOpen');if(!tab)return;
+  var n=callsWaiting();
+  tab.classList.toggle('hot',n>0);
+  tab.textContent=X.tCalls+(n?' ·'+n:'');
+  if(mode==='open'||mode==='new')tab.classList.add('on');
+}
+
+// Кого ещё не сыграл в дивизионе — главное, что игроку нужно видеть в лиге.
+// Имена берём из расписания дивизиона, тап по имени открывает создание вызова.
+function unplayedBlock(){
+  if(!unplayed.known||!unplayed.names.length)return '';
+  var chips=unplayed.names.map(function(n){
+    return '<div class="chip" onclick="challengeByName(\''+esc(n).replace(/'/g,"\\'")+'\')">'+esc(n)+'</div>';
+  }).join('');
+  var done=(unplayed.played||0)+' / '+(unplayed.total||unplayed.names.length);
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">'+esc(X.unplayedTitle)+' · '+esc(done)+'</h3>'
+    +'<div class="hint">'+esc(X.unplayedHint)+'</div><div class="chips" style="margin-top:10px">'+chips+'</div></div>';
+}
+// Тап по имени: переходим в создание заявки с уже выбранным соперником.
+function challengeByName(name){
+  var hit=opponents.filter(function(o){return String(o.name||'').toLowerCase()===String(name).toLowerCase()})[0];
+  if(!hit){ if(tg&&tg.showAlert)tg.showAlert(X.noTelegram+' '+name); else alert(X.noTelegram+' '+name); return }
+  mode='direct';selOpp=String(hit.telegram_id);showTab('new');
+}
+function renderOpen(){
+  // Создание вызова живёт здесь же, отдельной вкладкой его больше нет.
+  var top='<button class="mini primary" style="width:100%;padding:12px;margin-bottom:10px" onclick="showTab(\'new\')">'+esc(X.tCreate)+'</button>'
+    +waitingBlock()+unplayedBlock();
+  if(!openSlots.length){$('viewOpen').innerHTML=top+'<div class="empty">'+esc(X.emptyOpen)+'</div>';return}
+  $('viewOpen').innerHTML=top+openSlots.map(function(s){
+    var mine=String(s.from_telegram_id)===String(me&&me.id);
+    return '<div class="slot'+(mine?' mine':'')+'" id="slot-'+esc(s.challenge_id)+'">'
+      +'<div class="slot-head">'+avatar(s.from)+'<div><div class="who">'+esc(s.from_name)+(mine?' <span class="pill">'+esc(X.you)+'</span>':'')+'</div>'
+      +'<div class="meta">'+esc(s.division||'')+(s.from&&s.from.rating?' · NTRP '+esc(s.from.rating):'')+'</div></div></div>'
+      +'<div class="when">📅 <b>'+s.dates.map(fmtDay).map(esc).join(' · ')+'</b></div>'
+      +'<div class="when">🕐 <b>'+esc(s.time_from)+(s.time_to&&s.time_to!==s.time_from?'–'+esc(s.time_to):'')+'</b> <span class="pill">'+esc(X.durFixed)+'</span></div>'
+      +(s.courts.length?'<div class="meta">📍 '+s.courts.map(esc).join(' · ')+'</div>':'<div class="meta">📍 '+esc(X.anyCourt)+'</div>')
+      +(s.comment?'<div class="meta">💬 '+esc(s.comment)+'</div>':'')
+      +'<div class="acts">'+(mine
+          ?'<button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button>'
+            // админу даём откликнуться на своё окно — чтобы прогнать цепочку в одиночку
+            +(isAdmin?'<button class="mini primary" onclick="openPicker(\''+esc(s.challenge_id)+'\')">'+esc(X.play)+' 🧪</button>':'')
+          :'<button class="mini primary" onclick="openPicker(\''+esc(s.challenge_id)+'\')">'+esc(X.play)+'</button>')
+      +'</div></div>';
+  }).join('');
+}
+
+// Автор мог предложить несколько дат и кортов — отвечающий обязан выбрать конкретные.
+function openPicker(id){
+  var s=openSlots.filter(function(x){return x.challenge_id===id})[0]||myMatches.filter(function(x){return x.challenge_id===id})[0];
+  if(!s)return;
+  var dates=s.dates.map(function(d,i){return '<div class="chip'+(i===0?' on':'')+'" data-d="'+esc(d)+'" onclick="pickOne(this,\'d\')">'+esc(fmtDay(d))+'</div>'}).join('');
+  // Слоты на всю длительность матча с шагом 30 минут внутри интервала автора.
+  var dur=Number(s.duration_min||matchDuration);
+  var lo=hm2min(s.time_from||'00:00'),hi=hm2min(s.time_to||s.time_from||'23:59');
+  var times='';
+  for(var t=lo;t+dur<=Math.max(hi,lo+dur);t+=30){
+    times+='<div class="chip'+(t===lo?' on':'')+'" data-t="'+min2hm(t)+'" onclick="pickOne(this,\'t\')">'+min2hm(t)+'–'+min2hm(t+dur)+'</div>';
+  }
+  var courts=s.courts.length
+    ? s.courts.map(function(c,i){return '<div class="chip'+(i===0?' on':'')+'" data-c="'+esc(c)+'" onclick="pickOne(this,\'c\')">'+esc(c)+'</div>'}).join('')
+    : '<div class="hint">'+esc(X.anyCourt)+'</div>';
+  var el=document.createElement('div');
+  el.className='modal';el.id='picker';
+  el.onclick=function(e){if(e.target===el)closePicker()};
+  el.innerHTML='<div class="sheet"><h3>'+esc(X.pickTitle)+'</h3>'
+    +'<div class="hint">'+esc(s.from_name)+' · '+esc(s.time_from)+(s.time_to&&s.time_to!==s.time_from?'–'+esc(s.time_to):'')+'</div>'
+    +'<label>'+esc(X.pickDate)+'</label><div class="chips" id="pkDates">'+dates+'</div>'
+    +'<label>'+esc(X.pickTime)+'</label><div class="chips" id="pkTimes">'+times+'</div>'
+    +'<label>'+esc(X.pickCourt)+'</label><div class="chips" id="pkCourts">'+courts+'</div>'
+    +'<button class="primary" onclick="confirmTake(\''+esc(id)+'\',this)">'+esc(X.accept)+'</button>'
+    +'<button onclick="closePicker()">'+esc(L?'Отмена':'Cancel')+'</button>'
+    +'<div id="pkRes" class="res"></div></div>';
+  document.body.appendChild(el);
+}
+function closePicker(){var el=$('picker');if(el)el.remove()}
+function pickOne(node,kind){
+  var box=node.parentNode;
+  Array.prototype.forEach.call(box.querySelectorAll('.chip'),function(c){c.classList.remove('on')});
+  node.classList.add('on');
+}
+function confirmTake(id,btn){
+  var d=document.querySelector('#pkDates .chip.on');
+  var tm=document.querySelector('#pkTimes .chip.on');
+  var c=document.querySelector('#pkCourts .chip.on');
+  var res=$('pkRes');res.className='res';
+  if(!d){res.className='res err';res.textContent=X.needDate;return}
+  btn.disabled=true;btn.textContent='…';
+  fetch('/api/match/take',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:id,date:d.dataset.d,time:tm?tm.dataset.t:'',court:c?c.dataset.c:''
+  })}).then(function(r){return r.json()}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Error');
+    closePicker();load(true);showTab('mine');
+    if(tg&&tg.showAlert)tg.showAlert(X.sent);
+  }).catch(function(e){btn.disabled=false;btn.textContent=X.accept;res.className='res err';res.textContent='⛔ '+e.message});
+}
+
+// Входящие предложения, где ход за мной. Показываем их первыми в «Вызовах» —
+// это то, на что человек должен ответить прямо сейчас.
+function waitingBlock(){
+  var mineTurn=(myMatches||[]).filter(function(s){
+    return s.status==='pending' && String(s.pending_by)!==String(me&&me.id);
+  });
+  if(!mineTurn.length)return '';
+  return mineTurn.map(function(s){
+    var iAmAuthor=String(s.from_telegram_id)===String(me&&me.id);
+    var opp=iAmAuthor?(s.to_name||''):(s.from_name||'');
+    return '<div class="slot"><div class="slot-head"><div><div class="who">'+esc(opp||'—')+'</div>'
+      +'<div class="meta"><span class="pill open">'+esc(X.yourTurn)+'</span>'+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
+      +'<div class="when">📅 <b>'+s.dates.map(fmtDay).map(esc).join(' · ')+'</b> · 🕐 <b>'+esc(s.time_from)+'</b></div>'
+      +(s.courts.length?'<div class="meta">📍 '+s.courts.map(esc).join(' · ')+'</div>':'')
+      +'</div>';
+  }).join('');
+}
+
+// --- история матчей лиги -----------------------------------------------------
+// Лежит под расписанием на той же вкладке: сначала свои матчи, следом — что
+// происходит в лиге. По умолчанию свой дивизион, вся лига — переключателем.
+var histList=null,histScope='div',histLimit=15,histLoading=false;
+function loadHistory(){
+  if(histLoading||histList)return;
+  histLoading=true;
+  fetch('/api/match/history?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      histLoading=false;
+      if(!j.ok)return;
+      histList=j.matches||[];
+      if(mode==='mine')renderMine();
+    }).catch(function(){histLoading=false});
+}
+function setHistScope(v){histScope=v;histLimit=15;renderMine()}
+function moreHist(){histLimit+=15;renderMine()}
+function historyBlock(){
+  if(histList===null)return '<div class="card"><h3 style="margin:0;font-size:16px">'+esc(X.histTitle)+'</h3><div class="hint">…</div></div>';
+  var mineDiv=String(division||'').toUpperCase();
+  var list=histList.filter(function(m){
+    return histScope==='all' || !mineDiv || String(m.division||'').toUpperCase()===mineDiv;
+  });
+  var chips='<div class="chip'+(histScope==='div'?' on':'')+'" onclick="setHistScope(\'div\')">'+esc(X.histMine)+(mineDiv?' '+esc(mineDiv):'')+'</div>'
+    +'<div class="chip'+(histScope==='all'?' on':'')+'" onclick="setHistScope(\'all\')">'+esc(X.histAll)+'</div>';
+  var rows=list.slice(0,histLimit).map(function(m){
+    var head=[m.date,m.division?('Div '+m.division):'',m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+    return '<div class="slot"><div class="meta">'+esc(head)+'</div>'
+      +'<div class="who" style="font-size:14px"><b>'+esc(m.winner)+'</b> <span style="color:var(--muted)">vs</span> '+esc(m.loser)+'</div>'
+      +'<div class="when">🎾 <b>'+esc(m.score||'—')+'</b></div></div>';
+  }).join('');
+  return '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:16px">'+esc(X.histTitle)+'</h3>'
+    +'<div class="chips">'+chips+'</div></div>'
+    +(rows||'<div class="empty">'+esc(X.histEmpty)+'</div>')
+    +(list.length>histLimit?'<button class="mini" style="width:100%;padding:12px;margin-top:8px" onclick="moreHist()">'+esc(X.histMore)+'</button>':'');
+}
+
+function renderMine(){
+  loadHistory();
+  if(retimeId){
+    var rt=myMatches.filter(function(x){return x.challenge_id===retimeId})[0];
+    if(rt){$('viewMine').innerHTML=renderRetimePanel(rt);return}
+    retimeId='';
+  }
+  if(!myMatches.length){$('viewMine').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>'+historyBlock();return}
+  $('viewMine').innerHTML=myMatches.map(function(s){
+    var agreed=s.status==='accepted';var pending=s.status==='pending';
+    var iAmAuthor=String(s.from_telegram_id)===String(me&&me.id);
+    var opp=iAmAuthor?{name:s.to_name,username:s.to_username}:{name:s.from_name,username:s.from_username};
+    return '<div class="slot'+(agreed?' agreed':'')+'">'
+      +'<div class="slot-head"><div><div class="who">'+(agreed?esc(opp.name||'—'):esc(X.waiting))+'</div>'
+      +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(X.agreed)+'</span>':(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
+      +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?(s.agreed_time+'–'+min2hm(hm2min(s.agreed_time)+Number(s.duration_min||matchDuration))):s.time_from)+'</b></div>'
+      +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))
+         +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
+      +(agreed&&pendingTime(s)?'<div class="meta"><span class="pill open">'+esc(X.timePending)+' '+esc(pendingTime(s))+'</span></div>':'')
+      +(agreed?agreedActions(s,opp):'')
+      +(!agreed&&iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')
+      +'</div>';
+  }).join('')+historyBlock();
+}
+
+// Что можно сделать с согласованным матчем: написать, перенести время, отменить.
+// Перенос после подтверждения корта доступен только тому, кто корт подтверждал.
+function pendingTime(s){ return String(s.time_change||'').split('|')[0]||'' }
+function canRetime(s){
+  var me_=String(me&&me.id);
+  if(!s.court_confirmed_by) return true;
+  return String(s.court_confirmed_by)===me_;
+}
+function agreedActions(s,opp){
+  var b='<div class="acts">';
+  if(opp.username)b+='<button class="mini" onclick="openLink(\'https://t.me/'+esc(String(opp.username).replace(/^@/,''))+'\')">💬 '+(L?'Написать':'Message')+'</button>';
+  if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';
+  b+='<button class="mini" onclick="cancelMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancelMatch)+'</button>';
+  return b+'</div>';
+}
+// Перенос: дата и корт остаются, меняется только время — как и в чате с ботом.
+var retimeId='';
+function openRetime(id){ retimeId=id; renderMine(); }
+function closeRetime(){ retimeId=''; renderMine(); }
+function renderRetimePanel(s){
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.retimeTitle)+'</h3>'
+    +'<div class="hint">'+esc(X.retimeHint)+'</div>'
+    +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
+    +'<label>'+esc(X.pickTime)+'</label><select id="rtTime">'+timeOptions(s.agreed_time||'17:00')+'</select>'
+    +'<button class="primary" onclick="submitRetime(\''+esc(s.challenge_id)+'\',this)">'+esc(X.retimeSend)+'</button>'
+    +'<button onclick="closeRetime()">'+esc(X.back)+'</button>'
+    +'<div id="rtRes" class="res"></div></div>';
+}
+function submitRetime(id,btn){
+  var res=$('rtRes');res.className='res';
+  var time=$('rtTime').value;
+  btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/retime',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id,time:time})})
+    .then(function(r){return r.json()}).then(function(j){
+      btn.disabled=false;
+      if(!j.ok)throw new Error(j.error||'Error');
+      res.className='res ok';res.textContent=X.retimeSent;
+      retimeId='';load(true);
+    }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+// Отмена согласованного матча — финальная: соперник получает уведомление, окно закрывается.
+function cancelMatch(id,btn){
+  var go=function(){btn.disabled=true;btn.textContent='…';
+    fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+  if(tg&&tg.showConfirm)tg.showConfirm(X.cancelMatchAsk,function(ok){if(ok)go()});else if(confirm(X.cancelMatchAsk))go();
+}
+
+function renderCounter(){
+  var s=myMatches.filter(function(x){return x.challenge_id===counterSlotId})[0];
+  if(!s){$('viewNew').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>';return}
+  var today=new Date(),todayIso=isoDate(today);
+  foldStrips();
+  var base=s.agreed_date&&s.agreed_date>=todayIso?s.agreed_date:todayIso;
+  if(!selDates.length)selDates=[base];
+  var mons=(L?['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']);
+  var dow=(L?['Пн','Вт','Ср','Чт','Пт','Сб','Вс']:['Mon','Tue','Wed','Thu','Fri','Sat','Sun']);
+  var mondayOffset=(today.getDay()+6)%7;
+  var first=new Date(today.getFullYear(),today.getMonth(),today.getDate()-mondayOffset);
+  var days='';
+  for(var i=0;i<21;i++){
+    var d=new Date(first.getFullYear(),first.getMonth(),first.getDate()+i),iso=isoDate(d),past=iso<todayIso;
+    days+='<div class="daycell'+(past?' past':'')+(selDates[0]===iso?' on':'')+'"'+(past?'':' onclick="pickCounterDate(\''+iso+'\')"')
+      +'><div class="dnum">'+d.getDate()+'</div><div class="dmon">'+mons[d.getMonth()]+'</div></div>';
+  }
+  var courtOpts='<option value="">'+esc(X.anyCourt)+'</option>'+courts.map(function(c){
+    return '<option value="'+esc(c.name)+'"'+(c.name===s.agreed_court?' selected':'')+'>'+esc(c.name)+'</option>'}).join('');
+  $('viewNew').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.counterTitle)+'</h3>'
+    +'<div class="hint">'+esc(X.counterHint)+'</div>'
+    +'<label>'+esc(X.pickDate)+'</label>'
+    +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
+    +'<div class="dtwrap fold"><div class="datestrip">'+days+'</div></div>'+dtMore()
+    +'<label>'+esc(X.pickTime)+' <span class="pill">'+esc(X.durFixed)+'</span></label><select id="cTime">'+timeOptions(s.agreed_time||s.time_from||'17:00')+'</select>'
+    +'<label>'+esc(X.pickCourt)+'</label><select id="cCourt">'+courtOpts+'</select>'
+    +'<button class="primary" onclick="submitCounter(this)">'+esc(X.counterSend)+'</button>'
+    +'<div id="cRes" class="res"></div></div>';
+  foldStrips();
+}
+function pickCounterDate(iso){selDates=[iso];renderCounter()}
+function submitCounter(btn){
+  var res=$('cRes');res.className='res';btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/counter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:counterSlotId,date:selDates[0],time:$('cTime').value,court:$('cCourt').value
+  })}).then(function(r){return r.json()}).then(function(j){
+    btn.disabled=false;
+    if(!j.ok)throw new Error(j.error||'Error');
+    res.className='res ok';res.textContent=X.sent;
+    counterSlotId='';selDates=[];load(true);showTab('mine');
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+function setSelect(id,val,max){
+  var o='<option value=""></option>';
+  for(var i=0;i<=max;i++)o+='<option value="'+i+'"'+(String(val)===String(i)?' selected':'')+'>'+i+'</option>';
+  return '<select id="'+id+'">'+o+'</select>';
+}
+// Счёт вводится ОТ ПОБЕДИТЕЛЯ: левая колонка всегда его, и она подписана именем.
+// Поэтому редактор счёта закрыт, пока победитель не выбран.
+// Тай-брейк спрашиваем только там, где он вообще мог быть (7:6), а решающий сет —
+// только когда по сетам 1:1; «не игрался» как вариант больше не предлагаем.
+function renderScoreEditor(prefix){
+  var h='<div id="'+prefix+'scorewrap" class="hidden">'
+    +'<label>'+esc(X.score)+'</label>'
+    +'<div class="scorehead"><span class="lbl"></span>'
+      +'<span class="nm win" id="'+prefix+'nmW">—</span><span class="dash">:</span>'
+      +'<span class="nm" id="'+prefix+'nmL">—</span></div>'
+    +'<div class="hint">'+esc(X.scoreOrder)+'</div>';
+  for(var n=1;n<=2;n++){
+    h+='<div class="setrow"><span class="lbl">'+esc(X.set)+' '+n+'</span>'+setSelect(prefix+'s'+n+'a','',7)
+      +'<span class="dash">:</span>'+setSelect(prefix+'s'+n+'b','',7)+'</div>'
+      +'<div class="tbrow hidden" id="'+prefix+'tb'+n+'"><span class="lbl">'+esc(X.tb)+'</span>'+setSelect(prefix+'s'+n+'tba','',20)
+      +'<span class="dash">:</span>'+setSelect(prefix+'s'+n+'tbb','',20)+'</div>';
+  }
+  h+='<div id="'+prefix+'set3wrap" class="hidden">'
+    +'<label>'+esc(X.set3mode)+'</label>'
+    +'<div class="hint">'+esc(X.set3hint)+'</div>'
+    +'<div class="seg"><div class="s on" data-m="full" onclick="pickSet3(this,\''+prefix+'\')">'+esc(X.full)+'</div>'
+    +'<div class="s" data-m="mtb" onclick="pickSet3(this,\''+prefix+'\')">'+esc(X.mtb)+'</div></div>'
+    +'<div id="'+prefix+'set3box"></div></div>'
+    +'</div>';
+  return h;
+}
+function bindScore(prefix){
+  ['s1a','s1b','s2a','s2b'].forEach(function(k){
+    var el=$(prefix+k); if(el)el.onchange=function(){syncScore(prefix)};
+  });
+  syncScore(prefix);
+}
+// Имена сторон над колонками — чтобы было видно, чей результат пишется первым.
+function setScoreNames(prefix,winnerName,loserName){
+  var wrap=$(prefix+'scorewrap'); if(!wrap)return;
+  var has=Boolean(winnerName);
+  wrap.className=has?'':'hidden';
+  if($(prefix+'nmW'))$(prefix+'nmW').textContent=winnerName||'—';
+  if($(prefix+'nmL'))$(prefix+'nmL').textContent=loserName||'—';
+}
+function setWinnerOf(a,b){
+  if(a===''||b==='')return '';
+  a=Number(a);b=Number(b);
+  if(a===b)return '';
+  return a>b?'A':'B';
+}
+function isTb(a,b){
+  if(a===''||b==='')return false;
+  a=Number(a);b=Number(b);
+  return (a===7&&b===6)||(a===6&&b===7);
+}
+function clearVals(ids){ids.forEach(function(id){var el=$(id);if(el)el.value=''})}
+function syncScore(prefix){
+  var g=function(id){var el=$(prefix+id);return el?el.value:''};
+  for(var n=1;n<=2;n++){
+    var row=$(prefix+'tb'+n); if(!row)continue;
+    var on=isTb(g('s'+n+'a'),g('s'+n+'b'));
+    row.className='tbrow'+(on?'':' hidden');
+    if(!on)clearVals([prefix+'s'+n+'tba',prefix+'s'+n+'tbb']);
+  }
+  var w1=setWinnerOf(g('s1a'),g('s1b')),w2=setWinnerOf(g('s2a'),g('s2b'));
+  var split=Boolean(w1&&w2&&w1!==w2);
+  var wrap=$(prefix+'set3wrap'); if(!wrap)return;
+  wrap.className=split?'':'hidden';
+  if(split){ if(!$(prefix+'s3a'))renderSet3(prefix,currentSet3Mode(prefix)); }
+  else { $(prefix+'set3box').innerHTML=''; }
+}
+function currentSet3Mode(prefix){
+  var on=$(prefix+'set3wrap').querySelector('.seg .s.on');
+  return on?on.dataset.m:'full';
+}
+function pickSet3(node,prefix){
+  var box=node.parentNode;
+  Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){s.classList.remove('on')});
+  node.classList.add('on');
+  renderSet3(prefix,node.dataset.m);
+}
+function renderSet3(prefix,mode){
+  var el=$(prefix+'set3box'); if(!el)return;
+  if(mode==='mtb'){
+    el.innerHTML='<div class="setrow"><span class="lbl">'+esc(X.mtb)+'</span>'+setSelect(prefix+'s3a','',30)
+      +'<span class="dash">:</span>'+setSelect(prefix+'s3b','',30)+'</div>';
+    return;
+  }
+  el.innerHTML='<div class="setrow"><span class="lbl">'+esc(X.set)+' 3</span>'+setSelect(prefix+'s3a','',7)
+    +'<span class="dash">:</span>'+setSelect(prefix+'s3b','',7)+'</div>'
+    +'<div class="tbrow hidden" id="'+prefix+'tb3"><span class="lbl">'+esc(X.tb)+'</span>'+setSelect(prefix+'s3tba','',20)
+    +'<span class="dash">:</span>'+setSelect(prefix+'s3tbb','',20)+'</div>';
+  var f=function(){
+    var row=$(prefix+'tb3');
+    var on=isTb($(prefix+'s3a').value,$(prefix+'s3b').value);
+    row.className='tbrow'+(on?'':' hidden');
+    if(!on)clearVals([prefix+'s3tba',prefix+'s3tbb']);
+  };
+  $(prefix+'s3a').onchange=f;$(prefix+'s3b').onchange=f;
+}
+function collectSets(prefix){
+  var g=function(id){var el=$(prefix+id);return el&&el.value!==''?Number(el.value):''};
+  var sets=[{a:g('s1a'),b:g('s1b'),tba:g('s1tba'),tbb:g('s1tbb')},{a:g('s2a'),b:g('s2b'),tba:g('s2tba'),tbb:g('s2tbb')}];
+  if($(prefix+'s3a'))sets.push({a:g('s3a'),b:g('s3b'),tba:g('s3tba'),tbb:g('s3tbb')});
+  return sets.filter(function(s){return s.a!==''&&s.b!==''});
+}
+var resPhoto='';
+function photoField(id){
+  return '<label>'+esc(X.photo)+'</label>'
+    +'<label class="photo-btn" for="'+id+'">📷 '+esc(X.photo)+'</label>'
+    +'<input type="file" id="'+id+'" accept="image/*" class="hidden" onchange="onPhoto(this)">'
+    +'<img id="'+id+'prev" class="photo-prev hidden" alt="">';
+}
+function onPhoto(input){
+  var f=input.files&&input.files[0];if(!f)return;
+  var img=$(input.id+'prev');
+  var reader=new FileReader();
+  reader.onload=function(){
+    // Ужимаем на клиенте: с телефона прилетает 5–10 МБ, Telegram и канал этого не любят.
+    var im=new Image();
+    im.onload=function(){
+      var max=1280,k=Math.min(1,max/Math.max(im.width,im.height));
+      var c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);
+      c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+      resPhoto=c.toDataURL('image/jpeg',0.82);
+      img.src=resPhoto;img.classList.remove('hidden');
+    };
+    im.src=reader.result;
+  };
+  reader.readAsDataURL(f);
+}
+function renderRes(){
+  var h='';
+  if(resultSlotId){
+    var s=resultTasks.filter(function(x){return x.challenge_id===resultSlotId})[0];
+    if(s)return renderResultForm(s);
+  }
+  if(!resultTasks.length)h+='<div class="empty">'+esc(X.emptyRes)+'</div>';
+  else h+=resultTasks.map(function(s){
+    var opp=String(s.from_telegram_id)===String(me&&me.id)?{n:s.to_name}:{n:s.from_name};
+    var pending=s.result_status==='pending';
+    var mine=String(s.result_by)===String(me&&me.id);
+    return '<div class="slot'+(pending?' agreed':'')+'">'
+      +'<div class="who">'+esc(opp.n||'')+'</div>'
+      +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
+      +(pending?'<div class="meta"><span class="pill open">'+esc(mine?X.pendingRes:X.yourRes)+'</span> '+esc(s.result_score||'')+'</div>':'')
+      +'<div class="acts"><button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(pending&&!mine?X.yourRes:X.resTitle)+'</button></div>'
+      +'</div>';
+  }).join('');
+  h+='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
+    +'<div class="hint">'+esc(X.manualHint)+'</div>'
+    +'<button class="primary" onclick="openManual()">'+esc(X.manual)+'</button></div>';
+  $('viewRes').innerHTML=h;
+}
+function openResult(id){resultSlotId=id;renderRes()}
+function backToRes(){resultSlotId='';resultMode='';resPhoto='';renderRes()}
+function renderResultForm(s){
+  var meId=String(me&&me.id);
+  var oppIsFrom=String(s.from_telegram_id)!==meId;
+  var opp=oppIsFrom?{id:s.from_telegram_id,n:s.from_name}:{id:s.to_telegram_id,n:s.to_name};
+  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.resTitle)+'</h3>'
+    +'<div class="hint">'+esc(me.name||'')+' '+esc(X.vs)+' '+esc(opp.n||'')+' · '+esc(fmtDay(s.agreed_date))+'</div>'
+    +'<label>'+esc(X.winner)+'</label>'
+    +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
+    +'<div class="seg"><div class="s" data-w="'+esc(meId)+'" data-n="'+esc(me.name||'')+'" onclick="pickWinner(this,\'r\')">'+esc(me.name||'')+'</div>'
+    +'<div class="s" data-w="'+esc(opp.id)+'" data-n="'+esc(opp.n||'')+'" onclick="pickWinner(this,\'r\')">'+esc(opp.n||'')+'</div></div>'
+    +renderScoreEditor('r')
+    +photoField('rPhoto')
+    +'<label>'+esc(X.note)+'</label><textarea id="rNote"></textarea>'
+    +'<button class="primary" onclick="submitResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.sendRes)+'</button>'
+    +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
+    +'<div id="rRes" class="res"></div></div>';
+  selWinner='';bindScore('r');setScoreNames('r','','');
+}
+var selWinner='';
+// Победитель выбирается ДО счёта: от него зависит, чьё имя стоит слева.
+function pickWinner(node,prefix){
+  var box=node.parentNode;
+  var loser='';
+  Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){
+    if(s!==node){s.classList.remove('on');loser=s.dataset.n||''}
+  });
+  node.classList.add('on');
+  selWinner=node.dataset.w;
+  setScoreNames(prefix||'r',node.dataset.n||'',loser);
+  syncScore(prefix||'r');
+}
+function submitResult(id,btn){
+  var res=$('rRes');res.className='res';
+  var sets=collectSets('r');
+  if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
+  btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:id,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim()
+  })}).then(function(r){return r.json()}).then(function(j){
+    btn.disabled=false;
+    if(!j.ok)throw new Error(j.error||'Error');
+    res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;
+    selWinner='';resPhoto='';resultSlotId='';load(true);
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+function openManual(){
+  var today=new Date();
+  var opts=opponents.map(function(o){return '<option value="'+esc(o.telegram_id)+'">'+esc(o.name)+'</option>'}).join('');
+  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
+    +'<div class="hint">'+esc(X.manualHint)+'</div>'
+    +'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>'
+    +'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
+    // Корт можно выбрать из известных или вписать свой — площадок больше, чем в списке.
+    +'<label>'+esc(X.pickCourt)+'</label>'
+    +'<input id="mCourt" list="mCourtList" placeholder="'+esc(X.courtManual)+'">'
+    +'<datalist id="mCourtList">'+courts.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
+    +'<label>'+esc(X.winner)+'</label>'
+    +'<div class="hint">'+esc(X.winnerFirst)+'</div>'
+    +'<div class="seg" id="mWinSeg"></div>'
+    +renderScoreEditor('m')
+    +photoField('mPhoto')
+    +'<button class="primary" onclick="submitManual(this)">'+esc(X.sendRes)+'</button>'
+    +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
+    +'<div id="mResBox" class="res"></div></div>';
+  var oppSel=$('mOpp');
+  if(oppSel)oppSel.onchange=renderManualWinner;
+  renderManualWinner();
+}
+// Кнопки победителя для ручного матча перерисовываются при смене соперника.
+function renderManualWinner(){
+  var seg=$('mWinSeg');if(!seg)return;
+  var oppSel=$('mOpp');
+  var oppName='';
+  if(oppSel&&oppSel.selectedIndex>=0&&oppSel.options[oppSel.selectedIndex])oppName=oppSel.options[oppSel.selectedIndex].text;
+  var meId=String(me&&me.id||'');
+  seg.innerHTML='<div class="s" data-w="'+esc(meId)+'" data-n="'+esc(me&&me.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(me&&me.name||'')+'</div>'
+    +'<div class="s" data-w="'+esc(oppSel?oppSel.value:'')+'" data-n="'+esc(oppName)+'" onclick="pickWinner(this,\'m\')">'+esc(oppName||'—')+'</div>';
+  selWinner='';setScoreNames('m','','');bindScore('m');
+}
+function submitManual(btn){
+  var res=$('mResBox');res.className='res';
+  var sets=collectSets('m');
+  if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
+  btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,to_telegram_id:$('mOpp').value,date:$('mDate').value,
+    court:(($('mCourt')&&$('mCourt').value)||'').trim(),
+    sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto
+  })}).then(function(r){return r.json()}).then(function(j){
+    btn.disabled=false;
+    if(!j.ok)throw new Error(j.error||'Error');
+    res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;resPhoto='';load(true);
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+function renderBook(){
+  var today=new Date(),todayIso=isoDate(today);
+  if(!bookDate||bookDate<todayIso)bookDate=todayIso;
+  var mons=(L?['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']);
+  var dow=(L?['Пн','Вт','Ср','Чт','Пт','Сб','Вс']:['Mon','Tue','Wed','Thu','Fri','Sat','Sun']);
+  var mondayOffset=(today.getDay()+6)%7;
+  var first=new Date(today.getFullYear(),today.getMonth(),today.getDate()-mondayOffset);
+  var days='';
+  for(var i=0;i<21;i++){
+    var d=new Date(first.getFullYear(),first.getMonth(),first.getDate()+i),iso=isoDate(d),past=iso<todayIso;
+    days+='<div class="daycell'+(past?' past':'')+(bookDate===iso?' sel':'')+'"'+(past?'':' onclick="pickBookDate(\''+iso+'\')"')
+      +'><div class="dnum">'+d.getDate()+'</div><div class="dmon">'+mons[d.getMonth()]+'</div></div>';
+  }
+  var chips=courts.map(function(c){
+    return '<div class="chip'+(bookCourts.indexOf(c.name)>=0?' on':'')+'" onclick="toggleBookCourt(\''+esc(c.name).replace(/'/g,"\\'")+'\')">'+esc(c.name)+'</div>';
+  }).join('')||'<div class="hint">'+esc(X.noOpp)+'</div>';
+  $('viewBook').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.bookTitle)+'</h3>'
+    +'<div class="hint">'+esc(X.bookHint)+'</div>'
+    +'<label>'+esc(X.pickDate)+'</label>'
+    +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
+    +'<div class="dtwrap fold"><div class="datestrip">'+days+'</div></div>'+dtMore()
+    +'<label>'+esc(X.bookTime)+'</label>'
+    +'<div class="row"><select id="bkTime">'+timeOptions('17:00')+'</select>'
+    +'<select id="bkDur"><option value="60">'+esc(X.h1)+'</option><option value="90">'+esc(X.h15)+'</option>'
+    +'<option value="120" selected>'+esc(X.h2)+'</option><option value="150">'+esc(X.h25)+'</option><option value="180">'+esc(X.h3)+'</option></select></div>'
+    +'<label>'+esc(X.bookCourtsLbl)+(bookCourts.length?' <span class="pill">'+bookCourts.length+'</span>':'')+'</label>'
+    +'<div class="chips">'+chips+'</div>'
+    +'<div class="hint">'+esc(X.bookNote)+'</div>'
+    +'<button class="primary" onclick="submitBooking(this)">'+esc(X.bookSend)+'</button>'
+    +'<div id="bkRes" class="res"></div></div>';
+  foldStrips();
+}
+function pickBookDate(iso){bookDate=iso;renderBook()}
+function toggleBookCourt(n){var i=bookCourts.indexOf(n);if(i>=0)bookCourts.splice(i,1);else bookCourts.push(n);renderBook()}
+function submitBooking(btn){
+  var res=$('bkRes');res.className='res';
+  if(!bookCourts.length){res.className='res err';res.textContent=X.needCourts;return}
+  btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/court/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,date:bookDate,time:$('bkTime').value,duration_min:Number($('bkDur').value),courts:bookCourts
+  })}).then(function(r){return r.json()}).then(function(j){
+    btn.disabled=false;
+    if(!j.ok)throw new Error(j.error||'Error');
+    res.className='res ok';res.textContent=X.bookOk;bookCourts=[];
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+function renderNew(){
+  if(counterSlotId)return renderCounter();
+  var today=new Date();
+  var todayIso=isoDate(today);
+  selDates=selDates.filter(function(d){return d>=todayIso});
+  // Сетка выровнена по неделе: первая ячейка — понедельник текущей недели.
+  var dow=(L?['Пн','Вт','Ср','Чт','Пт','Сб','Вс']:['Mon','Tue','Wed','Thu','Fri','Sat','Sun']);
+  var mons=(L?['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек']:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']);
+  var mondayOffset=(today.getDay()+6)%7;
+  var first=new Date(today.getFullYear(),today.getMonth(),today.getDate()-mondayOffset);
+  var days='';
+  for(var i=0;i<21;i++){
+    var d=new Date(first.getFullYear(),first.getMonth(),first.getDate()+i);
+    var iso=isoDate(d);
+    var past=iso<todayIso;
+    days+='<div class="daycell'+(past?' past':'')+(selDates.indexOf(iso)>=0?' on':'')+'"'
+      +(past?'':' onclick="toggleDate(\''+iso+'\')"')
+      +'><div class="dnum">'+d.getDate()+'</div><div class="dmon">'+mons[d.getMonth()]+'</div></div>';
+  }
+  var courtChips=courts.map(function(c){
+    return '<div class="chip'+(selCourts.indexOf(c.name)>=0?' on':'')+'" onclick="toggleCourt(\''+esc(c.name).replace(/'/g,"\\'")+'\')">'+esc(c.name)+'</div>';
+  }).join('')||'<div class="hint">'+esc(X.courtAny)+'</div>';
+  var oppList=opponents.length
+    ? opponents.map(function(o){return '<div class="opp'+(String(o.telegram_id)===String(selOpp)?' sel':'')+'" onclick="pickOpp(\''+esc(o.telegram_id)+'\')">'+avatar(o)+'<div><div class="who">'+esc(o.name)+'</div><div class="meta">'+(o.rating?'NTRP '+esc(o.rating):'')+'</div></div></div>'}).join('')
+    : '<div class="hint">'+esc(X.noOpp)+'</div>';
+
+  // Возврат к списку вызовов: «Создать» больше не вкладка, уйти отсюда иначе некуда.
+  $('viewNew').innerHTML='<div class="meta" style="cursor:pointer;margin-bottom:8px" onclick="showTab(\'open\')">'+esc(X.tBackCalls)+'</div>'
+    +'<div class="card">'
+    +'<div class="seg"><div class="s'+(newMode==='open'?' on':'')+'" onclick="setMode(\'open\')">'+esc(X.modeOpen)+'</div><div class="s'+(newMode==='direct'?' on':'')+'" onclick="setMode(\'direct\')">'+esc(X.modeDirect)+'</div></div>'
+    +'<div class="hint">'+esc(newMode==='open'?X.hintOpen:X.hintDirect)+'</div>'
+    +(newMode==='direct'?'<label>'+esc(X.opp)+'</label><div id="oppBox">'+oppList+'</div>':'')
+    +'<label>'+esc(X.date)+(selDates.length?' <span class="pill">'+selDates.length+'</span>':'')+'</label>'
+    +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
+    +'<div class="dtwrap fold"><div class="datestrip" id="strip">'+days+'</div></div>'+dtMore()
+    +'<label>'+esc(X.time)+' <span class="pill">'+esc(X.durFixed)+'</span></label>'
+    +'<div class="row"><select id="mFrom">'+timeOptions('17:00')+'</select><select id="mTo">'+timeOptions('21:00')+'</select></div>'
+    +'<div class="hint">'+esc(X.timeHint)+'</div>'
+    +'<label>'+esc(X.court)+(selCourts.length?' <span class="pill">'+selCourts.length+'</span>':'')+'</label><div class="chips">'+courtChips+'</div>'
+    +'<div class="hint">'+esc(X.hintRange)+'</div>'
+    +'<label>'+esc(X.comment)+'</label><textarea id="mComment" placeholder="'+esc(X.commentPh)+'"></textarea>'
+    +'<button class="primary" onclick="submitSlot(this)">'+esc(X.send)+'</button>'
+    +'<div id="mRes" class="res"></div>'
+    +'</div>';
+  foldStrips();
+}
+function toggleDate(iso){var i=selDates.indexOf(iso);if(i>=0)selDates.splice(i,1);else selDates.push(iso);selDates.sort();renderNew()}
+function toggleCourt(name){var i=selCourts.indexOf(name);if(i>=0)selCourts.splice(i,1);else selCourts.push(name);renderNew()}
+var newMode='open';
+function setMode(m){newMode=m;renderNew()}
+function pickOpp(id){selOpp=id;renderNew()}
+function openLink(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}
+
+function submitSlot(btn){
+  var res=$('mRes');res.className='res';
+  var from=$('mFrom').value,to=$('mTo').value,dur=matchDuration;
+  if(!selDates.length){res.className='res err';res.textContent=X.needDate;return}
+  if(hm2min(to)-hm2min(from)<dur){res.className='res err';res.textContent=X.needRange;return}
+  if(newMode==='direct'&&!selOpp){res.className='res err';res.textContent=X.needOpp;return}
+  btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,match_type:newMode,dates:selDates,time_from:from,time_to:to,
+    courts:selCourts,comment:($('mComment').value||'').trim(),to_telegram_id:newMode==='direct'?selOpp:''
+  })}).then(function(r){return r.json()}).then(function(j){
+    btn.disabled=false;
+    if(!j.ok)throw new Error(j.error||'Error');
+    res.className='res ok';res.textContent=newMode==='direct'?X.okDirect:X.okOpen;
+    selOpp='';selDates=[];selCourts=[];load(true);
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+function cancelSlot(id,btn){
+  var go=function(){btn.disabled=true;btn.textContent='…';
+    fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+  if(tg&&tg.showConfirm)tg.showConfirm(X.cancelAsk,function(ok){if(ok)go()});else if(confirm(X.cancelAsk))go();
+}
+
+function load(keepTab){
+  var q=new URLSearchParams(location.search);var slotQ=q.get('slot')||'',cQ=q.get('counter')||'',rQ=q.get('result')||'';
+  return fetch('/api/match/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(slotQ?'&slot='+encodeURIComponent(slotQ):'')+(cQ?'&counter='+encodeURIComponent(cQ):'')+(rQ?'&result='+encodeURIComponent(rQ):''),{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j.ok)throw new Error(j.error||'Error');
+      if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
+      me=j.user;division=j.division||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
+      unplayed=j.unplayed||{known:false,names:[]};
+      openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
+      $('title').textContent=X.title;
+      $('sub').textContent=division?(X.subDiv+division):X.subNone;
+      $('tabOpen').textContent=X.tCalls;$('tabMine').textContent=X.tMine;$('tabRes').textContent=X.tRes;$('tabBook').textContent=X.tCourt;$('tabBook').classList.toggle('hidden',!canBookCourt);
+      if(!keepTab){
+        var want=new URLSearchParams(location.search).get('tab');
+        // Пришли по кнопке «Другое время / Другой корт» — сразу экран встречного предложения.
+        if(counterSlotId){showTab('new');return}
+        if(resultSlotId){showTab('res');return}
+        // ?tab= приходит из команд бота (/match, /result, /book) — открываем нужную вкладку сразу.
+        var allowed=['open','new','mine','res'];
+        if(canBookCourt)allowed.push('book');
+        showTab(allowed.indexOf(want)>=0?want:'mine');
+        // Переход по ссылке «Играю» из чата дивизиона — сразу открываем выбор даты и корта.
+        if(focusSlot&&openSlots.some(function(s){return s.challenge_id===focusSlot}))openPicker(focusSlot);
+      } else showTab(mode);
+    }).catch(function(e){$('viewOpen').innerHTML='<div class="empty" style="color:#ff6b6b">'+esc(e.message)+'</div>'});
+}
+document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){showTab(b.dataset.t)}});
+load();
+</script>
+</body>
+</html>

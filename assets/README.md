@@ -1,0 +1,77 @@
+# PTF Registration Bot — patched version
+
+Telegram bot + WebApp for Phuket Tennis Family registration, payments, admin inbox, broadcasts, and match challenges.
+
+## Main changes in this patch
+
+- EN button text changed from Apply to Join.
+- Website submenu added: Home, Matches, Divisions, Yearly Race, Players, Regulations.
+- Contact Organizer now stays open until user closes chat or returns to main menu.
+- WebApp event selection screen now renders active event cards with THB fee, start date, limited spots notice and application count.
+- Form validation now shows specific missing fields and a separate event selection error.
+- Payment flow updated: Bank Transfer / USDT / Pay Later / Contact Organizer. USDT network is chosen only after selecting USDT.
+- Bank button text is Bank Transfer; Bangkok Bank details stay inside payment instructions.
+- Rejected/refunded messages are not auto-sent; they should be handled manually.
+- Waitlist and confirmed/active messages remain automatic.
+- Match Challenge module added.
+
+## Match Challenge logic
+
+Website/player profile can open bot with:
+
+```text
+https://t.me/YOUR_BOT_USERNAME?start=challenge_TELEGRAM_ID
+```
+
+Only users with completed profile in Applicants can challenge players.
+
+If challenger has a public Telegram username, accepted challenge opens direct Telegram contact.
+If no username is available, bot opens temporary bot-mediated chat.
+
+## Required Railway variables
+
+```env
+BOT_TOKEN=
+PUBLIC_URL=https://your-railway-domain.up.railway.app
+SPREADSHEET_ID=1KAVMKdT3Jn7kzZTCFaqTm2EGFxfG_5ou6n0PezeJSig
+GOOGLE_CREDENTIALS={...full service account JSON...}
+CLUB_CHAT_URL=https://t.me/+mEkZr6wcpko4NmUy
+DEFAULT_USDT_AMOUNT=80
+TIMEZONE=Asia/Bangkok
+ADMIN_IDS=123456789
+NODE_ENV=production
+```
+
+After deploy, run `/admin_init` in the admin Telegram group.
+
+Each published result uses one 1080×1350 card for Telegram, the Google Drive
+publishing archive, and the future Instagram carousel. Transparent logos are
+loaded from assets/match-card-logos on every render. For a personal My Drive, run
+`npm run drive:authorize -- <desktop-oauth-client.json>` once and put the printed
+`GOOGLE_DRIVE_OAUTH_CREDENTIALS` value into Railway. The helper creates the
+archive folder and writes its id to `Settings.match_cards_drive_folder_id`.
+
+## Payment Methods and Payment Summary
+
+Current supported payment methods:
+
+- Thai bank transfer
+- USDT TRC20
+- USDT ERC20
+
+To change the Thai bank account without redeploy, edit Google Sheets → `Payment Methods` → row `thai_bank` → column `recipient`.
+
+To prepare payment methods and create the compact summary tab, run once:
+
+```bash
+npm run setup:payments
+```
+
+The helper script updates `Payment Methods` and creates `Payment Summary` with basic payment balance formulas.
+
+## Latest operational notes
+
+- `/broadcast_poll` sends an anonymous native Telegram poll to all bot contacts. Results are stored in `Poll Results`; use `/poll_stats <broadcast_id>` for a quick summary.
+- Main menu payment entry is now `💳 Payment / Оплата`, replacing League Pass.
+- Event payments support separate `price_thb` and `price_usdt` fields in `Events`.
+- Contact organizer chat is a 2-hour quiet session without repeated delivery confirmations.
