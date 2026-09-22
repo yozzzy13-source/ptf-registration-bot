@@ -7,21 +7,21 @@ import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } 
 import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
-import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn } from './admin.js';
+import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
-  notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyMatchUnfinished, sendCourtRequests,
+  notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
 import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
-  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, markMatchUnfinished, createManualMatch,
+  listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
   courtsByPlayedMatch, courtKey } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
-import { getUnplayedOpponents } from './results.js';
+import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
@@ -541,7 +541,10 @@ app.get('/api/match/admin-active', async (req, res) => {
     if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
     if(!v.isAdmin)return res.status(403).json({ok:false,error:'admin_required'});
     const rows=(await allSlots()).filter(function(slot){
-      return ['open','pending','accepted'].includes(String(slot.status||'').toLowerCase()) && String(slot.result_status||'').toLowerCase()!=='confirmed';
+      const status=String(slot.status||'').trim().toLowerCase();
+      const resultStatus=String(slot.result_status||'').trim().toLowerCase();
+      const resultConfirmed=resultStatus==='confirmed'||Boolean(String(slot.result_confirmed_at||'').trim());
+      return ['open','pending','accepted'].includes(status)&&!resultConfirmed;
     });
     const ids=[...new Set(rows.flatMap(function(slot){return [slot.from_telegram_id,slot.to_telegram_id]}).filter(Boolean).map(String))];
     const people=new Map(await Promise.all(ids.map(async function(id){
@@ -556,9 +559,9 @@ app.get('/api/match/admin-active', async (req, res) => {
       // Админ видит матчи в календарном порядке; записи без выбранной даты
       // оставляем внизу, а одинаковую дату упорядочиваем по времени.
       var ad=String(a.agreed_date||a.dates[0]||''),bd=String(b.agreed_date||b.dates[0]||'');
-      if(!ad&&!bd)return String(b.created_at||'').localeCompare(String(a.created_at||''));
+      if(!ad&&!bd)return String(a.created_at||'').localeCompare(String(b.created_at||''));
       if(!ad)return 1;if(!bd)return -1;
-      return ad.localeCompare(bd)||String(a.agreed_time||a.time_from||'').localeCompare(String(b.agreed_time||b.time_from||''));
+      return ad.localeCompare(bd)||String(a.agreed_time||a.time_from||'').localeCompare(String(b.agreed_time||b.time_from||''))||String(a.created_at||'').localeCompare(String(b.created_at||''));
     });
     res.json({ok:true,items:items});
   } catch(e){res.status(500).json({ok:false,error:e.message})}
@@ -771,6 +774,73 @@ app.post('/api/match/unfinished', async (req,res) => {
   } catch(e) { console.error('unfinished match failed:',e);res.status(500).json({ok:false,error:e.message}); }
 });
 
+async function finishConfirmedWebResult(slot) {
+  const write = await writeConfirmedResult(slot).catch(e => ({ status:'error', reason:e.message }));
+  if (write.status === 'error' || (write.division && write.division.status !== 'saved')) {
+    await notifyAdmin('Не удалось записать результат '+slot.challenge_id+': '+describeWrite(write)).catch(() => {});
+    return { review:true, write:describeWrite(write) };
+  }
+  if (write.status === 'cross_division_blocked') {
+    await notifyCrossDivision(slot, write).catch(e => console.error('notifyCrossDivision failed:',e.message));
+    return { review:true, cross_division:true, write:describeWrite(write) };
+  }
+  invalidateLeagueCache();
+  invalidateDivisionCache();
+  await notifyResultConfirmed(slot, describeWrite(write)).catch(e => console.error('notifyResultConfirmed failed:',e.message));
+  broadcastResult(slot).catch(e => console.error('broadcastResult failed:',e.message));
+  return { review:false, write:describeWrite(write) };
+}
+
+app.post('/api/match/result/remind', async (req,res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    const slot=await findSlot(b.challenge_id);
+    if(!slot)return res.status(404).json({ok:false,error:v.lang==='ru'?'Матч не найден.':'Match not found.'});
+    if(String(slot.result_status||'').toLowerCase()!=='pending')return res.status(409).json({ok:false,error:v.lang==='ru'?'Результат уже обработан.':'The result has already been processed.'});
+    const participant=[String(slot.from_telegram_id),String(slot.to_telegram_id)].includes(String(v.user.id));
+    const submitter=String(slot.result_by)===String(v.user.id);
+    if(!v.isAdmin&&(!participant||!submitter))return res.status(403).json({ok:false,error:v.lang==='ru'?'Повторно отправить может автор счёта.':'Only the score submitter can resend this request.'});
+    const delivered=Boolean(await notifyResultForVerification(slot));
+    if(!delivered)return res.status(502).json({ok:false,error:v.lang==='ru'?'Telegram не принял сообщение. Используйте подтверждение в «Моих матчах».':'Telegram did not accept the message. Use confirmation in My matches.'});
+    res.json({ok:true});
+  } catch(e) { console.error('result confirmation resend failed:',e);res.status(502).json({ok:false,error:e.message}); }
+});
+app.post('/api/match/result/confirm', async (req,res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    const action=v.isAdmin
+      ?await confirmResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name})
+      :await confirmResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name});
+    if(!action.ok){
+      const ru=v.lang==='ru';
+      const errors={
+        not_found:ru?'Матч не найден.':'Match not found.',
+        not_pending:ru?'Результат уже обработан.':'The result has already been processed.',
+        own_result:ru?'Счёт подтверждает соперник.':'The opponent must confirm the score.',
+        not_a_player:ru?'Это не ваш матч.':'This is not your match.'
+      };
+      return res.status(409).json({ok:false,error:errors[action.reason]||(ru?'Не удалось подтвердить результат.':'Could not confirm the result.')});
+    }
+    const final=await finishConfirmedWebResult(action.slot);
+    res.json({ok:true,review:final.review,cross_division:final.cross_division||false});
+  } catch(e) { console.error('web result confirmation failed:',e);res.status(500).json({ok:false,error:e.message}); }
+});
+
+app.post('/api/match/delete', async (req,res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    if(!v.isAdmin)return res.status(403).json({ok:false,error:'admin_required'});
+    const removed=await deleteMatchByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name});
+    if(!removed.ok){
+      const errors={not_found:'Матч не найден.',already_confirmed:'Подтверждённый матч сначала нужно откатить из таблиц.'};
+      return res.status(409).json({ok:false,error:errors[removed.reason]||'Не удалось удалить матч.'});
+    }
+    res.json({ok:true});
+  } catch(e) { console.error('admin match deletion failed:',e);res.status(500).json({ok:false,error:e.message}); }
+});
 app.post('/api/match/result', async (req, res) => {
   try {
     const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
@@ -817,8 +887,14 @@ app.post('/api/match/result', async (req, res) => {
       ?await submitResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload)
       :await submitResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload);
     if(!saved.ok){const messages={not_found:'Match not found.',not_accepted:'Match is not agreed.',already_confirmed:'Result already confirmed.',not_a_player:'Not your match.'};return res.status(409).json({ok:false,error:messages[saved.reason]||'Cannot save result'})}
-    await notifyResultForVerification(saved.slot).catch(e=>console.error('notifyResultForVerification failed:',e.message));
-    res.json({ok:true,score:saved.slot.result_score,warning:photo.warning||''});
+    let confirmationDelivered=false;
+    try { confirmationDelivered=Boolean(await notifyResultForVerification(saved.slot)); }
+    catch(e) { console.error('notifyResultForVerification failed:',e.message); }
+    const deliveryWarning=confirmationDelivered?'':(v.lang==='ru'
+      ?'Счёт сохранён, но сообщение сопернику не доставлено. Он всё равно увидит подтверждение в «Моих матчах».'
+      :'The score was saved, but the message was not delivered. Your opponent can still confirm it in My matches.');
+    res.json({ok:true,score:saved.slot.result_score,confirmation_delivered:confirmationDelivered,
+      warning:[photo.warning,deliveryWarning].filter(Boolean).join(' ')});
   }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
 });
 
@@ -880,8 +956,15 @@ app.post('/api/match/manual', async (req,res)=>{
       result_status:'pending',result_by:sides[0],result_winner:winnerId,result_score:storedScore,result_set3_mode:set3Mode,
       result_kind:kind,result_points_from:pointsFrom,result_points_to:pointsTo,
       result_photo_file_id:photo.fileId,result_note:safe(b.note),result_submitted_at:nowISO(),created_at:nowISO(),responded_at:nowISO()};
-    await createManualMatch(row);await notifyResultForVerification(row).catch(e=>console.error('notifyResultForVerification failed:',e.message));
-    res.json({ok:true,challenge_id:row.challenge_id,warning:photo.warning||''});
+    await createManualMatch(row);
+    let confirmationDelivered=false;
+    try { confirmationDelivered=Boolean(await notifyResultForVerification(row)); }
+    catch(e) { console.error('notifyResultForVerification failed:',e.message); }
+    const deliveryWarning=confirmationDelivered?'':(v.lang==='ru'
+      ?'Матч сохранён, но сообщение сопернику не доставлено. Он всё равно увидит подтверждение в «Моих матчах».'
+      :'The match was saved, but the message was not delivered. Your opponent can still confirm it in My matches.');
+    res.json({ok:true,challenge_id:row.challenge_id,confirmation_delivered:confirmationDelivered,
+      warning:[photo.warning,deliveryWarning].filter(Boolean).join(' ')});
   }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
 });
 
