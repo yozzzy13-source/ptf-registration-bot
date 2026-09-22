@@ -76,7 +76,8 @@ const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
 synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
-const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:()=>{}});
+const cardContexts=new Map();
+const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data)});
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
  if(modules.has(key))return modules.get(key);
@@ -129,6 +130,14 @@ check(String(tables.get('c2|Match_Log')[1][19]||'')==='Season 2','Competition ce
 const dup=await results.writeConfirmedResult(result2);check(dup.status==='duplicate','Repeat result does not append duplicate');
 const mixed=await results.writeConfirmedResult({...result2,group:'cross',to_name:'Alice One',to_telegram_id:'1'});check(mixed.status==='saved'&&mixed.division?.cross_group,'Same-division cross-group result is stored centrally');
 check(tables.has('master|Cross_Group_Match_Log'),'Cross-group journal is created in MatchLog');
+const womenCrossSlot={challenge_id:'women-cross-movement',division:'Division W',season:'2',group:'cross',from_name:'Wendy Two',to_name:'Wendy Three',from_telegram_id:'8',to_telegram_id:'9',agreed_date:'2099-09-22',result_score:'6:4 6:3',result_winner:'8'};
+const womenCrossWrite=await results.writeConfirmedResult(womenCrossSlot);
+const womenCtx=cardContexts.get('women-cross-movement');
+const womenAfter=await division.getDivisionTable('W','2','2');
+const wendyThreeAfter=womenAfter.players.find(p=>p.name==='Wendy Three');
+check(womenCrossWrite.division?.cross_group&&womenCtx?.cross_group,'Women cross-group result stores card context');
+check(womenCtx.p1.group==='1'&&womenCtx.p2.group==='2','Women cross-group context preserves each player group');
+check(womenCtx.p2.place===2&&wendyThreeAfter?.place===1,'Women cross-group result exposes ranking movement before and after');
 // Боевой тестовый прогон: журнал правок и полный откат в исходное состояние.
 const undoBefore=structuredClone(tables.get('w1|Match_Log'));
 const journal=[];
@@ -203,6 +212,33 @@ for(const letter of ['C','W']) {
 const cross=await results.writeConfirmedResult({...result2,to_name:'Wendy Three',to_telegram_id:'9'});
 check(cross.status==='cross_division_blocked','Existing admin approval for cross-division results preserved');
 const matches=await load('matches.js');messages.length=0;
+
+// Unfinished match: one durable state stops nudges without closing score entry.
+const unfinishedFixture={...slot,challenge_id:'unfinished',match_type:'open',status:'accepted',season:'2',group:'1',
+ from_telegram_id:'1',from_name:'Alice One',from_username:'alice',to_telegram_id:'2',to_name:'Bob Two',to_username:'bob',
+ dates:'2000-01-01',agreed_date:'2000-01-01',agreed_time:'10:00',duration_min:'120',court_confirmed_at:'2000-01-01T02:00:00.000Z',
+ result_prompt_sent_at:'2000-01-01T05:00:00.000Z',score_nudge:'m20,n1'};
+await db.createSlot(unfinishedFixture);
+check(!(await db.markMatchUnfinished('unfinished',{telegram_id:'6'})).ok,'Nonparticipant cannot pause match reminders');
+const unfinishedSaved=await db.markMatchUnfinished('unfinished',{telegram_id:'1',name:'Alice One'},{note:'Rain stopped play',photoFileId:'proof-photo'});
+check(unfinishedSaved.ok&&unfinishedSaved.slot.result_status==='unfinished','Player can mark a completed-time match unfinished');
+check(!unfinishedSaved.slot.score_nudge&&unfinishedSaved.slot.unfinished_note==='Rain stopped play'&&unfinishedSaved.slot.unfinished_photo_file_id==='proof-photo','Unfinished evidence is stored and reminder marks are cleared');
+check(!db.stuckItem(unfinishedSaved.slot,Date.now()+48*3600000),'Unfinished match produces no staged reminder');
+check(db.pendingActionsFor('1',[unfinishedSaved.slot]).total===0&&db.pendingActionsFor('2',[unfinishedSaved.slot]).total===0,'Unfinished match clears both action badges');
+check((await db.listResultTasks('1')).some(s=>s.challenge_id==='unfinished'),'Unfinished match remains available for later score entry');
+check((await db.listMySlots('1')).some(s=>s.challenge_id==='unfinished'),'Past unfinished match remains visible in My matches');
+check(!(await db.listMatchesNeedingResultPrompt()).some(s=>s.challenge_id==='unfinished'),'Unfinished match cannot receive a new result prompt');
+const finishedLater=await db.submitResult('unfinished',{telegram_id:'2',name:'Bob Two'},{winner:'2',score:'3:6 6:4 6:2'});
+check(finishedLater.ok&&finishedLater.slot.result_status==='pending','Either player can submit the result after the match is completed');
+
+const unfinishedApiFixture={...unfinishedFixture,challenge_id:'unfinished-api',unfinished_note:'',unfinished_photo_file_id:'',result_status:'',score_nudge:''};
+await db.createSlot(unfinishedApiFixture);
+const unfinishedApi=await request('post','/api/match/unfinished','2',{challenge_id:'unfinished-api',note:'Court lights went out'});
+check(unfinishedApi.body.ok&&(await db.findSlot('unfinished-api')).result_status==='unfinished','Mini app API marks the match unfinished');
+const futureUnfinished={...unfinishedFixture,challenge_id:'unfinished-future',dates:'2099-01-01',agreed_date:'2099-01-01',result_prompt_sent_at:''};
+await db.createSlot(futureUnfinished);
+check((await db.markMatchUnfinished('unfinished-future',{telegram_id:'1'})).reason==='match_not_ended','A future match cannot be marked unfinished');
+
 await matches.publishOpenSlot({...slot,challenge_id:'private',season:'2',group:'1'});
 check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'Open slot reaches the same group with RU button');
 check(!messages.some(m=>m.method==='sendMessage'&&['3','4','7','8','9','10'].includes(String(m.args[0]))),'Open slot is not sent to other groups or divisions');
@@ -234,9 +270,17 @@ const returnedSlot=await db.findSlot('cancel-open');
 check(returnedSlot.status==='open'&&!returnedSlot.to_telegram_id&&returnedSlot.dates.includes('2099-09-20'),'Returned window preserves future availability and clears opponent');
 await db.updateSlot('cancel-direct',{status:'accepted',result_status:'pending'});
 check((await db.cancelMatchmaking('cancel-direct',{telegram_id:'1'})).reason==='result_started','A match with submitted result cannot be cancelled');
+const adminOld={...base,challenge_id:'admin-old',status:'accepted',agreed_date:'2099-09-18',agreed_time:'09:00',result_status:'',result_confirmed_at:''};
+const adminNew={...base,challenge_id:'admin-new',status:'accepted',agreed_date:'2099-09-22',agreed_time:'09:00',result_status:'',result_confirmed_at:''};
+const adminConfirmedStatus={...base,challenge_id:'admin-confirmed-status',status:'accepted',agreed_date:'2099-09-17',result_status:' Confirmed ',result_confirmed_at:''};
+const adminConfirmedAt={...base,challenge_id:'admin-confirmed-at',status:'accepted',agreed_date:'2099-09-16',result_status:'',result_confirmed_at:iso(started)};
+for(const fixture of [adminOld,adminNew,adminConfirmedStatus,adminConfirmedAt])await db.createSlot(fixture);
 check((await request('get','/api/match/admin-active','1')).code===403,'Admin active-request list rejects a player');
 const adminActive=await request('get','/api/match/admin-active','99');
 check(adminActive.body.ok&&adminActive.body.items.some(x=>x.challenge_id==='cancel-open'),'Admin sees active requests across divisions');
+check(!adminActive.body.items.some(x=>['admin-confirmed-status','admin-confirmed-at'].includes(x.challenge_id)),'Admin match list hides every confirmed result');
+const adminOrder=adminActive.body.items.filter(x=>['admin-old','admin-new'].includes(x.challenge_id)).map(x=>x.challenge_id).join(',');
+check(adminOrder==='admin-old,admin-new','Admin match list is sorted oldest to newest');
 
 const scopes={
  initial:{...base,status:'open',match_type:'direct'},
@@ -247,14 +291,14 @@ const scopes={
  score:{...base,status:'accepted',court_confirmed_at:iso(started),result_prompt_sent_at:iso(started)}
 };
 for(const [name,fixture] of Object.entries(scopes)) {
- check(!db.stuckItem(fixture,started+19*60000),name+' no reminder before 20 minutes');
- for(const [minutes,stage] of [[20,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']]) {
+ check(!db.stuckItem(fixture,started+14*60000),name+' no reminder before 15 minutes');
+ for(const [minutes,stage] of [[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']]) {
    const item=db.stuckItem(fixture,started+minutes*60000);
    check(item?.stage===stage&&item.scope===(name==='initial'?'negotiation':name),name+' reaches '+stage);
  }
 }
-check(db.stuckItem(scopes.initial,started+20*60000).waiting.id==='2','Initial direct challenge reminds recipient');
-check(db.stuckItem(scopes.negotiation,started+20*60000).waiting.id==='1','Counter-proposal reminds other side');
+check(db.stuckItem(scopes.initial,started+15*60000).waiting.id==='2','Initial direct challenge reminds recipient');
+check(db.stuckItem(scopes.negotiation,started+15*60000).waiting.id==='1','Counter-proposal reminds other side');
 check(!db.stuckItem({...base,status:'open',to_telegram_id:''},started+28*hour),'Unclaimed open window does not spam every opponent');
 check(!db.stuckItem({...scopes.court,court_confirmed_at:iso(started)},started+2*hour),'Confirmed court stops booking reminders');
 check(!db.stuckItem({...scopes.result,result_status:'confirmed'},started+2*hour),'Confirmed score stops reminders');
@@ -268,11 +312,11 @@ await db.markStuckNudge('remind','negotiation','n2',item);
 check((await db.findSlot('remind')).nudge_sent==='m20,n1,n2','Night catch-up marks earlier stages instead of sending a burst');
 await db.updateSlot('remind',{nudge_sent:''});
 messages.length=0;
-await server.runStuckNudges(started+20*60000);
+await server.runStuckNudges(started+15*60000);
 check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Согласование матча не завершено')),'Scheduler sends first reminder in recipient language');
-const sentAt20=messages.length;
-await server.runStuckNudges(started+25*60000);
-check(messages.length===sentAt20,'Next scheduler tick does not repeat delivered reminder');
+const sentAt15=messages.length;
+await server.runStuckNudges(started+20*60000);
+check(messages.length===sentAt15,'Next scheduler tick does not repeat delivered reminder');
 await server.runStuckNudges(started+24*hour);
 check((await db.findSlot('remind')).nudge_sent.includes('d1'),'24-hour final reminder recorded');
 await server.runStuckNudges(started+28*hour);
@@ -293,7 +337,7 @@ check((await db.acceptTimeChange('remind',{telegram_id:'2'},'12:00')).ok,'New ti
 check((await db.findSlot('remind')).court_nudge==='','Court reminders restart after new time agreement');
 await db.updateSlot('remind',{...scopes.court,time_change:'',court_nudge:''});
 messages.length=0;
-await server.runStuckNudges(started+20*60000);
+await server.runStuckNudges(started+15*60000);
 check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&m.args[1].includes('booking is incomplete')),'Court reminder sent in EN to first player');
 check(!messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Бронирование матча не завершено')),'No court reminder sent to responding player');
 item=db.stuckItem(await db.findSlot('remind'),started+28*hour);
@@ -418,6 +462,23 @@ put('crm','Broadcasts',[['broadcast_id','message_text','sent_count']]);put('crm'
 messages.length=0;const delivered=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',filters:{selected_ids:['1','2']}});
 check(delivered.body.ok&&delivered.body.sent===2,'Bilingual panel broadcast reaches both language groups');
 check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&messages.some(m=>String(m.args[0])==='2'&&m.args[1]==='Привет'),'Recipients receive only selected text, not both variants');
+messages.length=0;
+const instagramRequest=await request('post','/api/admin/request-social-data','99',{initData:adminInit,kind:'instagram',filters:{selected_ids:['1','2']}});
+check(instagramRequest.body.ok&&instagramRequest.body.sent===2,'Instagram collection is a separate admin broadcast');
+check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Your Instagram')&&m.args[2]?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='social_instagram:start')),'Instagram request is English for EN player');
+check(messages.some(m=>String(m.args[0])==='2'&&m.args[1].includes('Ваш Instagram')),'Instagram request is Russian for RU player');
+messages.length=0;
+const consentRequest=await request('post','/api/admin/request-social-data','99',{initData:adminInit,kind:'consent',filters:{selected_ids:['1','2']}});
+check(consentRequest.body.ok&&consentRequest.body.sent===2,'Photo consent is a separate admin broadcast');
+check(messages.every(m=>m.method!=='sendMessage'||m.args[2]?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='social_consent:yes')),'Consent request has explicit yes/no choices');
+await sheets.saveInstagramAccount('1','@alice.ptf','PROVIDED');
+await sheets.savePhotoPublicationConsent('1',true);
+await sheets.savePhotoPublicationConsent('2',false);
+const socialOne=await sheets.findApplicantByTelegramId('1'),socialTwo=await sheets.findApplicantByTelegramId('2');
+check(socialOne.instagram==='@alice.ptf'&&socialOne.instagram_status==='PROVIDED','Instagram account is stored independently');
+check(socialOne.photo_publication_consent==='YES'&&socialTwo.photo_publication_consent==='NO','Photo permission stores explicit YES and NO');
+const bot=await load('bot.js');
+check(bot.normalizeInstagramAccount('https://instagram.com/alice.ptf/?x=1')==='@alice.ptf'&&bot.normalizeInstagramAccount('bad account')==='','Instagram input accepts handles and links but rejects free text');
 messages.length=0;await flow.reviewTopup({telegramId:'1',approve:false});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Top-up not confirmed')),'Top-up rejection follows player language');
 const futureEvent={...event,date:'16.09.2099',title_ru:'Турнир',title_en:'Tournament',audience:'all'};
 put('crm','Event_Registry',[ev.REGISTRY_HEADERS,ev.REGISTRY_HEADERS.map(h=>futureEvent[h]||'')]);

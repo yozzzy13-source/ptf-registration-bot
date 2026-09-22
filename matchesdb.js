@@ -1144,6 +1144,42 @@ export async function confirmResult(challengeId, actor = {}) {
   });
 }
 
+// Организатор может подтвердить зависший результат от имени лиги. Это отдельный
+// путь: обычная confirmResult по-прежнему разрешает подтверждение только второму
+// игроку и не даёт автору счёта подтвердить самого себя.
+export async function confirmResultByAdmin(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok:false, reason:'not_found' };
+    if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok:false, reason:'not_pending', slot };
+    const patch = { result_status:'confirmed', result_confirmed_at:nowISO() };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('result_confirmed_admin', merged, actor, merged.result_score);
+    return { ok:true, slot:merged };
+  });
+}
+
+// Дубли и ошибочные неподтверждённые матчи удаляем мягко: строка остаётся в
+// журнале для аудита, но исчезает из интерфейсов и больше не получает напоминаний.
+// Подтверждённый результат здесь удалять нельзя, потому что он уже мог попасть в
+// турнирные таблицы и потребует отдельного отката.
+export async function deleteMatchByAdmin(challengeId, actor = {}) {
+  return withClaimLock(challengeId, async () => {
+    const slot = await findSlot(challengeId);
+    if (!slot) return { ok:false, reason:'not_found' };
+    if (String(slot.result_status || '').toLowerCase() === 'confirmed') return { ok:false, reason:'already_confirmed', slot };
+    if (['cancelled','declined'].includes(String(slot.status || '').toLowerCase())) return { ok:true, already:true, slot };
+    const patch = {
+      status:'cancelled', cancelled_at:nowISO(), pending_by:'', time_change:'',
+      result_status:'deleted', result_nudge:'', score_nudge:'', court_nudge:''
+    };
+    await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+    const merged = { ...slot, ...patch };
+    await logMatchEvent('match_deleted_admin', merged, actor, slot.result_score || '');
+    return { ok:true, slot:merged };
+  });
+}
 export async function disputeResult(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);

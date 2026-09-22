@@ -1,12 +1,12 @@
 
-import {assignSlots, selectionIssue, deadlineReached, seasonFinished} from './fantasy-model.js';
+import {assignSlots, selectionIssue, deadlineReached} from './fantasy-model.js';
 
 const tg=window.Telegram?.WebApp;
 try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
 let D, ru=(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
-let view='home', step=0, slot=1, homeTeamOpen=0, filter='slot', search='', transferOut='', busy=false, notice='', homeStatus='', review=null, priceOpen='', searchSugOpen=false;
+let view='home', step=0, slot=1, homeTeamOpen=0, filter='slot', search='', transferOut='', busy=false, notice='', review=null, priceOpen='', searchSugOpen=false;
 // Разовое приглашение при первом заходе в Fantasy — показываем один раз на
 // это устройство, дальше не мешаем.
 let introOpen=false;
@@ -25,11 +25,9 @@ function draft(n=slot) {
   }
   return drafts.get(n);
 }
-const editable=()=>D.entry_open&&!deadlineReached(D)&&!seasonFinished(D);
+const editable=()=>D.entry_open&&!deadlineReached(D);
 const spent=(keys=draft().picks)=>keys.reduce((sum,k)=>sum+Number(player(k)?.price??team()?.picks.find(p=>p.key===k)?.price??0),0);
-const formatDate=value=>value?new Date(value).toLocaleString(ru?'ru-RU':'en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Bangkok'}):tr('не установлен','not set');
-const entryDate=()=>formatDate(D.entry_deadline||D.lock_at);
-const endDate=()=>formatDate(D.season_end_at);
+const date=()=>D.lock_at?new Date(D.lock_at).toLocaleString(ru?'ru-RU':'en-GB',{dateStyle:'medium',timeStyle:'short'}):tr('Дедлайн ещё не установлен','Deadline is not set yet');
 function avatar(p) {
   return p.photo?'<img class="avatar" src="'+esc(p.photo)+'" alt="" loading="lazy">':'<span class="avatar" aria-hidden="true">'+esc((p.name||'?').split(/\s+/).slice(0,2).map(s=>s[0]).join(''))+'</span>';
 }
@@ -80,17 +78,16 @@ function rule(key) {
   if(key==='intro')return tr('До двух независимых команд из ','Up to two independent squads of ')+D.roster_size+tr(' игроков. Сезон ',' players. Season ')+D.season+'.';
   if(key==='budget')return tr('Бюджет: ','Budget: ')+D.budget+'.';
   if(key==='squad')return tr('2 C и 2 W — по одному из каждой группы; 1 Prime, 1 A, 1 B и flex Prime/A/B.','2 C and 2 W — one from each group; 1 Prime, 1 A, 1 B and flex Prime/A/B.');
-  if(key==='locking')return tr('Набор и свободное редактирование команд — до ','Squad entry and free editing stay open until ')+entryDate()+tr(' по Таиланду.',' Thailand time.');
-  if(key==='transfers')return tr('После закрытия набора и до ','After entry closes and until ')+endDate()+tr(' доступны замены: ',' transfers are available: ')+D.transfers+tr('. После окончания остаётся итоговый рейтинг.','. After the competition ends, the final standings remain in history.');
+  if(key==='locking')return tr('До дедлайна можно менять и подтверждённый состав. После дедлайна доступны только разрешённые замены.','Edit even a confirmed squad until the deadline. After the deadline, only permitted transfers remain.');
+  if(key==='transfers')return tr('После дедлайна замен: ','Transfers after the deadline: ')+D.transfers+tr('. Замена официально снятого до первого матча игрока бесплатна.','. Replacing an officially withdrawn player before their first match is free.');
   return D.rules_i18n?.[ru?'ru':'en']?.[key]||D.rules[key]||'';
 }
 function timing() {
-  return '<p class="meta">'+tr('Набор команд до: ','Squad entry until: ')+esc(entryDate())+tr(' (Таиланд)',' (Thailand)')+'<br>'+tr('Очки и соревнование до: ','Points and competition until: ')+esc(endDate())+tr(' (Таиланд)',' (Thailand)')+'</p>';
+  return '<p class="meta">'+tr('Дедлайн: ','Deadline: ')+esc(date())+'</p>';
 }
 function windowMessage() {
-  if(seasonFinished(D))return tr('Соревнование завершено. Итоговые очки и рейтинг сохранены в истории.','The competition has ended. Final points and standings remain in history.');
-  return deadlineReached(D)?tr('Набор команд закрыт. Очки продолжают начисляться; доступны разрешённые замены.','Squad entry is closed. Points continue to update and permitted transfers are available.'):
-    tr('Приём составов пока закрыт.','Squad entry is currently closed.')+(D.open_at?' '+tr('Открытие: ','Opens: ')+formatDate(D.open_at):'');
+  return deadlineReached(D)?tr('Дедлайн прошёл. Создание команд и изменение черновиков закрыты.','The deadline has passed. New teams and draft edits are closed.'):
+    tr('Приём составов пока закрыт.','Squad entry is currently closed.')+(D.open_at?' '+tr('Открытие: ','Opens: ')+new Date(D.open_at).toLocaleString(ru?'ru-RU':'en-GB'):'');
 }
 function homeView() {
   const first=team(1),second=team(2),local=drafts.get(1);
@@ -104,9 +101,7 @@ function homeView() {
   // человек занимают весь экран и до второй команды никто не доскроллит.
   for(const t of [first,second].filter(Boolean)) {
     const n=Number(t.team_slot||1),open=homeTeamOpen===n;
-    const ready=t.status==='draft'&&draftReady(n);
-    const state=t.status==='locked'?(seasonFinished(D)?tr('Завершена · итоговые очки','Finished · final points'):tr('Подтверждена · участвует в рейтинге','Confirmed · in the standings'))
-      :ready?tr('Состав готов · осталось подтвердить','Squad ready · confirmation required')
+    const state=t.status==='locked'?tr('Подтверждена','Confirmed')
       :deadlineReached(D)?tr('Черновик — не участвует','Draft — not entered')
       :tr('Черновик — не в рейтинге','Draft — not in the standings');
     html+='<section class="card teamfold'+(open?' open':'')+'">'
@@ -116,19 +111,11 @@ function homeView() {
           +'<div class="tf-name">'+esc(t.team_name)+' <span class="tf-chev">'+(open?'\u25b2':'\u25bc')+'</span></div>'
           +'<div class="tf-meta">'+esc(state)+' \u00b7 '+(t.picks||[]).length+'/8 \u00b7 <b>'+Number(t.points||0)+'</b> Fantasy Points</div>'
         +'</button>'
-        +(editable()&&t.status==='locked'?'<div class="tf-actions">'
+        +(editable()?'<div class="tf-actions">'
           +button(tr('Состав','Squad'),'start','mini','data-slot="'+n+'"')
           +button(tr('Название','Rename'),'rename','mini','data-slot="'+n+'"')
         +'</div>':'')
       +'</div>'
-      +(editable()&&t.status==='draft'?'<div class="draft-confirm">'
-        +'<b>'+esc(ready?tr('Команда ещё не участвует в рейтинге','Your team is not in the standings yet'):tr('Команда сохранена как черновик','Your team is saved as a draft'))+'</b>'
-        +'<p>'+esc(ready?tr('Нажмите подтверждение — это последний шаг.','Confirm it now — this is the last step.'):tr('Завершите состав и подтвердите его до дедлайна.','Finish the squad and confirm it before the deadline.'))+'</p>'
-        +'<div class="draft-confirm-actions">'
-          +(ready?button(tr('Подтвердить и добавить в рейтинг','Confirm and enter standings'),'confirm-home','primary','data-slot="'+n+'"')
-            :button(tr('Завершить команду','Finish team'),'start','primary','data-slot="'+n+'"'))
-          +button(tr('Изменить','Edit'),'start','secondary','data-slot="'+n+'"')
-        +'</div></div>':'')
       +(open?cards('team',n):'')
     +'</section>';
   }
@@ -138,15 +125,8 @@ function homeView() {
     +'<p class="sub">'+tr('Вторая команда полностью независима: свой состав, свой капитан и своё место в рейтинге. Это второй заход с другой ставкой.','Your second team is fully independent: its own squad, its own captain and its own place in the standings. A second shot with a different bet.')+'</p>'
     +(editable()?button(tr('Создать вторую команду','Create second team'),'start','primary full','data-slot="2"'):'<div class="readonly">'+esc(windowMessage())+'</div>')+'</section>';
   // Про дедлайн важно сказать прямо: до него состав можно менять сколько угодно.
-  if(first)html+='<p class="meta home-note">'+esc(seasonFinished(D)?tr('Соревнование завершено. Итоговые очки и места доступны во вкладке «Рейтинг».','The competition has ended. Final points and places remain under Standings.'):tr('Команды можно свободно менять до ','Squads can be freely edited until ')+entryDate()+tr('. Очки начисляются до ','. Points are awarded until ')+endDate()+'.')+'</p>';
+  if(first)html+='<p class="meta home-note">'+esc(tr('Состав можно менять сколько угодно до дедлайна: ','You can change your squad as often as you like until the deadline: ')+date()+tr('. После дедлайна остаются только разрешённые замены.','. After the deadline, only permitted transfers remain.'))+'</p>';
   return html+'<details class="card rules"><summary>'+tr('Откуда берутся очки','Where points come from')+'</summary><p>'+esc(rule('intro'))+'</p><p>'+esc(rule('squad'))+'</p><p>'+esc(rule('scoring'))+'</p><p>'+esc(rule('locking'))+'</p></details>';
-}
-function draftReady(n=slot) {
-  const d=draft(n),state=assignSlots(d.picks,D.players);
-  const draftSpent=d.picks.reduce((sum,k)=>sum+Number(player(k)?.price??team(n)?.picks.find(p=>p.key===k)?.price??0),0);
-  return d.picks.length===8&&!state.unmatched.length&&!state.slots.some(s=>!s.key)&&
-    draftSpent<=D.budget&&d.picks.includes(d.captain_key)&&d.picks.includes(d.vice_key)&&
-    d.captain_key!==d.vice_key&&Boolean(d.team_name.trim());
 }
 function slotsPanel() {
   const keys=draft().picks.filter(k=>k!==transferOut),state=assignSlots(keys,D.players),next=state.slots.findIndex(s=>!s.key);
@@ -282,28 +262,28 @@ function wizardView() {
   if(step===1)html+='<section class="card"><h2>'+tr('Капитан и вице-капитан','Captain and vice-captain')+'</h2><p class="sub">'+tr('Капитан получает ×1.5. Вице-капитан заменяет его при официальном снятии до первого матча.','Your captain earns ×1.5. Your vice-captain takes over if the captain officially withdraws before their first match.')+'</p>'+cards('captains')+'</section>';
   if(step===2)html+='<section class="card"><h2>'+tr('Как назовём команду?','Name your team')+'</h2><p class="sub">'+tr('Название появится в рейтинге.','This name appears in the standings.')+'</p><div class="field"><label for="team-name">'+tr('Название команды','Team name')+'</label><input id="team-name" maxlength="40" autocomplete="off" value="'+esc(draft().team_name)+'"></div></section>';
   if(step===3)html+=reviewView();
-  if(step===4)html+='<section class="card"><h2>'+tr('Подтвердить команду','Confirm your team')+'</h2><p>'+esc(draft().team_name)+' · 8/8 · '+spent()+'/'+D.budget+'</p>'+timing()+'<p class="sub">'+esc(rule('locking'))+'</p><p class="sub">'+esc(rule('transfers'))+'</p>'+button(team()?.status==='locked'?tr('Подтвердить изменения','Confirm changes'):tr('Подтвердить и добавить в рейтинг','Confirm and enter standings'),'confirm','primary full',localErrors().length||!review?.ok?'disabled':'')+'</section>';
+  if(step===4)html+='<section class="card"><h2>'+tr('Подтвердить команду','Confirm your team')+'</h2><p>'+esc(draft().team_name)+' · 8/8 · '+spent()+'/'+D.budget+'</p>'+timing()+'<p class="sub">'+esc(rule('locking'))+'</p><p class="sub">'+esc(rule('transfers'))+'</p>'+button(team()?.status==='locked'?tr('Подтвердить изменения','Confirm changes'):tr('Создать команду','Create team'),'confirm','primary full',localErrors().length||!review?.ok?'disabled':'')+'</section>';
   return html+'<div class="wizard-actions '+(step===0?'selection-actions':'')+'">'+button(tr('Назад','Back'),'back','secondary')+
     (step<4?button([tr('К капитанам','Choose captains'),tr('К названию','Name team'),tr('Проверить состав','Review team'),tr('К подтверждению','Continue')][step],'next','primary',(step===0&&draft().picks.length!==8)||(step===1&&localErrors().some(x=>x.step===1))||(step===2&&!draft().team_name.trim())||(step===3&&(localErrors().length||!review?.ok))?'disabled':''):'')+'</div>'+
-    (team()?.status==='locked'?button(tr('Отменить изменения','Discard changes'),'discard','secondary full'):button(tr('Выйти без подтверждения','Exit without confirming'),'save-exit','secondary full'))+
-    '<p class="meta">'+(team()?.status==='locked'?tr('Изменения вступят в силу после подтверждения.','Changes take effect after confirmation.'):tr('Без подтверждения команда останется черновиком и не попадёт в рейтинг.','Without confirmation, the team remains a draft and will not enter the standings.'))+'</p>';
+    (team()?.status==='locked'?button(tr('Отменить изменения','Discard changes'),'discard','secondary full'):button(tr('Сохранить и выйти','Save and exit'),'save-exit','secondary full'))+
+    '<p class="meta">'+(team()?.status==='locked'?tr('Изменения вступят в силу после подтверждения.','Changes take effect after confirmation.'):tr('Черновик сохраняется автоматически.','Draft saves automatically.'))+'</p>';
 }
 function canTransfer(key,n=slot) {
   const t=team(n);
-  return deadlineReached(D)&&!seasonFinished(D)&&D.transfers_open&&t?.status==='locked'&&(Number(t.transfers_used)<D.transfers||(t.free_transfer_keys||[]).includes(key));
+  return deadlineReached(D)&&D.transfers_open&&t?.status==='locked'&&(Number(t.transfers_used)<D.transfers||(t.free_transfer_keys||[]).includes(key));
 }
 function teamView() {
   const t=team();
   if(!t)return homeView();
   const locked=t.status==='locked';
   return '<section class="card"><h2>'+esc(t.team_name)+'</h2><p class="meta">'+(locked?tr('Подтверждена','Confirmed'):tr('Черновик — не в рейтинге, подтвердите состав','Draft — not in the standings, confirm your squad'))+' · '+Number(t.points||0)+' Fantasy Points</p>'+timing()+
-    (deadlineReached(D)?'<div class="readonly">'+(seasonFinished(D)?tr('Соревнование завершено. Это итоговый состав и итоговые очки.','The competition has ended. This squad and its points are final.'):locked?tr('Набор закрыт. Очки продолжают начисляться. Осталось замен: ','Entry closed. Points continue to update. Transfers left: ')+Math.max(0,D.transfers-Number(t.transfers_used)):tr('Черновик не подтверждён до закрытия набора и не участвует в рейтинге.','This draft was not confirmed before entry closed and is not in the standings.'))+'</div>':'')+
+    (deadlineReached(D)?'<div class="readonly">'+(locked?tr('Состав закрыт. Осталось замен: ','Squad closed. Transfers left: ')+Math.max(0,D.transfers-Number(t.transfers_used)):tr('Черновик не подтверждён до дедлайна и не участвует в рейтинге.','This draft was not confirmed before the deadline and is not in the standings.'))+'</div>':'')+
     cards('team')+(editable()?button(tr('Изменить команду','Edit team'),'edit','primary full'):'')+'</section>'+
     (transferOut?'<section class="card"><h3>'+tr('Заменить: ','Replace: ')+esc((player(transferOut)||t.picks.find(p=>p.key===transferOut)).name)+'</h3>'+button(tr('Отмена замены','Cancel transfer'),'transfer-cancel','secondary')+'</section>'+slotsPanel()+catalog(true):'')+
     button(tr('Все мои команды','All my teams'),'home','secondary full');
 }
 function successView() {
-  return '<section class="card"><div class="clubmark">✓</div><h2>'+tr('Команда подтверждена!','Team confirmed!')+'</h2><p>'+esc(team().team_name)+'</p><div class="message good">'+tr('Команда добавлена в рейтинг.','Your team has been added to the standings.')+'</div>'+timing()+'<p class="sub">'+esc(rule('locking'))+'</p><p class="sub">'+esc(rule('transfers'))+'</p>'+button(tr('Посмотреть мою команду','View my team'),'team','primary full')+'</section>';
+  return '<section class="card"><div class="clubmark">✓</div><h2>'+tr('Команда создана!','Team created!')+'</h2><p>'+esc(team().team_name)+'</p>'+timing()+'<p class="sub">'+esc(rule('locking'))+'</p><p class="sub">'+esc(rule('transfers'))+'</p>'+button(tr('Посмотреть мою команду','View my team'),'team','primary full')+'</section>';
 }
 let rankMode='teams',rankOpen='';
 // Рейтинг разворачивается так же, как в интерфейсе лиги: команда показывает
@@ -316,7 +296,7 @@ function rankSquad(picks) {
 }
 function tableView() {
   const list=rankMode==='teams'?D.leaderboard:D.player_leaderboard;
-  return (seasonFinished(D)?'<div class="message good">✓ '+tr('Итоговый рейтинг · сезон завершён ','Final standings · season ended ')+esc(endDate())+'</div>':'')+'<div class="ranktabs">'+button(tr('Команды','Teams'),'rank-teams',rankMode==='teams'?'on':'')+button(tr('Игроки','Players'),'rank-players',rankMode==='players'?'on':'')+'</div><div class="card">'
+  return '<div class="ranktabs">'+button(tr('Команды','Teams'),'rank-teams',rankMode==='teams'?'on':'')+button(tr('Игроки','Players'),'rank-players',rankMode==='players'?'on':'')+'</div><div class="card">'
     +(list.length?list.map((p,i)=>{
       const key=rankMode==='teams'?(p.team_id||String(i)):p.key,open=rankOpen===key;
       const body=open?(rankMode==='teams'?rankSquad(p.picks):matchBreakdown(player(p.key)||{})):'';
@@ -334,7 +314,7 @@ function render() {
   if(!D)return;
   document.documentElement.lang=ru?'ru':'en';
   app.dataset.view=view;
-  app.innerHTML=header()+(view==='home'&&homeStatus?'<div class="message good" role="status">✓ '+esc(homeStatus)+'</div>':'')+(notice?'<div class="message bad" role="alert">'+esc(notice)+'</div>':'')+
+  app.innerHTML=header()+(notice?'<div class="message bad" role="alert">'+esc(notice)+'</div>':'')+
     (view==='home'?homeView():view==='wizard'?wizardView():view==='team'?teamView():view==='success'?successView():view==='players'?catalog():view==='table'?tableView():rulesView())+
     (introOpen&&view==='home'?introOverlay():'');
   app.setAttribute('aria-busy',String(busy));
@@ -355,7 +335,7 @@ function introOverlay() {
     +'<p class="sub">'+tr('Можно собрать до двух независимых команд за сезон.','You can build up to two independent teams per season.')+'</p>'
     +button(tr('Понятно, начнём','Got it, let us go'),'intro-dismiss','primary full')+'</div></div>';
 }
-function navigate(v) { view=v;notice='';if(v!=='home')homeStatus='';if(v==='players'){filter='all';search='';}render();window.scrollTo(0,0); }
+function navigate(v) { view=v;notice='';if(v==='players'){filter='all';search='';}render();window.scrollTo(0,0); }
 async function start(n) {
   await saveDraft(slot);slot=n;transferOut='';filter='slot';search='';review=null;
   const d=draft();
@@ -393,22 +373,6 @@ async function commit() {
   } catch(e) {notice=e.message;step=3;review=null;}
   finally {busy=false;render();window.scrollTo(0,0);}
 }
-async function confirmFromHome(n) {
-  if(busy||!editable())return;
-  slot=n;notice='';busy=true;render();
-  try {
-    await saveDraft(n);
-    const result=await api('validate',{...payload(n),complete:true});
-    if(!result.validation?.ok){
-      review=result.validation;step=3;view='wizard';notice=tr('Проверьте отмеченные пункты перед подтверждением.','Check the highlighted items before confirming.');return;
-    }
-    const saved=await api('team',{...payload(n),action:'lock'});
-    updateTeam(saved.team);draft(n).saved=draft(n).version;
-    const fresh=await api('bootstrap');D=fresh;D.teams=D.teams||[];drafts.delete(n);
-    homeStatus=tr('Команда подтверждена и добавлена в рейтинг.','Team confirmed and added to the standings.');
-  } catch(e) {notice=e.message;}
-  finally {busy=false;render();window.scrollTo(0,0);}
-}
 async function back() {
   if(busy)return;
   if(view==='wizard'&&step>0){step--;render();return;}
@@ -421,7 +385,6 @@ async function handle(action,el={dataset:{}}) {
   if(action==='language'){ru=!ru;render();if(view==='wizard'&&step===3)await validateReview();return;}
   if(['home','players','table','rules'].includes(action)){await saveDraft();return navigate(action);}
   if(action==='start')return start(Number(el.dataset.slot));
-  if(action==='confirm-home')return confirmFromHome(Number(el.dataset.slot));
   if(action==='team'){transferOut='';drafts.delete(slot);return navigate('team');}
   if(action==='edit'){step=0;filter='slot';return navigate('wizard');}
   if(action==='discard'){drafts.delete(slot);return navigate('team');}
@@ -484,5 +447,6 @@ app.addEventListener('error',event=>{if(event.target.tagName==='IMG'){const span
 function setTheme(value) {document.documentElement.dataset.theme=value;try{localStorage.setItem('ptf_theme',value);tg?.setHeaderColor(value==='light'?'#f2f5f1':'#0a0a0b');}catch{}}
 try{setTheme(localStorage.getItem('ptf_theme')==='light'?'light':'dark');tg?.BackButton?.onClick(()=>back().catch(e=>{notice=e.message;render();}));}catch{}
 api('bootstrap').then(j=>{D=j;D.teams=D.teams||[];ru=j.lang==='ru';render();}).catch(e=>{D=null;app.innerHTML='<div class="card empty"><h2>'+tr('Нет доступа','Access denied')+'</h2><p>'+esc(e.message)+'</p></div>';});
-// A long-open Telegram view follows both campaign boundaries.
-setInterval(()=>{if(!D)return;const entryChanged=!D.locked&&deadlineReached(D),finishChanged=!D.season_finished&&seasonFinished(D);if(entryChanged||finishChanged){if(entryChanged){D.locked=true;D.entry_closed=true;D.entry_open=false;}if(finishChanged){D.season_finished=true;D.competition_open=false;D.transfers_open=false;}review=null;render();api('bootstrap').then(j=>{D=j;render();}).catch(()=>{});}},1000);
+// A long-open Telegram web view must stop offering edits at the deadline.
+setInterval(()=>{if(D&&!D.locked&&deadlineReached(D)){D.locked=true;D.entry_open=false;review=null;render();api('bootstrap').then(j=>{D=j;render();}).catch(()=>{});}},1000);
+

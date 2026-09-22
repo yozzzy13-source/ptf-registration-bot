@@ -777,7 +777,8 @@ export async function getPartners() {
       name_en: name.en || name.ru,
       description: partnerPair(row, ['description', 'описание', 'about', 'текст']),
       category: partnerPair(row, ['category', 'категория', 'type', 'тип']),
-      message: partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']),
+      message: (partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']).ru || partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']).en),
+      message_i18n: partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']),
       photo: directPhotoUrl(partnerField(row, ['image', 'картинка', 'photo', 'фото', 'logo', 'логотип'])),
       whatsapp: phone.replace(/[^0-9]/g, ''),
       phone_label: phone,
@@ -1174,15 +1175,35 @@ export async function enrichEventsWithStats(events=[]) {
 // Колонки аватарки. Дописываем в конец листа: вставлять их между существующими
 // незачем — эти поля служебные и глазами их читать не нужно.
 let avatarColumnsReady = null;
-// Instagram в анкете — необязательное поле: нужно, чтобы отмечать игрока в
-// публикациях лиги. Колонку заводим один раз и только если её ещё нет.
+// Instagram и согласие на публикацию храним раздельно. Наличие ника не означает
+// согласия на фото, а отказ от публикации не стирает Instagram игрока.
 let instagramColumnReady = null;
 export async function ensureInstagramColumn() {
   if (!instagramColumnReady) {
-    instagramColumnReady = ensureSheetWithHeaders(SHEETS.applicants, ['instagram'])
+    instagramColumnReady = ensureSheetWithHeaders(SHEETS.applicants, [
+      'instagram', 'instagram_status', 'instagram_updated_at',
+      'photo_publication_consent', 'photo_publication_consent_at'
+    ])
       .catch(e => { instagramColumnReady = null; throw e; });
   }
   return instagramColumnReady;
+}
+
+export async function saveInstagramAccount(telegramId, instagram = '', status = 'PROVIDED') {
+  await ensureInstagramColumn();
+  return updateApplicantByTelegramId(telegramId, {
+    instagram,
+    instagram_status: status === 'NO_ACCOUNT' ? 'NO_ACCOUNT' : 'PROVIDED',
+    instagram_updated_at: nowISO()
+  });
+}
+
+export async function savePhotoPublicationConsent(telegramId, allowed) {
+  await ensureInstagramColumn();
+  return updateApplicantByTelegramId(telegramId, {
+    photo_publication_consent: allowed ? 'YES' : 'NO',
+    photo_publication_consent_at: nowISO()
+  });
 }
 
 export async function ensureAvatarColumns() {

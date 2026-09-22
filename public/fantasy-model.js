@@ -36,9 +36,5 @@ export function selectionIssue(keys, key, players, budget, maxPerPool = 2, slotI
 }
 
 export function deadlineReached(data, now = Date.now()) {
-  return Boolean(data.entry_closed || data.locked || (data.lock_at && now >= Date.parse(data.lock_at)));
-}
-
-export function seasonFinished(data, now = Date.now()) {
-  return Boolean(data.season_finished || (data.season_end_at && now >= Date.parse(data.season_end_at)));
+  return Boolean(data.locked || (data.lock_at && now >= Date.parse(data.lock_at)));
 }

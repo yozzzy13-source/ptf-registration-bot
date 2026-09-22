@@ -360,7 +360,15 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   if (!d1 || d1 !== d2) return { status: 'cross_division', d1, d2 };
   const stage=playoffStage(slot.round);
   const playoff=stage?await writePlayoffResult(pair,slot,stage):null;
-  if (pair.crossGroup) return playoff || writeCrossGroupResult(pair, slot);
+  if (pair.crossGroup) {
+    if (playoff) return playoff;
+    const crossSeason=String(pair.season || slot.season || '').trim();
+    await captureCrossGroupCardContext({p1,p2,parsed,pair,season:crossSeason,slot,d1})
+      .catch(e=>console.error('cross-group card context capture failed:',e.message));
+    const saved=await writeCrossGroupResult(pair,slot);
+    await refreshAfterResult().catch(e=>console.error('refresh after cross-group result failed:',e.message));
+    return saved;
+  }
   // Таблицу берём из реестра Divisions: там на каждый дивизион сезона своя
   // строка со ссылкой, поэтому PRIME, W и любой будущий дивизион подключаются
   // добавлением строки, а не правкой переменных Railway. Переменные остались
@@ -448,6 +456,38 @@ function scoreTextFor(slot, parsed, reversed) {
 // для ОБОИХ игроков, даже если кто-то из них не в текущем roster-каталоге
 // Fantasy: Костас хочет, чтобы очки считались всем, кто реально сыграл.
 // Цена по умолчанию 10 (как для дебютанта), если игрока нет в каталоге.
+async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot, d1 }) {
+  const p1Group=String(pair.groupA || pair.a?.group || '').trim();
+  const p2Group=String(pair.groupB || pair.b?.group || '').trim();
+  const [p1Table,p2Table,p1Sheet,p2Sheet,catalog]=await Promise.all([
+    getDivisionTable(d1,season,p1Group).catch(()=>null),
+    getDivisionTable(d1,season,p2Group).catch(()=>null),
+    divisionSheetId(d1,season,p1Group).catch(()=>''),
+    divisionSheetId(d1,season,p2Group).catch(()=>''),
+    buildFantasyCatalog({mode:'live'}).catch(()=>null)
+  ]);
+  const [historyP1,historyP2]=await Promise.all([
+    p1Sheet?recentFormBefore(p1Sheet,p1,0).catch(()=>[]):[],
+    p2Sheet?recentFormBefore(p2Sheet,p2,0).catch(()=>[]):[]
+  ]);
+  const place=(table,name)=>table?.ok
+    ? table.players.find(x=>sameName(x.name,name))?.place
+    : undefined;
+  const priceOf=name=>catalog?.players?.find(p=>fantasyPlayerKey(p.name)===fantasyPlayerKey(name))?.price??10;
+  const bothTechnical=resultKind(slot)==='technical'&&!slot.result_winner;
+  const p1Won=!bothTechnical&&String(slot.result_winner)===String(slot.from_telegram_id);
+  const p2Won=!bothTechnical&&!p1Won;
+  const fp1=bothTechnical?0:scoreFantasyMatch({score:scoreTextFor(slot,parsed,false),result:p1Won?'WIN':'LOSS'},priceOf(p1),priceOf(p2)).total;
+  const fp2=bothTechnical?0:scoreFantasyMatch({score:scoreTextFor(slot,parsed,true),result:p2Won?'WIN':'LOSS'},priceOf(p2),priceOf(p1)).total;
+  const withCurrent=(history,won)=>(bothTechnical?history:[...history,won?'W':'L']).slice(-5);
+  rememberCardContext(slot.challenge_id,{
+    p1:{name:p1,group:p1Group,place:place(p1Table,p1),form:withCurrent(historyP1,p1Won)},
+    p2:{name:p2,group:p2Group,place:place(p2Table,p2),form:withCurrent(historyP2,p2Won)},
+    fp:{p1:fp1,p2:fp2},
+    division:d1,season,group:'cross',cross_group:true
+  });
+}
+
 async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1 }) {
   const matchIdx = headers.indexOf('match');
   let matchNumber = 0;

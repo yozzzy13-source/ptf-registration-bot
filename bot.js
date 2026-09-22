@@ -1,12 +1,12 @@
 import {allSlots,pendingActionsFor} from './matchesdb.js';
-import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST, withBulkRetries} from './telegram.js';
+import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST, sendPhotoBuffer, withBulkRetries} from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getAllEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getAllEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup, saveInstagramAccount, savePhotoPublicationConsent } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml, parseTestMatchInput, findRosterPlayer, findRosterPair, matchNameKey } from './util.js';
 import { canAccessFantasyByTelegramId } from './fantasy.js';
-import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
+import { DEFAULT_USDT_AMOUNT, PUBLIC_URL, MATCH_CARDS_DRIVE_FOLDER_ID } from './config.js';
 import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, cancelMatchmaking, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange, markMatchUnfinished, addMatchUnfinishedEvidence } from './matchesdb.js';
 import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
   notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, notifyMatchUnfinished, broadcastResult,
@@ -19,6 +19,15 @@ import { authorizeSlot, sameScope } from './access.js';
 import { uiError } from './ui-errors.js';
 
 export const userState = new Map();
+const posterRuns = new Map();
+const posterJobsInFlight = new Set();
+function rememberPosterVariant(matchId, variant, data) {
+  const key=String(matchId || '');
+  const current=posterRuns.get(key) || {};
+  current[String(variant)]=data;
+  posterRuns.set(key,current);
+  if(posterRuns.size > 30)posterRuns.delete(posterRuns.keys().next().value);
+}
 // Язык человека меняется раз в жизни, а спрашивали его у таблицы на каждое
 // действие. Держим в памяти: ответ мгновенный, а таблица перечитывается только
 // когда мы этого человека ещё не видели.
@@ -38,6 +47,124 @@ async function userLang(from) {
   return value;
 }
 function fallbackLang(lang) { return lang === 'ru' ? 'ru' : 'en'; }
+
+export function normalizeInstagramAccount(value = '') {
+  let account = String(value || '').trim();
+  account = account.replace(/^https?:\/\/(?:www\.)?instagram\.com\//i, '');
+  account = account.replace(/^instagram\.com\//i, '').replace(/[/?#].*$/, '').replace(/^@+/, '').trim();
+  if (!/^[A-Za-z0-9._]{1,30}$/.test(account)) return '';
+  return '@' + account;
+}
+
+async function handleInstagramAccountMessage(msg, state, lang) {
+  const chatId = msg.chat.id;
+  if (Number(state.expiresAt || 0) <= Date.now()) {
+    userState.delete(String(chatId));
+    return sendMessage(chatId, lang === 'ru'
+      ? 'Время ввода истекло. Нажмите кнопку запроса Instagram ещё раз.'
+      : 'The entry window expired. Please press the Instagram request button again.');
+  }
+  const account = normalizeInstagramAccount(msg.text || msg.caption || '');
+  if (!account) {
+    return sendMessage(chatId, lang === 'ru'
+      ? 'Пришлите @username или ссылку вида instagram.com/username.'
+      : 'Send @username or a link such as instagram.com/username.');
+  }
+  const saved = await saveInstagramAccount(msg.from.id, account, 'PROVIDED');
+  if (!saved) return sendMessage(chatId, lang === 'ru' ? 'Профиль игрока не найден.' : 'Player profile was not found.');
+  userState.delete(String(chatId));
+  return sendMessage(chatId, lang === 'ru'
+    ? '✅ Instagram сохранён: <b>' + escapeHtml(account) + '</b>\n\nЭто не меняет ваш отдельный выбор о публикации фотографий.'
+    : '✅ Instagram saved: <b>' + escapeHtml(account) + '</b>\n\nThis does not change your separate photo publication choice.');
+}
+
+async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', onlyVariant=0 }) {
+  const [{
+    preparePosterJob,loadPosterSourcePhotos,generatePosterBackgrounds,composeMatchPoster,posterEnabled
+  },{ winnerFirstScore }] = await Promise.all([
+    import('./matchposter.js'),import('./matches.js')
+  ]);
+  const matchId=String(slot.challenge_id || slot.match_id || '');
+  const lockKey=`${matchId}:${onlyVariant || 'all'}`;
+  const opts=threadId?{message_thread_id:threadId}:{};
+  if(posterJobsInFlight.has(lockKey)) {
+    await sendMessage(chatId,'⏳ Этот вариант уже генерируется. Я пришлю его сюда после завершения.',opts);
+    return null;
+  }
+  posterJobsInFlight.add(lockKey);
+  try {
+    const season=String(slot.season || await getSetting('season_number').catch(()=>'') || '').trim();
+    const job=await preparePosterJob(slot,{winnerFirstScore,season,comment,variants:2});
+    if(onlyVariant) {
+      job.prompts=job.prompts.filter(x=>Number(x.variant)===Number(onlyVariant));
+      job.variants=job.variants.filter(x=>Number(x.variant)===Number(onlyVariant));
+    }
+    const consent=job.consent.map(x=>{
+      const value=x.value==='NO' ? 'NO' : (x.value==='NOT_ANSWERED' ? 'ответа нет — разрешено' : 'YES');
+      return `${x.allowed?'✅':'⛔'} ${escapeHtml(x.name)}: <b>${escapeHtml(value)}</b>`;
+    }).join('\n');
+    if(job.status==='blocked_consent') {
+      await sendMessage(chatId,`<b>🎨 Постер матча</b>\n\n⛔ Генерация заблокирована: один из игроков явно ответил NO. Его фотография не передана в OpenAI.\n\n<b>Согласия</b>\n${consent}`,{
+        ...opts,
+        reply_markup:{inline_keyboard:[[{text:'🔄 Проверить снова',callback_data:`poster:prepare:${matchId}`}]]}
+      });
+      return job;
+    }
+    if(!posterEnabled()) {
+      await sendMessage(chatId,'⛔ OPENAI_API_KEY не задан. Добавьте переменную и перезапустите сервис.',opts);
+      return job;
+    }
+
+    const count=job.prompts.length;
+    await sendMessage(chatId,`⏳ <b>Генерирую ${count===1?'вариант':'два варианта'}</b>\n\n${escapeHtml(job.match.winner)} — ${escapeHtml(job.match.loser)}\nСчёт: <b>${escapeHtml(job.match.score)}</b>${job.comment?`\nКомментарий: <i>${escapeHtml(job.comment)}</i>`:''}\n\nОбычно это занимает несколько минут. Готовые PNG придут в этот топик.`,opts);
+
+    const photos=await loadPosterSourcePhotos(job);
+    const backgrounds=await generatePosterBackgrounds(job,photos);
+    const sent=[];
+    for(const item of backgrounds) {
+      const finalBuffer=await composeMatchPoster(item.buffer,job.match);
+      const variant=Number(item.variant || sent.length+1);
+      const caption=`<b>🎨 Постер · вариант ${variant}</b>\n\n${escapeHtml(job.match.winner)} — ${escapeHtml(job.match.loser)}\nСчёт: <b>${escapeHtml(job.match.score)}</b>${job.comment?`\nКомментарий: <i>${escapeHtml(job.comment)}</i>`:''}\n\nФайл готов для сохранения из Telegram.`;
+      const result=await sendPhotoBuffer(chatId,finalBuffer,'image/png',{
+        ...opts,
+        caption,
+        reply_markup:{inline_keyboard:[
+          [{text:`✅ Вариант ${variant} готов`,callback_data:`poster:ready:${variant}:${matchId}`}],
+          [
+            {text:'🔄 Ещё вариант',callback_data:`poster:regen:${variant}:${matchId}`},
+            {text:'✍️ С комментарием',callback_data:`poster:comment:${matchId}`}
+          ]
+        ]}
+      });
+      const fileId=(result?.photo || result?.result?.photo || []).slice(-1)[0]?.file_id || '';
+      rememberPosterVariant(matchId,variant,{fileId,comment:job.comment,createdAt:new Date().toISOString()});
+      sent.push({variant,fileId});
+    }
+    if(sent.length > 1) {
+      await sendMessage(chatId,`✅ Оба варианта готовы. Выберите нужный под изображением или перегенерируйте оба.`,{
+        ...opts,
+        reply_markup:{inline_keyboard:[
+          [{text:'🔄 Новые 2 варианта',callback_data:`poster:prepare:${matchId}`}],
+          [{text:'✍️ Новые с комментарием',callback_data:`poster:comment:${matchId}`}]
+        ]}
+      });
+    }
+    return {...job,status:'ready',sent};
+  } catch(error) {
+    console.error('poster generation failed:',matchId,error);
+    await sendMessage(chatId,`⛔ <b>Постер не создан</b>\n\n${escapeHtml(error?.message || error)}\n\nМожно повторить запрос или добавить комментарий.`,{
+      ...opts,
+      reply_markup:{inline_keyboard:[
+        [{text:'🔄 Повторить',callback_data:`poster:prepare:${matchId}`}],
+        [{text:'✍️ С комментарием',callback_data:`poster:comment:${matchId}`}]
+      ]}
+    }).catch(()=>{});
+    return {status:'failed',error:String(error?.message || error)};
+  } finally {
+    posterJobsInFlight.delete(lockKey);
+  }
+}
+
 async function sendLanguageChoice(chatId) {
   return sendMessage(chatId, t('en','choose_language'), { reply_markup: languageKeyboard() });
 }
@@ -1145,6 +1272,22 @@ function findConfirmedSlot(done, wanted) {
   return { slot: null };
 }
     if (text.startsWith('/test_match')) return adminTestMatch(msg, text);
+    if (text.startsWith('/poster_test')) {
+      // Полный безопасный тест на последнем подтверждённом матче: не публикует
+      // результат повторно и присылает оба постера только в текущий админский чат.
+      try {
+        const wanted=String(text.replace(/^\/poster_test(?:@\w+)?\s*/i,'')).trim();
+        const rows=await allSlots();
+        const done=rows.filter(r=>String(r.result_status || '').toLowerCase()==='confirmed');
+        const {slot,many}=findConfirmedSlot(done,wanted);
+        if(many)return sendMessage(chatId,`Нашёл несколько матчей на «${escapeHtml(wanted)}», уточните имя:\n`+many.slice(0,10).map(m=>`• <code>${escapeHtml(m.from_name || '')} — ${escapeHtml(m.to_name || '')}</code>`).join('\n'));
+        if(!slot)return sendMessage(chatId,wanted?'Матч не найден. Укажите имя игрока или запустите /poster_test без аргумента — возьму последний подтверждённый матч.':'Подтверждённых результатов пока нет.');
+        await sendMessage(chatId,`🧪 <b>Тест постера</b>\n\n${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}\n\nРезультат матча повторно не публикуется. Два постера придут только сюда.`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+        return preparePosterForAdmin({chatId,threadId:msg.message_thread_id||'',slot,comment:''});
+      } catch(error) {
+        return sendMessage(chatId,`⛔ ${escapeHtml(error?.message || error)}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      }
+    }
     if (text.startsWith('/result_test')) {
       // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
       // не трогаются — всё уходит только сюда.
@@ -1206,6 +1349,18 @@ function findConfirmedSlot(done, wanted) {
     if (text.startsWith('/whois')) return adminWhois(chatId, text);
     if (text === '/id_check') return adminIdCheck(chatId);
     if (text === '/photos') return adminPhotoCheck(chatId);
+
+    const posterState=adminState.get(String(from.id));
+    if (posterState?.mode === 'poster_comment') {
+      if (!text) return sendMessage(chatId,'Напишите комментарий к постеру текстом или отправьте /cancel.',msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      const slot=await findMatchSlot(posterState.challengeId);
+      if (!slot) {
+        adminState.delete(String(from.id));
+        return sendMessage(chatId,'Матч не найден.',msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      }
+      adminState.delete(String(from.id));
+      return preparePosterForAdmin({chatId,threadId:msg.message_thread_id||'',slot,comment:text});
+    }
 
     if ((msg.chat.type === 'group' || msg.chat.type === 'supergroup') && msg.message_thread_id && !text.startsWith('/')) {
       const topicPlayer = await findApplicantByAdminTopicId(msg.message_thread_id).catch(() => null);
@@ -1278,6 +1433,8 @@ function findConfirmedSlot(done, wanted) {
     return sendMessage(chatId, t(lang, 'selfie_received'), await menuMarkup(lang, from.id));
   }
 
+  if (state?.mode === 'awaiting_social_instagram') return handleInstagramAccountMessage(msg,state,lang);
+
   if (state?.mode === 'unfinished_evidence') return handleUnfinishedEvidence(msg,state,lang);
 
   if (state?.mode === 'awaiting_payment_proof') {
@@ -1349,7 +1506,7 @@ function findConfirmedSlot(done, wanted) {
 // настройки ленты результатов. Админские (admin_*, bc*) и матчевые кнопки
 // сюда не входят — им место в группе по замыслу.
 const PERSONAL_CALLBACKS = new Set(['main', 'website_menu', 'payment_entry', 'contact', 'close_contact', 'results_mute', 'results_unmute']);
-const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:'];
+const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:', 'social_'];
 function isPersonalCallback(data = '') {
   const d = String(data);
   return PERSONAL_CALLBACKS.has(d) || PERSONAL_PREFIXES.some(p => d.startsWith(p));
@@ -1394,6 +1551,36 @@ export async function handleCallback(q) {
 
   if (!storedLang && msg.chat.type === 'private' && !isAdminUser(from.id)) {
     return sendLanguageChoice(chatId);
+  }
+
+  if (data === 'social_instagram:start') {
+    userState.set(String(chatId), { mode:'awaiting_social_instagram', expiresAt:Date.now() + 24 * 60 * 60 * 1000 });
+    return sendMessage(chatId, lang === 'ru'
+      ? '<b>Пришлите ваш Instagram</b>\n\nОтправьте @username или ссылку на профиль одним сообщением.'
+      : '<b>Send your Instagram</b>\n\nSend @username or your profile link in one message.', {
+        reply_markup:{ inline_keyboard:[[
+          { text:lang === 'ru' ? 'У меня нет Instagram' : 'I do not have Instagram', callback_data:'social_instagram:none' }
+        ]] }
+      });
+  }
+  if (data === 'social_instagram:none') {
+    const saved = await saveInstagramAccount(from.id, '', 'NO_ACCOUNT');
+    userState.delete(String(chatId));
+    return sendMessage(chatId, saved
+      ? (lang === 'ru' ? '✅ Отметили, что Instagram-аккаунта нет.' : '✅ Saved: no Instagram account.')
+      : (lang === 'ru' ? 'Профиль игрока не найден.' : 'Player profile was not found.'));
+  }
+  if (data === 'social_consent:yes' || data === 'social_consent:no') {
+    const allowed = data.endsWith(':yes');
+    const saved = await savePhotoPublicationConsent(from.id, allowed);
+    if (!saved) return sendMessage(chatId, lang === 'ru' ? 'Профиль игрока не найден.' : 'Player profile was not found.');
+    return sendMessage(chatId, allowed
+      ? (lang === 'ru'
+        ? '✅ Согласие сохранено. PTF сможет использовать ваши фотографии и PTF-аватары в официальных публикациях.'
+        : '✅ Consent saved. PTF may use your photos and PTF avatars in official publications.')
+      : (lang === 'ru'
+        ? '✅ Отказ сохранён. Ваши фотографии и PTF-аватары не будут использоваться в публикациях.'
+        : '✅ Your choice was saved. Your photos and PTF avatars will not be used in publications.'));
   }
 
   // Every old Telegram button follows the same server policy as the mini app.
@@ -1683,6 +1870,40 @@ export async function handleCallback(q) {
   if (data.startsWith('challenge_decline:')) return declineChallenge(chatId, from, lang, data.split(':')[1]);
 
   if (isAdminUser(from.id)) {
+    if (data.startsWith('poster:ready:')) {
+      const rest=data.slice('poster:ready:'.length);
+      const split=rest.indexOf(':');
+      const variant=Number(rest.slice(0,split));
+      const challengeId=rest.slice(split+1);
+      const run=posterRuns.get(challengeId) || {};
+      run.selected=variant;
+      posterRuns.set(challengeId,run);
+      await answerCallbackQuery(q.id,`Вариант ${variant} отмечен готовым`).catch(()=>{});
+      return sendMessage(chatId,`✅ <b>Вариант ${variant} отмечен готовым.</b>\n\nОн остаётся в этом топике, откуда его можно сохранить. Кнопку публикации в Instagram подключим отдельным этапом.`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+    }
+    if (data.startsWith('poster:regen:')) {
+      const rest=data.slice('poster:regen:'.length);
+      const split=rest.indexOf(':');
+      const variant=Number(rest.slice(0,split));
+      const challengeId=rest.slice(split+1);
+      const slot=await findMatchSlot(challengeId);
+      if(!slot)return sendMessage(chatId,'Матч не найден.');
+      await answerCallbackQuery(q.id,'Запустил генерацию').catch(()=>{});
+      return preparePosterForAdmin({chatId,threadId:msg.message_thread_id||'',slot,comment:'',onlyVariant:variant});
+    }
+    if (data.startsWith('poster:comment:')) {
+      const challengeId=data.slice('poster:comment:'.length);
+      const slot=await findMatchSlot(challengeId);
+      if(!slot)return sendMessage(chatId,'Матч не найден.');
+      adminState.set(String(from.id),{mode:'poster_comment',challengeId});
+      return sendMessage(chatId,'<b>Комментарий к постеру</b>\n\nНапишите одним сообщением, что изменить или добавить в промпт: например «полуфинал», «бывший чемпион» или нужное настроение.\n\nОтмена: /cancel',msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+    }
+    if (data.startsWith('poster:prepare:')) {
+      const challengeId=data.slice('poster:prepare:'.length);
+      const slot=await findMatchSlot(challengeId);
+      if(!slot)return sendMessage(chatId,'Матч не найден.');
+      return preparePosterForAdmin({chatId,threadId:msg.message_thread_id||'',slot,comment:''});
+    }
     if (data.startsWith('admin_reply:')) {
       const targetTelegramId = data.split(':')[1];
       adminState.set(String(from.id), { mode:'reply_waiting', targetTelegramId });

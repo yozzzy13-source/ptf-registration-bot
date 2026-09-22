@@ -1,93 +1,311 @@
-// Постер матча — заготовка. Пока НЕ включён: ждём промпт и обкатку.
+// Генерация постера матча через OpenAI Image API.
 //
-// Как договорились:
-//   • картинку 9:16 рисует OpenAI по двум аватаркам игроков и промпту;
-//   • весь текст (логотип, счёт, имена, дивизион, дата) кладём поверх сами —
-//     модели коверкают надписи, а счёт врать не имеет права;
-//   • качество medium, промпт и модель — переменными окружения;
-//   • если у кого-то нет аватарки, генерацию не запускаем вовсе;
-//   • не больше POSTER_DAILY_LIMIT штук в сутки;
-//   • одна повторная попытка при ошибке, дальше карточка матча;
-//   • готовый постер запоминаем по file_id, чтобы не платить дважды.
-//
-// Сейчас модуль всегда отвечает «постера нет» — и лента спокойно уходит с
-// карточкой матча. Когда появится ключ и промпт, включаем POSTER_ENABLED, и
-// цепочка вокруг уже готова: менять придётся только generate().
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL = process.env.POSTER_IMAGE_MODEL || 'gpt-image-2';
+// Два исходных фото используются только как ссылки на личности игроков.
+// Нейросеть создаёт сцену без текста, а сервер накладывает точные имена, счёт,
+// форму, позиции и сменные логотипы. Готовый PNG отправляется прямо в Telegram;
+// Google Drive для ветки постеров не требуется.
+import sharp from 'sharp';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { findApplicantByTelegramId } from './sheets.js';
+import { matchDataForSlot, playerPhotoForPoster } from './matchcard.js';
+
+const WIDTH = 1080;
+const HEIGHT = 1920;
+const VARIANTS = Math.max(1, Math.min(2, Number(process.env.MATCH_POSTER_VARIANTS || 2)));
+const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
+const OPENAI_IMAGE_API_URL = String(process.env.OPENAI_IMAGE_API_URL || 'https://api.openai.com/v1/images/edits').trim();
+const MODEL = process.env.POSTER_IMAGE_MODEL || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
 const QUALITY = process.env.POSTER_QUALITY || 'medium';
-const SIZE = process.env.POSTER_SIZE || '1024x1536';
-const DAILY_LIMIT = Number(process.env.POSTER_DAILY_LIMIT || 50);
-const DEFAULT_PROMPT = 'Two tennis players standing side by side, full body, sports portrait, '
-  + 'warm sunset light, clean neutral studio-style background, no text, no logos, '
-  + 'photorealistic, vertical composition';
+const SIZE = process.env.POSTER_SIZE || '1008x1792';
+const API_TIMEOUT_MS = Math.max(30_000, Number(process.env.POSTER_API_TIMEOUT_MS || 180_000));
+const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+const LOGOS_DIR = path.join(ASSETS_DIR, 'match-card-logos');
 
-// Рубильник отдельный от ключа: ключ может быть заведён для аватарок, а постер
-// при этом ещё не обкатан.
-export function posterEnabled() {
-  return Boolean(OPENAI_API_KEY) && String(process.env.POSTER_ENABLED || '').toLowerCase() === 'on';
+const DEFAULT_PROMPT = `Create a cinematic vertical 9:16 tennis match poster background using the two supplied player portraits as identity references.
+Preserve the exact recognizable facial features of both people. Show both players from approximately the waist or chest upward, with balanced visual weight. Player 1 is on the left and player 2 is on the right.
+Do not show tennis rackets, tennis balls or sports equipment in either player's hands or in the foreground. Keep both players' hands and arms in relaxed, natural, freely chosen positions that may differ between generations. When the source portrait shows a natural shoulder or arm posture, stay close to it where the poster composition permits. Do not force identical, mirrored or staged poses.
+They wear premium modern minimalist tennis apparel in complementary colors chosen from blue, red, white, gray, pink, light blue, beige, yellow, or black.
+The setting is a premium blue hard court at a luxury tennis club in Phuket during a vibrant tropical sunset. The sky has fiery orange, deep violet and soft pink gradients, with palm trees and tropical foliage in the background. Warm low-angle light, realistic skin texture, polished sports lifestyle photography, shallow depth of field.
+Keep the center readable and leave the lower 35 percent visually calm. The lower-middle area will receive a narrow dark translucent information panel, and the bottom 15 percent must remain especially clean for real organization and sponsor logos added later by code. Do not generate any text, letters, logos, scoreboards, watermarks, trophies or fake sponsor marks.`;
+
+const cleanEnvPrompt = value => String(value || '').replace(/\\n/g, '\n').trim();
+export function posterPromptTemplate() {
+  return cleanEnvPrompt(process.env.MATCH_POSTER_PROMPT)
+    || cleanEnvPrompt(process.env.POSTER_PROMPT)
+    || DEFAULT_PROMPT;
 }
-export function posterPrompt() { return process.env.POSTER_PROMPT || DEFAULT_PROMPT; }
+export function posterPromptSource() {
+  if (cleanEnvPrompt(process.env.MATCH_POSTER_PROMPT)) return 'MATCH_POSTER_PROMPT';
+  if (cleanEnvPrompt(process.env.POSTER_PROMPT)) return 'POSTER_PROMPT';
+  return 'built_in_default';
+}
+
+export function posterEnabled() { return Boolean(OPENAI_API_KEY); }
 export function posterSettings() {
-  return { model: MODEL, quality: QUALITY, size: SIZE, dailyLimit: DAILY_LIMIT, enabled: posterEnabled() };
+  return {
+    apiConnected:posterEnabled(),
+    model:MODEL,
+    quality:QUALITY,
+    size:SIZE,
+    output:{ width:WIDTH, height:HEIGHT, aspectRatio:'9:16' },
+    variants:VARIANTS,
+    promptSource:posterPromptSource()
+  };
 }
 
-// Расход за сутки. Хранится в памяти: перезапуск обнуляет, и это осознанно —
-// лимит нужен от случайного цикла, а не для бухгалтерии.
-let spent = { day: '', count: 0 };
-function today() { return new Date().toISOString().slice(0, 10); }
-export function posterQuotaLeft() {
-  if (spent.day !== today()) spent = { day: today(), count: 0 };
-  return Math.max(0, DAILY_LIMIT - spent.count);
+function tokenMap(match={}, comment='', variant=1) {
+  return {
+    player_1:String(match.winner || ''),
+    player_2:String(match.loser || ''),
+    winner:String(match.winner || ''),
+    loser:String(match.loser || ''),
+    score:String(match.score || ''),
+    division:String(match.division || ''),
+    season:String(match.season || ''),
+    comment:String(comment || ''),
+    variant:String(variant)
+  };
 }
-function spend() {
-  if (spent.day !== today()) spent = { day: today(), count: 0 };
-  spent.count += 1;
+function fillTokens(template, values) {
+  return String(template || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi,
+    (whole,key) => Object.prototype.hasOwnProperty.call(values,key.toLowerCase()) ? values[key.toLowerCase()] : whole);
+}
+const VARIANT_NOTES = [
+  'Composition option 1: balanced face-off, both players equally prominent, calm premium editorial framing, with different relaxed arm positions and no sports equipment.',
+  'Composition option 2: slightly more dynamic diagonal framing and stronger sunset atmosphere, with different relaxed arm positions, no sports equipment, and the clear lower panel and sponsor areas preserved.'
+];
+
+export function buildPosterPrompt(match={}, { comment='', variant=1 }={}) {
+  const n = Math.max(1, Math.min(VARIANTS, Number(variant || 1)));
+  const values = tokenMap(match, comment, n);
+  const base = fillTokens(posterPromptTemplate(), values);
+  const context = [
+    `Reference assignment: player 1 is ${values.player_1 || 'the first supplied portrait'}; player 2 is ${values.player_2 || 'the second supplied portrait'}.`,
+    VARIANT_NOTES[n - 1] || VARIANT_NOTES[0],
+    comment ? `Organizer direction: ${comment}` : '',
+    'Mandatory composition constraints: no tennis rackets, balls or equipment; hands and arms remain relaxed and naturally positioned; keep the bottom 15 percent clean for sponsor and organization logos.',
+    'The image generator creates only the photographic scene. Exact names, score, rankings, form and organization logos are added later by code.'
+  ].filter(Boolean).join('\n');
+  return base + '\n\n' + context;
 }
 
-// Главная точка входа. Возвращает { buffer, ms } или null — «постера нет,
-// отправляй карточку».
-export async function renderMatchPoster(match = {}, { photos = [] } = {}) {
-  if (!posterEnabled()) return null;
-  if (photos.length < 2 || photos.some(p => !p)) return null;   // без двух лиц не начинаем
-  if (posterQuotaLeft() <= 0) {
-    console.warn('poster: суточный лимит исчерпан');
-    return null;
+const consentValue = row => String(row?.photo_publication_consent || '').trim().toUpperCase();
+// По текущей политике блокирует только явный отказ. Пустое поле или ещё не
+// полученный ответ считаются разрешением.
+export function posterConsentAllowed(value='') {
+  return String(value || '').trim().toUpperCase() !== 'NO';
+}
+export async function preparePosterJob(slot={}, {
+  winnerFirstScore, season='', comment='', variants=VARIANTS
+}={}) {
+  const match = await matchDataForSlot(slot, { winnerFirstScore, season });
+  const players = await Promise.all([
+    findApplicantByTelegramId(match.winnerId).catch(() => null),
+    findApplicantByTelegramId(match.loserId).catch(() => null)
+  ]);
+  const consent = players.map((row,index) => ({
+    telegram_id:String((index ? match.loserId : match.winnerId) || ''),
+    name:String((index ? match.loser : match.winner) || ''),
+    value:consentValue(row) || 'NOT_ANSWERED',
+    allowed:posterConsentAllowed(consentValue(row))
+  }));
+  const count = Math.max(1, Math.min(2, Number(variants || VARIANTS)));
+  const prompts = Array.from({length:count},(_,i)=>({
+    variant:i + 1,
+    prompt:buildPosterPrompt(match,{comment,variant:i + 1})
+  }));
+  const allowed = consent.every(x => x.allowed);
+  return {
+    schema_version:1,
+    job_id:`poster-${String(slot.challenge_id || slot.match_id || 'match')}-${Date.now()}`,
+    match_id:String(slot.challenge_id || slot.match_id || ''),
+    created_at:new Date().toISOString(),
+    status:allowed ? (posterEnabled() ? 'ready_to_generate' : 'api_not_configured') : 'blocked_consent',
+    api_connected:posterEnabled(),
+    prompt_source:posterPromptSource(),
+    settings:posterSettings(),
+    comment:String(comment || '').trim(),
+    match,
+    consent,
+    prompts,
+    variants:prompts.map(p=>({ variant:p.variant, status:'ready_to_generate', telegram_file_id:'' }))
+  };
+}
+
+// Вызывается только будущим API-адаптером. Повторно проверяет согласие перед
+// чтением файлов, поэтому фотографии не уйдут во внешний сервис после отказа.
+export async function loadPosterSourcePhotos(job={}) {
+  if (!Array.isArray(job.consent) || !job.consent.every(x => x.allowed)) {
+    throw new Error('poster_consent_required');
   }
-  const started = Date.now();
-  try {
-    const buffer = await generate(photos);
-    spend();
-    return { buffer, ms: Date.now() - started };
-  } catch (e) {
-    console.error('poster: первая попытка не удалась:', e.message);
+  const match = job.match || {};
+  const photos = await Promise.all([
+    playerPhotoForPoster({ telegramId:match.winnerId, name:match.winner }),
+    playerPhotoForPoster({ telegramId:match.loserId, name:match.loser })
+  ]);
+  if (photos.some(p => !p)) throw new Error('poster_source_photo_missing');
+  return photos;
+}
+
+function esc(value='') {
+  return String(value).replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;' }[m]));
+}
+function fit(value='', max=18) {
+  const s=String(value||'').trim();
+  return s.length<=max?s:s.slice(0,Math.max(1,max-1))+'…';
+}
+function positionData(meta) {
+  const pos=meta?.position||{};
+  const value=Number.isFinite(pos.after)?pos.after:(Number.isFinite(pos.before)?pos.before:null);
+  if(value===null)return null;
+  if(Number.isFinite(pos.before)&&Number.isFinite(pos.after)&&pos.before!==pos.after) {
+    const up=pos.after<pos.before;
+    return { value, delta:Math.abs(pos.before-pos.after), up };
+  }
+  return { value, delta:0, up:null };
+}
+function positionSvg(meta, center=0, y=0) {
+  const data=positionData(meta);
+  if(!data)return '';
+  const rankX=data.delta?center-42:center;
+  const rank=`<text x="${rankX}" y="${y}" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="27" font-weight="900" fill="#f4f7fb">#${data.value}</text>`;
+  if(!data.delta)return rank;
+  const bg=data.up?'rgba(143,191,154,.16)':'rgba(194,105,94,.15)';
+  const line=data.up?'rgba(143,191,154,.38)':'rgba(194,105,94,.36)';
+  const fg=data.up?'#8FBF9A':'#C2695E';
+  const arrow=data.up?'▲':'▼';
+  return `${rank}<rect x="${center+5}" y="${y-27}" width="74" height="34" rx="17" fill="${bg}" stroke="${line}"/>
+    <text x="${center+42}" y="${y-4}" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="17" font-weight="900" fill="${fg}">${arrow} ${data.delta}</text>`;
+}
+function formSvg(items=[], center=0, y=0) {
+  const list=(Array.isArray(items)?items:[]).slice(-5).map(x=>String(x||'').toUpperCase()).filter(x=>x==='W'||x==='L');
+  const gap=34,start=center-(list.length-1)*gap/2;
+  return list.map((v,i)=>{
+    const win=v==='W',x=start+i*gap;
+    return `<circle cx="${x}" cy="${y}" r="13" fill="${win?'#173d35':'#3a242b'}" stroke="${win?'#35d0a0':'#ef6d7a'}"/>
+      <text x="${x}" y="${y+5}" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="13" font-weight="800" fill="${win?'#7ee8c4':'#ff9ca5'}">${v}</text>`;
+  }).join('');
+}
+async function posterLogoLayers() {
+  let names=[];
+  try { names=fs.readdirSync(LOGOS_DIR).filter(n=>/\.(png|webp|svg)$/i.test(n)).sort().slice(0,4); }
+  catch { return []; }
+  const rendered=[];
+  for(const name of names) {
     try {
-      const buffer = await generate(photos);
-      spend();
-      return { buffer, ms: Date.now() - started };
-    } catch (e2) {
-      console.error('poster: вторая попытка тоже:', e2.message);
-      return null;
-    }
+      const input=await sharp(path.join(LOGOS_DIR,name)).resize({width:210,height:88,fit:'inside',withoutEnlargement:true}).png().toBuffer();
+      const meta=await sharp(input).metadata();
+      rendered.push({input,width:meta.width||230,height:meta.height||100});
+    } catch(e) { console.error('poster logo failed:',name,e.message); }
+  }
+  const gap=30,total=rendered.reduce((s,x)=>s+x.width,0)+Math.max(0,rendered.length-1)*gap;
+  let left=Math.round((WIDTH-total)/2);
+  return rendered.map(item=>{const layer={input:item.input,left,top:1772+Math.round((88-item.height)/2)};left+=item.width+gap;return layer;});
+}
+
+// Накладывает точный текст и логотипы на любой будущий AI-фон. Эту функцию
+// можно проверять и использовать уже сейчас — сетевого доступа она не требует.
+export async function composeMatchPoster(backgroundBuffer, match={}) {
+  if (!backgroundBuffer) throw new Error('poster_background_missing');
+  const score=String(match.score||'').replace(/\s+/g,' ').trim();
+  const division=[match.division,match.season?`Season ${match.season}`:''].filter(Boolean).join(' · ');
+  const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#06101b" stop-opacity=".12"/><stop offset=".58" stop-color="#06101b" stop-opacity=".25"/><stop offset="1" stop-color="#06101b" stop-opacity=".88"/></linearGradient></defs>
+    <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
+    <text x="540" y="88" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="28" font-weight="700" letter-spacing="7" fill="#f4f7fb">PHUKET TENNIS FAMILY</text>
+    <rect x="92" y="1030" width="896" height="558" rx="38" fill="#07131f" fill-opacity=".84" stroke="#ffffff" stroke-opacity=".22"/>
+    <text x="540" y="1090" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="23" font-weight="700" letter-spacing="3" fill="#d6dde7">${esc(division)}</text>
+    <text x="292" y="1175" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="40" font-weight="800" fill="#ffffff">${esc(fit(match.winner,17))}</text>
+    <text x="788" y="1175" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="40" font-weight="800" fill="#ffffff">${esc(fit(match.loser,17))}</text>
+    <text x="540" y="1288" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="72" font-weight="900" letter-spacing="2" fill="#f4b84a">${esc(score)}</text>
+    ${positionSvg(match.winnerMeta,292,1387)}
+    ${positionSvg(match.loserMeta,788,1387)}
+    ${formSvg(match.winnerMeta?.form,292,1452)}
+    ${formSvg(match.loserMeta?.form,788,1452)}
+    ${match.label?`<text x="540" y="1535" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="19" font-weight="700" letter-spacing="4" fill="#f4b84a">${esc(match.label)}</text>`:''}
+  </svg>`);
+  const logos=await posterLogoLayers();
+  return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})
+    .composite([{input:svg,left:0,top:0},...logos]).png({compressionLevel:6}).toBuffer();
+}
+
+// Генерирует фон через OpenAI, после чего сервер сам накладывает точный текст.
+export async function renderMatchPoster(slot={}, options={}) {
+  const job=await preparePosterJob(slot,options);
+  if (job.status === 'blocked_consent') return { ...job, buffers:[] };
+  const generated=await generatePosterBackgrounds(job);
+  const buffers=[];
+  for (const item of generated) {
+    buffers.push({ variant:item.variant, buffer:await composeMatchPoster(item.buffer,job.match) });
+  }
+  return { ...job, status:'ready', buffers };
+}
+
+async function imageReference(buffer) {
+  if (!buffer?.length) throw new Error('poster_source_photo_missing');
+  // Нормализуем EXIF и ограничиваем вес запроса. Финальный PNG всё равно
+  // собирается отдельно в точном размере 1080×1920.
+  const normalized=await sharp(buffer).rotate().resize(1024,1024,{
+    fit:'inside',withoutEnlargement:true
+  }).jpeg({quality:92,mozjpeg:true}).toBuffer();
+  return { image_url:`data:image/jpeg;base64,${normalized.toString('base64')}` };
+}
+
+function openAiError(json,status) {
+  const message=String(json?.error?.message || json?.message || '').trim();
+  return message || `OpenAI Image API ответил ${status}`;
+}
+
+async function generateOneBackground(prompt, imageReferences) {
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),API_TIMEOUT_MS);
+  try {
+    const response=await globalThis.fetch(OPENAI_IMAGE_API_URL,{
+      method:'POST',
+      headers:{
+        Authorization:`Bearer ${OPENAI_API_KEY}`,
+        'Content-Type':'application/json'
+      },
+      body:JSON.stringify({
+        model:MODEL,
+        prompt,
+        images:imageReferences,
+        input_fidelity:'high',
+        quality:QUALITY,
+        size:SIZE,
+        n:1,
+        output_format:'png',
+        background:'opaque'
+      }),
+      signal:controller.signal
+    });
+    const json=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(openAiError(json,response.status));
+    const b64=String(json?.data?.[0]?.b64_json || '');
+    if(!b64)throw new Error('OpenAI Image API не вернул изображение');
+    return Buffer.from(b64,'base64');
+  } catch(error) {
+    if(error?.name === 'AbortError')throw new Error(`OpenAI Image API не ответил за ${Math.round(API_TIMEOUT_MS/1000)} с`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-// Сам вызов провайдера. Ровно та же форма, что у генератора аватарок, только
-// картинок на входе две. Включится, когда появятся ключ и промпт.
-async function generate(photos) {
-  const form = new FormData();
-  form.append('model', MODEL);
-  form.append('prompt', posterPrompt());
-  form.append('size', SIZE);
-  form.append('quality', QUALITY);
-  form.append('n', '1');
-  for (const p of photos) form.append('image[]', new Blob([p], { type: 'image/jpeg' }), 'player.jpg');
-  const res = await fetch('https://api.openai.com/v1/images/edits', {
-    method: 'POST', headers: { Authorization: `Bearer ${OPENAI_API_KEY}` }, body: form
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json?.error?.message || `OpenAI ответил ${res.status}`);
-  const b64 = json?.data?.[0]?.b64_json;
-  if (!b64) throw new Error('OpenAI не вернул изображение');
-  return Buffer.from(b64, 'base64');
+export async function generatePosterBackgrounds(job={}, photos=null) {
+  if(!posterEnabled())throw new Error('OPENAI_API_KEY не задан');
+  if(!Array.isArray(job.consent) || !job.consent.every(x=>x.allowed))throw new Error('poster_consent_required');
+  const sourcePhotos=Array.isArray(photos) && photos.length ? photos : await loadPosterSourcePhotos(job);
+  if(sourcePhotos.length < 2)throw new Error('poster_source_photo_missing');
+  const imageReferences=await Promise.all(sourcePhotos.slice(0,2).map(imageReference));
+  const result=[];
+  // Последовательные запросы не упираются в небольшой IPM-лимит аккаунта.
+  for(const item of (job.prompts || [])) {
+    const buffer=await generateOneBackground(String(item.prompt || ''),imageReferences);
+    result.push({variant:Number(item.variant || result.length+1),buffer});
+  }
+  if(!result.length)throw new Error('poster_prompts_missing');
+  return result;
 }

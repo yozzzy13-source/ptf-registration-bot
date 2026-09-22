@@ -18,6 +18,8 @@ BOT_TOKEN
 PUBLIC_URL
 SPREADSHEET_ID
 GOOGLE_CREDENTIALS
+GOOGLE_DRIVE_OAUTH_CREDENTIALS
+MATCH_CARDS_DRIVE_FOLDER_ID
 CLUB_CHAT_URL
 DEFAULT_USDT_AMOUNT
 TIMEZONE
@@ -34,6 +36,8 @@ RESULTS_TOPIC_ID=5
 RESULTS_CONFIRM_IN_TOPIC=true
 RESULTS_BROADCAST_ENABLED=true
 RESULTS_BROADCAST_DELAY_MS=700
+GOOGLE_DRIVE_OAUTH_CREDENTIALS=<JSON printed by npm run drive:authorize>
+MATCH_CARDS_DRIVE_FOLDER_ID=<optional fallback for a Shared Drive>
 RESULTS_MEDIA_PAIR_WINDOW_MS=180000
 RESULTS_MEDIA_WAIT_MS=120000
 RESULTS_WEBSITE_BASE_URL=https://www.phukettennis.com
@@ -57,6 +61,38 @@ The same `GOOGLE_CREDENTIALS` service account must have Editor access to:
 - main results spreadsheet from `RESULTS_SHEET_ID`
 - player profile spreadsheet from `RESULTS_PLAYER_PROFILES_SPREADSHEET_ID`
 - all four division spreadsheets
+
+A service account cannot own files in a personal My Drive. Connect the Drive
+owner once with a Google Cloud **Desktop app** OAuth client:
+
+```bash
+npm run drive:authorize -- C:\\path\\to\\desktop-oauth-client.json
+```
+
+Open the printed URL, sign in as the Drive owner, then copy the single printed
+`GOOGLE_DRIVE_OAUTH_CREDENTIALS` variable to Railway and restart the service.
+The helper creates `PTF Match Cards Archive` in My Drive and updates
+`Settings.match_cards_drive_folder_id` itself. The folder may then be moved in
+the Drive interface without changing its id. Publish the OAuth consent screen
+for this private production app so its refresh token does not expire after the
+testing period.
+
+For a Google Workspace Shared Drive, the existing service account may be used
+instead: grant it access and set `MATCH_CARDS_DRIVE_FOLDER_ID` or the Settings
+key to that Shared Drive folder.
+
+The configured folder is the root of the automatic publishing archive. The bot creates:
+
+    Season <N>/<YYYY-MM>/Publishing/Match Cards/*_match.png
+    Season <N>/<YYYY-MM>/Publishing/Queue/*.json
+
+The PNG is the single 1080×1350 result card used by Telegram and the future
+Instagram carousel. Each JSON file is a versioned publication event: it points
+to the card and reserves the future 1080×1920 GPT Image poster output. Drop up
+to four transparent PNG, WebP, or SVG logos into assets/match-card-logos;
+files are picked up alphabetically on the next render without a code change.
+The same folder id can be set without a redeploy in `Settings` under
+`match_cards_drive_folder_id`; the sheet value takes priority over the environment variable.
 
 ## Webhook
 

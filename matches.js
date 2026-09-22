@@ -15,9 +15,9 @@ import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
 import { slotScope } from './access.js';
-import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL } from './config.js';
+import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL, MATCH_CARDS_DRIVE_FOLDER_ID } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
-import { getAdminChatId, getOrCreatePlayerTopic } from './admin.js';
+import { getAdminChatId, getOrCreatePlayerTopic, notifyAdmin } from './admin.js';
 
 const MATCH_BUTTON_EN = {"🎾 Играю":"🎾 I’m in","📲 Забронировать корт":"📲 Book court","💬 Написать сопернику":"💬 Message opponent","👤 Профиль игрока":"👤 Player profile","🎾 Мои матчи":"🎾 My matches","✅ Выбрать время и принять":"✅ Choose time and respond","❌ Отклонить":"❌ Decline","📲 Отменить бронь корта":"📲 Cancel court booking","🎾 Создать окно":"🎾 Create slot","✅ Принять":"✅ Accept","🕐 Другое время":"🕐 Different time","📍 Другой корт":"📍 Different court","✅ Корт подтвердил":"✅ Court confirmed","🕐 Изменить время":"🕐 Change time","📲 Открыть WhatsApp":"📲 Open WhatsApp","📅 Добавить в календарь":"📅 Add to calendar","🎾 Матчи":"🎾 Matches","✅ Подходит":"✅ Works for me","❌ Не могу":"❌ Cannot play","🕐 Предложить снова":"🕐 Propose again","✅ Подтверждаю":"✅ Confirm","❌ Не согласен":"❌ Disagree","📅 Обновить в календаре":"📅 Update calendar","🕐 Предложить другое время":"🕐 Suggest another time","📝 Внести результат":"📝 Submit result","⏸ Матч не доигран":"⏸ Match unfinished","✅ Матч уже доигран":"✅ Match completed","✅ Записать всё равно":"✅ Record anyway","✖️ Отклонить":"✖️ Reject","📝 Внести заново":"📝 Resubmit","✖️ Отменить запрос":"✖️ Cancel request","✖️ Отменить матч":"✖️ Cancel match"};
 async function sendMessage(chatId,text,opts={}) {
@@ -798,7 +798,7 @@ ${ru?"Если всё верно — подтвердите. Если нет —
     return sendPhoto(to.id, slot.result_photo_file_id, { caption: text, reply_markup: kb })
       .catch(async e => { console.error('result photo failed:', e.message); return sendMessage(to.id, text, { reply_markup: kb }); });
   }
-  return sendMessage(to.id, text, { reply_markup: kb }).catch(e => console.error('verify request failed:', e.message));
+  return sendMessage(to.id, text, { reply_markup: kb });
 }
 
 // Междивизионный матч: в зачёт он не идёт, поэтому счёт никуда не записан и ждёт
@@ -965,13 +965,12 @@ async function resultMedia(slot) {
     const { cardForSlot } = await import('./matchcard.js');
     const season = String(slot.season || await getSetting('season_number').catch(() => '') || '').trim();
     const buffer = await cardForSlot(slot, { winnerFirstScore, season });
-    return { buffer, kind: 'card' };
+    return { buffer, season, kind:'card' };
   } catch (e) {
     console.error('match card failed:', e.message);
-    return { kind: 'none' };
+    return { kind:'none' };
   }
 }
-
 // Перевыпуск уже опубликованной карточки результата.
 //
 // Нужен, когда сообщение ушло с испорченной картинкой или старыми ссылками:
@@ -1042,6 +1041,16 @@ export async function broadcastResult(slot) {
   const { text, reply_markup } = cards.en;
   const media = await resultMedia(slot);
   const extraPhoto = slot.result_photo_file_id || '';
+  const rootFolderId = String(await getSetting('match_cards_drive_folder_id').catch(() => '') || MATCH_CARDS_DRIVE_FOLDER_ID || '').trim();
+  // Drive не задерживает Telegram-ленту: загрузка идёт параллельно рассылке,
+  // но перед записью журнала мы всё же дожидаемся результата.
+  const archivePromise = !rootFolderId
+    ? Promise.resolve({ saved:false, reason:'not_configured' })
+    : import('./matcharchive.js').then(({ archiveMatchCards }) => archiveMatchCards(slot, {
+        rootFolderId,
+        season:media.season,
+        cardBuffer:media.buffer
+      }));
 
   // Первая отправка загружает файл, остальные — уже по file_id.
   const sendWith = async (chatId, caption, opts) => {
@@ -1101,9 +1110,27 @@ export async function broadcastResult(slot) {
     }
     });
   } catch (e) { console.error('results broadcast failed:', e.message); }
+  let archive;
+  try { archive = await archivePromise; }
+  catch (e) {
+    console.error('match cards Drive archive failed:', e.message);
+    archive = { saved:false, reason:e.message };
+  }
+  const posterId=String(slot.challenge_id || slot.match_id || '');
+  if (posterId) {
+    const driveLine=archive?.card?.url
+      ? `\n<a href="${escapeHtml(archive.card.url)}">Карточка на Google Drive</a>`
+      : '';
+    await notifyAdmin(`<b>🎨 Постер матча</b>\n\n${escapeHtml(slot.from_name || 'Player 1')} — ${escapeHtml(slot.to_name || 'Player 2')}\nСчёт: <b>${escapeHtml(winnerFirstScore(slot))}</b>${driveLine}\n\nМожно сразу создать два варианта постера через OpenAI. Готовые PNG придут в этот админский топик.`, {
+      reply_markup:{ inline_keyboard:[
+        [{ text:'🎨 Создать 2 варианта', callback_data:`poster:prepare:${posterId}` }],
+        [{ text:'✍️ Добавить комментарий', callback_data:`poster:comment:${posterId}` }]
+      ] }
+    }).catch(e => console.error('poster admin offer failed:',e.message));
+  }
   await logMatchEvent('result_broadcast', slot, { telegram_id: slot.result_by, name: '' },
-    `лента: ${chat ? 'группа + ' : ''}личных ${sent}, ошибок ${failed}`);
-  return { sent, failed, group: Boolean(chat) };
+    `лента: ${chat ? 'группа + ' : ''}личных ${sent}, ошибок ${failed}; Drive: ${archive.saved ? archive.path : archive.reason}`);
+  return { sent, failed, group: Boolean(chat), archive };
 }
 
 // ---------------------------------------------------------------------------
@@ -1161,3 +1188,5 @@ export async function matchContact(slot,viewerId) {
  return {id:opp.id,name:opp.name,username,url:username?`https://t.me/${username}`:`tg://user?id=${encodeURIComponent(opp.id)}`};
 }
 async function contactRow(slot,id,lang) {const c=await matchContact(slot,id);return c?[{text:lang==="ru"?"💬 Написать":"💬 Message",url:c.url}]:[];}
+
+

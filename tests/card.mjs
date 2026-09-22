@@ -6,7 +6,10 @@ import sharp from 'sharp';
 // Real image renderer, mocked portrait sources: no Google or Telegram access.
 const red = await sharp({create:{width:400,height:400,channels:3,background:'#ef3434'}}).png().toBuffer();
 const blue = await sharp({create:{width:400,height:400,channels:3,background:'#3454ef'}}).png().toBuffer();
-let lookups = [], downloads = [], failAvatar = false;
+const green = await sharp({create:{width:400,height:400,channels:4,background:'#24b56a'}}).png().toBuffer();
+let lookups = [], downloads = [], failAvatar = false, logoFiles = [];
+const sharpMock=(input,...args)=>sharp(typeof input==='string'&&input.includes('match-card-logos')?green:input,...args);
+sharpMock.strategy=sharp.strategy;
 const context = vm.createContext({Buffer,console,Map,process:{env:{}},fetch:async url=>{
   downloads.push(url);
   assert.equal(url,'https://portraits.test/master.png');
@@ -16,7 +19,7 @@ const mock = values => new vm.SyntheticModule(Object.keys(values),function(){
   for(const [key,value] of Object.entries(values)) this.setExport(key,value);
 },{context});
 const deps = {
-  sharp:mock({default:sharp}),
+  sharp:mock({default:sharpMock}),
   './telegram.js':mock({getFileBuffer:async id=>{
     lookups.push(id); if(failAvatar)throw Error('Unavailable avatar');return {buffer:red};
   }}),
@@ -24,7 +27,7 @@ const deps = {
     findApplicantByTelegramId:async id=>({avatar_file_id:id==='1'?'applicants-avatar':''}),
     getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']])
   }),
-  'node:fs':mock({default:{readFileSync:()=>Buffer.from('test-font'),writeFileSync:()=>{},mkdtempSync:p=>String(p)+'tmp'}}),
+  'node:fs':mock({default:{readdirSync:dir=>String(dir).includes('match-card-logos')?logoFiles:[],readFileSync:()=>Buffer.from('test-font'),writeFileSync:()=>{},mkdtempSync:p=>String(p)+'tmp'}}),
   'node:path':mock({default:{join:(...parts)=>parts.join('/'),dirname:x=>x}}),
   'node:os':mock({default:{tmpdir:()=>'/tmp'}}),
   'node:url':mock({fileURLToPath:x=>String(x)})
@@ -38,24 +41,37 @@ const match={winner:'Alice One',loser:'Bob Two',winnerId:'1',loserId:'2',score:'
   winnerMeta:{position:{before:3,after:1},fp:18,form:['L','W','W','W','W']},
   loserMeta:{position:{before:2,after:2},fp:6,form:['W','L','W','L']}};
 const png=await card.renderMatchCard(match);
+if(process.argv[2]) await fs.writeFile(process.argv[2],png);
 const meta=await sharp(png).metadata();
-assert.equal(meta.width,1200);assert.equal(meta.height,650);assert.equal(meta.format,'png');
+assert.equal(meta.width,1080);assert.equal(meta.height,1148);assert.equal(meta.format,'png');
 assert.deepEqual(lookups,['applicants-avatar']);
 assert.deepEqual(downloads,['https://portraits.test/master.png']);
 const pixel=async (img,left,top)=>[...await sharp(img).extract({left,top,width:1,height:1}).removeAlpha().raw().toBuffer()];
-assert.deepEqual(await pixel(png,280,250),[239,52,52],'Applicants portrait takes priority');
-assert.deepEqual(await pixel(png,920,250),[52,84,239],'Master photo is second choice');
-// Рамки — те же, что у чемпиона и финалиста на главной: золото и серебро.
-const near=(got,want,tol=18)=>got.every((v,i)=>Math.abs(v-want[i])<=tol);
-assert.ok(near(await pixel(png,330,185),[201,167,106]),'Winner wears the champion gold ring');
-assert.ok(near(await pixel(png,870,186),[154,148,139]),'Loser wears the runner-up silver ring');
+assert.deepEqual(await pixel(png,225,390),[239,52,52],'Applicants portrait takes priority');
+assert.deepEqual(await pixel(png,855,390),[52,84,239],'Master photo is second choice');
 card.forgetPhotoCache();failAvatar=true;downloads=[];
 const fallback=await card.renderMatchCard({...match,loser:'No Portrait',loserId:''});
 assert.deepEqual(downloads,['https://portraits.test/master.png']);
-assert.deepEqual(await pixel(fallback,280,250),[52,84,239],'Broken Applicants avatar falls back to Master');
-assert.equal((await sharp(fallback).metadata()).width,1200,'Missing photo renders initials');
-// Без контекста матча карточка обязана собираться без колонок, а не падать.
+assert.deepEqual(await pixel(fallback,225,390),[52,84,239],'Broken Applicants avatar falls back to Master');
+assert.equal((await sharp(fallback).metadata()).width,1080,'Missing photo renders initials');
 const bare=await card.renderMatchCard({...match,winnerMeta:null,loserMeta:null});
-assert.equal((await sharp(bare).metadata()).height,650,'Card without stats keeps the same canvas');
+assert.equal((await sharp(bare).metadata()).height,1148,'Card without stats keeps the same canvas');
+failAvatar=false;downloads=[];lookups=[];card.forgetPhotoCache();
+const instagram=await card.renderInstagramMatchCard(match);
+const instagramMeta=await sharp(instagram).metadata();
+assert.equal(instagramMeta.width,1080);assert.equal(instagramMeta.height,1148);assert.equal(instagramMeta.format,'png');
+assert.deepEqual(png,instagram,'Telegram and Instagram use one identical card');
+logoFiles=['01-partner.png'];
+const branded=await card.renderMatchCard(match);
+assert.deepEqual(await pixel(branded,540,1048),[36,181,106],'Transparent partner files are picked up without a code change');
+logoFiles=[];
+const withoutFantasy=await card.renderInstagramMatchCard({
+  ...match,
+  winnerMeta:{...match.winnerMeta,fp:null},
+  loserMeta:{...match.loserMeta,fp:null}
+});
+assert.deepEqual(instagram,withoutFantasy,'Unified card ignores Fantasy Points');
+assert.ok(!(await fs.readFile(new URL('../matchcard.js',import.meta.url),'utf8')).includes('>WINNER<'),'Winner label is absent');
 if(process.argv[2]) await fs.writeFile(process.argv[2],png);
-console.log('PASS: 14 image checks, using the real renderer with mocked portrait sources.');
+if(process.argv[3]) await fs.writeFile(process.argv[3],instagram);
+console.log('PASS: unified 1080x1148 match card, portrait fallbacks, no Fantasy Points or Winner label.');
