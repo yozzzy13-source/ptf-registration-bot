@@ -211,7 +211,7 @@ var T={
       sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
       manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
       manualHint:'Выберите соперника, дату и корт — счёт так же уйдёт ему на подтверждение.',courtManual:'Например, Rawai — можно не указывать',
-      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',needWinner:'Выберите победителя',
+      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
       vs:'против',back:'⬅️ Назад',
       tBook:'Бронь корта',bookTitle:'Забронировать корт',
       bookHint:'Это отдельная бронь, не привязанная к матчу лиги. Отметьте площадки — бот подготовит по сообщению на каждую, а отправите вы сами из WhatsApp.',
@@ -254,7 +254,7 @@ var T={
       sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
       manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
       manualHint:'Pick the opponent, date and court — the score goes to them for confirmation too.',courtManual:'For example, Rawai — optional',
-      pendingRes:'awaiting confirmation',yourRes:'confirm the score',needWinner:'Pick the winner',
+      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
       vs:'vs',back:'⬅️ Back',
       tBook:'Book a court',bookTitle:'Book a court',
       bookHint:'A standalone booking, not tied to a league match. Tick the venues — the bot prepares one message per venue, and you send them yourself from WhatsApp.',
@@ -529,6 +529,15 @@ function historyBlock(){
     +(list.length>histLimit?'<button class="mini" style="width:100%;padding:12px;margin-top:8px" onclick="moreHist()">'+esc(X.histMore)+'</button>':'');
 }
 
+function adminMatchTime(s){
+  var dates=(Array.isArray(s.dates)?s.dates:[]).slice().sort();
+  var date=String(s.agreed_date||dates[0]||'').trim();
+  var time=String(s.agreed_time||s.time_from||'00:00').trim()||'00:00';
+  var value=date?Date.parse(date+'T'+time+':00+07:00'):NaN;
+  if(!isNaN(value))return value;
+  var created=Date.parse(String(s.created_at||''));
+  return isNaN(created)?Number.MAX_SAFE_INTEGER:created;
+}
 function adminQueryChanged(el){adminQuery=el.value;adminSugOpen=!!el.value.trim();renderAdmin();var input=$('adminSearch');if(input){input.focus();try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}}
 function adminPickName(name){adminQuery=name;adminSugOpen=false;renderAdmin()}
 function adminSearchBlur(){setTimeout(function(){adminSugOpen=false;renderAdmin()},150)}
@@ -541,8 +550,25 @@ function renderAdmin(){
   var nameSugs=(adminSugOpen&&qSug)?adminPlayers.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qSug)>=0}).slice(0,6):[];
   var controls='<div class="card"><h3 style="margin:0 0 10px;font-size:17px">'+esc(X.adminTitle)+'</h3><div class="row"><select onchange="adminDiv=this.value;renderAdmin()"><option value="">'+esc(X.adminAll)+'</option>'+divisions.map(function(d){return '<option value="'+esc(d)+'"'+(adminDiv===d?' selected':'')+'>'+esc(d)+'</option>'}).join('')+'</select><div class="searchwrap"><input id="adminSearch" value="'+esc(adminQuery)+'" placeholder="'+esc(X.adminSearch)+'" autocomplete="off" oninput="adminQueryChanged(this)" onblur="adminSearchBlur()">'
     +(nameSugs.length?'<div class="psug">'+nameSugs.map(function(p){return '<button type="button" class="pi" onmousedown="event.preventDefault()" onclick="adminPickName(\''+esc(String(p.name||'').replace(/\'/g,"\\'"))+'\')">'+esc(p.name)+'</button>'}).join('')+'</div>':'')+'</div></div></div>';
-  var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){return (!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)});
-  var cards=list.map(function(s){var status=String(s.status||'').toLowerCase(),label=status==='accepted'?X.adminAccepted:status==='pending'?X.adminPending:X.adminOpen;var to=s.to_name||X.adminGroup;var dates=s.agreed_date?[s.agreed_date]:(s.dates||[]);var time=s.agreed_time||s.time_from||'';var court=s.agreed_court||(s.courts||[]).join(' · ');var acts='<div class="acts">';if(s.from_contact&&s.from_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.from_contact.url)+'\')">💬 '+esc(s.from_name||'1')+'</button>';if(s.to_contact&&s.to_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.to_contact.url)+'\')">💬 '+esc(s.to_name||'2')+'</button>';acts+='</div>';return '<div class="slot"><div class="who">'+esc(s.from_name||'—')+' → '+esc(to)+'</div><div class="meta"><span class="pill open">'+esc(label)+'</span> '+esc(s.division||'')+(s.group?' · '+esc(L?'Группа ':'Group ')+esc(s.group):'')+'</div><div class="when">📅 <b>'+dates.map(fmtDay).map(esc).join(' · ')+'</b>'+(time?' · 🕐 <b>'+esc(time)+'</b>':'')+'</div>'+(court?'<div class="meta">📍 '+esc(court)+'</div>':'')+acts+'</div>'}).join('');
+  var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){var rs=String(s.result_status||'').trim().toLowerCase();var done=rs==='confirmed'||Boolean(String(s.result_confirmed_at||'').trim());return !done&&(!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)}).sort(function(a,b){return adminMatchTime(a)-adminMatchTime(b)||String(a.challenge_id||'').localeCompare(String(b.challenge_id||''))});
+  var cards=list.map(function(s){
+    var status=String(s.status||'').toLowerCase(),resultStatus=String(s.result_status||'').toLowerCase();
+    var label=status==='accepted'?X.adminAccepted:status==='pending'?X.adminPending:X.adminOpen;
+    var to=s.to_name||X.adminGroup,dates=s.agreed_date?[s.agreed_date]:(s.dates||[]);
+    var time=s.agreed_time||s.time_from||'',court=s.agreed_court||(s.courts||[]).join(' · ');
+    var acts='<div class="acts">';
+    if(s.from_contact&&s.from_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.from_contact.url)+'\')">💬 '+esc(s.from_name||'1')+'</button>';
+    if(s.to_contact&&s.to_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.to_contact.url)+'\')">💬 '+esc(s.to_name||'2')+'</button>';
+    if(resultStatus==='pending'){acts+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';acts+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';}
+    if(resultStatus!=='confirmed')acts+='<button class="mini" onclick="deleteAdminMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.deleteMatch)+'</button>';
+    acts+='</div>';
+    return '<div class="slot"><div class="who">'+esc(s.from_name||'—')+' → '+esc(to)+'</div>'
+      +'<div class="meta"><span class="pill open">'+esc(label)+'</span> '+esc(s.division||'')+(s.group?' · '+esc(L?'Группа ':'Group ')+esc(s.group):'')+'</div>'
+      +'<div class="when">📅 <b>'+dates.map(fmtDay).map(esc).join(' · ')+'</b>'+(time?' · 🕐 <b>'+esc(time)+'</b>':'')+'</div>'
+      +(court?'<div class="meta">📍 '+esc(court)+'</div>':'')
+      +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
+      +acts+'</div>';
+  }).join('');
   view.innerHTML=controls+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
 }
 
@@ -565,6 +591,7 @@ function renderMine(){
       +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))
          +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
       +(agreed&&pendingTime(s)?'<div class="meta"><span class="pill open">'+esc(X.timePending)+' '+esc(pendingTime(s))+'</span></div>':'')
+      +(agreed&&String(s.result_status||'')==='pending'?'<div class="meta"><span class="pill open">'+esc(String(s.result_by)===String(me&&me.id)?X.pendingRes:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
       +(agreed?agreedActions(s,opp):(opp.name?requestActions(s,opp):(iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')))
       +'</div>';
   }).join('')+historyBlock();
@@ -587,9 +614,15 @@ function agreedActions(s,opp){
   var b='<div class="acts">';
   var contact=matchContactUrl(s,opp),st=String(s.result_status||'');
   if(contact)b+='<button class="mini" onclick="openLink(\''+esc(contact)+'\')">💬 '+(L?'Написать':'Message')+'</button>';
+  if(st==='pending'){
+    if(String(s.result_by)!==String(me&&me.id))b+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    else b+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';
+    return b+'</div>';
+  }
   if(matchEnded(s)){
     if(st==='unfinished')b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.matchCompleted)+'</button>';
     else if(!st){b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';b+='<button class="mini" onclick="openUnfinished(\''+esc(s.challenge_id)+'\')">'+esc(X.markUnfinished)+'</button>'}
+
     else b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';
     return b+'</div>';
   }
@@ -826,18 +859,56 @@ function renderRes(){
     var opp=isAdmin?{n:(s.from_name||'')+' — '+(s.to_name||'')}:(String(s.from_telegram_id)===String(me&&me.id)?{n:s.to_name}:{n:s.from_name});
     var pending=s.result_status==='pending',unfinished=s.result_status==='unfinished';
     var mine=String(s.result_by)===String(me&&me.id);
+    var actions='<div class="acts">';
+    if(pending&&(!mine||isAdmin))actions+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    else if(unfinished)actions+='<button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(X.matchCompleted)+'</button>';
+    else if(!pending)actions+='<button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(s.result_status==='confirmed'&&isAdmin?X.editResult:X.resTitle)+'</button>';
+    else actions+='<span class="hint">'+esc(X.pendingRes)+'</span>';
+    if(isAdmin&&pending)actions+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';
+    if(isAdmin&&s.result_status!=='confirmed')actions+='<button class="mini" onclick="deleteAdminMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.deleteMatch)+'</button>';
+    if(!pending&&!unfinished&&s.result_status!=='confirmed')actions+='<button class="mini" onclick="openUnfinished(\''+esc(s.challenge_id)+'\')">'+esc(X.markUnfinished)+'</button>';
+    actions+='</div>';
     return '<div class="slot'+(pending?' agreed':'')+'">'
       +'<div class="who">'+esc(opp.n||'')+'</div>'
       +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
-      +(pending?'<div class="meta"><span class="pill open">'+esc(mine?X.pendingRes:X.yourRes)+'</span> '+esc(s.result_score||'')+'</div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
-      +'<div class="acts"><button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(unfinished?X.matchCompleted:(pending&&!mine?X.yourRes:X.resTitle))+'</button>'
-      +(!pending&&!unfinished?'<button class="mini" onclick="openUnfinished(\''+esc(s.challenge_id)+'\')">'+esc(X.markUnfinished)+'</button>':'')+'</div>'
-      +'</div>';
+      +(pending?'<div class="meta"><span class="pill open">'+esc(mine&&!isAdmin?X.pendingRes:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
+      +actions+'</div>';
   }).join('');
   h+='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
     +'<div class="hint">'+esc(X.manualHint)+'</div>'
     +'<button class="primary" onclick="openManual()">'+esc(X.manual)+'</button></div>';
   $('viewRes').innerHTML=h;
+}
+function resendResultConfirmation(id,btn){
+  btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
+  fetch('/api/match/result/remind',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:id
+  })}).then(function(r){return r.json()}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Error');
+    btn.disabled=false;btn.textContent=old;
+    if(tg&&tg.showAlert)tg.showAlert(X.confirmationResent);else alert(X.confirmationResent);
+  }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+}function confirmPendingResult(id,btn){
+  btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
+  fetch('/api/match/result/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:id
+  })}).then(function(r){return r.json()}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Error');
+    if(tg&&tg.showAlert)tg.showAlert(j.review?X.resultReview:X.resultConfirmed);
+    adminLoaded=false;resultSlotId='';load(true);
+  }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+}
+function deleteAdminMatch(id,btn){
+  var go=function(){
+    btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
+    fetch('/api/match/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      initData:initData,t:linkToken,challenge_id:id
+    })}).then(function(r){return r.json()}).then(function(j){
+      if(!j.ok)throw new Error(j.error||'Error');
+      adminLoaded=false;resultSlotId='';load(true);
+    }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+  };
+  if(tg&&tg.showConfirm)tg.showConfirm(X.deleteMatchAsk,function(ok){if(ok)go()});else if(confirm(X.deleteMatchAsk))go();
 }
 function openResult(id){resultSlotId=id;resultMode='';renderRes()}
 function openResultFromMine(id){resultSlotId=id;resultMode='';showTab('res')}
