@@ -28,7 +28,7 @@ Preserve the exact recognizable facial features of both people. Show both player
 Do not show tennis rackets, tennis balls or sports equipment in either player's hands or in the foreground. Keep both players' hands and arms in relaxed, natural, freely chosen positions that may differ between generations. When the source portrait shows a natural shoulder or arm posture, stay close to it where the poster composition permits. Do not force identical, mirrored or staged poses.
 They wear premium modern minimalist tennis apparel in complementary colors chosen from blue, red, white, gray, pink, light blue, beige, yellow, or black.
 The setting is a premium blue hard court at a luxury tennis club in Phuket during a vibrant tropical sunset. The sky has fiery orange, deep violet and soft pink gradients, with palm trees and tropical foliage in the background. Warm low-angle light, realistic skin texture, polished sports lifestyle photography, shallow depth of field.
-Keep the center readable and leave the lower 35 percent visually calm. The lower-middle area will receive a narrow dark translucent information panel, and the bottom 15 percent must remain especially clean for real organization and sponsor logos added later by code. Do not generate any text, letters, logos, scoreboards, watermarks, trophies or fake sponsor marks.`;
+Keep the center readable and leave the lower 35 percent visually calm. The lower-middle area will receive a narrow dark translucent information panel, and leave space for the organization logo below the title and keep the bottom 15 percent clean for sponsor logos added later by code. Do not generate any text, letters, logos, scoreboards, watermarks, trophies or fake sponsor marks.`;
 
 const cleanEnvPrompt = value => String(value || '').replace(/\\n/g, '\n').trim();
 export function posterPromptTemplate() {
@@ -85,7 +85,7 @@ export function buildPosterPrompt(match={}, { comment='', variant=1 }={}) {
     `Reference assignment: player 1 is ${values.player_1 || 'the first supplied portrait'}; player 2 is ${values.player_2 || 'the second supplied portrait'}.`,
     VARIANT_NOTES[n - 1] || VARIANT_NOTES[0],
     comment ? `Organizer direction: ${comment}` : '',
-    'Mandatory composition constraints: no tennis rackets, balls or equipment; hands and arms remain relaxed and naturally positioned; keep the bottom 15 percent clean for sponsor and organization logos.',
+    'Mandatory composition constraints: no tennis rackets, balls or equipment; hands and arms remain relaxed and naturally positioned; leave space below the title for the organization logo and keep the bottom 15 percent clean for sponsor logos.',
     'The image generator creates only the photographic scene. Exact names, score, rankings, form and organization logos are added later by code.'
   ].filter(Boolean).join('\n');
   return base + '\n\n' + context;
@@ -197,12 +197,17 @@ async function posterLogoLayers() {
     try {
       const input=await sharp(path.join(LOGOS_DIR,name)).resize({width:210,height:88,fit:'inside',withoutEnlargement:true}).png().toBuffer();
       const meta=await sharp(input).metadata();
-      rendered.push({input,width:meta.width||230,height:meta.height||100});
+      rendered.push({name,input,width:meta.width||230,height:meta.height||100});
     } catch(e) { console.error('poster logo failed:',name,e.message); }
   }
-  const gap=30,total=rendered.reduce((s,x)=>s+x.width,0)+Math.max(0,rendered.length-1)*gap;
+  const organization=rendered.find(item=>/^ptf\./i.test(item.name));
+  const sponsors=rendered.filter(item=>item!==organization);
+  const layers=[];
+  if(organization)layers.push({input:organization.input,left:Math.round((WIDTH-organization.width)/2),top:135+Math.round((88-organization.height)/2)});
+  const gap=30,total=sponsors.reduce((sum,item)=>sum+item.width,0)+Math.max(0,sponsors.length-1)*gap;
   let left=Math.round((WIDTH-total)/2);
-  return rendered.map(item=>{const layer={input:item.input,left,top:1772+Math.round((88-item.height)/2)};left+=item.width+gap;return layer;});
+  for(const item of sponsors){layers.push({input:item.input,left,top:1772+Math.round((88-item.height)/2)});left+=item.width+gap;}
+  return layers;
 }
 
 // Накладывает точный текст и логотипы на любой будущий AI-фон. Эту функцию
@@ -210,21 +215,32 @@ async function posterLogoLayers() {
 export async function composeMatchPoster(backgroundBuffer, match={}) {
   if (!backgroundBuffer) throw new Error('poster_background_missing');
   const score=String(match.score||'').replace(/\s+/g,' ').trim();
-  const division=[match.division,match.season?`Season ${match.season}`:''].filter(Boolean).join(' · ');
+  const scoreLines=(score.match(/\d+:\d+(?:\s*\(\d+:\d+\))?|W\/L|L\/W|L\/L/gi)||[score]).slice(0,3);
+  const scoreSize=scoreLines.length===3?59:72;
+  const scoreStep=scoreLines.length===3?68:84;
+  const scoreFirst=scoreLines.length===3?1242:scoreLines.length===2?1270:1300;
+  const scoreSvg=scoreLines.map((line,index)=>{
+    const tie=line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
+    const main=tie?tie[1]:line,y=scoreFirst+index*scoreStep;
+    return `<text x="540" y="${y}" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="${scoreSize}" font-weight="900" fill="#f4b84a">${esc(main)}</text>`
+      +(tie?`<text x="620" y="${y-24}" text-anchor="start" font-family="DejaVu Sans,Arial" font-size="21" font-weight="800" fill="#f4b84a">(${esc(tie[2])})</text>`:'');
+  }).join('');
+  const divisionName=String(match.division||'').trim();
+  const division=[divisionName&&!/^Division\b/i.test(divisionName)?`Division ${divisionName}`:divisionName,match.season?`Season ${match.season}`:''].filter(Boolean).join(' · ');
   const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#06101b" stop-opacity=".12"/><stop offset=".58" stop-color="#06101b" stop-opacity=".25"/><stop offset="1" stop-color="#06101b" stop-opacity=".88"/></linearGradient></defs>
     <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
     <text x="540" y="88" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="28" font-weight="700" letter-spacing="7" fill="#f4f7fb">PHUKET TENNIS FAMILY</text>
-    <rect x="92" y="1030" width="896" height="558" rx="38" fill="#07131f" fill-opacity=".84" stroke="#ffffff" stroke-opacity=".22"/>
+    <rect x="92" y="1030" width="896" height="590" rx="38" fill="#07131f" fill-opacity=".84" stroke="#ffffff" stroke-opacity=".22"/>
     <text x="540" y="1090" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="23" font-weight="700" letter-spacing="3" fill="#d6dde7">${esc(division)}</text>
     <text x="292" y="1175" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="40" font-weight="800" fill="#ffffff">${esc(fit(match.winner,17))}</text>
     <text x="788" y="1175" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="40" font-weight="800" fill="#ffffff">${esc(fit(match.loser,17))}</text>
-    <text x="540" y="1288" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="72" font-weight="900" letter-spacing="2" fill="#f4b84a">${esc(score)}</text>
-    ${positionSvg(match.winnerMeta,292,1387)}
-    ${positionSvg(match.loserMeta,788,1387)}
-    ${formSvg(match.winnerMeta?.form,292,1452)}
-    ${formSvg(match.loserMeta?.form,788,1452)}
-    ${match.label?`<text x="540" y="1535" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="19" font-weight="700" letter-spacing="4" fill="#f4b84a">${esc(match.label)}</text>`:''}
+    ${scoreSvg}
+    ${positionSvg(match.winnerMeta,292,1462)}
+    ${positionSvg(match.loserMeta,788,1462)}
+    ${formSvg(match.winnerMeta?.form,292,1530)}
+    ${formSvg(match.loserMeta?.form,788,1530)}
+    ${match.label?`<text x="540" y="1595" text-anchor="middle" font-family="DejaVu Sans,Arial" font-size="19" font-weight="700" letter-spacing="4" fill="#f4b84a">${esc(match.label)}</text>`:''}
   </svg>`);
   const logos=await posterLogoLayers();
   return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})

@@ -1,6 +1,6 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck, canonicalStatus, ensureInstagramColumn } from './sheets.js';
+import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck, canonicalStatus } from './sheets.js';
 import { sendMessage, sendPhotoBuffer, sendPhotoAlbumBuffers, withBulkRetries} from './telegram.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 import { panelBroadcastText, broadcastVariant, validateBroadcastLanguages, parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
@@ -45,10 +45,6 @@ function publicContact(row) {
     last_application_event: row.last_application_event || '',
     country: row.country_of_origin || '',
     whatsapp: row.whatsapp || '',
-    instagram: row.instagram || '',
-    instagram_status: row.instagram_status || (String(row.instagram || '').trim() ? 'PROVIDED' : ''),
-    photo_publication_consent: row.photo_publication_consent || '',
-    photo_publication_consent_at: row.photo_publication_consent_at || '',
     crm_tags: row.crm_tags || '',
     ntrp: row.ntrp || '',
     missing_rating: hasMissingRating(row)
@@ -74,8 +70,6 @@ function applyFilters(rows, filters={}) {
   const event = norm(filters.event);
   const search = norm(filters.search);
   const rating = norm(filters.rating);
-  const instagram = norm(filters.instagram_status);
-  const consent = norm(filters.photo_consent);
   const selected = Array.isArray(filters.selected_ids) ? filters.selected_ids.map(String) : [];
   return rows.filter(r => {
     if (!r.telegram_id) return false;
@@ -91,15 +85,6 @@ function applyFilters(rows, filters={}) {
     if (event && !norm(r.last_application_event).includes(event)) return false;
     if (rating === 'missing' && !hasMissingRating(r)) return false;
     if (rating === 'set' && hasMissingRating(r)) return false;
-    const hasInstagram = Boolean(String(r.instagram || '').trim());
-    const instagramState = norm(r.instagram_status) || (hasInstagram ? 'provided' : '');
-    if (instagram === 'provided' && !hasInstagram) return false;
-    if (instagram === 'none' && instagramState !== 'no_account') return false;
-    if (instagram === 'missing' && (hasInstagram || instagramState === 'no_account')) return false;
-    const consentState = norm(r.photo_publication_consent);
-    if (consent === 'yes' && consentState !== 'yes') return false;
-    if (consent === 'no' && consentState !== 'no') return false;
-    if (consent === 'missing' && ['yes','no'].includes(consentState)) return false;
     if (search) {
       const hay = [r.name, r.telegram_username, r.telegram_id, r.whatsapp, r.country_of_origin, r.crm_tags].map(norm).join(' ');
       if (!hay.includes(search)) return false;
@@ -183,9 +168,6 @@ export function registerAdminRoutes(app) {
       const active = contacts.filter(r => r.status === 'active').length;
       const waitlist = contacts.filter(r => r.status === 'waitlist').length;
       const missingSelfie = contacts.filter(r => r.status === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received').length;
-      const consentYes = contacts.filter(r => norm(r.photo_publication_consent) === 'yes').length;
-      const consentNo = contacts.filter(r => norm(r.photo_publication_consent) === 'no').length;
-      const consentPending = contacts.length - consentYes - consentNo;
       const payStatus = s => applications.filter(a => norm(a.payment_status) === s).length;
       const unpaid = applications.filter(a => ['payment_required','waiting_payment'].includes(norm(a.payment_status))).length;
       const proofReceived = payStatus('proof_received');
@@ -196,7 +178,7 @@ export function registerAdminRoutes(app) {
       const paidUsdt = approvedPayments.filter(p => norm(p.currency) === 'usdt').reduce((sum,p) => sum + Number(p.amount || 0), 0);
       const divisions = [...new Set(contacts.map(r => r.division).filter(Boolean))].sort();
       const statuses = [...new Set(contacts.map(r => canonicalStatus(r.status)).filter(Boolean))].sort();
-      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie, consentYes, consentNo, consentPending }, contacts:contacts.map(publicContact), events, divisions, statuses,
+      res.json({ ok:true, admin:auth.user, stats:{ contacts:contacts.length, applications:applications.length, active, waitlist, unpaid, proofReceived, paid, rejectedPayments, paidThb, paidUsdt, missingSelfie }, contacts:contacts.map(publicContact), events, divisions, statuses,
         link_codes: DESTINATIONS.map(d => ({ code: d.aliases[0] || d.code, label: req.uiLang==='en'?d.en:d.ru })) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
@@ -339,52 +321,6 @@ export function registerAdminRoutes(app) {
       }
       });
       await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:'missing_rating_panel', language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-      res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
-    } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
-  });
-
-  app.post('/api/admin/request-social-data', async (req, res) => {
-    try {
-      const auth = adminFromInitData(req.body.initData || '');
-      if (!auth.ok) return res.status(403).json(auth);
-      const kind = String(req.body.kind || '').trim();
-      if (!['instagram','consent'].includes(kind)) return res.status(400).json({ ok:false, error:'Unknown request type' });
-      await ensureInstagramColumn();
-      const contacts = applyFilters(await getContacts(), req.body.filters || {});
-      const broadcastId = uid('broadcast');
-      const segment = kind === 'instagram' ? 'instagram_request_panel' : 'photo_consent_request_panel';
-      let sent = 0, failed = 0;
-      await withBulkRetries(async () => {
-        for (const c of contacts) {
-          const lang = c.language === 'ru' ? 'ru' : 'en';
-          const instagram = kind === 'instagram';
-          const text = instagram
-            ? (lang === 'ru'
-              ? '<b>📸 Ваш Instagram для публикаций PTF</b>\n\nПришлите ваш Instagram-аккаунт, чтобы мы могли отмечать вас в публикациях о матчах. Это отдельный запрос и не означает согласия на публикацию фотографий.\n\nНажмите кнопку и отправьте @username или ссылку на профиль.'
-              : '<b>📸 Your Instagram for PTF posts</b>\n\nSend your Instagram account so we can tag you in match posts. This is a separate request and does not give permission to publish your photos.\n\nPress the button and send @username or your profile link.')
-            : (lang === 'ru'
-              ? '<b>🖼 Разрешение на публикацию</b>\n\nРазрешаете Phuket Tennis Family публиковать ваши фотографии и созданные для вас PTF-аватары в официальных публикациях PTF, включая Instagram?\n\nВыбор можно изменить позже, ответив на новый запрос.'
-              : '<b>🖼 Publication permission</b>\n\nDo you allow Phuket Tennis Family to publish your photos and PTF avatars created for you in official PTF posts, including Instagram?\n\nYou can change this choice later by answering a new request.');
-          const reply_markup = instagram
-            ? { inline_keyboard:[
-                [{ text:lang === 'ru' ? 'Указать Instagram' : 'Add Instagram', callback_data:'social_instagram:start' }],
-                [{ text:lang === 'ru' ? 'У меня нет Instagram' : 'I do not have Instagram', callback_data:'social_instagram:none' }]
-              ] }
-            : { inline_keyboard:[[
-                { text:lang === 'ru' ? '✅ Разрешаю' : '✅ I agree', callback_data:'social_consent:yes' },
-                { text:lang === 'ru' ? 'Не разрешаю' : 'I do not agree', callback_data:'social_consent:no' }
-              ]] };
-          try {
-            await sendMessage(c.telegram_id, text, { reply_markup });
-            await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:segment });
-            sent++;
-          } catch (e) {
-            await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:lang, segment_filter:segment });
-            failed++;
-          }
-        }
-      });
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:segment, language:'mixed', message_text:kind === 'instagram' ? 'Instagram account request' : 'Photo publication consent request', media_type:'text+buttons', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
       res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });

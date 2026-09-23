@@ -51,7 +51,7 @@ assert.equal(requests[0].url,'https://api.openai.com/v1/images/edits');
 assert.equal(requests[0].options.headers.Authorization,'Bearer test-key');
 assert.equal(requests[0].body.model,'gpt-image-2');
 assert.equal(requests[0].body.size,'1008x1792');
-assert.equal(requests[0].body.input_fidelity,'high');
+assert.equal(requests[0].body.input_fidelity,undefined);
 assert.equal(requests[0].body.images.length,2);
 assert.match(requests[0].body.images[0].image_url,/^data:image\/jpeg;base64,/);
 await assert.rejects(()=>poster.generatePosterBackgrounds({

@@ -10,8 +10,7 @@
     "setup:payments": "node scripts/setup-payments.js",
     "setup:events": "node scripts/setup-events.js",
     "setup:courts": "node scripts/setup-courts.js",
-    "drive:authorize": "node scripts/google-drive-authorize.mjs",
-    "test": "node --experimental-vm-modules tests/regression.mjs && node --experimental-vm-modules tests/card.mjs && node tests/poster.mjs && node --experimental-vm-modules tests/matcharchive.mjs && node tests/match-result-flow.mjs && node tests/fantasy.mjs && node tests/women-cross.mjs && node --experimental-vm-modules tests/fantasy-flow.mjs && node tests/fantasy-assets.mjs"
+    "test": "node --experimental-vm-modules tests/regression.mjs && node --experimental-vm-modules tests/card.mjs && node tests/fantasy.mjs && node tests/women-cross.mjs && node --experimental-vm-modules tests/fantasy-flow.mjs && node tests/fantasy-assets.mjs && node tests/poster.mjs && node tests/match-result-flow.mjs"
   },
   "engines": {
     "node": ">=20.9"

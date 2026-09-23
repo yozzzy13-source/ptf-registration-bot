@@ -2,12 +2,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 
-const [db,index,matches,html,archive,card,poster,bot]=await Promise.all([
+const [db,index,matches,html,card,poster,bot]=await Promise.all([
   fs.readFile(new URL('../matchesdb.js',import.meta.url),'utf8'),
   fs.readFile(new URL('../index.js',import.meta.url),'utf8'),
   fs.readFile(new URL('../matches.js',import.meta.url),'utf8'),
   fs.readFile(new URL('../public/match.html',import.meta.url),'utf8'),
-  fs.readFile(new URL('../matcharchive.js',import.meta.url),'utf8'),
   fs.readFile(new URL('../matchcard.js',import.meta.url),'utf8'),
   fs.readFile(new URL('../matchposter.js',import.meta.url),'utf8'),
   fs.readFile(new URL('../bot.js',import.meta.url),'utf8')
@@ -31,9 +30,6 @@ assert.match(html,/confirmResult:'✅ Подтвердить результат'
 assert.match(html,/confirmResult:'✅ Confirm result'/);
 assert.match(html,/pendingApproval:'Нужно ваше подтверждение'/);
 assert.match(html,/pendingApproval:'Your confirmation is required'/);
-assert.match(archive,/Publishing/);
-assert.match(archive,/publication_event/);
-assert.match(archive,/story_poster/);
 assert.match(card,/CARD_LOGOS_DIR/);
 assert.match(card,/cardLogoComposites/);
 assert.match(matches,/poster:prepare:/);
@@ -47,9 +43,11 @@ assert.match(poster,/blocked_consent/);
 assert.match(poster,/OPENAI_API_KEY/);
 assert.match(poster,/images:imageReferences/);
 assert.match(poster,/posterConsentAllowed/);
+assert.doesNotMatch(poster,/input_fidelity/);
+assert.doesNotMatch(matches,/matcharchive/);
 
 const inline=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
   .map(m=>m[1]).filter(code=>code.trim());
 for(const code of inline)new vm.Script(code);
 
-console.log('PASS: manual result confirmation, admin recovery controls, bilingual UI, and publishing contract.');
+console.log('PASS: manual result confirmation, admin recovery controls, bilingual UI, and poster generation.');

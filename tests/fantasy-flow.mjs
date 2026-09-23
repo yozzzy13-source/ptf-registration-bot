@@ -6,7 +6,7 @@ import {SHEETS} from '../config.js';
 import * as tennis from '../tennis.js';
 import * as model from '../public/fantasy-model.js';
 
-const settings=new Map(Object.entries({FANTASY_MODE:'TEST',FANTASY_SEASON:'2',FANTASY_BUDGET:'88',FANTASY_TEAM_SIZE:'8',FANTASY_TRANSFERS:'2',FANTASY_TEST_ENTRY_OPEN:'on',FANTASY_ENTRY_OPEN:'on',FANTASY_DEADLINE:'2099-01-01T00:00:00Z'}));
+const settings=new Map(Object.entries({FANTASY_MODE:'TEST',FANTASY_SEASON:'2',FANTASY_BUDGET:'88',FANTASY_TEAM_SIZE:'8',FANTASY_TRANSFERS:'2',FANTASY_TEST_ENTRY_OPEN:'on',FANTASY_ENTRY_OPEN:'on',FANTASY_DEADLINE:'2026-09-20T08:00:00+07:00',FANTASY_TEST_ENTRY_DEADLINE:'2099-01-01T00:00:00Z',FANTASY_TEST_END_AT:'2026-11-09T23:59:59+07:00'}));
 const tables=new Map(), writes=[];
 let roster=['C:1','C:2','W:1','W:2','PRIME','A','B','A','C:1','PRIME','B','A'].map((pool,i)=>({name:'Player '+i,letter:pool.split(':')[0],group:pool.split(':')[1]||''}));
 const originalRoster=structuredClone(roster);
@@ -86,7 +86,9 @@ check(model.assignSlots(squad,bootstrap.players).slots.every(s=>s.key),'All eigh
 check(model.selectionIssue([],squad[4],bootstrap.players,88,2,0)==='slot','Wrong slot explained');
 check(model.selectionIssue([squad[0]],squad[0],bootstrap.players,88)==='selected','Duplicate explained');
 check(model.selectionIssue([],squad[0],bootstrap.players,5)==='budget','Budget explained');
-check(model.deadlineReached({lock_at:'2020-01-01'})&&!model.deadlineReached({lock_at:'2099-01-01'}),'Deadline boundary');
+check(model.deadlineReached({lock_at:'2020-01-01'})&&!model.deadlineReached({lock_at:'2099-01-01'}),'Entry deadline boundary');
+check(model.seasonFinished({season_end_at:'2020-01-01'})&&!model.seasonFinished({season_end_at:'2099-01-01'}),'Season end boundary');
+check(f.FANTASY_DATES.entryDeadline==='2026-09-21T12:00:00+07:00'&&f.FANTASY_DATES.seasonEndAt==='2026-11-09T23:59:59+07:00','Season 2 Thailand campaign dates');
 const catalog=await f.buildFantasyCatalog({mode:'test'});
 for(const [patch,label]of [
  [{picks:squad.slice(0,7)},'incomplete squad'],
@@ -115,9 +117,9 @@ await rejects(()=>f.transferFantasyPlayer('1',{team_slot:1,player_out_key:squad[
 settings.set('FANTASY_BUDGET','70');
 await rejects(()=>f.saveFantasyTeam('1','Player 0',body,'en','test'),'Settings budget enforced');
 settings.set('FANTASY_BUDGET','88');
-settings.set('FANTASY_DEADLINE','2020-01-01T00:00:00Z');
+settings.set('FANTASY_TEST_ENTRY_DEADLINE','2020-01-01T00:00:00Z');
 const closed=await f.getFantasyBootstrap('1','Player 0','en','test');
-check(closed.locked&&!closed.entry_open&&closed.transfers_open&&!closed.preview_only,'Deadline closes entry but opens transfers');
+check(closed.locked&&!closed.entry_open&&closed.transfers_open&&closed.competition_open&&!closed.season_finished&&!closed.preview_only,'Entry deadline closes squads but keeps competition and points open');
 await rejects(()=>f.saveFantasyTeam('2','Player 0',body,'en','test'),'No first team after deadline');
 await rejects(()=>f.saveFantasyTeam('1','Player 0',body,'en','test'),'No edit after deadline');
 await rejects(()=>f.saveFantasyTeam('2','Player 0',{...body,team_slot:2},'en','test'),'No second team after deadline');
@@ -131,10 +133,15 @@ const withdrawn=await f.getFantasyBootstrap('1','Player 0','en','test');
 check(withdrawn.teams[1].free_transfer_keys.includes(squad[7]),'Official withdrawal before first match offers free transfer');
 const free=await f.transferFantasyPlayer('1',{team_slot:2,player_out_key:squad[7],player_in_key:byName('Player 9')},'en','test');
 check(free.forced&&free.team.transfers_used===2,'Forced transfer preserves used count');
-history=new Map([[profiles[5].id,[{season:'2',score:'6:0 6:0',result:'W',opponent:'Player 6',match_no:'1'}]]]);
+history=new Map([[profiles[5].id,[{season:'2',date:'09.11.2026',score:'6:0 6:0',result:'W',opponent:'Player 6',match_no:'1'},{season:'2',date:'10.11.2026',score:'6:0 6:0',result:'W',opponent:'Player 6',match_no:'2'}]]]);
 roster=roster.filter(p=>p.name!=='Player 4');await f.buildFantasyCatalog({mode:'test',fresh:true});
 const promoted=await f.getFantasyBootstrap('1','Player 0','en','test');
-check(promoted.teams[1].points===55.5,'Vice scores x1.5 when captain officially withdrawn before first match');
+check(promoted.teams[1].points===55.5,'Vice scores x1.5 and matches after 9 November do not change final points');
+settings.set('FANTASY_TEST_END_AT','2020-01-02T00:00:00Z');
+const finished=await f.getFantasyBootstrap('1','Player 0','en','test');
+check(finished.season_finished&&finished.phase==='finished'&&!finished.competition_open&&!finished.transfers_open&&finished.leaderboard.length===2,'Finished competition keeps final standings visible');
+await rejects(()=>f.transferFantasyPlayer('1',{team_slot:1,player_out_key:squad[4],player_in_key:byName('Player 9')},'en','test'),'Transfers close after competition end');
+settings.set('FANTASY_TEST_END_AT','2026-11-09T23:59:59+07:00');
 settings.set('FANTASY_TEST_ENTRY_OPEN','off');
 check(!(await f.getFantasyBootstrap('1','Player 0','en','test')).transfers_open,'Settings switch closes transfer actions');
 await rejects(()=>f.transferFantasyPlayer('1',{team_slot:1,player_out_key:squad[4],player_in_key:byName('Player 9')},'en','test'),'Closed switch rejects transfer');

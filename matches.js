@@ -15,7 +15,7 @@ import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
 import { slotScope } from './access.js';
-import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL, MATCH_CARDS_DRIVE_FOLDER_ID } from './config.js';
+import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic, notifyAdmin } from './admin.js';
 
@@ -765,7 +765,7 @@ function resultLine(slot) {
 
 function resultBlock(slot,lang="ru") {
   const note=String(slot.result_note||'').trim();
-  return `🏆 ${resultLine(slot)}${slot.result_set3_mode === 'Match TB' ? (lang==='ru'?'\n<i>чемпионский тай-брейк</i>':'\n<i>match tie-break</i>') : ''}${note?`\n💬 <i>${escapeHtml(note)}</i>`:''}`;
+  return `🏆 ${resultLine(slot)}${note?`\n💬 <i>${escapeHtml(note)}</i>`:''}`;
 }
 
 // В карточках результата время и корт не показываем: матч уже сыгран,
@@ -938,8 +938,7 @@ async function feedCard(slot, lang='en') {
     ? telegramLink({name:slot.from_name,username:slot.from_username,telegramId:slot.from_telegram_id})+'  L/L  '+telegramLink({name:slot.to_name,username:slot.to_username,telegramId:slot.to_telegram_id})
     : '🏆 '+telegramLink(winner)+'  <b>'+escapeHtml(winnerFirstScore(slot))+'</b>  '+telegramLink(loser);
   const text = '🎾 <b>Match Result</b>'+(subtitle ? '\n'+escapeHtml(subtitle) : '')+'\n\n'+line
-    +(slot.result_set3_mode === 'Match TB' ? '\n<i>Match tie-break</i>' : '')
-    +(slot.result_note ? '\n💬 <i>'+escapeHtml(slot.result_note)+'</i>' : '');
+    +(String(slot.result_note||'').trim() ? '\n💬 <i>'+escapeHtml(String(slot.result_note).trim())+'</i>' : '');
   const winnerLabel=technicalBoth?(slot.from_name||'Player'):(winner.name||'Player');
   const loserLabel=technicalBoth?(slot.to_name||'Player'):(loser.name||'Player');
   const winnerSide=technicalBoth?{name:slot.from_name}:winner, loserSide=technicalBoth?{name:slot.to_name}:loser;
@@ -1041,17 +1040,6 @@ export async function broadcastResult(slot) {
   const { text, reply_markup } = cards.en;
   const media = await resultMedia(slot);
   const extraPhoto = slot.result_photo_file_id || '';
-  const rootFolderId = String(await getSetting('match_cards_drive_folder_id').catch(() => '') || MATCH_CARDS_DRIVE_FOLDER_ID || '').trim();
-  // Drive не задерживает Telegram-ленту: загрузка идёт параллельно рассылке,
-  // но перед записью журнала мы всё же дожидаемся результата.
-  const archivePromise = !rootFolderId
-    ? Promise.resolve({ saved:false, reason:'not_configured' })
-    : import('./matcharchive.js').then(({ archiveMatchCards }) => archiveMatchCards(slot, {
-        rootFolderId,
-        season:media.season,
-        cardBuffer:media.buffer
-      }));
-
   // Первая отправка загружает файл, остальные — уже по file_id.
   const sendWith = async (chatId, caption, opts) => {
     if (media.fileId) return sendPhoto(chatId, media.fileId, { caption, ...opts });
@@ -1110,18 +1098,9 @@ export async function broadcastResult(slot) {
     }
     });
   } catch (e) { console.error('results broadcast failed:', e.message); }
-  let archive;
-  try { archive = await archivePromise; }
-  catch (e) {
-    console.error('match cards Drive archive failed:', e.message);
-    archive = { saved:false, reason:e.message };
-  }
   const posterId=String(slot.challenge_id || slot.match_id || '');
   if (posterId) {
-    const driveLine=archive?.card?.url
-      ? `\n<a href="${escapeHtml(archive.card.url)}">Карточка на Google Drive</a>`
-      : '';
-    await notifyAdmin(`<b>🎨 Постер матча</b>\n\n${escapeHtml(slot.from_name || 'Player 1')} — ${escapeHtml(slot.to_name || 'Player 2')}\nСчёт: <b>${escapeHtml(winnerFirstScore(slot))}</b>${driveLine}\n\nМожно сразу создать два варианта постера через OpenAI. Готовые PNG придут в этот админский топик.`, {
+    await notifyAdmin(`<b>🎨 Постер матча</b>\n\n${escapeHtml(slot.from_name || 'Player 1')} — ${escapeHtml(slot.to_name || 'Player 2')}\nСчёт: <b>${escapeHtml(winnerFirstScore(slot))}</b>\n\nМожно сразу создать два варианта постера через OpenAI. Готовые PNG придут в этот админский топик.`, {
       reply_markup:{ inline_keyboard:[
         [{ text:'🎨 Создать 2 варианта', callback_data:`poster:prepare:${posterId}` }],
         [{ text:'✍️ Добавить комментарий', callback_data:`poster:comment:${posterId}` }]
@@ -1129,8 +1108,8 @@ export async function broadcastResult(slot) {
     }).catch(e => console.error('poster admin offer failed:',e.message));
   }
   await logMatchEvent('result_broadcast', slot, { telegram_id: slot.result_by, name: '' },
-    `лента: ${chat ? 'группа + ' : ''}личных ${sent}, ошибок ${failed}; Drive: ${archive.saved ? archive.path : archive.reason}`);
-  return { sent, failed, group: Boolean(chat), archive };
+    `лента: ${chat ? 'группа + ' : ''}личных ${sent}, ошибок ${failed}`);
+  return { sent, failed, group: Boolean(chat) };
 }
 
 // ---------------------------------------------------------------------------

@@ -281,6 +281,8 @@ check(adminActive.body.ok&&adminActive.body.items.some(x=>x.challenge_id==='canc
 check(!adminActive.body.items.some(x=>['admin-confirmed-status','admin-confirmed-at'].includes(x.challenge_id)),'Admin match list hides every confirmed result');
 const adminOrder=adminActive.body.items.filter(x=>['admin-old','admin-new'].includes(x.challenge_id)).map(x=>x.challenge_id).join(',');
 check(adminOrder==='admin-old,admin-new','Admin match list is sorted oldest to newest');
+const adminBootstrap=await request('get','/api/match/bootstrap','99');
+check(!adminBootstrap.body.result_tasks.some(x=>['admin-confirmed-status','admin-confirmed-at'].includes(x.challenge_id)),'Admin result entry hides confirmed matches too');
 
 const scopes={
  initial:{...base,status:'open',match_type:'direct'},
@@ -463,22 +465,6 @@ messages.length=0;const delivered=await request('post','/api/admin/broadcast','9
 check(delivered.body.ok&&delivered.body.sent===2,'Bilingual panel broadcast reaches both language groups');
 check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&messages.some(m=>String(m.args[0])==='2'&&m.args[1]==='Привет'),'Recipients receive only selected text, not both variants');
 messages.length=0;
-const instagramRequest=await request('post','/api/admin/request-social-data','99',{initData:adminInit,kind:'instagram',filters:{selected_ids:['1','2']}});
-check(instagramRequest.body.ok&&instagramRequest.body.sent===2,'Instagram collection is a separate admin broadcast');
-check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Your Instagram')&&m.args[2]?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='social_instagram:start')),'Instagram request is English for EN player');
-check(messages.some(m=>String(m.args[0])==='2'&&m.args[1].includes('Ваш Instagram')),'Instagram request is Russian for RU player');
-messages.length=0;
-const consentRequest=await request('post','/api/admin/request-social-data','99',{initData:adminInit,kind:'consent',filters:{selected_ids:['1','2']}});
-check(consentRequest.body.ok&&consentRequest.body.sent===2,'Photo consent is a separate admin broadcast');
-check(messages.every(m=>m.method!=='sendMessage'||m.args[2]?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data==='social_consent:yes')),'Consent request has explicit yes/no choices');
-await sheets.saveInstagramAccount('1','@alice.ptf','PROVIDED');
-await sheets.savePhotoPublicationConsent('1',true);
-await sheets.savePhotoPublicationConsent('2',false);
-const socialOne=await sheets.findApplicantByTelegramId('1'),socialTwo=await sheets.findApplicantByTelegramId('2');
-check(socialOne.instagram==='@alice.ptf'&&socialOne.instagram_status==='PROVIDED','Instagram account is stored independently');
-check(socialOne.photo_publication_consent==='YES'&&socialTwo.photo_publication_consent==='NO','Photo permission stores explicit YES and NO');
-const bot=await load('bot.js');
-check(bot.normalizeInstagramAccount('https://instagram.com/alice.ptf/?x=1')==='@alice.ptf'&&bot.normalizeInstagramAccount('bad account')==='','Instagram input accepts handles and links but rejects free text');
 messages.length=0;await flow.reviewTopup({telegramId:'1',approve:false});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Top-up not confirmed')),'Top-up rejection follows player language');
 const futureEvent={...event,date:'16.09.2099',title_ru:'Турнир',title_en:'Tournament',audience:'all'};
 put('crm','Event_Registry',[ev.REGISTRY_HEADERS,ev.REGISTRY_HEADERS.map(h=>futureEvent[h]||'')]);
@@ -514,31 +500,6 @@ check(noTest.body?.fantasy===null&&!noTest.body.tabs.includes('fantasy'),'League
  const leagueHtml=await fs.readFile(path.join(root,'public/league.html'),'utf8');
  check(leagueHtml.includes('loadFantasyLater')&&leagueHtml.includes('fantasy_deferred'),'Мини-приложение догружает Fantasy после первой отрисовки');
  await sheets.setSetting('FANTASY_MODE','TEST');
-}
-// Партнёры: весь экран берётся из листа Partners таблицы состава, поэтому
-// проверяем именно разбор — заголовки по-русски и по-английски, выключенные
-// строки, телефон в любом написании и порядок.
-{
- put('161O5DWEJU-ik3XoDaUjWeTlm7T2Je98IFd_-DFhRBu8','Partners',[
-  ['Название','Описание','Картинка','Телефон','Сообщение','Ссылка','Категория','Порядок','Вкл'],
-  ['Racket Lab','Перетяжка за сутки','https://pic.test/a.png','+66 81 234 5678','Привет! Я {name} из PTF.','https://lab.test','Магазин','2','yes'],
-  ['Thanyapura','Шесть кортов','','66899999999','Здравствуйте, это {name}.','','Корты','1',''],
-  ['Старый партнёр','Больше не с нами','','66800000000','','','','3','нет'],
-  ['','','','','','','','','']
- ]);
- sheets.invalidatePartnersCache();
- const list=await sheets.getPartners();
- check(list.length===2,'Выключенные и пустые строки листа Partners не попадают в приложение');
- check(list[0].name==='Thanyapura'&&list[1].name==='Racket Lab','Партнёры идут в порядке из колонки «Порядок»');
- check(list[1].whatsapp==='66812345678','Телефон приводится к цифрам для ссылки WhatsApp');
- check(list[1].phone_label==='+66 81 234 5678','Человеку показывается номер так, как он записан в таблице');
- check(list[1].message.includes('{name}'),'Заготовка сообщения доезжает до приложения с подстановками');
- check(list[1].photo&&list[1].link==='https://lab.test','Картинка и ссылка читаются из листа');
- const withPartners=await request('get','/api/league/bootstrap','1');
- check(Array.isArray(withPartners.body?.partners)&&withPartners.body.partners.length===2,'Партнёры приходят в приложение вместе с витриной');
- const leagueSource=await fs.readFile(path.join(root,'public/league.html'),'utf8');
- check(leagueSource.includes('function renderPartners')&&leagueSource.includes('wa.me/'),'Вкладка партнёров рисуется и ведёт в WhatsApp');
- check(!leagueSource.includes('"tab off"')&&leagueSource.includes("'partners'"),'Партнёры стали настоящей вкладкой, а не заглушкой');
 }
 // Опросы и рассылка по рейтингу удалены целиком — ни команд, ни обработчиков.
 {

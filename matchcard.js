@@ -47,16 +47,17 @@ async function cardLogoComposites(canvasWidth = 1080, canvasHeight = 1148) {
         width:boxWidth, height:120, fit:'inside', withoutEnlargement:true
       }).png().toBuffer();
       const meta = await sharp(buffer).metadata();
-      rendered.push({ input:buffer, width:meta.width || boxWidth, height:meta.height || 120 });
+      rendered.push({ name, input:buffer, width:meta.width || boxWidth, height:meta.height || 120 });
     } catch (e) { console.error('match card logo failed:', name, e.message); }
   }
-  const total = rendered.reduce((sum,item) => sum + item.width, 0) + gap * Math.max(0, rendered.length - 1);
+  const organization = rendered.find(item => /^ptf\./i.test(item.name));
+  const sponsors = rendered.filter(item => item !== organization);
+  const layers = [];
+  if (organization) layers.push({ input:organization.input, left:Math.round((canvasWidth - organization.width) / 2), top:160 });
+  const total = sponsors.reduce((sum,item) => sum + item.width, 0) + gap * Math.max(0, sponsors.length - 1);
   let left = Math.round((canvasWidth - total) / 2);
-  return rendered.map(item => {
-    const layer = { input:item.input, left, top:canvasHeight - 160 + Math.round((120 - item.height) / 2) };
-    left += item.width + gap;
-    return layer;
-  });
+  for (const item of sponsors) { layers.push({ input:item.input, left, top:canvasHeight - 160 + Math.round((120 - item.height) / 2) }); left += item.width + gap; }
+  return layers;
 }
 // Берём любые шрифты, положенные в assets: .ttf и .otf, сколько угодно
 // начертаний. Имя семейства читаем из файла, поэтому замена шрифта — это
@@ -197,7 +198,7 @@ function scoreLines(score = '') {
 }
 // Подбираем кегль так, чтобы самая длинная строка влезла в просвет.
 function scoreSize(lines, room = 330) {
-  const longest = lines.reduce((n, l) => Math.max(n, l.length), 1);
+  const longest = lines.reduce((n, l) => Math.max(n, l.replace(/\s*\([^)]*\)/g, '').length), 1);
   const byRows = [92, 92, 76, 64, 54][lines.length] || 54;
   return Math.max(34, Math.min(byRows, Math.floor(room / (longest * 0.62))));
 }
@@ -322,7 +323,7 @@ async function fromUrl(url) {
 
 // Ищем фото игрока по цепочке. Ошибки не роняют карточку: не нашли — рисуем
 // инициалы, это лучше, чем не отправить ничего.
-async function playerPhoto({ telegramId = '', name = '' } = {}) {
+async function playerPhoto({ telegramId = '', name = '', fresh = false } = {}) {
   const key = `p:${telegramId || name.toLowerCase()}`;
   
 
@@ -330,7 +331,7 @@ async function playerPhoto({ telegramId = '', name = '' } = {}) {
     const row = await findApplicantByTelegramId(telegramId).catch(() => null);
     const fileId = txt(row?.avatar_file_id);
     if (fileId) {
-      if (photoCache.has(fileId)) return photoCache.get(fileId);
+      if (!fresh && photoCache.has(fileId)) return photoCache.get(fileId);
       const hit = await getFileBuffer(fileId).then(f => f.buffer).catch(() => null);
       if (hit) return remember(fileId, hit);
     }
@@ -340,7 +341,7 @@ async function playerPhoto({ telegramId = '', name = '' } = {}) {
     const master = await getMasterPhotos().catch(() => new Map());
     for (const [n, url] of master) {
       if (txt(n).toLowerCase() !== wanted || !url) continue;
-      if (photoCache.has(url)) return photoCache.get(url);
+      if (!fresh && photoCache.has(url)) return photoCache.get(url);
       const hit = await fromUrl(url).catch(() => null);
       if (hit) return remember(url, hit);
       break;
@@ -350,7 +351,7 @@ async function playerPhoto({ telegramId = '', name = '' } = {}) {
 }
 
 export async function playerPhotoForPoster(player = {}) {
-  return playerPhoto(player);
+  return playerPhoto({ ...player, fresh:true });
 }
 
 // Плашка статистики в боковой колонке: подпись, крупное число и — только у
@@ -426,36 +427,43 @@ export async function renderInstagramMatchCard(match = {}) {
   const IW = 1080, IH = 1148, IR = 390;
   // Верхние 70% заняты результатом; нижние 30% намеренно остаются чистыми
   // для будущей композиции прозрачных логотипов.
-  const centers = [{ x:225, y:390 }, { x:855, y:390 }];
+  const centers = [{ x:225, y:450 }, { x:855, y:450 }];
   const m = {
     winner:txt(match.winner), loser:txt(match.loser), score:txt(match.score),
     division:txt(match.division), season:txt(match.season), label:txt(match.label),
     winnerMeta:match.winnerMeta || null, loserMeta:match.loserMeta || null
   };
-  const chip = [m.division, m.season ? `Season ${m.season}` : ''].filter(Boolean).join(' · ');
+  const division = m.division && !/^Division\b/i.test(m.division) ? `Division ${m.division}` : m.division;
+  const chip = [division, m.season ? `Season ${m.season}` : ''].filter(Boolean).join(' · ');
   const chipW = Math.min(920, Math.max(240, chip.length * 12 + 56));
   const lines = scoreLines(m.score);
   const fs = Math.min(68, Math.max(38, scoreSize(lines, 300)));
   const step = Math.round(fs * 1.16), scoreCenter = centers[0].y;
   const first = Math.round(scoreCenter + fs * 0.34 - (lines.length - 1) * step / 2);
-  const scoreSvg = lines.map((line, i) =>
-    `<text x="${IW / 2}" y="${first + i * step}" text-anchor="middle" font-family="${FONT}"
-      font-size="${fs}" font-weight="800" fill="${C.amber}" letter-spacing="1">${esc(line)}</text>`).join('');
+  const scoreSvg = lines.map((line, i) => {
+    const tie = line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
+    const main = tie ? tie[1] : line, y = first + i * step;
+    return `<text x="${IW / 2}" y="${y}" text-anchor="middle" font-family="${FONT}"
+      font-size="${fs}" font-weight="800" fill="${C.amber}" letter-spacing="1">${esc(main)}</text>`
+      + (tie ? `<text x="${IW / 2 + 76}" y="${y - Math.round(fs * 0.36)}" text-anchor="start"
+        font-family="${FONT}" font-size="${Math.max(18, Math.round(fs * 0.32))}" font-weight="800"
+        fill="${C.amber}">(${esc(tie[2])})</text>` : '');
+  }).join('');
   const rank = (meta, cx) => {
     if (!meta) return '';
     const pos = meta.position || {};
     const value = Number.isFinite(pos.after) ? pos.after : (Number.isFinite(pos.before) ? pos.before : null);
     if (value === null) return '';
     const pill = rankPill(pos.before, pos.after);
-    const w = 142, h = pill ? 90 : 72, x = cx - w / 2, y = 682;
+    const w = 178, h = pill ? 118 : 90, x = cx - w / 2, y = 748;
     return `<g>
       <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="15" fill="${C.plate}" stroke="${C.plateLine}"/>
-      <text x="${cx}" y="${y + 20}" text-anchor="middle" font-family="${FONT}" font-size="9" font-weight="800"
-        letter-spacing="1.4" fill="${C.mute}">DIVISION RANK</text>
-      <text x="${cx}" y="${y + 55}" text-anchor="middle" font-family="${FONT}" font-size="31" font-weight="900"
+      <text x="${cx}" y="${y + 27}" text-anchor="middle" font-family="${FONT}" font-size="14" font-weight="800"
+        letter-spacing="1" fill="${C.mute}">DIVISION RANK</text>
+      <text x="${cx}" y="${y + 72}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="900"
         fill="${C.text}">#${value}</text>
-      ${pill ? `<rect x="${cx - 25}" y="${y + 61}" width="50" height="20" rx="10" fill="${pill.bg}" stroke="${pill.line}"/>
-      <text x="${cx}" y="${y + 75}" text-anchor="middle" font-family="${FONT}" font-size="11" font-weight="800"
+      ${pill ? `<rect x="${cx - 37}" y="${y + 80}" width="74" height="30" rx="15" fill="${pill.bg}" stroke="${pill.line}"/>
+      <text x="${cx}" y="${y + 101}" text-anchor="middle" font-family="${FONT}" font-size="17" font-weight="800"
         fill="${pill.fg}">${esc(pill.text)}</text>` : ''}
     </g>`;
   };
@@ -471,15 +479,15 @@ export async function renderInstagramMatchCard(match = {}) {
     <text x="${IW / 2}" y="126" text-anchor="middle" font-family="${FONT}" font-size="21" font-weight="700"
       fill="${C.win}">${esc(chip)}</text>` : ''}
     ${scoreSvg}
-    <text x="${centers[0].x}" y="640" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="800"
+    <text x="${centers[0].x}" y="700" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="800"
       fill="${C.text}">${esc(fit(m.winner, 18))}</text>
-    <text x="${centers[1].x}" y="640" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="700"
+    <text x="${centers[1].x}" y="700" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="700"
       fill="${C.dim}">${esc(fit(m.loser, 18))}</text>
     ${rank(m.winnerMeta, centers[0].x)}
     ${rank(m.loserMeta, centers[1].x)}
-    ${formChipsSvg(m.winnerMeta && m.winnerMeta.form, centers[0].x, 806, { gap:28, r:11 })}
-    ${formChipsSvg(m.loserMeta && m.loserMeta.form, centers[1].x, 806, { gap:28, r:11 })}
-    ${m.label ? `<text x="${centers[0].x}" y="852" text-anchor="middle" font-family="${FONT}" font-size="16"
+    ${formChipsSvg(m.winnerMeta && m.winnerMeta.form, centers[0].x, 903, { gap:42, r:17 })}
+    ${formChipsSvg(m.loserMeta && m.loserMeta.form, centers[1].x, 903, { gap:42, r:17 })}
+    ${m.label ? `<text x="${centers[0].x}" y="949" text-anchor="middle" font-family="${FONT}" font-size="16"
       font-weight="700" fill="${C.champ}" letter-spacing="3">${esc(m.label)}</text>` : ''}
   </svg>`;
 
@@ -568,3 +576,4 @@ function fmtDate(iso = '') {
 }
 
 export function forgetPhotoCache() { photoCache.clear(); }
+

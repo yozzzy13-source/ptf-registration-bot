@@ -393,6 +393,7 @@ export async function listMySlots(telegramId) {
   return rows
     .filter(r => String(r.from_telegram_id) === id || String(r.to_telegram_id) === id)
     .filter(r => !['cancelled', 'declined'].includes(String(r.status || '').toLowerCase()))
+    .filter(r => String(r.result_status || '').trim().toLowerCase() !== 'confirmed' && !String(r.result_confirmed_at || '').trim())
     // A played match stays in "My matches" until its result is resolved. This
     // gives an unfinished match a stable way back to the score form.
     .filter(r => !isSlotPast(r) || (String(r.status || '').toLowerCase() === 'accepted'
@@ -1223,6 +1224,7 @@ export async function agreedSchedule(now = Date.now()) {
   const rows = await allSlots();
   return rows
     .filter(r => String(r.status || '').toLowerCase() === 'accepted')
+    .filter(r => String(r.result_status || '').toLowerCase() !== 'confirmed' && !String(r.result_confirmed_at || '').trim())
     .filter(r => {
       const start = slotStartMs(r);
       return start !== null && (start >= now || String(r.result_status||'').toLowerCase() !== 'confirmed');

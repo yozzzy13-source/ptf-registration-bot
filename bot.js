@@ -1,12 +1,12 @@
 import {allSlots,pendingActionsFor} from './matchesdb.js';
 import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST, sendPhotoBuffer, withBulkRetries} from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
-import { getBotText, getSetting, setSetting, getActiveEvents, getAllEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup, saveInstagramAccount, savePhotoPublicationConsent } from './sheets.js';
+import { getBotText, getSetting, setSetting, getActiveEvents, getAllEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
 import { t, tt } from './i18n.js';
 import { findDestination, destinationLabel, linksCheatSheet } from './links.js';
 import { nowISO, uid, escapeHtml, parseTestMatchInput, findRosterPlayer, findRosterPair, matchNameKey } from './util.js';
 import { canAccessFantasyByTelegramId } from './fantasy.js';
-import { DEFAULT_USDT_AMOUNT, PUBLIC_URL, MATCH_CARDS_DRIVE_FOLDER_ID } from './config.js';
+import { DEFAULT_USDT_AMOUNT, PUBLIC_URL } from './config.js';
 import { findSlot as findMatchSlot, listMySlots, listResultTasks, awaitingSide, acceptProposal, rejectProposal, cancelMatchmaking, confirmCourt, confirmResult, disputeResult, rejectResultByAdmin, proposeTimeChange, acceptTimeChange, rejectTimeChange, markMatchUnfinished, addMatchUnfinishedEvidence } from './matchesdb.js';
 import { declineDirectChallenge, notifyMatchAgreed, notifyMatchCancelled, notifyProposalRejected, sendBookingHelper, notifyCourtConfirmed,
   notifyResultConfirmed, notifyResultDisputed, notifyCrossDivision, notifyResultRejected, notifyMatchUnfinished, broadcastResult,
@@ -47,36 +47,6 @@ async function userLang(from) {
   return value;
 }
 function fallbackLang(lang) { return lang === 'ru' ? 'ru' : 'en'; }
-
-export function normalizeInstagramAccount(value = '') {
-  let account = String(value || '').trim();
-  account = account.replace(/^https?:\/\/(?:www\.)?instagram\.com\//i, '');
-  account = account.replace(/^instagram\.com\//i, '').replace(/[/?#].*$/, '').replace(/^@+/, '').trim();
-  if (!/^[A-Za-z0-9._]{1,30}$/.test(account)) return '';
-  return '@' + account;
-}
-
-async function handleInstagramAccountMessage(msg, state, lang) {
-  const chatId = msg.chat.id;
-  if (Number(state.expiresAt || 0) <= Date.now()) {
-    userState.delete(String(chatId));
-    return sendMessage(chatId, lang === 'ru'
-      ? 'Время ввода истекло. Нажмите кнопку запроса Instagram ещё раз.'
-      : 'The entry window expired. Please press the Instagram request button again.');
-  }
-  const account = normalizeInstagramAccount(msg.text || msg.caption || '');
-  if (!account) {
-    return sendMessage(chatId, lang === 'ru'
-      ? 'Пришлите @username или ссылку вида instagram.com/username.'
-      : 'Send @username or a link such as instagram.com/username.');
-  }
-  const saved = await saveInstagramAccount(msg.from.id, account, 'PROVIDED');
-  if (!saved) return sendMessage(chatId, lang === 'ru' ? 'Профиль игрока не найден.' : 'Player profile was not found.');
-  userState.delete(String(chatId));
-  return sendMessage(chatId, lang === 'ru'
-    ? '✅ Instagram сохранён: <b>' + escapeHtml(account) + '</b>\n\nЭто не меняет ваш отдельный выбор о публикации фотографий.'
-    : '✅ Instagram saved: <b>' + escapeHtml(account) + '</b>\n\nThis does not change your separate photo publication choice.');
-}
 
 async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', onlyVariant=0 }) {
   const [{
@@ -1433,8 +1403,6 @@ function findConfirmedSlot(done, wanted) {
     return sendMessage(chatId, t(lang, 'selfie_received'), await menuMarkup(lang, from.id));
   }
 
-  if (state?.mode === 'awaiting_social_instagram') return handleInstagramAccountMessage(msg,state,lang);
-
   if (state?.mode === 'unfinished_evidence') return handleUnfinishedEvidence(msg,state,lang);
 
   if (state?.mode === 'awaiting_payment_proof') {
@@ -1506,7 +1474,7 @@ function findConfirmedSlot(done, wanted) {
 // настройки ленты результатов. Админские (admin_*, bc*) и матчевые кнопки
 // сюда не входят — им место в группе по замыслу.
 const PERSONAL_CALLBACKS = new Set(['main', 'website_menu', 'payment_entry', 'contact', 'close_contact', 'results_mute', 'results_unmute']);
-const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:', 'social_'];
+const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:'];
 function isPersonalCallback(data = '') {
   const d = String(data);
   return PERSONAL_CALLBACKS.has(d) || PERSONAL_PREFIXES.some(p => d.startsWith(p));
@@ -1551,36 +1519,6 @@ export async function handleCallback(q) {
 
   if (!storedLang && msg.chat.type === 'private' && !isAdminUser(from.id)) {
     return sendLanguageChoice(chatId);
-  }
-
-  if (data === 'social_instagram:start') {
-    userState.set(String(chatId), { mode:'awaiting_social_instagram', expiresAt:Date.now() + 24 * 60 * 60 * 1000 });
-    return sendMessage(chatId, lang === 'ru'
-      ? '<b>Пришлите ваш Instagram</b>\n\nОтправьте @username или ссылку на профиль одним сообщением.'
-      : '<b>Send your Instagram</b>\n\nSend @username or your profile link in one message.', {
-        reply_markup:{ inline_keyboard:[[
-          { text:lang === 'ru' ? 'У меня нет Instagram' : 'I do not have Instagram', callback_data:'social_instagram:none' }
-        ]] }
-      });
-  }
-  if (data === 'social_instagram:none') {
-    const saved = await saveInstagramAccount(from.id, '', 'NO_ACCOUNT');
-    userState.delete(String(chatId));
-    return sendMessage(chatId, saved
-      ? (lang === 'ru' ? '✅ Отметили, что Instagram-аккаунта нет.' : '✅ Saved: no Instagram account.')
-      : (lang === 'ru' ? 'Профиль игрока не найден.' : 'Player profile was not found.'));
-  }
-  if (data === 'social_consent:yes' || data === 'social_consent:no') {
-    const allowed = data.endsWith(':yes');
-    const saved = await savePhotoPublicationConsent(from.id, allowed);
-    if (!saved) return sendMessage(chatId, lang === 'ru' ? 'Профиль игрока не найден.' : 'Player profile was not found.');
-    return sendMessage(chatId, allowed
-      ? (lang === 'ru'
-        ? '✅ Согласие сохранено. PTF сможет использовать ваши фотографии и PTF-аватары в официальных публикациях.'
-        : '✅ Consent saved. PTF may use your photos and PTF avatars in official publications.')
-      : (lang === 'ru'
-        ? '✅ Отказ сохранён. Ваши фотографии и PTF-аватары не будут использоваться в публикациях.'
-        : '✅ Your choice was saved. Your photos and PTF avatars will not be used in publications.'));
   }
 
   // Every old Telegram button follows the same server policy as the mini app.

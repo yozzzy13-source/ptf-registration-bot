@@ -44,13 +44,6 @@ NODE_ENV=production
 
 After deploy, run `/admin_init` in the admin Telegram group.
 
-Each published result uses one 1080×1350 card for Telegram, the Google Drive
-publishing archive, and the future Instagram carousel. Transparent logos are
-loaded from assets/match-card-logos on every render. For a personal My Drive, run
-`npm run drive:authorize -- <desktop-oauth-client.json>` once and put the printed
-`GOOGLE_DRIVE_OAUTH_CREDENTIALS` value into Railway. The helper creates the
-archive folder and writes its id to `Settings.match_cards_drive_folder_id`.
-
 ## Payment Methods and Payment Summary
 
 Current supported payment methods:

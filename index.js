@@ -15,7 +15,7 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
-import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, listToCell, cellToList, getCourts,
+import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
@@ -544,7 +544,8 @@ app.get('/api/match/admin-active', async (req, res) => {
       const status=String(slot.status||'').trim().toLowerCase();
       const resultStatus=String(slot.result_status||'').trim().toLowerCase();
       const resultConfirmed=resultStatus==='confirmed'||Boolean(String(slot.result_confirmed_at||'').trim());
-      return ['open','pending','accepted'].includes(status)&&!resultConfirmed;
+      return ['open','pending','accepted'].includes(status)&&!resultConfirmed
+        && (status==='accepted'||!isSlotPast(slot));
     });
     const ids=[...new Set(rows.flatMap(function(slot){return [slot.from_telegram_id,slot.to_telegram_id]}).filter(Boolean).map(String))];
     const people=new Map(await Promise.all(ids.map(async function(id){
@@ -577,7 +578,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
       getDivisionOpponents(v.division, v.user.id, v.season, v.matchGroup),
       listOpenSlots(v.division, v.user.id, v.season, v.matchGroup),
       listMySlots(v.user.id),
-      v.isAdmin ? allSlots().then(rows => rows.filter(r => String(r.status || '').toLowerCase() === 'accepted').slice(-300).reverse()) : listResultTasks(v.user.id)
+      v.isAdmin ? allSlots().then(rows => rows.filter(r => String(r.status || '').toLowerCase() === 'accepted' && String(r.result_status || '').trim().toLowerCase() !== 'confirmed' && !String(r.result_confirmed_at || '').trim()).slice(-300)) : listResultTasks(v.user.id)
     ]);
     const contacts=new Map(await Promise.all(mySlots.map(async s=>[s.challenge_id,await matchContact(s,v.user.id)])));
     const byId = new Map(opponents.map(o => [String(o.telegram_id), o]));

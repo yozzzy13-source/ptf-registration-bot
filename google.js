@@ -1,8 +1,7 @@
 import { google } from 'googleapis';
-import { GOOGLE_CREDENTIALS, GOOGLE_DRIVE_OAUTH_CREDENTIALS } from './config.js';
+import { GOOGLE_CREDENTIALS } from './config.js';
 
 let sheetsClient = null;
-let driveClient = null;
 
 function getAuth() {
   if (!GOOGLE_CREDENTIALS) throw new Error('GOOGLE_CREDENTIALS env is empty');
@@ -14,25 +13,8 @@ function getAuth() {
     creds.client_email,
     null,
     creds.private_key,
-    [
-      'https://www.googleapis.com/auth/spreadsheets',
-      'https://www.googleapis.com/auth/drive.file'
-    ]
+    ['https://www.googleapis.com/auth/spreadsheets']
   );
-}
-
-function getDriveAuth() {
-  if (!GOOGLE_DRIVE_OAUTH_CREDENTIALS) return getAuth();
-  const creds = JSON.parse(GOOGLE_DRIVE_OAUTH_CREDENTIALS);
-  const clientId = creds.client_id || creds.clientId;
-  const clientSecret = creds.client_secret || creds.clientSecret;
-  const refreshToken = creds.refresh_token || creds.refreshToken;
-  if (!clientId || !clientSecret || !refreshToken) {
-    throw new Error('GOOGLE_DRIVE_OAUTH_CREDENTIALS must contain client_id, client_secret and refresh_token');
-  }
-  const auth = new google.auth.OAuth2(clientId, clientSecret);
-  auth.setCredentials({ refresh_token: refreshToken });
-  return auth;
 }
 
 // У Google лимит на чтения в минуту. Когда в него упираемся, ответ приходит с
@@ -81,9 +63,4 @@ function wrap(client) {
 export function sheets() {
   if (!sheetsClient) sheetsClient = wrap(google.sheets({ version: 'v4', auth: getAuth() }));
   return sheetsClient;
-}
-
-export function drive() {
-  if (!driveClient) driveClient = google.drive({ version: 'v3', auth: getDriveAuth() });
-  return driveClient;
 }

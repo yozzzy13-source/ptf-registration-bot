@@ -587,9 +587,7 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
   <div id="viewPlayers" class="hidden"></div>
   <div id="viewMatches" class="hidden"></div>
   <div id="viewEvents" class="hidden"></div>
-  <div id="viewPartners" class="hidden"></div>
   <div id="viewAbout" class="hidden"></div>
-  <div id="viewFantasy" class="hidden"></div>
   <div id="viewCard" class="hidden"></div>
   <div class="navbot" id="navBot"></div>
 </div>
@@ -607,8 +605,6 @@ var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='';
-var partners=[],partnerTexts={};
-var fantasyData=null,fantasyDeferred=false,fantasyLoading=null;
 var mode='home',openId='',backTo='players';
 var pQuery='',pDiv='',pStatus='',pView='detail',pOrder=[],openAch='',pFiltersOpen=false;
 var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false;
@@ -888,20 +884,20 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
 // ожидания, заявка без оплаты, остальные). Главная есть всегда.
 // «Расписание» больше не отдельный экран: согласованные матчи живут сверху
 // вкладки «Матчи», прямо над историей.
-var ALL_VIEWS=['home','div','race','players','matches','events','fantasy','partners','about'];
+var ALL_VIEWS=['home','div','race','players','matches','events','about'];
 var VIEWS=ALL_VIEWS.slice();
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
-matches:'viewMatches',events:'viewEvents',fantasy:'viewFantasy',partners:'viewPartners',about:'viewAbout'};
+matches:'viewMatches',events:'viewEvents',about:'viewAbout'};
 function buildTabs(){
   var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
-              matches:X.tMatches,events:X.tEvents,fantasy:'Fantasy',partners:X.tPartners,about:X.tAbout};
+              matches:X.tMatches,events:X.tEvents,about:X.tAbout};
   var labels=VIEWS.map(function(k){return [k,byCode[k]||k]});
   $('tabs').innerHTML=labels.map(function(x){
     // У «Событий» — зелёная точка, когда есть открытая регистрация: иначе про
     // новое событие узнают только те, кто зашёл во вкладку сам.
     var dot=(x[0]==='events'&&evOpenCount()>0)?'<span class="dot"></span>':'';
     return '<div class="tab" data-t="'+x[0]+'" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+dot+'</div>';
-  }).join('');
+  }).join('')+'<div class="tab off">'+esc(X.tPartners)+'</div>';
   // Активную вкладку заново подсвечивает showTab — вызываем её текущим режимом.
   var cur=document.querySelector('.tab[data-t="'+mode+'"]');
   if(cur)cur.classList.add('on');
@@ -964,27 +960,8 @@ function openDivFrom(n,d){
   divData=null;divErr='';
   showTab('div');
 }
-function fantasyUrl(){
-  var q=[];
-  if(linkToken)q.push('t='+encodeURIComponent(linkToken));
-  if(asQ)q.push('as='+encodeURIComponent(asQ));
-  return '/fantasy'+(q.length?'?'+q.join('&'):'');
-}
-function openFantasy(){ location.href=fantasyUrl(); }
-function loadFantasyLater(){
-  if(!fantasyDeferred||fantasyData)return Promise.resolve(fantasyData);
-  if(fantasyLoading)return fantasyLoading;
-  fantasyLoading=fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):'')+'&with_fantasy=1',{cache:'no-store'})
-    .then(function(r){return r.json()}).then(function(j){
-      if(!j.ok)throw new Error(j.error||'Error');
-      fantasyData=j.fantasy||null;fantasyDeferred=false;return fantasyData;
-    }).catch(function(e){console.error('Fantasy preload failed',e);return null})
-    .finally(function(){fantasyLoading=null});
-  return fantasyLoading;
-}
 function showTab(t){
   if(ALL_VIEWS.indexOf(t)<0)return;
-  if(t==='fantasy')return openFantasy();
   mode=t;openId='';allMatches=false;openAch='';
   syncBack();
   ALL_VIEWS.forEach(function(k){
@@ -1002,81 +979,9 @@ function showTab(t){
   else if(t==='players')renderPlayers();
   else if(t==='matches')renderFeed();
   else if(t==='events')renderEvents();
-  else if(t==='partners')renderPartners();
   else renderAbout();
   renderNav();
   window.scrollTo(0,0);
-}
-
-function partnerText(value){
-  if(value&&typeof value==='object')return String((L?value.ru:value.en)||value.ru||value.en||'');
-  return String(value||'');
-}
-function renderPartners(){
-  var title=partnerText(partnerTexts.title)||(L?'Партнёры':'Partners');
-  var intro=partnerText(partnerTexts.intro);
-  var h='<div class="sec"><h2>'+esc(title)+'</h2>'+(intro?'<p class="hint">'+esc(intro)+'</p>':'')+'</div>';
-  if(!partners.length){
-    h+='<div class="empty">'+esc(L?'Партнёры скоро появятся.':'Partners will appear here soon.')+'</div>';
-    $('viewPartners').innerHTML=h;return;
-  }
-  h+=partners.map(function(p){
-    var name=L?(p.name||p.name_en):(p.name_en||p.name);
-    var description=partnerText(p.description);
-    var category=partnerText(p.category);
-    var template=partnerText(p.message_i18n)||String(p.message||'');
-    template=template.replace(/\{name\}/g,(me&&me.name)||'PTF player').replace(/\{(?:партнёр|партнер|partner)\}/gi,name);
-    var wa=p.whatsapp?'https://wa.me/'+p.whatsapp+(template?'?text='+encodeURIComponent(template):''):'';
-    return '<div class="card">'
-      +(p.photo?'<img src="'+esc(p.photo)+'" alt="" style="width:100%;max-height:180px;object-fit:cover;border-radius:12px;margin-bottom:12px">':'')
-      +'<h3>'+esc(name)+'</h3>'
-      +(category?'<div class="hint">'+esc(category)+'</div>':'')
-      +(description?'<p>'+esc(description)+'</p>':'')
-      +'<div class="actions">'
-      +(wa?'<button onclick="openLink(\''+q(wa)+'\')">WhatsApp</button>':'')
-      +(p.link?'<button onclick="openLink(\''+q(p.link)+'\')">'+esc(L?'Открыть':'Open')+'</button>':'')
-      +'</div></div>';
-  }).join('');
-  $('viewPartners').innerHTML=h;
-}
-
-function inviteHeroHtml(data){
-  var seasons=(data&&data.seasons)||[];
-  var latest=seasons[0]||{};
-  var champion=latest.champion||latest.winner||'';
-  return '<div class="hero"><h2>'+esc(L?'Добро пожаловать в PTF League':'Welcome to PTF League')+'</h2>'
-    +'<p>'+esc(L?'Создайте профиль, чтобы видеть таблицы, матчи и события.':'Create a profile to see standings, matches and events.')+'</p>'
-    +(champion?'<div class="hint">'+esc((L?'Чемпион: ':'Champion: ')+champion)+'</div>':'')
-    +'<button onclick="location.href=\'/apply\'">'+esc(L?'Создать профиль':'Create profile')+'</button></div>';
-}
-function inviteFinal(season){
-  var final=season&&(season.final||season.final_match);
-  if(!final)return '';
-  return '<div class="card"><h3>'+esc(L?'Финал':'Final')+'</h3><div class="hint">'+esc(typeof final==='string'?final:JSON.stringify(final))+'</div></div>';
-}
-function toggleInvitePlayers(id){
-  var el=$(id);if(el)el.classList.toggle('hidden');
-}
-function inviteEventsHtml(data){
-  var seasons=(data&&data.seasons)||[];
-  return seasons.map(function(season,i){
-    var players=season.players||[];
-    return '<div class="card"><h3>'+esc(season.title||season.name||((L?'Сезон ':'Season ')+(season.season||'')))+'</h3>'
-      +inviteFinal(season)
-      +(players.length?'<button onclick="toggleInvitePlayers(\'invitePlayers'+i+'\')">'+esc((L?'Игроки':'Players')+' · '+players.length)+'</button>'
-      +'<div id="invitePlayers'+i+'" class="hidden hint">'+esc(players.map(function(x){return x.name||x}).join(', '))+'</div>':'')
-      +'</div>';
-  }).join('');
-}
-function renderInvite(){
-  $('tabs').classList.add('hidden');$('hdr').classList.add('hidden');$('navBot').innerHTML='';
-  $('viewHome').classList.remove('hidden');
-  $('viewHome').innerHTML=inviteHeroHtml({})+'<div class="loading">'+esc(L?'Загружаем сезоны…':'Loading seasons…')+'</div>';
-  fetch('/api/public/seasons',{cache:'no-store'}).then(function(r){return r.json()}).then(function(data){
-    $('viewHome').innerHTML=inviteHeroHtml(data)+inviteEventsHtml(data);
-  }).catch(function(){
-    $('viewHome').innerHTML=inviteHeroHtml({});
-  });
 }
 
 // -------------------------------------------------------- расписание
@@ -2396,14 +2301,9 @@ function toggleMatches(id){
 var asQ=(new URLSearchParams(location.search).get('as')||'').trim();
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
-    if(!j.ok){
-      if(j.code==='profile_required'||j.error==='profile_required'){renderInvite();return null}
-      throw new Error(j.error||'Error');
-    }
+    if(!j.ok)throw new Error(j.error||'Error');
     if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en}
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];
-    partners=j.partners||[];partnerTexts=j.partners_text||{};
-    fantasyData=j.fantasy||null;fantasyDeferred=Boolean(j.fantasy_deferred);
     photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
     season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
     seasons=j.seasons||[];
@@ -2413,7 +2313,6 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
       VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
       if(VIEWS.indexOf('home')<0)VIEWS.unshift('home');
     }
-    if(partners.length&&VIEWS.indexOf('partners')<0)VIEWS.push('partners');
     buildTabs();
     $('title').textContent=X.title;
     // Видно, что это чужой набор вкладок, а не поломка.
@@ -2446,8 +2345,6 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
       wantPlayer=mine?String(mine.id):'';
     }
     if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home'));
-    // Тяжёлые Fantasy-данные приходят вторым запросом уже после первой отрисовки.
-    if(fantasyDeferred)setTimeout(loadFantasyLater,0);
   }).catch(function(e){
     $('viewHome').innerHTML='<div class="empty" style="color:#C2695E">'+esc(e.message)+'</div>';
   });
