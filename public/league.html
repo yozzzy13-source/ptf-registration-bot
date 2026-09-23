@@ -752,7 +752,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   search:'Поиск по имени…',searchP:'Поиск по игроку…',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Сезон',
-  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',resultPending:'Ожидается результат',
+  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',resultPending:'Ожидается результат',matchSoon:'Скоро',matchAgreed:'Матч назначен',
   schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
   schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
   avTitle:'Аватарка',avSend:'📸 Загрузить селфи',avRedo:'📸 Заменить селфи',avSending:'Отправляю…',
@@ -811,7 +811,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   search:'Search by name…',searchP:'Search by player…',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Season',
-  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',resultPending:'Result pending',
+  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',resultPending:'Result pending',matchSoon:'Soon',matchAgreed:'Match agreed',
   schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
   schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
   avTitle:'Avatar',avSend:'📸 Upload a selfie',avRedo:'📸 Replace the selfie',avSending:'Sending…',
@@ -1176,6 +1176,7 @@ var schData=null,schLoading=false,schErr='';
 var schDiv='',schMine=false;
 var matchesView='upcoming';
 function loadSched(){
+  if(schLoading)return;
   schLoading=true;schErr='';
   fetch('/api/league/schedule?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
@@ -1188,8 +1189,12 @@ function loadSched(){
           schDiv=(j.me_division&&j.divisions.indexOf(j.me_division)>=0)?j.me_division:'';
         }
       }
-      if(mode==='matches')renderFeed();
-    }).catch(function(e){schLoading=false;schErr=e.message;if(mode==='matches')renderFeed()});
+      if(openId){var p=byId(openId);if(p)renderPlayer(p)}
+      else if(mode==='matches')renderFeed();
+    }).catch(function(e){schLoading=false;schErr=e.message;
+      if(openId){var p=byId(openId);if(p)renderPlayer(p)}
+      else if(mode==='matches')renderFeed();
+    });
 }
 function setSchDiv(v){schDiv=v;renderFeed()}
 function toggleSchMine(){schMine=!schMine;renderFeed()}
@@ -1200,6 +1205,20 @@ function schVisible(){
     if(schMine&&String(i.p1.id)!==schData.me&&String(i.p2.id)!==schData.me)return false;
     return true;
   });
+}
+// История показывает только матчи, которые ещё впереди. Согласованные матчи
+// без результата после своей даты остаются в расписании для внесения счёта,
+// но не должны выглядеть будущими в карточке игрока.
+function futureSchedule(){
+  return schData&&schData.items?schData.items.filter(function(i){
+    return Number(i.start)>Date.now()&&!i.result_pending;
+  }):[];
+}
+function futureForPlayer(p){
+  var key=nameKey(p&&p.name);
+  return key?futureSchedule().filter(function(i){
+    return nameKey(i.p1&&i.p1.name)===key||nameKey(i.p2&&i.p2.name)===key;
+  }):[];
 }
 // Заголовок дня: сегодня и завтра называем словами — так быстрее считывается.
 function schDayLabel(dateStr,nowMs){
@@ -1252,15 +1271,16 @@ function upcomingBlock(){
 // Предстоящий матч использует ту же карточку, что и сыгранный: сразу видны
 // оба игрока, аватары, дивизион, время и корт.
 function scheduledPlayer(p,from){
-  // В расписании id может быть локальным номером строки дивизиона. Открываем
-  // профиль по настоящему id витрины, а при его отсутствии — по имени.
-  var hit=byId((p||{}).id);
+  // ID расписания может быть Telegram ID или номером в дивизионе, поэтому
+  // сначала ищем игрока по имени, как и фото в остальных списках.
+  var hit=players.filter(function(x){return nameKey(x.name)===nameKey((p||{}).name)})[0];
   if(hit){openPlayer(hit.id,from);return}
-  openPlayerByName((p||{}).name,from);
+  hit=byId((p||{}).id);
+  if(hit)openPlayer(hit.id,from);
 }
 function upcomingCard(i){
   var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
-  var top=[i.date,i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+  var top=[matchDate(i.date),i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
   var p1=byId((i.p1||{}).id)||i.p1||{},p2=byId((i.p2||{}).id)||i.p2||{};
   var p1Call="scheduledPlayer({id:'"+q(p1.id)+"',name:'"+q(schName(p1))+"'},'matches')";
   var p2Call="scheduledPlayer({id:'"+q(p2.id)+"',name:'"+q(schName(p2))+"'},'matches')";
@@ -2220,8 +2240,9 @@ function toggleF(){fOpen=!fOpen;renderFeed()}
 function setMatchesView(v){matchesView=v;renderFeed()}
 function renderFeed(){
   var list=allMatchesList();
+  var futureAll=futureSchedule();
   var divs=[];
-  list.forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
+  list.concat(futureAll).forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
   divs.sort();
   var qq=fQuery.trim().toLowerCase();
   var shown=list.filter(function(m){
@@ -2229,7 +2250,16 @@ function renderFeed(){
     if(qq&&String(m.winner.name).toLowerCase().indexOf(qq)<0&&String(m.loser.name).toLowerCase().indexOf(qq)<0)return false;
     return true;
   });
+  var future=futureAll.filter(function(i){
+    if(fDiv&&String(i.division||'').trim()!==fDiv)return false;
+    if(qq&&String(i.p1&&i.p1.name||'').toLowerCase().indexOf(qq)<0
+      &&String(i.p2&&i.p2.name||'').toLowerCase().indexOf(qq)<0)return false;
+    return true;
+  });
   var upcoming=upcomingBlock();
+  var futureAboveHistory=future.length
+    ?'<div class="bhead"><h3>'+esc(X.matchesUpcoming)+'</h3><div class="bcnt">'+future.length+'</div></div>'
+      +future.map(upcomingCard).join(''):'';
   var history='<div class="bhead"><h3>'+esc(X.histTitle)+'</h3>'
     +'<div class="bcnt">'+shown.length+'</div>'
     +'<div class="chip sm'+(fOpen||fQuery||fDiv?' on':'')+'" onclick="toggleF()">'+esc(X.filters)+'</div></div>';
@@ -2244,7 +2274,7 @@ function renderFeed(){
   if(shown.length>fLimit)history+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
   var h='<div class="matchswitch"><button class="'+(matchesView==='upcoming'?'on':'')+'" onclick="setMatchesView(\'upcoming\')">'+esc(X.matchesUpcoming)+'</button>'
     +'<button class="'+(matchesView==='history'?'on':'')+'" onclick="setMatchesView(\'history\')">'+esc(X.matchesHistory)+'</button></div>'
-    +(matchesView==='upcoming'?upcoming:history);
+    +(matchesView==='upcoming'?upcoming:futureAboveHistory+history);
   $('viewMatches').innerHTML=h;
   if(fOpen||fQuery)keepFocus('fq',fQuery);
 }
@@ -2655,6 +2685,7 @@ function seasonRowsWithLive(p,byTable){
   return rows;
 }
 function renderPlayer(p){
+  if(!schData&&!schLoading&&!schErr)loadSched();
   var w=pct(p),fp=fantasyPlayer(p);
   var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
   var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>';
@@ -2717,11 +2748,13 @@ function renderPlayer(p){
   h+='</div>';
 
   var mine=matches[String(p.id)]||[];
-  h+='<div class="card"><h3>'+esc(X.history)+(mine.length?' · '+mine.length:'')+'</h3>';
-  if(!mine.length)h+='<div class="hint">'+esc(X.noMatches)+'</div>';
+  var future=futureForPlayer(p);
+  var count=mine.length+future.length;
+  h+='<div class="card"><h3>'+esc(X.history)+(count?' · '+count:'')+'</h3>';
+  if(!count)h+='<div class="hint">'+esc(X.noMatches)+'</div>';
   else{
     var shown=allMatches?mine:mine.slice(0,5);
-    h+=shown.map(matchRow).join('');
+    h+=future.map(function(i){return futureMatchRow(i,p)}).join('')+shown.map(matchRow).join('');
     if(mine.length>5)h+='<button class="more" onclick="toggleMatches(\''+q(p.id)+'\')">'
       +esc(allMatches?X.collapse:X.showAll+' ('+mine.length+')')+'</button>';
   }
@@ -2781,6 +2814,19 @@ function matchRow(m){
     +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result==='WIN'?'WIN':'LOST')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
+    +'</div></div>';
+}
+function futureMatchRow(i,p){
+  var p1=i.p1||{},p2=i.p2||{};
+  var other=nameKey(p1.name)===nameKey(p.name)?p2:p1;
+  var hit=players.filter(function(x){return nameKey(x.name)===nameKey(other.name)})[0];
+  var opp={name:other.name||'',photo:livePhoto(hit||other)};
+  var dv=divTag(i.division,season);
+  var top=[matchDate(i.date),i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+  return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="mrow"><div class="res w">'+esc(X.matchSoon)+'</div>'
+    +'<div onclick="openPlayerByName(\''+q(other.name)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
+    +'<div><div class="who">'+esc(other.name||'—')+'</div><div class="sc">'+esc(X.matchAgreed)+'</div></div>'
     +'</div></div>';
 }
 // Раньше здесь вызывался openPlayer, а он первым делом сбрасывает allMatches
