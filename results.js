@@ -11,7 +11,7 @@ import { sheets as sheetsClient } from './google.js';
 import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, TIMEZONE } from './config.js';
 import { scoreValues, detectSet3Mode, reverseScore, cellToScore, formatScore } from './tennis.js';
 import { divisionSheetId, divisionLetter, getDivisionTable, recentFormBefore } from './division.js';
-import { getSetting, sameName } from './sheets.js';
+import { getLeagueProfiles, getSetting, sameName } from './sheets.js';
 import { slotScope, sameScope } from './access.js';
 import { buildFantasyCatalog, scoreFantasyMatch, fantasyPlayerKey } from './fantasy.js';
 import { rememberCardContext } from './matchcard.js';
@@ -456,6 +456,16 @@ function scoreTextFor(slot, parsed, reversed) {
 // для ОБОИХ игроков, даже если кто-то из них не в текущем roster-каталоге
 // Fantasy: Костас хочет, чтобы очки считались всем, кто реально сыграл.
 // Цена по умолчанию 10 (как для дебютанта), если игрока нет в каталоге.
+async function cardFormsBefore(names, fallbacks) {
+  const profiles = await getLeagueProfiles().catch(() => []);
+  return Promise.all(names.map((name, i) => {
+    const form = profiles.find(player => sameName(player.name, name))?.form;
+    // Frontend_Profile_All.recent_form spans every season. Match_Log is the
+    // fallback when a player's profile has not populated that column yet.
+    return Array.isArray(form) && form.length ? form.slice(-5) : fallbacks[i]().catch(() => []);
+  }));
+}
+
 async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot, d1 }) {
   const p1Group=String(pair.groupA || pair.a?.group || '').trim();
   const p2Group=String(pair.groupB || pair.b?.group || '').trim();
@@ -466,9 +476,9 @@ async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot
     divisionSheetId(d1,season,p2Group).catch(()=>''),
     buildFantasyCatalog({mode:'live'}).catch(()=>null)
   ]);
-  const [historyP1,historyP2]=await Promise.all([
-    p1Sheet?recentFormBefore(p1Sheet,p1,0).catch(()=>[]):[],
-    p2Sheet?recentFormBefore(p2Sheet,p2,0).catch(()=>[]):[]
+  const [historyP1,historyP2]=await cardFormsBefore([p1,p2],[
+    () => p1Sheet ? recentFormBefore(p1Sheet,p1,0) : Promise.resolve([]),
+    () => p2Sheet ? recentFormBefore(p2Sheet,p2,0) : Promise.resolve([])
   ]);
   const place=(table,name)=>table?.ok
     ? table.players.find(x=>sameName(x.name,name))?.place
@@ -499,10 +509,12 @@ async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed
   // ниже), а сам матч дописываем руками: Костас хочет видеть плашку даже у
   // дебютанта, у которого этот матч — первый.
   const previous = matchNumber ? matchNumber - 1 : 0;
-  const [beforeTable, historyP1, historyP2] = await Promise.all([
+  const [beforeTable, [historyP1, historyP2]] = await Promise.all([
     getDivisionTable(d1, season, pair.group).catch(() => null),
-    recentFormBefore(spreadsheetId, p1, previous).catch(() => []),
-    recentFormBefore(spreadsheetId, p2, previous).catch(() => [])
+    cardFormsBefore([p1,p2],[
+      () => recentFormBefore(spreadsheetId, p1, previous),
+      () => recentFormBefore(spreadsheetId, p2, previous)
+    ])
   ]);
   // Имена сверяем терпимо: «Yana D.» в составе и «Yana D» в матч-логе — один и
   // тот же человек, а строгое сравнение оставляло карточку без места.
