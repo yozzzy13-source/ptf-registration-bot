@@ -2240,9 +2240,8 @@ function toggleF(){fOpen=!fOpen;renderFeed()}
 function setMatchesView(v){matchesView=v;renderFeed()}
 function renderFeed(){
   var list=allMatchesList();
-  var futureAll=futureSchedule();
   var divs=[];
-  list.concat(futureAll).forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
+  list.forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
   divs.sort();
   var qq=fQuery.trim().toLowerCase();
   var shown=list.filter(function(m){
@@ -2250,16 +2249,7 @@ function renderFeed(){
     if(qq&&String(m.winner.name).toLowerCase().indexOf(qq)<0&&String(m.loser.name).toLowerCase().indexOf(qq)<0)return false;
     return true;
   });
-  var future=futureAll.filter(function(i){
-    if(fDiv&&String(i.division||'').trim()!==fDiv)return false;
-    if(qq&&String(i.p1&&i.p1.name||'').toLowerCase().indexOf(qq)<0
-      &&String(i.p2&&i.p2.name||'').toLowerCase().indexOf(qq)<0)return false;
-    return true;
-  });
   var upcoming=upcomingBlock();
-  var futureAboveHistory=future.length
-    ?'<div class="bhead"><h3>'+esc(X.matchesUpcoming)+'</h3><div class="bcnt">'+future.length+'</div></div>'
-      +future.map(upcomingCard).join(''):'';
   var history='<div class="bhead"><h3>'+esc(X.histTitle)+'</h3>'
     +'<div class="bcnt">'+shown.length+'</div>'
     +'<div class="chip sm'+(fOpen||fQuery||fDiv?' on':'')+'" onclick="toggleF()">'+esc(X.filters)+'</div></div>';
@@ -2274,7 +2264,7 @@ function renderFeed(){
   if(shown.length>fLimit)history+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
   var h='<div class="matchswitch"><button class="'+(matchesView==='upcoming'?'on':'')+'" onclick="setMatchesView(\'upcoming\')">'+esc(X.matchesUpcoming)+'</button>'
     +'<button class="'+(matchesView==='history'?'on':'')+'" onclick="setMatchesView(\'history\')">'+esc(X.matchesHistory)+'</button></div>'
-    +(matchesView==='upcoming'?upcoming:futureAboveHistory+history);
+    +(matchesView==='upcoming'?upcoming:history);
   $('viewMatches').innerHTML=h;
   if(fOpen||fQuery)keepFocus('fq',fQuery);
 }
