@@ -465,15 +465,22 @@ export async function getMasterPhotos() {
   return out;
 }
 
-// Очки по сезонам: лист «Year ranking points» в главной таблице, колонки Season 1..10.
+// Очки по сезонам: лист «Year ranking points input» в Match_Log, колонки Season 1..10.
 // Заполняется вручную, поэтому читаем как есть и ничего не пересчитываем.
 let seasonPointsCache = { t: 0, v: null };
 async function getSeasonPoints() {
   if (seasonPointsCache.v && Date.now() - seasonPointsCache.t < PROFILES_CACHE_MS) return seasonPointsCache.v;
   const byPlayer = new Map();
-  if (!LEAGUE_RESULTS_SHEET_ID) return byPlayer;
-  const { headers, rows } = await readNamedSheet(LEAGUE_RESULTS_SHEET_ID,
-    ['Year ranking points', 'Year ranking points input'], 'player_id').catch(() => ({ headers: [], rows: [] }));
+  let headers = [];
+  let rows = [];
+  for (const spreadsheetId of new Set([DIVISIONS_SPREADSHEET_ID, LEAGUE_RESULTS_SHEET_ID].filter(Boolean))) {
+    const found = await readNamedSheet(spreadsheetId,
+      ['Year ranking points input', 'Year ranking points'], 'player_id').catch(() => ({ headers: [], rows: [] }));
+    if (found.headers.some(h => /^season_\d+$/.test(h))) {
+      ({ headers, rows } = found);
+      break;
+    }
+  }
   const seasonKeys = headers.filter(h => /^season_\d+$/.test(h));
   for (const r of rows) {
     const pid = String(r.player_id || '').trim();
