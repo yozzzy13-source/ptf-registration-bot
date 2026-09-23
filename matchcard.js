@@ -427,7 +427,7 @@ export async function renderInstagramMatchCard(match = {}) {
   const IW = 1080, IH = 1148, IR = 390;
   // Верхние 70% заняты результатом; нижние 30% намеренно остаются чистыми
   // для будущей композиции прозрачных логотипов.
-  const centers = [{ x:225, y:450 }, { x:855, y:450 }];
+  const centers = [{ x:225, y:420 }, { x:855, y:420 }];
   const m = {
     winner:txt(match.winner), loser:txt(match.loser), score:txt(match.score),
     division:txt(match.division), season:txt(match.season), label:txt(match.label),
@@ -454,8 +454,11 @@ export async function renderInstagramMatchCard(match = {}) {
     const pos = meta.position || {};
     const value = Number.isFinite(pos.after) ? pos.after : (Number.isFinite(pos.before) ? pos.before : null);
     if (value === null) return '';
-    const pill = rankPill(pos.before, pos.after);
-    const w = 178, h = pill ? 118 : 90, x = cx - w / 2, y = 748;
+    const unchanged = Number.isFinite(pos.before) && Number.isFinite(pos.after) && pos.before === pos.after;
+    const pill = rankPill(pos.before, pos.after) || (unchanged
+      ? { text:'—', bg:'rgba(232,164,92,.13)', line:'rgba(232,164,92,.32)', fg:C.amber }
+      : null);
+    const w = 178, h = pill ? 118 : 90, x = cx - w / 2, y = 755;
     return `<g>
       <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="15" fill="${C.plate}" stroke="${C.plateLine}"/>
       <text x="${cx}" y="${y + 27}" text-anchor="middle" font-family="${FONT}" font-size="14" font-weight="800"
@@ -479,15 +482,15 @@ export async function renderInstagramMatchCard(match = {}) {
     <text x="${IW / 2}" y="126" text-anchor="middle" font-family="${FONT}" font-size="21" font-weight="700"
       fill="${C.win}">${esc(chip)}</text>` : ''}
     ${scoreSvg}
-    <text x="${centers[0].x}" y="700" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="800"
+    <text x="${centers[0].x}" y="660" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="800"
       fill="${C.text}">${esc(fit(m.winner, 18))}</text>
-    <text x="${centers[1].x}" y="700" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="700"
+    <text x="${centers[1].x}" y="660" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="700"
       fill="${C.dim}">${esc(fit(m.loser, 18))}</text>
+    ${formChipsSvg(m.winnerMeta && m.winnerMeta.form, centers[0].x, 713, { gap:42, r:17 })}
+    ${formChipsSvg(m.loserMeta && m.loserMeta.form, centers[1].x, 713, { gap:42, r:17 })}
     ${rank(m.winnerMeta, centers[0].x)}
     ${rank(m.loserMeta, centers[1].x)}
-    ${formChipsSvg(m.winnerMeta && m.winnerMeta.form, centers[0].x, 903, { gap:42, r:17 })}
-    ${formChipsSvg(m.loserMeta && m.loserMeta.form, centers[1].x, 903, { gap:42, r:17 })}
-    ${m.label ? `<text x="${centers[0].x}" y="949" text-anchor="middle" font-family="${FONT}" font-size="16"
+    ${m.label ? `<text x="${centers[0].x}" y="908" text-anchor="middle" font-family="${FONT}" font-size="16"
       font-weight="700" fill="${C.champ}" letter-spacing="3">${esc(m.label)}</text>` : ''}
   </svg>`;
 
