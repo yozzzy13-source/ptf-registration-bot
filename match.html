@@ -162,7 +162,7 @@ var unplayed={known:false,names:[]};
 var canBookCourt=false,bookDate='',bookCourts=[],resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
-      tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
+      tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histUpcoming:'Предстоящие',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
       emptyOpen:'Сейчас нет открытых окон в твоём дивизионе. Создай своё — соперник увидит его в чате дивизиона.',
       emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
       modeOpen:'🔓 Открытое окно',modeDirect:'🎯 Конкретный соперник',
@@ -204,7 +204,7 @@ var T={
       bookNote:'Бот ничего не отправляет сам: он только готовит текст и ссылку. Ответы кортов приходят вам в WhatsApp.',
       h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
   en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
-      tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
+      tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histUpcoming:'Upcoming',histEmpty:'No matches played yet.',histMore:'Show more',
       emptyOpen:'No open slots in your division right now. Create one — your division will see it in chat.',
       emptyMine:'No scheduled matches or open slots yet.',
       modeOpen:'🔓 Open slot',modeDirect:'🎯 Specific opponent',
@@ -465,7 +465,22 @@ function waitingBlock(){
 // Лежит под расписанием на той же вкладке: сначала свои матчи, следом — что
 // происходит в лиге. По умолчанию свой дивизион, вся лига — переключателем.
 var histList=null,histScope='div',histLimit=15,histLoading=false;
+var histUpcoming=null,histUpcomingLoading=false;
+function loadHistoryUpcoming(){
+  if(histUpcomingLoading||histUpcoming!==null)return;
+  histUpcomingLoading=true;
+  fetch('/api/league/schedule?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      histUpcomingLoading=false;
+      histUpcoming=j.ok?(j.items||[]):[];
+      if(mode==='mine')renderMine();
+    }).catch(function(){
+      histUpcomingLoading=false;histUpcoming=[];
+      if(mode==='mine')renderMine();
+    });
+}
 function loadHistory(){
+  loadHistoryUpcoming();
   if(histLoading||histList)return;
   histLoading=true;
   fetch('/api/match/history?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
@@ -486,6 +501,16 @@ function historyBlock(){
   });
   var chips='<div class="chip'+(histScope==='div'?' on':'')+'" onclick="setHistScope(\'div\')">'+esc(X.histMine)+(mineDiv?' '+esc(mineDiv):'')+'</div>'
     +'<div class="chip'+(histScope==='all'?' on':'')+'" onclick="setHistScope(\'all\')">'+esc(X.histAll)+'</div>';
+  var future=(histUpcoming||[]).filter(function(i){
+    return Number(i.start)>Date.now()&&!i.result_pending
+      &&(histScope==='all'||!mineDiv||String(i.division||'').toUpperCase()===mineDiv);
+  });
+  var futureRows=future.map(function(i){
+    var head=[i.date,i.division?('Div '+i.division):'',i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+    return '<div class="slot agreed"><div class="meta">'+esc(head)+' <span class="pill acc">'+esc(X.agreed)+'</span></div>'
+      +'<div class="who" style="font-size:14px">'+esc(i.p1&&i.p1.name||'—')+' <span style="color:var(--muted)">vs</span> '+esc(i.p2&&i.p2.name||'—')+'</div>'
+      +'<div class="when">🕐 <b>'+esc(i.time||'—')+'</b></div></div>';
+  }).join('');
   var rows=list.slice(0,histLimit).map(function(m){
     var head=[m.date,m.division?('Div '+m.division):'',m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
     return '<div class="slot"><div class="meta">'+esc(head)+'</div>'
@@ -494,7 +519,8 @@ function historyBlock(){
   }).join('');
   return '<div class="card" style="margin-top:14px"><h3 style="margin:0 0 8px;font-size:16px">'+esc(X.histTitle)+'</h3>'
     +'<div class="chips">'+chips+'</div></div>'
-    +(rows||'<div class="empty">'+esc(X.histEmpty)+'</div>')
+    +(futureRows?'<div class="meta" style="margin:12px 0 6px">'+esc(X.histUpcoming)+'</div>'+futureRows:'')
+    +(rows||(!futureRows?'<div class="empty">'+esc(X.histEmpty)+'</div>':''))
     +(list.length>histLimit?'<button class="mini" style="width:100%;padding:12px;margin-top:8px" onclick="moreHist()">'+esc(X.histMore)+'</button>':'');
 }
 
