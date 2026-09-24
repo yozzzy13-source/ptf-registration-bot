@@ -118,9 +118,15 @@ check((await db.submitResult('old',{telegram_id:'1'},{winner:'1',score:'6:4 6:3'
 check(!(await db.disputeResult('old',{telegram_id:'3'})).ok,'Unrelated player cannot dispute result');
 check(!(await db.confirmResult('old',{telegram_id:'1'})).ok,'Submitter cannot confirm own score');
 check((await db.confirmResult('old',{telegram_id:'2'})).ok,'Opponent confirms result');
-const result2={division:'Division C',season:'2',group:'2',from_name:'Carol Three',to_name:'Dan Four',from_telegram_id:'3',to_telegram_id:'4',agreed_date:'2099-09-14',result_score:'6:4 6:3',result_winner:'3'};
+put('1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY','Frontend_Profile_All',[
+ ['player_id','player_name','recent_form'],
+ ['3','Carol Three','WIN LOST WIN'],['4','Dan Four','LOST WIN']
+]);
+const result2={challenge_id:'history-form',division:'Division C',season:'2',group:'2',from_name:'Carol Three',to_name:'Dan Four',from_telegram_id:'3',to_telegram_id:'4',agreed_date:'2099-09-14',result_score:'6:4 6:3',result_winner:'3'};
 const before=writes.length;const write=await results.writeConfirmedResult(result2);
 check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
+const allSeasonForm=cardContexts.get('history-form');
+check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='L,W,L','Card form uses the all-season profile history and includes this match once');
 check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
 // Заголовки Match_Log раньше не находились никогда (norm() съедает подчёркивание
 // в «p1_id»), и вместе с ними молча отваливалась запись сезона.
@@ -612,6 +618,197 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
   }
  }
  check(!broken.length,'Каждый импорт находит свой экспорт:\n'+broken.join('\n'));
+}
+
+
+// --- Турниры: группы, сетка, снятия, замены, парная запись ------------------
+{
+ const trn=await load('tournaments.js');
+
+ // Круговая система: каждая пара встречается ровно один раз, туры ровные.
+ const rr=trn.roundRobinPairs(['a','b','c','d','e']);
+ const seen=new Set();
+ for(const round of rr)for(const [x,y] of round)seen.add([x,y].sort().join('-'));
+ check(seen.size===10,'Круговая система: 5 игроков дают 10 уникальных пар');
+ check(rr.every(round=>new Set(round.flat()).size===round.flat().length),'В одном туре игрок встречается один раз');
+ check(trn.roundRobinPairs(['a']).length===0,'Один участник — матчей нет');
+
+ // Змейка разводит сильных по разным группам.
+ check(JSON.stringify(trn.snakeDistribute([1,2,3,4,5,6],2))==='[[1,4,5],[2,3,6]]','Змейка раскладывает 1-2 / 3-4 наоборот');
+ check(trn.snakeDistribute([1,2,3],1).length===1,'Одна группа принимает всех');
+
+ check(JSON.stringify(trn.parseScore('6:4 7:6 (7:4)'))==='[{"a":6,"b":4},{"a":7,"b":6}]','Тай-брейк в скобках не считается сетом');
+ check(trn.parseScore('W/O').length===0,'W/O не даёт сетов');
+
+ // Полный проход по турниру на мок-таблицах.
+ const admin={id:'99',name:'Admin'};
+ const t=await trn.createTournament({name:'Тестовый турнир',kind:'singles',playoff_type:'cross_1_4',third_place:'yes'},admin,false);
+ check(t.tournament_id.startsWith('trn_'),'Турнир создан');
+ check((await trn.listTournaments(false)).length===1,'Турнир виден в списке');
+
+ const names=['P1','P2','P3','P4'];
+ const made=[];
+ for(let i=0;i<names.length;i++){
+  made.push(await trn.addEntry(t.tournament_id,{player_id:String(100+i),player_name:names[i],display_name:names[i],status:'accepted',group:'A',seed:String(i+1)},admin,false));
+ }
+ check((await trn.listEntries(t.tournament_id,false,false)).length===4,'Четыре заявки записаны');
+ const twin=await trn.addEntry(t.tournament_id,{player_id:'100',player_name:'P1'},admin,false);
+ check(twin.entry_id===made[0].entry_id,'Повторная заявка того же игрока не плодит дубль');
+
+ const stage=await trn.createStage(t.tournament_id,{kind:'group',name:'Группы'},admin,false);
+ const gm=await trn.generateGroupMatches(t.tournament_id,stage.stage_id,admin,false);
+ check(gm.length===6,'Расписание группы из четырёх: шесть матчей');
+
+ // Вносим счёт так, чтобы порядок был предсказуемым: P1 > P2 > P3 > P4.
+ const rank={};made.forEach((e,i)=>rank[e.entry_id]=i);
+ for(const m of await trn.listMatches(t.tournament_id,false,false)){
+  const winner=rank[m.entry_a]<rank[m.entry_b]?m.entry_a:m.entry_b;
+  await trn.setMatchResult(m.match_id,{status:'completed',score:'6:1 6:1',winner_entry:winner},admin,false);
+ }
+ let state=await trn.tournamentState(t.tournament_id,false);
+ check(state.standings.map(x=>x.name).join()==='P1,P2,P3,P4','Таблица считается из матчей в верном порядке');
+ check(state.standings[0].points===9&&state.standings[3].points===3,'Очки: 3 за победу, 1 за поражение');
+
+ const po=await trn.generatePlayoff(t.tournament_id,{},admin,false);
+ const semis=po.matches.filter(m=>Number(m.round)===1);
+ check(semis.length===2,'Плей-офф: два полуфинала');
+ check(semis[0].entry_a_name==='P1'&&semis[0].entry_b_name==='P4','Первый полуфинал 1-4');
+ check(semis[1].entry_a_name==='P2'&&semis[1].entry_b_name==='P3','Второй полуфинал 2-3');
+ check(po.matches.some(m=>m.round_label==='Финал'),'Финал создан');
+ check(po.matches.some(m=>m.round_label==='Матч за 3-е место'),'Матч за третье место создан');
+
+ // Победитель полуфинала сам встаёт в финал.
+ await trn.setMatchResult(semis[0].match_id,{status:'completed',score:'6:2 6:2',winner_entry:semis[0].entry_a},admin,false);
+ await trn.setMatchResult(semis[1].match_id,{status:'completed',score:'7:5 6:4',winner_entry:semis[1].entry_b},admin,false);
+ let all=await trn.listMatches(t.tournament_id,false,false);
+ const final=all.find(m=>m.round_label==='Финал');
+ check(final.entry_a_name==='P1'&&final.entry_b_name==='P3','Победители полуфиналов подставились в финал');
+ const third=all.find(m=>m.round_label==='Матч за 3-е место');
+ check(third.entry_a_name==='P4'&&third.entry_b_name==='P2','Проигравшие полуфиналов подставились в матч за третье место');
+
+ // Исправление счёта переписывает и таблицу, и подстановку в финал.
+ await trn.setMatchResult(semis[1].match_id,{status:'completed',score:'6:7 4:6',winner_entry:semis[1].entry_a},admin,false);
+ const log=await trn.readLog(t.tournament_id,false);
+ check(log.some(r=>r.action==='result_corrected'),'Исправление счёта попадает в журнал отдельным действием');
+
+ // Победитель определяется по счёту, если его не указали явно.
+ const extra=await trn.createManualTournamentMatch(t.tournament_id,{entry_a:made[0].entry_id,entry_b:made[3].entry_id,round_label:'Кросс-групповой'},admin,false);
+ const auto=await trn.setMatchResult(extra.match_id,{status:'completed',score:'6:3 4:6 10:8'},admin,false);
+ check(auto.winner_entry===made[0].entry_id,'Победитель выведен из счёта без явного указания');
+ let failed='';
+ try{await trn.setMatchResult(extra.match_id,{status:'completed',score:''},admin,false)}catch(e){failed=e.message}
+ check(/счёт/i.test(failed),'Пустой счёт не принимается');
+ failed='';
+ try{await trn.setMatchResult(extra.match_id,{status:'walkover'},admin,false)}catch(e){failed=e.message}
+ check(/победител/i.test(failed),'W/O без победителя не принимается');
+
+ // Снятие: сыгранное остаётся, несыгранное превращается в W/O сопернику.
+ const t2=await trn.createTournament({name:'Снятия',kind:'singles'},admin,false);
+ const st2=await trn.createStage(t2.tournament_id,{kind:'group'},admin,false);
+ const e2=[];
+ for(let i=0;i<4;i++)e2.push(await trn.addEntry(t2.tournament_id,{player_id:String(200+i),player_name:'W'+i,display_name:'W'+i,status:'accepted',group:'A',seed:String(i+1)},admin,false));
+ await trn.generateGroupMatches(t2.tournament_id,st2.stage_id,admin,false);
+ const before=(await trn.listMatches(t2.tournament_id,false,false)).filter(m=>[m.entry_a,m.entry_b].includes(e2[0].entry_id));
+ await trn.setMatchResult(before[0].match_id,{status:'completed',score:'6:0 6:0',winner_entry:e2[0].entry_id},admin,false);
+ await trn.withdrawEntry(e2[0].entry_id,{reason:'injury'},admin,false);
+ const after=(await trn.listMatches(t2.tournament_id,false,false)).filter(m=>[m.entry_a,m.entry_b].includes(e2[0].entry_id));
+ check(after.find(m=>m.match_id===before[0].match_id).status==='completed','Сыгранный матч снятого игрока не тронут');
+ check(after.filter(m=>m.status==='walkover').length===2,'Несыгранные матчи снятого стали W/O');
+ check(after.filter(m=>m.status==='walkover').every(m=>m.winner_entry&&m.winner_entry!==e2[0].entry_id),'W/O засчитан сопернику');
+ const withdrawn=(await trn.listEntries(t2.tournament_id,false,false)).find(x=>x.entry_id===e2[0].entry_id);
+ check(withdrawn.status==='withdrawn'&&withdrawn.withdrawal_reason==='injury','Заявка снята с причиной');
+
+ // Замена: новый участник наследует место, группу и несыгранные матчи.
+ const spare=await trn.addEntry(t2.tournament_id,{player_id:'299',player_name:'Spare',display_name:'Spare',status:'waitlist'},admin,false);
+ await trn.withdrawEntry(e2[1].entry_id,{reason:'travel',replacedBy:spare.entry_id},admin,false);
+ const swapped=(await trn.listEntries(t2.tournament_id,false,false)).find(x=>x.entry_id===spare.entry_id);
+ check(swapped.status==='accepted'&&swapped.group===e2[1].group&&swapped.seed===e2[1].seed,'Замена встала на то же место с тем же посевом');
+ const inherited=(await trn.listMatches(t2.tournament_id,false,false)).filter(m=>[m.entry_a,m.entry_b].includes(spare.entry_id));
+ check(inherited.length>0&&inherited.every(m=>m.status==='scheduled'),'Замена унаследовала несыгранные матчи');
+ check((await trn.listEntries(t2.tournament_id,false,false)).find(x=>x.entry_id===e2[1].entry_id).status==='replaced','Заменённый помечен отдельным статусом, не «снят»');
+
+ // Подмена участника прямо в слоте сетки.
+ const slotMatch=inherited[0];
+ const side=slotMatch.entry_a===spare.entry_id?'a':'b';
+ await trn.slotAction(slotMatch.match_id,{side,action:'bye'},admin,false);
+ const byeMatch=(await trn.listMatches(t2.tournament_id,false,false)).find(m=>m.match_id===slotMatch.match_id);
+ check(byeMatch.status==='bye'&&byeMatch.winner_entry,'Проход без игры отдаёт победу второму участнику слота');
+
+ // Парная цепочка.
+ const dbl=await trn.createTournament({name:'Парный',kind:'doubles',status:'registration'},admin,false);
+ const pair=await trn.createPair(dbl.tournament_id,{playerAId:'301',playerAName:'Alpha'},admin,false);
+ check(pair.status==='seeking','Запись без партнёра создаёт пару в поиске');
+ const again=await trn.createPair(dbl.tournament_id,{playerAId:'301',playerAName:'Alpha'},admin,false);
+ check(again.pair_id===pair.pair_id,'Повторная запись не плодит вторую пару');
+ const inv=await trn.invitePartner(pair.pair_id,{toId:'302',toName:'Beta'},admin,false);
+ check((await trn.findPair(pair.pair_id,false)).status==='invite_pending','После приглашения пара ждёт ответа');
+ await trn.declineInvite(inv.invite_id,admin,false);
+ const afterDecline=await trn.findPair(pair.pair_id,false);
+ check(afterDecline.status==='seeking'&&!afterDecline.player_b_id,'Отказ не убивает заявку — пара снова ищет партнёра');
+ const inv2=await trn.invitePartner(pair.pair_id,{toId:'303',toName:'Gamma'},admin,false);
+ const accepted=await trn.acceptInvite(inv2.invite_id,{playerId:'303',playerName:'Gamma'},admin,false);
+ check(accepted.pair.status==='confirmed','Согласие собирает пару');
+ check(accepted.entry.entrant_type==='pair'&&accepted.entry.display_name==='Alpha / Gamma','После согласия появляется заявка пары');
+ check((await trn.pendingInvitesFor('303',false)).length===0,'Принятое приглашение больше не висит');
+
+ // Встречные приглашения засчитываются как согласие.
+ const p1=await trn.createPair(dbl.tournament_id,{playerAId:'401',playerAName:'Mu'},admin,false);
+ const p2=await trn.createPair(dbl.tournament_id,{playerAId:'402',playerAName:'Nu'},admin,false);
+ await trn.invitePartner(p1.pair_id,{toId:'402',toName:'Nu'},admin,false);
+ await trn.invitePartner(p2.pair_id,{toId:'401',toName:'Mu'},admin,false);
+ const mutual=await trn.matchMutualInvites(dbl.tournament_id,false);
+ check(mutual.length===1,'Встречные приглашения схлопнулись в одно согласие');
+ const confirmed=(await trn.listPairs(dbl.tournament_id,false,false)).filter(p=>p.status==='confirmed');
+ check(confirmed.length===2,'После встречного согласия собранных пар стало две');
+
+ // Тестовый режим живёт в отдельных листах и не видит боевых данных.
+ check(trn.sheetName('entries',true).endsWith(' TEST'),'Тестовые листы помечены суффиксом');
+ const sandbox=await trn.createTournament({name:'Песочница',kind:'singles'},admin,true);
+ check((await trn.listTournaments(true)).length===1,'В тестовом режиме свой список турниров');
+ check((await trn.listTournaments(false)).every(x=>x.tournament_id!==sandbox.tournament_id),'Тестовый турнир не попал в боевой список');
+ check((await trn.listTournaments(false)).length===3,'Боевой список не изменился от записей в тест');
+}
+
+
+// --- Турнирное API: доступ только админу, ошибки едут отдельным полем -------
+{
+ for(const p of ['/api/tournaments/bootstrap','/api/tournaments/state','/api/tournaments/candidates','/api/tournaments/log','/api/tournaments/open','/api/tournaments/my-invites'])
+  check(routes.some(r=>r.method==='get'&&r.p===p),'Зарегистрирован GET '+p);
+ for(const p of ['/api/tournaments/create','/api/tournaments/update','/api/tournaments/import-season','/api/tournaments/entry/add','/api/tournaments/entry/update','/api/tournaments/entry/assign','/api/tournaments/entry/withdraw','/api/tournaments/pair/create','/api/tournaments/pair/invite','/api/tournaments/pair/accept','/api/tournaments/pair/decline','/api/tournaments/groups/distribute','/api/tournaments/matches/generate','/api/tournaments/playoff/generate','/api/tournaments/match/result','/api/tournaments/match/slot','/api/tournaments/match/create'])
+  check(routes.some(r=>r.method==='post'&&r.p===p),'Зарегистрирован POST '+p);
+
+ const denied=await request('get','/api/tournaments/bootstrap','3');
+ check(denied.code===403&&denied.body.code==='tournament_admin_only','Не-админа в турнирную админку не пускают');
+ const boot=await request('get','/api/tournaments/bootstrap','99');
+ check(boot.code===200&&Array.isArray(boot.body.tournaments),'Админ получает список турниров');
+ const bad=await request('post','/api/tournaments/create','99',{});
+ check(bad.code===400&&/назван/i.test(bad.body.detail||''),'Настоящая причина ошибки едет в detail, а не теряется в общем переводчике');
+ const created=await request('post','/api/tournaments/create','99',{name:'API турнир',kind:'doubles'});
+ check(created.body.ok&&created.body.tournament.kind==='doubles','Турнир создаётся через API');
+ const testMode=await request('get','/api/tournaments/bootstrap','99',{test:'1'});
+ check(testMode.body.test===true,'Флаг тестового режима доезжает до сервера');
+
+ // Файлы интерфейса и цепочки загружаются без сюрпризов.
+ const pair=await load('pairflow.js');
+ check(typeof pair.handlePairCallback==='function'&&pair.isPairCallback('pr:join:x')&&!pair.isPairCallback('pay:1'),'Парные колбэки отделены от остальных');
+ const page=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
+ for(const path0 of ['bootstrap','state','entry/assign','playoff/generate','match/result','match/slot','pair/invite'])
+  check(page.includes(`'${path0}'`)||page.includes(`api('${path0}'`),'Интерфейс зовёт '+path0);
+ check(!/localStorage|sessionStorage/.test(page),'Интерфейс не полагается на браузерное хранилище');
+}
+
+
+// --- Команды не теряются: и в меню по слэшу, и в /help ----------------------
+{
+ const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/cmd:'tournaments'/.test(tg),'Команда /tournaments есть в едином списке команд организатора');
+ check(/command: 'doubles'/.test(tg)&&tg.match(/command: 'doubles'/g).length===2,'Команда /doubles есть в меню игрока на обоих языках');
+ check(/'\/doubles — парные турниры/.test(bot)&&/'\/doubles — doubles tournaments/.test(bot),'Команда /doubles описана в /help на обоих языках');
+ check(/'Турниры':'🥇'/.test(bot)&&/'Турниры':'Tournaments'/.test(bot),'Раздел «Турниры» в админском /help переведён');
+ check(/text === '\/tournaments'/.test(bot),'Обработчик команды /tournaments на месте');
+ check(/param\.startsWith\('pair_'\)/.test(bot),'Ссылка-приглашение в пару разбирается в /start');
+ check(/PERSONAL_PREFIXES[^\n]*'pr:'/.test(bot),'Парные кнопки помечены личными — в группе их не нажать');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

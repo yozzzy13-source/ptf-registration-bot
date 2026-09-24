@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>PTF Tournaments</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+/* Те же токены, что в мини-приложении лиги: админка не должна выглядеть
+   чужой рядом с остальными экранами. */
+:root{
+  --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#2A2521;--line2:#221F1B;
+  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;
+  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--gold:#C9A76A;
+  --win:#8FBF9A;--lose:#C2695E;--link:#7FB6E8;--silver:#9A948B;
+  --card2:#161514;--line3:#332D28;--line4:#262220;--tile:#141312;
+  --accBg:rgba(232,164,92,.12);--accBg2:rgba(232,164,92,.18);--accLine:rgba(232,164,92,.34);
+  --onAcc:#12100E;--winBg:rgba(143,191,154,.14);--winLine:rgba(143,191,154,.34);
+  --loseBg:rgba(194,105,94,.14);--loseLine:rgba(194,105,94,.34);
+  --linkBg:rgba(127,182,232,.12);--linkLine:rgba(127,182,232,.34);
+  --edge:rgba(255,255,255,.06);--sheet:rgba(17,16,16,.97);--hair:rgba(255,255,255,.05);
+  --testBg:rgba(217,160,196,.14);--testLine:rgba(217,160,196,.4);--test:#D9A0C4;
+}
+html[data-theme="light"]{
+  --bg:#F2F5F1;--surf:#FFFFFF;--surf2:#EBF0EA;--line:#C7D3C5;--line2:#DDE5DB;
+  --text:#16211A;--dim:#4C5A50;--mute:#7E8B82;--mute2:#93A099;
+  --amber:#1F6B44;--amber2:#145236;--champ:#6E7A22;--gold:#8E9A2E;
+  --win:#1F6B44;--lose:#B04A2E;--link:#1A5FB4;--silver:#9AA39C;
+  --card2:#F5F8F4;--line3:#D5DED3;--line4:#E4EAE2;--tile:#F0F4EF;
+  --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--onAcc:#FFFFFF;
+  --winBg:#E1F0E7;--winLine:#A6D2BB;--loseBg:#F9E7E0;--loseLine:#E5B7A4;
+  --linkBg:#E2EAF5;--linkLine:#AAC3E1;
+  --edge:rgba(22,33,26,.06);--sheet:rgba(242,245,241,.97);--hair:rgba(22,33,26,.05);
+  --testBg:#F6E3EF;--testLine:#DFB2CE;--test:#93436F;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  padding-bottom:calc(88px + env(safe-area-inset-bottom))}
+h1,h2,h3{margin:0;font-weight:800}
+button{font:inherit;color:inherit}
+a{color:var(--link)}
+
+/* --- шапка ---------------------------------------------------------------- */
+.top{position:sticky;top:0;z-index:20;background:var(--sheet);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line2);padding:10px 14px calc(8px + env(safe-area-inset-top)) 14px;
+  padding-top:calc(10px + env(safe-area-inset-top))}
+.topline{display:flex;align-items:center;gap:10px}
+.brand{font-size:15px;font-weight:900;letter-spacing:.4px;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.testsw{display:flex;align-items:center;gap:6px;border:1px solid var(--line3);border-radius:999px;
+  padding:5px 10px;font-size:12px;font-weight:800;color:var(--mute);background:var(--tile);cursor:pointer}
+.testsw.on{background:var(--testBg);border-color:var(--testLine);color:var(--test)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mute2)}
+.testsw.on .dot{background:var(--test)}
+.pick{margin-top:9px;width:100%;background:var(--tile);border:1px solid var(--line3);color:var(--text);
+  border-radius:12px;padding:10px 12px;font-size:14px;font-weight:700}
+.testbar{margin-top:8px;background:var(--testBg);border:1px solid var(--testLine);color:var(--test);
+  border-radius:10px;padding:7px 11px;font-size:12px;font-weight:700}
+
+/* --- низ ------------------------------------------------------------------ */
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;background:var(--sheet);
+  backdrop-filter:blur(12px);border-top:1px solid var(--line2);
+  padding:6px 4px calc(6px + env(safe-area-inset-bottom)) 4px}
+.tab{flex:1;background:none;border:0;padding:7px 2px;border-radius:12px;font-size:10.5px;
+  font-weight:800;color:var(--mute2);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+.tab i{font-style:normal;font-size:17px;line-height:1}
+.tab.on{color:var(--amber);background:var(--accBg)}
+
+/* --- общее ---------------------------------------------------------------- */
+.wrap{padding:14px}
+.card{background:var(--surf);border:1px solid var(--line2);border-radius:16px;padding:13px;margin-bottom:11px}
+.card.tight{padding:10px 12px}
+.sect{font-size:11px;font-weight:900;letter-spacing:1.4px;color:var(--mute);margin:16px 2px 8px}
+.sect:first-child{margin-top:2px}
+.row{display:flex;align-items:center;gap:9px}
+.row.sp{justify-content:space-between}
+.grow{flex:1;min-width:0}
+.name{font-weight:800;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{font-size:12px;color:var(--mute);margin-top:2px}
+.muted{color:var(--mute)}
+.empty{text-align:center;color:var(--mute);padding:28px 14px;font-size:14px}
+.err{background:var(--loseBg);border:1px solid var(--loseLine);color:var(--lose);
+  border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600;margin-bottom:11px}
+.okmsg{background:var(--winBg);border:1px solid var(--winLine);color:var(--win);
+  border-radius:12px;padding:10px 12px;font-size:13px;font-weight:600;margin-bottom:11px}
+
+/* --- кнопки --------------------------------------------------------------- */
+.btn{border:1px solid var(--line3);background:var(--tile);color:var(--text);border-radius:11px;
+  padding:9px 13px;font-size:13px;font-weight:800;cursor:pointer}
+.btn:active{transform:scale(.98)}
+.btn.pri{background:var(--amber);border-color:var(--amber);color:var(--onAcc)}
+.btn.dang{background:var(--loseBg);border-color:var(--loseLine);color:var(--lose)}
+.btn.good{background:var(--winBg);border-color:var(--winLine);color:var(--win)}
+.btn.wide{width:100%;padding:12px}
+.btn.sm{padding:6px 10px;font-size:12px;border-radius:9px}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.btns{display:flex;gap:7px;flex-wrap:wrap}
+
+/* --- поля ----------------------------------------------------------------- */
+label.f{display:block;margin-bottom:9px}
+label.f span{display:block;font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--mute);margin-bottom:4px}
+input,select,textarea{width:100%;background:var(--tile);border:1px solid var(--line3);color:var(--text);
+  border-radius:11px;padding:10px 12px;font:inherit;font-size:14px}
+textarea{min-height:64px;resize:vertical}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+
+/* --- бейджи --------------------------------------------------------------- */
+.bg{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:3px 8px;
+  font-size:10.5px;font-weight:900;letter-spacing:.5px;border:1px solid var(--line3);
+  background:var(--tile);color:var(--mute);white-space:nowrap}
+.bg.acc{background:var(--accBg);border-color:var(--accLine);color:var(--amber)}
+.bg.win{background:var(--winBg);border-color:var(--winLine);color:var(--win)}
+.bg.lose{background:var(--loseBg);border-color:var(--loseLine);color:var(--lose)}
+.bg.link{background:var(--linkBg);border-color:var(--linkLine);color:var(--link)}
+.bg.test{background:var(--testBg);border-color:var(--testLine);color:var(--test)}
+
+/* --- таблица -------------------------------------------------------------- */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{font-size:10px;letter-spacing:.8px;color:var(--mute);font-weight:900;text-align:right;padding:0 0 7px}
+.tbl th:first-child,.tbl td:first-child{text-align:left}
+.tbl td{padding:7px 0;border-top:1px solid var(--line4);text-align:right}
+.tbl td.nm{text-align:left;font-weight:700}
+.pl{display:inline-flex;width:21px;height:21px;border-radius:7px;align-items:center;justify-content:center;
+  font-size:11px;font-weight:900;background:var(--tile);border:1px solid var(--line3);margin-right:7px}
+.pl.adv{background:var(--accBg);border-color:var(--accLine);color:var(--amber)}
+
+/* --- доска групп ---------------------------------------------------------- */
+.board{display:flex;gap:9px;overflow-x:auto;padding-bottom:5px;scroll-snap-type:x mandatory}
+.col{min-width:calc(72vw);max-width:290px;flex:0 0 auto;background:var(--surf);border:1px solid var(--line2);
+  border-radius:15px;padding:11px;scroll-snap-align:start}
+.col.target{border-color:var(--accLine);background:var(--accBg)}
+.colh{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.chip{display:flex;align-items:center;gap:8px;background:var(--tile);border:1px solid var(--line3);
+  border-radius:11px;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+.chip.sel{border-color:var(--amber);background:var(--accBg);box-shadow:0 0 0 1px var(--accLine)}
+.chip .sd{width:22px;height:22px;border-radius:7px;background:var(--surf2);border:1px solid var(--line4);
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:var(--mute)}
+
+/* --- сетка плей-офф ------------------------------------------------------- */
+.brk{display:flex;gap:11px;overflow-x:auto;padding-bottom:6px}
+.brcol{min-width:230px;flex:0 0 auto}
+.brh{font-size:10.5px;font-weight:900;letter-spacing:1px;color:var(--mute);margin-bottom:8px;text-align:center}
+.brm{background:var(--surf);border:1px solid var(--line2);border-radius:13px;overflow:hidden;margin-bottom:9px;cursor:pointer}
+.brs{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;font-size:13.5px;font-weight:700;gap:8px}
+.brs+.brs{border-top:1px solid var(--line4)}
+.brs.w{background:var(--accBg);color:var(--amber);font-weight:900}
+.brs .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brs .s{font-variant-numeric:tabular-nums;font-weight:900;color:var(--mute)}
+.brs.w .s{color:var(--amber)}
+.tbd{color:var(--mute2);font-style:italic;font-weight:600}
+
+/* --- список матчей -------------------------------------------------------- */
+.mt{background:var(--surf);border:1px solid var(--line2);border-radius:14px;padding:11px 12px;margin-bottom:8px;cursor:pointer}
+.mt .hd{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+.mt .pl2{display:flex;align-items:center;justify-content:space-between;gap:9px;font-size:14px}
+.mt .pl2 b{font-weight:800}
+.mt .sc{font-variant-numeric:tabular-nums;font-weight:900;color:var(--amber);white-space:nowrap}
+
+/* --- модалка -------------------------------------------------------------- */
+.mask{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);
+  display:flex;align-items:flex-end;justify-content:center}
+.sheetbox{width:100%;max-width:520px;max-height:88vh;overflow-y:auto;background:var(--surf);
+  border:1px solid var(--line2);border-radius:20px 20px 0 0;padding:16px 15px calc(20px + env(safe-area-inset-bottom))}
+.sheeth{display:flex;align-items:center;justify-content:space-between;margin-bottom:13px}
+.x{background:none;border:0;font-size:24px;line-height:1;color:var(--mute);cursor:pointer;padding:0 4px}
+.hint{font-size:12px;color:var(--mute);margin:-3px 0 10px;line-height:1.4}
+.spin{text-align:center;padding:46px;color:var(--mute);font-size:14px}
+.setrow{display:grid;grid-template-columns:1fr 14px 1fr;gap:6px;align-items:center;margin-bottom:7px}
+.setrow .sep{text-align:center;color:var(--mute);font-weight:900}
+.pillrow{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.pill{border:1px solid var(--line3);background:var(--tile);border-radius:999px;padding:7px 12px;
+  font-size:12.5px;font-weight:800;color:var(--dim);cursor:pointer}
+.pill.on{background:var(--accBg);border-color:var(--accLine);color:var(--amber)}
+.logrow{border-top:1px solid var(--line4);padding:8px 0;font-size:12.5px}
+.logrow:first-child{border-top:0}
+.logrow .w{font-weight:800}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="topline">
+    <div class="brand" id="brand">Турниры PTF</div>
+    <button class="testsw" id="testsw" onclick="toggleTest()"><span class="dot"></span><span id="testlbl">Боевой</span></button>
+  </div>
+  <select class="pick" id="tpick" onchange="pickTournament(this.value)"></select>
+  <div class="testbar" id="testbar" style="display:none">Тестовый режим: пишем в листы с пометкой TEST. Боевые таблицы не меняются.</div>
+</div>
+
+<div class="wrap" id="view"><div class="spin">Загружаю…</div></div>
+
+<div class="tabs">
+  <button class="tab on" data-v="list" onclick="go('list')"><i>🏆</i>Турниры</button>
+  <button class="tab" data-v="entries" onclick="go('entries')"><i>📝</i>Заявки</button>
+  <button class="tab" data-v="groups" onclick="go('groups')"><i>🧩</i>Состав</button>
+  <button class="tab" data-v="draw" onclick="go('draw')"><i>🎯</i>Сетка</button>
+  <button class="tab" data-v="matches" onclick="go('matches')"><i>🎾</i>Матчи</button>
+  <button class="tab" data-v="log" onclick="go('log')"><i>🕘</i>Журнал</button>
+</div>
+
+<div id="modal"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+try { tg?.ready(); tg?.expand(); } catch (e) {}
+try { if (tg?.colorScheme === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+
+const initData = tg?.initData || '';
+const token = new URLSearchParams(location.search).get('t') || '';
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const $ = id => document.getElementById(id);
+
+let S = {
+  test: false, view: 'list', tournaments: [], id: '', state: null, candidates: [],
+  log: [], busy: false, msg: '', err: '', season: '', pick: null
+};
+
+// Один вход для всех запросов. Ошибку сервер везёт в detail — общий
+// переводчик /api подменяет текст в поле error на дежурную фразу.
+async function api(path, body, method) {
+  const isGet = (method || (body ? 'POST' : 'GET')) === 'GET';
+  const q = new URLSearchParams({ initData, t: token, test: S.test ? '1' : '' });
+  if (isGet && body) for (const [k, v] of Object.entries(body)) q.set(k, String(v ?? ''));
+  const res = await fetch('/api/tournaments/' + path + (isGet ? '?' + q : ''), isGet ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(body || {}), initData, t: token, test: S.test ? '1' : '' })
+  });
+  const json = await res.json().catch(() => ({ ok: false, detail: 'Сервер не ответил' }));
+  if (!json.ok) throw new Error(json.detail || json.error || 'Не получилось');
+  return json;
+}
+function flash(text, isError) { S.msg = isError ? '' : text; S.err = isError ? text : ''; render(); setTimeout(() => { S.msg = ''; S.err = ''; render(); }, 4200); }
+async function run(fn, done) {
+  if (S.busy) return;
+  S.busy = true; render();
+  try { const out = await fn(); if (done) flash(done); else { S.msg = ''; S.err = ''; } await reload(); return out; }
+  catch (e) { flash(e.message, true); }
+  finally { S.busy = false; render(); }
+}
+const haptic = () => { try { tg?.HapticFeedback?.impactOccurred('light'); } catch (e) {} };
+
+// -------------------------------------------------------------- загрузка
+async function boot() {
+  try {
+    const j = await api('bootstrap');
+    S.tournaments = j.tournaments || [];
+    S.season = j.season || '';
+    if (!S.id && S.tournaments.length) S.id = S.tournaments[0].tournament_id;
+    if (S.id) await loadState();
+  } catch (e) { S.err = e.message; }
+  render();
+}
+async function loadState() {
+  if (!S.id) { S.state = null; return; }
+  try { S.state = await api('state', { tournament_id: S.id }); }
+  catch (e) { S.state = null; S.err = e.message; }
+}
+async function reload() { const j = await api('bootstrap').catch(() => null); if (j) { S.tournaments = j.tournaments || []; S.season = j.season || ''; } await loadState(); render(); }
+async function ensureCandidates() {
+  if (S.candidates.length) return S.candidates;
+  const j = await api('candidates', { season: S.season });
+  S.candidates = j.players || [];
+  return S.candidates;
+}
+
+function toggleTest() { S.test = !S.test; S.id = ''; S.state = null; S.candidates = []; haptic(); boot(); }
+function pickTournament(id) { S.id = id; S.state = null; loadState().then(render); }
+function go(v) { S.view = v; S.pick = null; haptic(); if (v === 'log') loadLog(); render(); }
+async function loadLog() { try { const j = await api('log', { tournament_id: S.id }); S.log = j.log || []; render(); } catch (e) {} }
+
+// ---------------------------------------------------------------- хелперы
+const T = () => S.state?.tournament || null;
+const isDoubles = () => String(T()?.kind || '').toLowerCase() === 'doubles';
+const entries = () => S.state?.entries || [];
+const accepted = () => entries().filter(e => String(e.status).toLowerCase() === 'accepted');
+const matches = () => S.state?.matches || [];
+const stages = () => S.state?.stages || [];
+const groupStage = () => stages().find(s => String(s.kind).toLowerCase() === 'group');
+const playoffStage = () => stages().find(s => String(s.kind).toLowerCase() === 'playoff');
+const entryName = id => entries().find(e => e.entry_id === id)?.display_name || '';
+const STATUS_RU = { applied:'подана', accepted:'принята', waitlist:'лист ожидания', withdrawn:'снят', rejected:'отклонена', replaced:'заменён' };
+const MATCH_RU = { scheduled:'назначен', completed:'сыгран', walkover:'W/O', retired:'RET', default:'DEF', bye:'проход', cancelled:'отменён' };
+const PAIR_RU = { seeking:'ищет партнёра', invite_pending:'ждёт ответа', confirmed:'собрана', dissolved:'распалась' };
+const REASON_RU = { injury:'травма', travel:'уехал', personal:'личное', no_show:'не явился', other:'другое' };
+
+// ==================================================================== вид
+function render() {
+  $('brand').textContent = T() ? T().name : 'Турниры PTF';
+  const sw = $('testsw'); sw.classList.toggle('on', S.test);
+  $('testlbl').textContent = S.test ? 'Тест' : 'Боевой';
+  $('testbar').style.display = S.test ? 'block' : 'none';
+  const pick = $('tpick');
+  pick.innerHTML = S.tournaments.length
+    ? S.tournaments.map(t => `<option value="${esc(t.tournament_id)}"${t.tournament_id === S.id ? ' selected' : ''}>${esc(t.name)} · ${esc(t.kind === 'doubles' ? 'пары' : 'одиночка')}</option>`).join('')
+    : '<option>Турниров пока нет</option>';
+  pick.style.display = S.tournaments.length ? 'block' : 'none';
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.v === S.view));
+
+  const head = (S.err ? `<div class="err">${esc(S.err)}</div>` : '') + (S.msg ? `<div class="okmsg">${esc(S.msg)}</div>` : '');
+  const body = S.busy && !S.state ? '<div class="spin">Работаю…</div>'
+    : S.view === 'list' ? viewList()
+    : !S.state ? '<div class="empty">Выберите турнир или создайте новый на вкладке «Турниры».</div>'
+    : S.view === 'entries' ? viewEntries()
+    : S.view === 'groups' ? viewGroups()
+    : S.view === 'draw' ? viewDraw()
+    : S.view === 'matches' ? viewMatches()
+    : viewLog();
+  $('view').innerHTML = head + body;
+}
+
+// ------------------------------------------------------------- 1. турниры
+function viewList() {
+  const rows = S.tournaments.map(t => {
+    const st = String(t.status || '').toLowerCase();
+    const cls = st === 'running' ? 'win' : st === 'registration' ? 'acc' : '';
+    return `<div class="card tight" onclick="pickTournament('${esc(t.tournament_id)}');go('entries')">
+      <div class="row sp">
+        <div class="grow">
+          <div class="name">${esc(t.name)}</div>
+          <div class="sub">${esc(t.kind === 'doubles' ? 'парный' : 'одиночный')}${t.season ? ' · сезон ' + esc(t.season) : ''}${t.starts_on ? ' · ' + esc(t.starts_on) : ''}</div>
+        </div>
+        <span class="bg ${cls}">${esc(statusRu(t.status))}</span>
+      </div></div>`;
+  }).join('');
+  return `<div class="sect">ТУРНИРЫ</div>
+    ${rows || '<div class="empty">Пока ни одного турнира. Создайте новый или перенесите текущий сезон.</div>'}
+    <div class="sect">ДЕЙСТВИЯ</div>
+    <div class="card">
+      <button class="btn pri wide" onclick="openCreate()">＋ Новый турнир</button>
+      <div style="height:8px"></div>
+      <button class="btn wide" onclick="openImport()">⤵ Перенести сезон лиги в турнир</button>
+      <div class="hint" style="margin:10px 0 0">Перенос только читает составы дивизионов. В таблицы организатора турнирный модуль не пишет никогда — все свои данные он держит в собственных листах.</div>
+    </div>
+    ${T() ? `<div class="sect">НАСТРОЙКИ ТУРНИРА</div>${settingsCard()}` : ''}`;
+}
+function statusRu(s) {
+  return { draft:'черновик', registration:'запись открыта', running:'идёт', completed:'завершён', archived:'архив' }[String(s || '').toLowerCase()] || String(s || '');
+}
+function settingsCard() {
+  const t = T();
+  return `<div class="card">
+    <label class="f"><span>НАЗВАНИЕ</span><input id="s_name" value="${esc(t.name)}"></label>
+    <div class="two">
+      <label class="f"><span>СТАТУС</span><select id="s_status">
+        ${['draft','registration','running','completed','archived'].map(v => `<option value="${v}"${String(t.status).toLowerCase() === v ? ' selected' : ''}>${statusRu(v)}</option>`).join('')}
+      </select></label>
+      <label class="f"><span>СХЕМА ПЛЕЙ-ОФФ</span><select id="s_playoff">
+        <option value="cross_1_4"${t.playoff_type === 'cross_1_4' ? ' selected' : ''}>1-4 и 2-3 внутри группы</option>
+        <option value="cross_groups"${t.playoff_type === 'cross_groups' ? ' selected' : ''}>накрест между группами</option>
+        <option value="seeded_bracket"${t.playoff_type === 'seeded_bracket' ? ' selected' : ''}>сетка по посеву</option>
+      </select></label>
+    </div>
+    <div class="three">
+      <label class="f"><span>ПОБЕДА</span><input id="s_win" type="number" value="${esc(t.points_win || 3)}"></label>
+      <label class="f"><span>ПОРАЖЕНИЕ</span><input id="s_loss" type="number" value="${esc(t.points_loss || 1)}"></label>
+      <label class="f"><span>НЕЯВКА</span><input id="s_wo" type="number" value="${esc(t.points_walkover || 0)}"></label>
+    </div>
+    <div class="two">
+      <label class="f"><span>НАЧАЛО</span><input id="s_start" placeholder="2026-10-01" value="${esc(t.starts_on || '')}"></label>
+      <label class="f"><span>ЗАПИСЬ ДО</span><input id="s_reg" placeholder="2026-09-25" value="${esc(t.registration_closes || '')}"></label>
+    </div>
+    <label class="f"><span>МАТЧ ЗА 3-Е МЕСТО</span><select id="s_third">
+      <option value="no"${t.third_place !== 'yes' ? ' selected' : ''}>не играем</option>
+      <option value="yes"${t.third_place === 'yes' ? ' selected' : ''}>играем</option>
+    </select></label>
+    <button class="btn pri wide" onclick="saveSettings()">Сохранить</button>
+  </div>`;
+}
+function saveSettings() {
+  run(() => api('update', {
+    tournament_id: S.id, name: $('s_name').value, status: $('s_status').value,
+    playoff_type: $('s_playoff').value, points_win: $('s_win').value, points_loss: $('s_loss').value,
+    points_walkover: $('s_wo').value, starts_on: $('s_start').value,
+    registration_closes: $('s_reg').value, third_place: $('s_third').value
+  }), 'Настройки сохранены');
+}
+
+// -------------------------------------------------------------- 2. заявки
+function viewEntries() {
+  const list = entries();
+  const c = S.state.counts || {};
+  const byStatus = s => list.filter(e => String(e.status).toLowerCase() === s);
+  const card = e => {
+    const st = String(e.status).toLowerCase();
+    const cls = st === 'accepted' ? 'win' : st === 'withdrawn' || st === 'rejected' ? 'lose' : st === 'waitlist' ? 'link' : 'acc';
+    return `<div class="card tight" onclick="openEntry('${esc(e.entry_id)}')">
+      <div class="row sp"><div class="grow">
+        <div class="name">${esc(e.display_name || e.player_name)}</div>
+        <div class="sub">${[e.division, e.group ? 'группа ' + e.group : '', e.seed ? 'посев ' + e.seed : '', e.rating ? 'NTRP ' + e.rating : ''].filter(Boolean).map(esc).join(' · ') || 'без назначения'}</div>
+      </div><span class="bg ${cls}">${esc(STATUS_RU[st] || st)}</span></div>
+      ${e.withdrawal_reason ? `<div class="sub" style="margin-top:6px;color:var(--lose)">причина: ${esc(REASON_RU[e.withdrawal_reason] || e.withdrawal_reason)}</div>` : ''}
+    </div>`;
+  };
+  const section = (title, arr) => arr.length ? `<div class="sect">${title} · ${arr.length}</div>` + arr.map(card).join('') : '';
+  return `<div class="card tight"><div class="row sp">
+      <div><div class="name">${esc(T().name)}</div><div class="sub">${c.accepted || 0} в составе · ${c.played || 0} сыграно · ${c.scheduled || 0} впереди</div></div>
+      <span class="bg ${S.test ? 'test' : 'acc'}">${S.test ? 'ТЕСТ' : statusRu(T().status)}</span>
+    </div></div>
+    <div class="btns" style="margin-bottom:11px">
+      <button class="btn pri" onclick="openAddEntry()">＋ Участник</button>
+      ${isDoubles() ? '<button class="btn" onclick="openPairs()">👥 Пары</button>' : ''}
+      ${byStatus('applied').length ? `<button class="btn good" onclick="acceptAll()">✓ Принять все (${byStatus('applied').length})</button>` : ''}
+    </div>
+    ${isDoubles() ? pairsSummary() : ''}
+    ${section('ПОДАНЫ', byStatus('applied'))}
+    ${section('В СОСТАВЕ', byStatus('accepted'))}
+    ${section('ЛИСТ ОЖИДАНИЯ', byStatus('waitlist'))}
+    ${section('СНЯТЫ', list.filter(e => ['withdrawn','rejected','replaced'].includes(String(e.status).toLowerCase())))}
+    ${list.length ? '' : '<div class="empty">Заявок пока нет. Добавьте участников вручную или откройте запись в настройках турнира.</div>'}`;
+}
+function pairsSummary() {
+  const pairs = (S.state.pairs || []).filter(p => String(p.status).toLowerCase() !== 'dissolved');
+  if (!pairs.length) return '';
+  const seek = pairs.filter(p => String(p.status).toLowerCase() === 'seeking');
+  const wait = pairs.filter(p => String(p.status).toLowerCase() === 'invite_pending');
+  return `<div class="card tight" onclick="openPairs()">
+    <div class="row sp"><div class="grow"><div class="name">Пары · ${pairs.length}</div>
+    <div class="sub">${pairs.filter(p => p.status === 'confirmed').length} собрано · ${wait.length} ждут ответа · ${seek.length} ищут партнёра</div></div>
+    <span class="bg link">открыть</span></div></div>`;
+}
+function acceptAll() {
+  const ids = entries().filter(e => String(e.status).toLowerCase() === 'applied').map(e => ({ entry_id: e.entry_id, status: 'accepted' }));
+  run(() => api('entry/assign', { tournament_id: S.id, items: ids }), `Принято: ${ids.length}`);
+}
+
+// -------------------------------------------------------------- 3. состав
+// Двухшаговое перемещение вместо перетаскивания: ткнул в игрока, ткнул в
+// группу. На телефоне это надёжнее любого drag-and-drop.
+function viewGroups() {
+  const list = accepted();
+  if (!list.length) return '<div class="empty">Сначала примите заявки — распределять пока некого.</div>';
+  const groups = [...new Set(list.map(e => e.group || '—'))].sort();
+  if (!groups.includes('—') && list.some(e => !e.group)) groups.push('—');
+  const cols = groups.map(g => {
+    const inGroup = list.filter(e => (e.group || '—') === g).sort((a, b) => (Number(a.seed) || 99) - (Number(b.seed) || 99));
+    return `<div class="col${S.pick ? ' target' : ''}" onclick="dropTo('${esc(g === '—' ? '' : g)}')">
+      <div class="colh"><div class="name">${g === '—' ? 'Без группы' : 'Группа ' + esc(g)}</div><span class="bg">${inGroup.length}</span></div>
+      ${inGroup.map(e => `<div class="chip${S.pick === e.entry_id ? ' sel' : ''}" onclick="event.stopPropagation();pickChip('${esc(e.entry_id)}')">
+        <span class="sd">${esc(e.seed || '·')}</span>
+        <span class="grow name" style="font-size:13.5px">${esc(e.display_name || e.player_name)}</span>
+        ${e.rating ? `<span class="bg">${esc(e.rating)}</span>` : ''}
+      </div>`).join('') || '<div class="sub">пусто</div>'}
+    </div>`;
+  }).join('');
+  return `<div class="hint">Нажмите на игрока, затем на группу — он переедет туда. Посев правится числом в карточке игрока.</div>
+    <div class="board">${cols}</div>
+    ${S.pick ? `<div class="okmsg" style="margin-top:11px">Выбран: ${esc(entryName(S.pick))}. Теперь нажмите на нужную группу. <button class="btn sm" onclick="S.pick=null;render()">Отмена</button></div>` : ''}
+    <div class="sect">РАСПРЕДЕЛЕНИЕ</div>
+    <div class="card">
+      <div class="two">
+        <label class="f"><span>СКОЛЬКО ГРУПП</span><input id="g_count" type="number" min="1" max="8" value="${Math.max(1, groups.filter(g => g !== '—').length || 2)}"></label>
+        <label class="f"><span>КАК ДЕЛИМ</span><select id="g_method">
+          <option value="rating">по рейтингу, змейкой</option>
+          <option value="seed">по посеву, змейкой</option>
+          <option value="random">случайно</option>
+        </select></label>
+      </div>
+      <div class="hint">Змейка разводит сильных по разным группам: 1-2-3-4, потом 4-3-2-1. Ручные правки после этого никуда не денутся — просто разложите заново, если не понравилось.</div>
+      <button class="btn wide" onclick="distribute()">Разложить по группам</button>
+    </div>
+    <div class="sect">РАСПИСАНИЕ ГРУПП</div>
+    <div class="card">
+      <div class="hint">Круговая система внутри каждой группы: каждый с каждым, ровными турами. Повторная генерация возможна, пока в стадии нет сыгранных матчей.</div>
+      <button class="btn pri wide" onclick="genGroups()">Сгенерировать матчи групп</button>
+    </div>`;
+}
+function pickChip(id) { S.pick = S.pick === id ? null : id; haptic(); render(); }
+function dropTo(group) {
+  if (!S.pick) return;
+  const id = S.pick; S.pick = null;
+  run(() => api('entry/assign', { tournament_id: S.id, items: [{ entry_id: id, group }] }), `${entryName(id)} → ${group || 'без группы'}`);
+}
+function distribute() {
+  const n = Number($('g_count').value || 2), m = $('g_method').value;
+  run(() => api('groups/distribute', { tournament_id: S.id, group_count: n, method: m }), 'Разложил по группам');
+}
+function genGroups() {
+  const stage = groupStage();
+  if (!stage) return run(async () => {
+    const s = await api('stage/create', { tournament_id: S.id, kind: 'group', name: 'Групповой этап' });
+    await api('matches/generate', { tournament_id: S.id, stage_id: s.stage.stage_id });
+  }, 'Расписание готово');
+  run(() => api('matches/generate', { tournament_id: S.id, stage_id: stage.stage_id }), 'Расписание готово');
+}
+
+// --------------------------------------------------------------- 4. сетка
+function viewDraw() {
+  const st = S.state.standings || [];
+  const groups = [...new Set(st.map(x => x.group))];
+  const advance = Number(T().advance_per_group || 4);
+  const tables = groups.map(g => {
+    const rowsIn = st.filter(x => x.group === g);
+    return `<div class="sect">ГРУППА ${esc(g)}</div><div class="card">
+      <table class="tbl"><thead><tr><th>Участник</th><th>И</th><th>В</th><th>С</th><th>О</th></tr></thead><tbody>
+      ${rowsIn.map(x => `<tr><td class="nm"><span class="pl${x.place <= advance ? ' adv' : ''}">${x.place}</span>${esc(x.name)}</td>
+        <td>${x.played}</td><td>${x.wins}</td><td>${x.setDiff > 0 ? '+' : ''}${x.setDiff}</td><td><b>${x.points}</b></td></tr>`).join('')}
+      </tbody></table></div>`;
+  }).join('');
+
+  const ps = playoffStage();
+  const pm = ps ? matches().filter(m => m.stage_id === ps.stage_id) : [];
+  const rounds = [...new Set(pm.map(m => Number(m.round)))].sort((a, b) => a - b);
+  const bracket = rounds.map(r => {
+    const inRound = pm.filter(m => Number(m.round) === r).sort((a, b) => Number(a.slot) - Number(b.slot));
+    return `<div class="brcol"><div class="brh">${esc(inRound[0]?.round_label || 'Раунд ' + r)}</div>
+      ${inRound.map(m => bracketMatch(m)).join('')}</div>`;
+  }).join('');
+
+  return `${tables || '<div class="empty">Таблица появится, как только будут сыграны первые матчи.</div>'}
+    <div class="sect">ПЛЕЙ-ОФФ</div>
+    ${pm.length ? `<div class="brk">${bracket}</div>` : '<div class="card"><div class="hint" style="margin:0">Сетка ещё не собрана. Она строится по текущей таблице групп, поэтому её можно собрать и до конца группового этапа — а потом пересобрать, пока в плей-офф нет сыгранных матчей.</div></div>'}
+    <div class="card">
+      <label class="f"><span>СХЕМА</span><select id="p_type">
+        <option value="">как в настройках турнира</option>
+        <option value="cross_1_4">1-4 и 2-3 внутри группы</option>
+        <option value="cross_groups">накрест между группами (A1-B2, B1-A2)</option>
+        <option value="seeded_bracket">сетка по посеву</option>
+      </select></label>
+      <button class="btn pri wide" onclick="genPlayoff()">${pm.length ? 'Пересобрать сетку' : 'Собрать сетку плей-офф'}</button>
+    </div>`;
+}
+function bracketMatch(m) {
+  const side = (id, name, score) => {
+    const w = m.winner_entry && m.winner_entry === id;
+    return `<div class="brs${w ? ' w' : ''}"><span class="n ${name ? '' : 'tbd'}">${esc(name || sourceLabel(m, id))}</span><span class="s">${esc(score)}</span></div>`;
+  };
+  const sc = String(m.score || '').trim();
+  return `<div class="brm" onclick="openMatch('${esc(m.match_id)}')">
+    ${side(m.entry_a, m.entry_a_name, m.winner_entry === m.entry_a ? sc : '')}
+    ${side(m.entry_b, m.entry_b_name, m.winner_entry === m.entry_b ? sc : '')}
+  </div>`;
+}
+function sourceLabel(m, id) {
+  const src = id === m.entry_a ? m.source_a : m.source_b;
+  const s = String(src || '');
+  if (/^W:/.test(s)) return 'победитель ' + s.slice(2);
+  if (/^L:/.test(s)) return 'проигравший ' + s.slice(2);
+  return s || 'ждём';
+}
+function genPlayoff() {
+  const type = $('p_type').value;
+  run(async () => {
+    const j = await api('playoff/generate', { tournament_id: S.id, type });
+    if (j.warning) setTimeout(() => flash(j.warning, true), 900);
+  }, 'Сетка собрана');
+}
+
+// --------------------------------------------------------------- 5. матчи
+function viewMatches() {
+  const all = matches().slice().sort((a, b) => String(a.stage_id).localeCompare(String(b.stage_id))
+    || Number(a.round) - Number(b.round) || Number(a.slot) - Number(b.slot));
+  const open = all.filter(m => String(m.status).toLowerCase() === 'scheduled');
+  const done = all.filter(m => String(m.status).toLowerCase() !== 'scheduled');
+  const card = m => {
+    const st = String(m.status).toLowerCase();
+    const wa = m.winner_entry && m.winner_entry === m.entry_a, wb = m.winner_entry && m.winner_entry === m.entry_b;
+    return `<div class="mt" onclick="openMatch('${esc(m.match_id)}')">
+      <div class="hd"><span class="bg">${esc(m.group ? 'группа ' + m.group : m.round_label || '')}</span>
+        <span class="bg ${st === 'completed' ? 'win' : st === 'scheduled' ? '' : 'lose'}">${esc(MATCH_RU[st] || st)}</span>
+        <span class="grow"></span>${m.court ? `<span class="sub">${esc(m.court)}</span>` : ''}</div>
+      <div class="pl2"><span class="${wa ? '' : 'muted'}"><b>${esc(m.entry_a_name || '—')}</b></span>
+        <span class="sc">${esc(m.score || 'vs')}</span>
+        <span class="${wb ? '' : 'muted'}"><b>${esc(m.entry_b_name || '—')}</b></span></div>
+    </div>`;
+  };
+  return `<div class="btns" style="margin-bottom:11px">
+      <button class="btn pri" onclick="openNewMatch()">＋ Матч вручную</button>
+    </div>
+    ${open.length ? `<div class="sect">ЖДУТ СЧЁТА · ${open.length}</div>` + open.map(card).join('') : ''}
+    ${done.length ? `<div class="sect">СЫГРАНО · ${done.length}</div>` + done.map(card).join('') : ''}
+    ${all.length ? '' : '<div class="empty">Матчей нет. Сгенерируйте расписание групп на вкладке «Состав».</div>'}`;
+}
+
+// -------------------------------------------------------------- 6. журнал
+function viewLog() {
+  if (!S.log.length) return '<div class="empty">Журнал пуст. Здесь появится каждое действие: кто, когда и что поменял.</div>';
+  const ACT = { tournament_created:'создан турнир', tournament_updated:'изменены настройки', entry_added:'добавлен участник',
+    entry_updated:'изменена заявка', entries_assigned:'перераспределение', entry_withdrawn:'снятие', entry_replaced:'замена',
+    pair_created:'создана пара', pair_invited:'приглашение', pair_confirmed:'пара собрана', pair_invite_declined:'отказ',
+    pair_updated:'изменена пара', stage_created:'создана стадия', stage_status:'статус стадии',
+    groups_distributed:'разложены группы', group_matches_generated:'расписание групп', playoff_generated:'собрана сетка',
+    result_entered:'внесён счёт', result_corrected:'ИСПРАВЛЕН СЧЁТ', slot_action:'правка слота',
+    match_created:'создан матч', season_imported:'перенесён сезон' };
+  return '<div class="card">' + S.log.map(r => `<div class="logrow">
+    <div class="row sp"><span class="w">${esc(ACT[r.action] || r.action)}</span><span class="sub">${esc(String(r.at || '').slice(0, 16).replace('T', ' '))}</span></div>
+    ${r.before && r.before !== '""' ? `<div class="sub">было: ${esc(shortJson(r.before))}</div>` : ''}
+    ${r.after && r.after !== '""' ? `<div class="sub">стало: ${esc(shortJson(r.after))}</div>` : ''}
+  </div>`).join('') + '</div>';
+}
+function shortJson(v) {
+  try { const o = JSON.parse(v); return Object.entries(o).filter(([, x]) => String(x ?? '') !== '').map(([k, x]) => `${k}: ${typeof x === 'object' ? JSON.stringify(x) : x}`).join(', ').slice(0, 160); }
+  catch (e) { return String(v).slice(0, 160); }
+}
+
+// ================================================================= модалки
+function closeModal() { $('modal').innerHTML = ''; }
+function sheet(title, inner) {
+  $('modal').innerHTML = `<div class="mask" onclick="if(event.target===this)closeModal()"><div class="sheetbox">
+    <div class="sheeth"><h2 style="font-size:17px">${esc(title)}</h2><button class="x" onclick="closeModal()">×</button></div>
+    ${inner}</div></div>`;
+}
+const val = id => ($(id)?.value || '').trim();
+
+function openCreate() {
+  sheet('Новый турнир', `
+    <label class="f"><span>НАЗВАНИЕ</span><input id="n_name" placeholder="Осенний парный турнир"></label>
+    <div class="two">
+      <label class="f"><span>ТИП</span><select id="n_kind"><option value="singles">одиночный</option><option value="doubles">парный</option></select></label>
+      <label class="f"><span>СЕЗОН</span><input id="n_season" value="${esc(S.season)}"></label>
+    </div>
+    <div class="two">
+      <label class="f"><span>ГРУПП</span><input id="n_groups" type="number" min="1" value="2"></label>
+      <label class="f"><span>ВЫХОДЯТ ИЗ ГРУППЫ</span><input id="n_adv" type="number" min="1" value="4"></label>
+    </div>
+    <label class="f"><span>СХЕМА ПЛЕЙ-ОФФ</span><select id="n_playoff">
+      <option value="cross_1_4">1-4 и 2-3 внутри группы</option>
+      <option value="cross_groups">накрест между группами</option>
+      <option value="seeded_bracket">сетка по посеву</option>
+    </select></label>
+    <div class="two">
+      <label class="f"><span>ВЗНОС, ฿</span><input id="n_thb" type="number" placeholder="2490"></label>
+      <label class="f"><span>ВЗНОС, USDT</span><input id="n_usdt" type="number" placeholder="80"></label>
+    </div>
+    <button class="btn pri wide" onclick="createTournament()">Создать</button>`);
+}
+function createTournament() {
+  run(async () => {
+    const j = await api('create', {
+      name: val('n_name'), kind: val('n_kind'), season: val('n_season'),
+      group_count: val('n_groups'), advance_per_group: val('n_adv'), playoff_type: val('n_playoff'),
+      entry_fee_thb: val('n_thb'), entry_fee_usdt: val('n_usdt'), status: 'registration'
+    });
+    S.id = j.tournament.tournament_id;
+    closeModal();
+  }, 'Турнир создан');
+}
+
+function openImport() {
+  sheet('Перенести сезон в турнир', `
+    <div class="hint">Читаются составы дивизионов действующего сезона и копируются в турнир как принятые заявки. Группы берутся те же, что в таблице. Ни одна таблица организатора при этом не меняется.</div>
+    <div class="two">
+      <label class="f"><span>СЕЗОН</span><input id="i_season" value="${esc(S.season)}"></label>
+      <label class="f"><span>ДИВИЗИОН</span><input id="i_div" placeholder="все"></label>
+    </div>
+    <label class="f"><span>НАЗВАНИЕ ТУРНИРА</span><input id="i_name" placeholder="по умолчанию — «Сезон N»"></label>
+    ${S.test ? '' : '<div class="err">Сейчас боевой режим. Для проверки включите «Тест» в шапке — тогда всё уедет в листы с пометкой TEST.</div>'}
+    <button class="btn pri wide" onclick="doImport()">Перенести</button>`);
+}
+function doImport() {
+  run(async () => {
+    const j = await api('import-season', { season: val('i_season'), division: val('i_div'), name: val('i_name') });
+    S.id = j.tournament.tournament_id;
+    closeModal();
+  }, 'Сезон перенесён');
+}
+
+async function openAddEntry() {
+  sheet('Добавить участника', '<div class="spin">Читаю список игроков…</div>');
+  try {
+    const players = await ensureCandidates();
+    const doubles = isDoubles();
+    sheet('Добавить участника', `
+      <input id="a_search" placeholder="Поиск по имени" oninput="filterCandidates(this.value)">
+      ${doubles ? '<div class="hint">Парный турнир: выбранный игрок заводится как пара без партнёра — он попадёт на доску поиска, и партнёра можно будет позвать позже.</div>' : ''}
+      <div id="a_list" style="margin-top:10px;max-height:46vh;overflow-y:auto">${candidateRows(players)}</div>
+      <div class="sect">ВРУЧНУЮ</div>
+      <label class="f"><span>ИМЯ</span><input id="a_name" placeholder="если игрока нет в списке"></label>
+      <button class="btn wide" onclick="addEntryManual()">Добавить по имени</button>`);
+  } catch (e) { sheet('Добавить участника', `<div class="err">${esc(e.message)}</div>`); }
+}
+function candidateRows(list) {
+  if (!list.length) return '<div class="empty">Никого не нашёл.</div>';
+  return list.slice(0, 120).map(p => `<div class="chip" onclick="addEntryFrom('${esc(p.telegram_id)}','${esc(p.name).replace(/'/g, '&#39;')}','${esc(p.rating)}')">
+    <span class="grow name" style="font-size:13.5px">${esc(p.name)}</span>
+    ${p.division ? `<span class="bg">${esc(p.division)}${p.group ? ' · ' + esc(p.group) : ''}</span>` : ''}
+    ${p.rating ? `<span class="bg acc">${esc(p.rating)}</span>` : ''}</div>`).join('');
+}
+function filterCandidates(q) {
+  const s = String(q || '').toLowerCase().trim();
+  const list = s ? S.candidates.filter(p => p.name.toLowerCase().includes(s)) : S.candidates;
+  $('a_list').innerHTML = candidateRows(list);
+}
+function addEntryFrom(id, name, rating) {
+  const decoded = String(name).replace(/&#39;/g, "'");
+  run(async () => {
+    if (isDoubles()) await api('pair/create', { tournament_id: S.id, player_a_id: id, player_a_name: decoded });
+    else await api('entry/add', { tournament_id: S.id, player_id: id, player_name: decoded, display_name: decoded, rating, status: 'accepted' });
+    closeModal();
+  }, `Добавлен: ${decoded}`);
+}
+function addEntryManual() {
+  const name = val('a_name');
+  if (!name) return;
+  run(async () => {
+    if (isDoubles()) await api('pair/create', { tournament_id: S.id, player_a_name: name });
+    else await api('entry/add', { tournament_id: S.id, player_name: name, display_name: name, status: 'accepted' });
+    closeModal();
+  }, `Добавлен: ${name}`);
+}
+
+function openEntry(id) {
+  const e = entries().find(x => x.entry_id === id);
+  if (!e) return;
+  const others = accepted().filter(x => x.entry_id !== id);
+  const bench = entries().filter(x => ['applied','waitlist'].includes(String(x.status).toLowerCase()));
+  sheet(e.display_name || e.player_name, `
+    <div class="pillrow">
+      ${['applied','accepted','waitlist','rejected'].map(s => `<button class="pill${String(e.status).toLowerCase() === s ? ' on' : ''}" onclick="setEntryStatus('${esc(id)}','${s}')">${STATUS_RU[s]}</button>`).join('')}
+    </div>
+    <div class="three">
+      <label class="f"><span>ДИВИЗИОН</span><input id="e_div" value="${esc(e.division || '')}"></label>
+      <label class="f"><span>ГРУППА</span><input id="e_grp" value="${esc(e.group || '')}"></label>
+      <label class="f"><span>ПОСЕВ</span><input id="e_seed" type="number" value="${esc(e.seed || '')}"></label>
+    </div>
+    <button class="btn wide" onclick="saveEntry('${esc(id)}')">Сохранить</button>
+    <div class="sect">СНЯТИЕ</div>
+    <div class="hint">Сыгранные матчи остаются как есть. Несыгранные получают W/O в пользу соперника — это отдельный исход матча, а не молчаливое удаление.</div>
+    <label class="f"><span>ПРИЧИНА</span><select id="e_reason">
+      ${Object.entries(REASON_RU).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}
+    </select></label>
+    <label class="f"><span>ЗАМЕНА (необязательно)</span><select id="e_repl">
+      <option value="">без замены — сопернику W/O</option>
+      ${bench.map(x => `<option value="${esc(x.entry_id)}">${esc(x.display_name || x.player_name)}</option>`).join('')}
+    </select></label>
+    <div class="hint">С заменой новый участник встаёт на то же место в группе, с тем же посевом, и наследует все несыгранные матчи. Без замены они превращаются в W/O.</div>
+    <button class="btn dang wide" onclick="withdraw('${esc(id)}')">Снять с турнира</button>`);
+}
+function setEntryStatus(id, status) { run(() => api('entry/update', { entry_id: id, status }), 'Статус обновлён').then(() => closeModal()); }
+function saveEntry(id) {
+  run(() => api('entry/update', { entry_id: id, division: val('e_div'), group: val('e_grp'), seed: val('e_seed') }), 'Сохранено').then(() => closeModal());
+}
+function withdraw(id) {
+  run(() => api('entry/withdraw', { entry_id: id, reason: val('e_reason'), replaced_by: val('e_repl') }),
+    val('e_repl') ? 'Замена проведена' : 'Участник снят').then(() => closeModal());
+}
+
+function openPairs() {
+  const pairs = (S.state.pairs || []).filter(p => String(p.status).toLowerCase() !== 'dissolved');
+  const invites = (S.state.invites || []).filter(i => String(i.status).toLowerCase() === 'pending');
+  const row = p => {
+    const st = String(p.status).toLowerCase();
+    const inv = invites.find(i => i.pair_id === p.pair_id);
+    return `<div class="card tight">
+      <div class="row sp"><div class="grow">
+        <div class="name">${esc(p.player_a_name)}${p.player_b_name ? ' / ' + esc(p.player_b_name) : ''}</div>
+        <div class="sub">${esc(PAIR_RU[st] || st)}${inv ? ' · ждём ' + esc(inv.to_name || inv.to_contact) : ''}</div>
+      </div><span class="bg ${st === 'confirmed' ? 'win' : st === 'seeking' ? 'link' : 'acc'}">${esc(PAIR_RU[st] || st)}</span></div>
+      <div class="btns" style="margin-top:9px">
+        ${st !== 'confirmed' ? `<button class="btn sm" onclick="openInvite('${esc(p.pair_id)}')">Позвать партнёра</button>` : ''}
+        ${inv ? `<button class="btn sm good" onclick="acceptInv('${esc(inv.invite_id)}','${esc(inv.to_id)}','${esc(inv.to_name).replace(/'/g, '&#39;')}')">Засчитать согласие</button>
+                 <button class="btn sm dang" onclick="declineInv('${esc(inv.invite_id)}')">Отказ</button>` : ''}
+      </div></div>`;
+  };
+  sheet('Пары', `
+    <div class="hint">Пара живёт до согласия: отказ партнёра не убивает заявку — она возвращается в «ищет партнёра». Встречные приглашения засчитываются как согласие обеих сторон.</div>
+    ${pairs.map(row).join('') || '<div class="empty">Пар пока нет.</div>'}
+    ${invites.length > 1 ? '<button class="btn wide" onclick="matchMutual()">Проверить встречные приглашения</button>' : ''}`);
+}
+function openInvite(pairId) {
+  ensureCandidates().then(players => {
+    sheet('Кого зовём', `
+      <input id="p_search" placeholder="Поиск по имени" oninput="filterInvite('${esc(pairId)}',this.value)">
+      <div id="p_list" style="margin-top:10px;max-height:52vh;overflow-y:auto">${inviteRows(pairId, players)}</div>`);
+  });
+}
+function inviteRows(pairId, list) {
+  return list.slice(0, 120).map(p => `<div class="chip" onclick="sendInvite('${esc(pairId)}','${esc(p.telegram_id)}','${esc(p.name).replace(/'/g, '&#39;')}')">
+    <span class="grow name" style="font-size:13.5px">${esc(p.name)}</span>
+    ${p.rating ? `<span class="bg acc">${esc(p.rating)}</span>` : ''}</div>`).join('') || '<div class="empty">Никого не нашёл.</div>';
+}
+function filterInvite(pairId, q) {
+  const s = String(q || '').toLowerCase().trim();
+  $('p_list').innerHTML = inviteRows(pairId, s ? S.candidates.filter(p => p.name.toLowerCase().includes(s)) : S.candidates);
+}
+function sendInvite(pairId, toId, toName) {
+  const name = String(toName).replace(/&#39;/g, "'");
+  run(() => api('pair/invite', { pair_id: pairId, to_id: toId, to_name: name }), `Приглашение отправлено: ${name}`).then(() => closeModal());
+}
+function acceptInv(inviteId, playerId, playerName) {
+  run(() => api('pair/accept', { invite_id: inviteId, player_id: playerId, player_name: String(playerName).replace(/&#39;/g, "'") }), 'Пара собрана').then(() => closeModal());
+}
+function declineInv(inviteId) { run(() => api('pair/decline', { invite_id: inviteId }), 'Отказ записан').then(() => closeModal()); }
+function matchMutual() { run(() => api('pair/match-mutual', { tournament_id: S.id }), 'Проверил встречные приглашения').then(() => closeModal()); }
+
+// Карточка матча: внесение и исправление счёта, действия над слотом.
+function openMatch(id) {
+  const m = matches().find(x => x.match_id === id);
+  if (!m) return;
+  const sets = String(m.score || '').replace(/\([^)]*\)/g, ' ').trim().split(/\s+/).filter(Boolean)
+    .map(s => s.split(/[:\-]/)).filter(p => p.length === 2);
+  const setInput = i => `<div class="setrow">
+      <input id="m_a${i}" type="number" min="0" max="20" placeholder="—" value="${esc(sets[i]?.[0] ?? '')}">
+      <span class="sep">:</span>
+      <input id="m_b${i}" type="number" min="0" max="20" placeholder="—" value="${esc(sets[i]?.[1] ?? '')}">
+    </div>`;
+  const done = String(m.status).toLowerCase() !== 'scheduled';
+  sheet(done ? 'Исправить результат' : 'Внести результат', `
+    <div class="card tight"><div class="pl2 row sp">
+      <b>${esc(m.entry_a_name || '—')}</b><span class="sub">${esc(m.round_label || '')}${m.group ? ' · группа ' + esc(m.group) : ''}</span><b>${esc(m.entry_b_name || '—')}</b>
+    </div></div>
+    ${done ? `<div class="okmsg">Сейчас записано: ${esc(m.score || MATCH_RU[String(m.status).toLowerCase()])}. Исправление попадёт в журнал, таблица пересчитается сама.</div>` : ''}
+    <div class="pillrow">
+      ${['completed','walkover','retired','default'].map(s => `<button class="pill${(done ? String(m.status).toLowerCase() : 'completed') === s ? ' on' : ''}" onclick="pickStatus(this,'${s}')">${MATCH_RU[s]}</button>`).join('')}
+    </div>
+    <input type="hidden" id="m_status" value="${esc(done ? String(m.status).toLowerCase() : 'completed')}">
+    <div class="sect">СЧЁТ ПО СЕТАМ</div>
+    ${[0, 1, 2].map(setInput).join('')}
+    <div class="hint">Третий сет — супертай-брейк до 10 пишется как есть, например 10:8. Геймы из него в таблицу не идут.</div>
+    <div class="sect">ПОБЕДИТЕЛЬ</div>
+    <div class="pillrow">
+      <button class="pill${m.winner_entry === m.entry_a ? ' on' : ''}" onclick="pickWinner(this,'${esc(m.entry_a)}')">${esc(m.entry_a_name || 'первый')}</button>
+      <button class="pill${m.winner_entry === m.entry_b ? ' on' : ''}" onclick="pickWinner(this,'${esc(m.entry_b)}')">${esc(m.entry_b_name || 'второй')}</button>
+    </div>
+    <input type="hidden" id="m_winner" value="${esc(m.winner_entry || '')}">
+    <div class="hint">Для обычного счёта победитель определяется сам. Указывать вручную нужно только для W/O, RET и DEF.</div>
+    <div class="two">
+      <label class="f"><span>ДАТА</span><input id="m_date" value="${esc(m.scheduled_at || '')}" placeholder="2026-10-05"></label>
+      <label class="f"><span>КОРТ</span><input id="m_court" value="${esc(m.court || '')}"></label>
+    </div>
+    <button class="btn pri wide" onclick="saveResult('${esc(id)}')">${done ? 'Исправить' : 'Записать результат'}</button>
+    <div class="sect">СЛОТ</div>
+    <div class="hint">Подмена участника нужна, когда кто-то снялся уже после жеребьёвки: сетка остаётся, меняется только имя в слоте.</div>
+    <div class="btns">
+      <button class="btn sm" onclick="openSwap('${esc(id)}','a')">Подменить ${esc(m.entry_a_name || 'первого')}</button>
+      <button class="btn sm" onclick="openSwap('${esc(id)}','b')">Подменить ${esc(m.entry_b_name || 'второго')}</button>
+      <button class="btn sm" onclick="slot('${esc(id)}','a','bye')">Проход без игры первому</button>
+      <button class="btn sm" onclick="slot('${esc(id)}','b','bye')">Проход без игры второму</button>
+    </div>`);
+}
+function pickStatus(el, s) { el.parentNode.querySelectorAll('.pill').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('m_status').value = s; }
+function pickWinner(el, id) { el.parentNode.querySelectorAll('.pill').forEach(x => x.classList.remove('on')); el.classList.add('on'); $('m_winner').value = id; }
+function saveResult(id) {
+  const parts = [];
+  for (let i = 0; i < 3; i++) {
+    const a = val('m_a' + i), b = val('m_b' + i);
+    if (a !== '' && b !== '') parts.push(a + ':' + b);
+  }
+  run(() => api('match/result', {
+    match_id: id, status: val('m_status'), score: parts.join(' '),
+    winner_entry: val('m_winner'), scheduled_at: val('m_date'), court: val('m_court')
+  }), 'Результат записан').then(() => closeModal());
+}
+function openSwap(matchId, side) {
+  const list = accepted();
+  sheet('Кем заменить', list.map(e => `<div class="chip" onclick="slot('${esc(matchId)}','${side}','swap','${esc(e.entry_id)}')">
+    <span class="grow name" style="font-size:13.5px">${esc(e.display_name || e.player_name)}</span>
+    ${e.group ? `<span class="bg">группа ${esc(e.group)}</span>` : ''}</div>`).join('')
+    + `<div style="height:9px"></div><button class="btn dang wide" onclick="slot('${esc(matchId)}','${side}','clear')">Очистить слот</button>`);
+}
+function slot(matchId, side, action, entryId) {
+  run(() => api('match/slot', { match_id: matchId, side, action, entry_id: entryId || '' }), 'Слот обновлён').then(() => closeModal());
+}
+function openNewMatch() {
+  const list = accepted();
+  if (list.length < 2) return flash('Нужно минимум два участника в составе', true);
+  const opts = list.map(e => `<option value="${esc(e.entry_id)}">${esc(e.display_name || e.player_name)}${e.group ? ' · ' + esc(e.group) : ''}</option>`).join('');
+  sheet('Матч вручную', `
+    <div class="hint">Пригодится для кросс-групповых матчей и всего, что не попало в расписание.</div>
+    <label class="f"><span>ПЕРВЫЙ</span><select id="c_a">${opts}</select></label>
+    <label class="f"><span>ВТОРОЙ</span><select id="c_b">${opts}</select></label>
+    <div class="two">
+      <label class="f"><span>ДАТА</span><input id="c_date" placeholder="2026-10-05"></label>
+      <label class="f"><span>КОРТ</span><input id="c_court"></label>
+    </div>
+    <label class="f"><span>НАЗВАНИЕ</span><input id="c_label" placeholder="Кросс-групповой матч"></label>
+    <button class="btn pri wide" onclick="createMatch()">Создать</button>`);
+}
+function createMatch() {
+  run(() => api('match/create', {
+    tournament_id: S.id, entry_a: val('c_a'), entry_b: val('c_b'),
+    scheduled_at: val('c_date'), court: val('c_court'), round_label: val('c_label') || 'Дополнительный матч'
+  }), 'Матч создан').then(() => closeModal());
+}
+
+boot();
+</script>
+</body>
+</html>

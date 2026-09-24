@@ -201,12 +201,14 @@ export const MATCH_COMMANDS = {
   en: [
     { command: 'match', description: 'Matches: open slots and challenges' },
     { command: 'result', description: 'Submit a match result' },
-    { command: 'book', description: 'Book a court' }
+    { command: 'book', description: 'Book a court' },
+    { command: 'doubles', description: 'Doubles: enter and find a partner' }
   ],
   ru: [
     { command: 'match', description: 'Матчи: окна и вызовы' },
     { command: 'result', description: 'Внести результат матча' },
-    { command: 'book', description: 'Забронировать корт' }
+    { command: 'book', description: 'Забронировать корт' },
+    { command: 'doubles', description: 'Парные турниры: запись и партнёр' }
   ]
 };
 
@@ -236,6 +238,9 @@ export const ADMIN_COMMAND_LIST = [
     help:'назначенные матчи, где не подтверждён корт, кто не ответил, где нет счёта, открытые окна',
     help_en:'scheduled matches, courts not confirmed, who has not replied, missing scores, open slots' },
   { cmd:'league',       group:'Матчи', short:'Витрина лиги', short_en:'League app', help_en:'open the league app', help:'открыть витрину лиги' },
+  { cmd:'tournaments',  group:'Турниры', short:'Админка турниров', short_en:'Tournament admin',
+    help:'создание турниров, приём заявок, распределение по группам, расписание круговой системы, сборка сетки плей-офф 1-4 и 2-3, ручные замены и подмена участника в слоте, внесение и ИСПРАВЛЕНИЕ счёта с пересчётом таблицы, журнал всех правок. Переключатель «Тест» в шапке пишет всё в листы с пометкой TEST — боевые таблицы не меняются',
+    help_en:'create tournaments, accept entries, split into groups, generate round-robin schedules, build the 1-4 / 2-3 playoff bracket, swap players in slots, enter and CORRECT scores with automatic standings recalculation, and read the full audit log. The «Test» switch writes everything into TEST-suffixed sheets, leaving the live ones untouched' },
   { cmd:'fantasy',      group:'Матчи', short:'Fantasy во вкладке лиги',
     short_en:'Fantasy tab', help_en:'open the league straight on the Fantasy tab — the same button players get', help:'открыть лигу сразу на вкладке Fantasy — та же кнопка, что уходит игрокам' },
   { cmd:'rating_to',    group:'Панель и рассылки', short:'Запрос уровня одному', short_en:'Ask one player for level', args_en:'@username', args:'@ник',

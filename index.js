@@ -10,6 +10,8 @@ import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
+import { registerTournamentRoutes } from './tournamentsapi.js';
+import { setPairBotUsername } from './pairflow.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
@@ -76,6 +78,8 @@ app.get('/participants', (req, res) => { noCache(res); res.sendFile(path.join(__
 app.get('/match', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'match.html')); });
 app.get('/league', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
 app.get('/fantasy', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'fantasy.html')); });
+// Турнирная админка — отдельное приложение, а не вкладка внутри админки.
+app.get('/tournaments', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'tournament.html')); });
 
 // --- Календарь -------------------------------------------------------------
 // /ics отдаёт сам файл события, /cal — страница мини-приложения с кнопкой:
@@ -494,6 +498,7 @@ async function leagueViewer(initData, token = '') {
 async function matchViewer(initData, token = '') { return leagueViewer(initData, token); }
 
 registerFantasyRoutes(app,{ viewer: leagueViewer });
+registerTournamentRoutes(app,{ viewer: leagueViewer });
 
 // История матчей лиги для экрана матчей: плоская лента, по строке на матч.
 // В витрине она хранится по игрокам — один матч лежит в двух карточках, поэтому
@@ -1884,7 +1889,7 @@ app.listen(PORT, async () => {
     if (BOT_TOKEN && PUBLIC_URL) {
       await setWebhook();
       await setCommands();
-      try { const me = await getMe(); setBotUsername(me?.username); } catch (e) { console.error('getMe failed:', e.message); }
+      try { const me = await getMe(); setBotUsername(me?.username); setPairBotUsername(me?.username); } catch (e) { console.error('getMe failed:', e.message); }
       console.log('Webhook and commands installed');
     }
   } catch (e) {

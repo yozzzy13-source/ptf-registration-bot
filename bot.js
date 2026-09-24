@@ -15,6 +15,7 @@ import { writeConfirmedResult, describeWrite, divisionPair, rollbackJournal } fr
 import { invalidateDivisionCache } from './division.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
+import { sendDoublesTournaments, handlePairStart, handlePairCallback, isPairCallback } from './pairflow.js';
 import { authorizeSlot, sameScope } from './access.js';
 import { uiError } from './ui-errors.js';
 
@@ -446,7 +447,8 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
     ...(active
       ? ['/match — окна соперников, создать своё окно, мои матчи',
          '/result — внести счёт сыгранного матча (подтверждает соперник)',
-         '/book — забронировать корт']
+         '/book — забронировать корт',
+         '/doubles — парные турниры: записаться, выбрать партнёра из списка или позвать ссылкой']
       : ['<i>Матчи, результаты и бронь корта откроются после распределения по дивизионам.</i>']),
     '',
     ...(active ? ['✨ <b>Fantasy</b>', '/fantasy — собрать команду из игроков лиги и получать очки за их реальные матчи', ''] : []),
@@ -471,7 +473,8 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
     ...(active
       ? ['/match — open slots, create your own, your matches',
          '/result — submit a match score (your opponent confirms it)',
-         '/book — book a court']
+         '/book — book a court',
+         '/doubles — doubles tournaments: enter, pick a partner or invite by link']
       : ['<i>Matches, results and court booking open up once divisions are set.</i>']),
     '',
     ...(active ? ['✨ <b>Fantasy</b>', '/fantasy — build a squad of league players and score from their real matches', ''] : []),
@@ -496,8 +499,8 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
 // Эмодзи у раздела — чтобы в длинном списке было видно, где что, а не сплошная
 // стена команд. Раздел берётся из ADMIN_COMMAND_LIST: добавил команду — она сама
 // встала и сюда, и в меню по слэшу.
-const ADMIN_HELP_ICON = { 'Лига':'🏆', 'Матчи':'🎾', 'Панель и рассылки':'📣', 'Настройка':'⚙️', 'Прочее':'🧰' };
-const ADMIN_HELP_GROUP_EN = { 'Лига':'League and players', 'Матчи':'Matches and results', 'Панель и рассылки':'Panel and broadcasts', 'Настройка':'Setup', 'Прочее':'Other' };
+const ADMIN_HELP_ICON = { 'Лига':'🏆', 'Матчи':'🎾', 'Турниры':'🥇', 'Панель и рассылки':'📣', 'Настройка':'⚙️', 'Прочее':'🧰' };
+const ADMIN_HELP_GROUP_EN = { 'Лига':'League and players', 'Матчи':'Matches and results', 'Турниры':'Tournaments', 'Панель и рассылки':'Panel and broadcasts', 'Настройка':'Setup', 'Прочее':'Other' };
 const ADMIN_HELP_TAIL = {
   ru: [
     '', '👉 <b>Кнопками, а не командами</b>',
@@ -507,6 +510,11 @@ const ADMIN_HELP_TAIL = {
     '• Рассылка умеет слать записанным на событие: во вкладке «Рассылка» переключи «Кому» на «По событию», выбери ивент и кого из записанных (все / участвуют / лист ожидания / не оплатили). Счётчик покажет число получателей до отправки. В тексте работают подстановки <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code>.',
     '• Касса: игрок выбирается из списка, пополнение/списание/возврат — кнопками, комментарий обязателен.',
     '• Вкладка «Кнопки» — что видит каждая группа игроков: вкладки мини-приложения, кнопки под сообщением и нижняя клавиатура в чате. Там же «Прислать в бот» и «Открыть мини-апп» — посмотреть всё глазами выбранной группы, без второго аккаунта.',
+    '', '🥇 <b>Турниры</b>',
+    '• <code>/tournaments</code> — отдельное приложение: турниры, заявки, группы, сетка, правка счёта, журнал. Внутри админки его нет намеренно — это другой инструмент.',
+    '• Позиции и таблица нигде не хранятся: они считаются из матчей при каждом открытии. Поэтому исправление счёта задним числом само чинит и таблицу, и сетку.',
+    '• Снятие игрока и результат матча — разные вещи. Снятие меняет статус заявки; несыгранные матчи получают явный W/O, а сыгранные остаются как есть.',
+    '• Парная запись идёт у игрока командой <code>/doubles</code>: можно записаться без партнёра, выбрать его из списка или позвать ссылкой. Отказ не убивает заявку.',
     '', '📊 <b>Дивизионы и результаты</b>',
     '• Дивизион игрока и список соперников берутся из таблицы дивизиона последнего сезона, лист <b>Division_Tracker</b>, список под заголовком «Player». Переносишь игрока — правишь только там.',
     '• Статус active/inactive — из анкеты. Нет active — матчи закрыты, даже если игрок есть в сетке.',
@@ -1125,6 +1133,8 @@ export async function handleMessage(msg) {
       });
     }
     // Ссылка-раздел из рассылки: t.me/бот?start=go_<код>.
+    // Ссылка-приглашение в пару: t.me/бот?start=pair_<id приглашения>.
+    if (param.startsWith('pair_')) return handlePairStart(chatId, from, lang, param.replace(/^pair_/, ''));
     if (param.startsWith('go_')) return openDestination(chatId, lang, from, param.replace(/^go_/, ''));
     if (!isPrivate) return null;
     return sendMain(chatId, lang, from);
@@ -1144,6 +1154,8 @@ export async function handleMessage(msg) {
   if (text === '/match' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'open');
   if (text === '/result' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'res');
   if (text === '/book' && isPrivate) return sendMatchShortcut(chatId, lang, from, 'book');
+  // Парные турниры: отдельное событие со своей цепочкой записи.
+  if (text === '/doubles' && isPrivate) return sendDoublesTournaments(chatId, from, lang);
 
   if (text === '/help') return sendHelp(chatId, lang, from, msg);
   if (text === '/links') {
@@ -1302,6 +1314,12 @@ function findConfirmedSlot(done, wanted) {
     if (text === '/league') {
       return sendMessage(chatId, '<b>🏆 Лига — тест нового интерфейса</b>\n\nГодовая гонка, список игроков и карточка игрока. Пока видно только вам.', {
         reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть', web_app: { url: `${PUBLIC_URL}/league` } }]] }
+      });
+    }
+    // Турнирная админка: отдельное приложение, не вкладка внутри админки.
+    if (text === '/tournaments') {
+      return sendMessage(chatId, '<b>🏆 Турниры</b>\n\nСоздание турниров, заявки, группы, сетка плей-офф, правка результатов и парные заявки.\n\nПереключатель «Тест» в шапке пишет всё в листы с пометкой TEST — боевые таблицы при этом не меняются.', {
+        reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть админку турниров', web_app: { url: `${PUBLIC_URL}/tournaments` } }]] }
       });
     }
     // Выполняется прямо в той группе и теме, куда должны падать результаты.
@@ -1474,7 +1492,7 @@ function findConfirmedSlot(done, wanted) {
 // настройки ленты результатов. Админские (admin_*, bc*) и матчевые кнопки
 // сюда не входят — им место в группе по замыслу.
 const PERSONAL_CALLBACKS = new Set(['main', 'website_menu', 'payment_entry', 'contact', 'close_contact', 'results_mute', 'results_unmute']);
-const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:'];
+const PERSONAL_PREFIXES = ['text:', 'lang_select:', 'pay:', 'crypto:', 'paylater:', 'payment_menu:', 'pr:'];
 function isPersonalCallback(data = '') {
   const d = String(data);
   return PERSONAL_CALLBACKS.has(d) || PERSONAL_PREFIXES.some(p => d.startsWith(p));
@@ -1501,6 +1519,9 @@ export async function handleCallback(q) {
 
   const storedLang = await userLang(from);
   const lang = fallbackLang(storedLang);
+
+  // Парная цепочка живёт отдельным файлом: здесь только перенаправление.
+  if (isPairCallback(data)) return handlePairCallback(q, lang);
 
   if (data.startsWith('lang_select:')) {
     const selected = data.split(':')[1] === 'ru' ? 'ru' : 'en';

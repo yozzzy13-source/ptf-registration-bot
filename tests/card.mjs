@@ -47,12 +47,12 @@ assert.equal(meta.width,1080);assert.equal(meta.height,1148);assert.equal(meta.f
 assert.deepEqual(lookups,['applicants-avatar']);
 assert.deepEqual(downloads,['https://portraits.test/master.png']);
 const pixel=async (img,left,top)=>[...await sharp(img).extract({left,top,width:1,height:1}).removeAlpha().raw().toBuffer()];
-assert.deepEqual(await pixel(png,225,450),[239,52,52],'Applicants portrait takes priority');
-assert.deepEqual(await pixel(png,855,450),[52,84,239],'Master photo is second choice');
+assert.deepEqual(await pixel(png,225,420),[239,52,52],'Applicants portrait takes priority');
+assert.deepEqual(await pixel(png,855,420),[52,84,239],'Master photo is second choice');
 card.forgetPhotoCache();failAvatar=true;downloads=[];
 const fallback=await card.renderMatchCard({...match,loser:'No Portrait',loserId:''});
 assert.deepEqual(downloads,['https://portraits.test/master.png']);
-assert.deepEqual(await pixel(fallback,225,450),[52,84,239],'Broken Applicants avatar falls back to Master');
+assert.deepEqual(await pixel(fallback,225,420),[52,84,239],'Broken Applicants avatar falls back to Master');
 assert.equal((await sharp(fallback).metadata()).width,1080,'Missing photo renders initials');
 const bare=await card.renderMatchCard({...match,winnerMeta:null,loserMeta:null});
 assert.equal((await sharp(bare).metadata()).height,1148,'Card without stats keeps the same canvas');
