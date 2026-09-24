@@ -13,7 +13,7 @@ import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './
 import { registerTournamentRoutes } from './tournamentsapi.js';
 import { setPairBotUsername } from './pairflow.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
-  notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
+  notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultHalfConfirmed, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
@@ -21,7 +21,7 @@ import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlo
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
-  courtsByPlayedMatch, courtKey } from './matchesdb.js';
+  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
@@ -812,6 +812,54 @@ app.post('/api/match/result/remind', async (req,res) => {
     res.json({ok:true});
   } catch(e) { console.error('result confirmation resend failed:',e);res.status(502).json({ok:false,error:e.message}); }
 });
+// Ручное напоминание: один игрок подталкивает другого, когда тот не нажал
+// кнопку. Отправляется ровно то же сообщение, что ушло бы автоматически, —
+// чтобы у человека были те же кнопки и он не искал, куда нажимать.
+//
+// Кого ждём, решает не интерфейс, а сервер: тот же pendingAction, что питает
+// автоматические напоминания. Иначе кнопка со временем начала бы будить не того.
+const manualNudges = new Map();
+const MANUAL_NUDGE_MS = 60 * 60 * 1000;
+app.post('/api/match/nudge', async (req,res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    const ru=v.lang==='ru';
+    const slot=await findSlot(b.challenge_id);
+    if(!slot)return res.status(404).json({ok:false,error:ru?'Матч не найден.':'Match not found.'});
+    const sides=[String(slot.from_telegram_id),String(slot.to_telegram_id)];
+    if(!v.isAdmin&&!sides.includes(String(v.user.id)))return res.status(403).json({ok:false,error:ru?'Это не ваш матч.':'This is not your match.'});
+    const item=pendingAction(slot);
+    if(!item)return res.status(409).json({ok:false,error:ru?'Сейчас никто ничего не ждёт — напоминать не о чем.':'Nothing is pending on this match right now.'});
+    const waiting=(item.waitingIds||[]).map(String).filter(Boolean);
+    if(!waiting.length)return res.status(409).json({ok:false,error:ru?'Некому напоминать.':'There is nobody to remind.'});
+    // Себе не напоминают: если ход за тобой, кнопка бессмысленна.
+    if(!v.isAdmin&&waiting.length===1&&waiting[0]===String(v.user.id)) {
+      return res.status(409).json({ok:false,error:ru?'Сейчас ход за вами — напоминать нужно не сопернику.':'It is your turn — there is nothing to remind about.'});
+    }
+    // Ночью повторные напоминания молчат. Ручное — такое же повторное, и будить
+    // человека кнопкой было бы обходом того же правила.
+    const win=await nightWindow();
+    if(isNightHold(Date.now(),TIMEZONE,win)) {
+      return res.status(409).json({ok:false,error:ru?'Сейчас тихие часы — напоминания не уходят. Попробуйте утром.':'Quiet hours — reminders are not delivered now. Try in the morning.'});
+    }
+    const key=`${slot.challenge_id}:${item.scope}`;
+    const last=manualNudges.get(key)||0;
+    if(Date.now()-last<MANUAL_NUDGE_MS) {
+      const left=Math.ceil((MANUAL_NUDGE_MS-(Date.now()-last))/60000);
+      return res.status(429).json({ok:false,error:ru?`Напоминание уже отправлено. Следующее можно через ${left} мин.`:`A reminder was already sent. You can send the next one in ${left} min.`});
+    }
+    const payload={...item,stage:'manual'};
+    if(item.scope==='invite'||item.scope==='negotiation')await notifyStuckNegotiation(payload);
+    else if(item.scope==='time')await notifyStuckTimeChange(payload);
+    else if(item.scope==='court')await notifyStuckCourt(payload);
+    else if(item.scope==='score')await notifyStuckScore(payload);
+    else if(item.scope==='result')await notifyResultForVerification(slot);
+    manualNudges.set(key,Date.now());
+    for(const [k,t] of manualNudges) if(Date.now()-t>MANUAL_NUDGE_MS)manualNudges.delete(k);
+    res.json({ok:true,scope:item.scope});
+  } catch(e) { console.error('manual nudge failed:',e);res.status(502).json({ok:false,error:e.message}); }
+});
 app.post('/api/match/result/confirm', async (req,res) => {
   try {
     const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
@@ -828,6 +876,12 @@ app.post('/api/match/result/confirm', async (req,res) => {
         not_a_player:ru?'Это не ваш матч.':'This is not your match.'
       };
       return res.status(409).json({ok:false,error:errors[action.reason]||(ru?'Не удалось подтвердить результат.':'Could not confirm the result.')});
+    }
+    // Счёт от организатора ждёт подписи обоих: первая подпись ничего не пишет
+    // в таблицы, только отмечается и уведомляет второго.
+    if(action.waiting){
+      await notifyResultHalfConfirmed(action.slot,String(v.user.id)).catch(e=>console.error('half confirm notice:',e.message));
+      return res.json({ok:true,waiting:true});
     }
     const final=await finishConfirmedWebResult(action.slot);
     res.json({ok:true,review:final.review,cross_division:final.cross_division||false});
@@ -888,7 +942,9 @@ app.post('/api/match/result', async (req, res) => {
     const pointsTo=v.isAdmin&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
     let photo={fileId:'',warning:''};
     try{photo=await uploadResultPhoto(v.user.id,b.photo)}catch(e){return res.status(400).json({ok:false,error:e.message})}
-    const payload={winner:winnerId,score:storedScore,set3Mode,kind,pointsFrom,pointsTo,photoFileId:photo.fileId,note:safe(b.note),submitter:String(slot.from_telegram_id)};
+    const enteredByOrganiser=v.isAdmin&&!participant;
+    const payload={winner:winnerId,score:storedScore,set3Mode,kind,pointsFrom,pointsTo,photoFileId:photo.fileId,note:safe(b.note),
+      submitter:enteredByOrganiser?String(v.user.id):String(slot.from_telegram_id)};
     const saved=v.isAdmin
       ?await submitResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload)
       :await submitResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload);
@@ -959,7 +1015,8 @@ app.post('/api/match/manual', async (req,res)=>{
       to_telegram_id:sides[1],to_name:to.name,to_username:to.username||'',
       dates:date,time_from:'',time_to:'',duration_min:MATCH_DURATION_MIN,courts:safe(b.court).slice(0,60),comment:'',
       agreed_date:date,agreed_time:safe(b.time),agreed_court:safe(b.court).slice(0,60),pending_by:'',round:v.isAdmin?safe(b.round):'',
-      result_status:'pending',result_by:sides[0],result_winner:winnerId,result_score:storedScore,result_set3_mode:set3Mode,
+      result_status:'pending',result_by:(v.isAdmin&&!sides.includes(String(v.user.id)))?String(v.user.id):sides[0],
+      result_winner:winnerId,result_score:storedScore,result_set3_mode:set3Mode,
       result_kind:kind,result_points_from:pointsFrom,result_points_to:pointsTo,
       result_photo_file_id:photo.fileId,result_note:safe(b.note),result_submitted_at:nowISO(),created_at:nowISO(),responded_at:nowISO()};
     await createManualMatch(row);
@@ -1763,7 +1820,7 @@ export async function runStuckNudges(now=Date.now()) {
     try {
       if (!await isStuckCurrent(item)) continue;
       if (item.stage === 'close') {
-        if (item.scope === 'negotiation' || item.scope === 'court') {
+        if (item.scope === 'negotiation' || item.scope === 'invite' || item.scope === 'court') {
           const r = await closeStuckSlot(item.slot.challenge_id,{scope:item.scope,expected:item,now});
           if (r.ok) await notifyNegotiationExpired(r.previous, { backToOpen: r.backToOpen, scope:item.scope });
         } else if (item.scope === 'time') {
@@ -1776,7 +1833,7 @@ export async function runStuckNudges(now=Date.now()) {
         }
         continue;
       }
-      if (item.scope === 'negotiation') await notifyStuckNegotiation(item);
+      if (item.scope === 'negotiation' || item.scope === 'invite') await notifyStuckNegotiation(item);
       else if (item.scope === 'time') await notifyStuckTimeChange(item);
       else if(item.scope==='court') await notifyStuckCourt(item);
       else if(item.scope==='score') await notifyStuckScore(item);

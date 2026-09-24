@@ -460,7 +460,11 @@ function nudgeDetails(slot,lang,offer=false) {
     (ru?'Время: ':'Time: ')+escapeHtml(time||'—'),
     (ru?'Корт: ':'Court: ')+escapeHtml(court||'—')].join('\n');
 }
-function nudgeWarning(stage,ru) {
+function nudgeWarning(stage,ru,invite=false) {
+  if(invite) {
+    return stage==='d1'?(ru?'Это последнее напоминание: без ответа вызов будет снят.':'Final reminder: the challenge will be withdrawn without an answer.')
+      :stage==='n2'?(ru?'Ответьте, пожалуйста, чтобы вызов не пропал.':'Please answer so the challenge does not expire.') : '';
+  }
   return stage==='d1'?(ru?'Это последнее напоминание: неподтверждённое предложение будет снято.':'Final reminder: the unconfirmed proposal will expire.')
     :stage==='n2'?(ru?'Завершите этот этап, чтобы предложение не закрылось.':'Complete this step before the proposal expires.') : '';
 }
@@ -477,13 +481,24 @@ export async function notifyStuckNegotiation({slot,stage,waiting,proposer,initia
     [{text:ru?'❌ Отклонить':'❌ Decline',callback_data:'match_no:'+slot.challenge_id}],
     [{text:ru?'✖️ Отменить запрос':'✖️ Cancel request',callback_data:'match_cancel:'+slot.challenge_id}]
   ];
-  await sendMessage(waiting.id,(ru?'<b>⏳ Согласование матча не завершено</b>':'<b>⏳ Your match still needs an answer</b>')+'\n\n'
-    +nudgeDetails(slot,ru?'ru':'en',initial)+'\n\n'
-    +(ru?'Ответьте на вызов: подтвердите условия или предложите свои.':'Respond to the challenge: confirm the details or suggest your own.')
-    +'\n'+nudgeWarning(stage,ru),{reply_markup:{inline_keyboard:rows}});
-  if(stage==='n2'&&proposer?.id) {
+  const head=initial
+    ?(ru?'<b>🎾 Вас вызвали на матч</b>':'<b>🎾 You have a match challenge</b>')
+    :(ru?'<b>⏳ Согласование матча не завершено</b>':'<b>⏳ Your match still needs an answer</b>');
+  const ask=initial
+    ?(ru?'Соперник предложил сыграть. Выберите удобные дату, время и корт из предложенных — или откажитесь, чтобы он не ждал.':'Your opponent suggested a match. Pick a date, time and court that suit you — or decline, so they are not left waiting.')
+    :(ru?'Ответьте на вызов: подтвердите условия или предложите свои.':'Respond to the challenge: confirm the details or suggest your own.');
+  await sendMessage(waiting.id,head+'\n\n'
+    +(initial&&proposer?.name?(ru?'От кого: ':'From: ')+playerLink(proposer.name,proposer.username)+'\n':'')
+    +nudgeDetails(slot,ru?'ru':'en',initial)+'\n\n'+ask
+    +'\n'+nudgeWarning(stage,ru,initial),{reply_markup:{inline_keyboard:rows}});
+  // Только когда переговоры уже шли. По непринятому вызову автору не пишем:
+  // никакого «этапа» у него нет, а подтолкнуть соперника он может кнопкой
+  // «Напомнить» в своих матчах.
+  if(stage==='n2'&&!initial&&proposer?.id) {
     const pr=(await nudgeLang(proposer.id))==='ru';
-    await sendMessage(proposer.id,(pr?'⏳ Соперник пока не ответил. Можно написать ему напрямую.':'⏳ Your opponent has not replied yet. You can contact them directly.'),
+    await sendMessage(proposer.id,initial
+      ?(pr?'⏳ Соперник ещё не открывал ваш вызов. Можно написать ему напрямую.':'⏳ Your opponent has not opened your challenge yet. You can contact them directly.')
+      :(pr?'⏳ Соперник пока не ответил. Можно написать ему напрямую.':'⏳ Your opponent has not replied yet. You can contact them directly.'),
       {reply_markup:{inline_keyboard:[await contactRow(slot,proposer.id,pr?'ru':'en'),[{text:pr?'✖️ Отменить запрос':'✖️ Cancel request',callback_data:'match_cancel:'+slot.challenge_id}],[{text:pr?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]].filter(function(r){return r.length})}}).catch(()=>{});
   }
   return true;
@@ -538,9 +553,15 @@ export async function notifyTimeChangeExpired(slot, proposal) {
   }).catch(() => null);
 }
 
-export async function notifyStuckResult({slot,stage,waitingId}) {
-  if(!waitingId)return null;const ru=(await nudgeLang(waitingId))==='ru';
-  return sendMessage(waitingId,(ru?'<b>⏳ Счёт ждёт вашего подтверждения</b>':'<b>⏳ The score needs your confirmation</b>')+'\n\n'
+export async function notifyStuckResult({slot,stage,waitingId,waitingIds}) {
+  const targets=(Array.isArray(waitingIds)&&waitingIds.length?waitingIds:[waitingId]).filter(Boolean);
+  if(targets.length>1) {
+    for(const id of targets)await notifyStuckResult({slot,stage,waitingId:id}).catch(()=>{});
+    return true;
+  }
+  const only=targets[0];
+  if(!only)return null;const ru=(await nudgeLang(only))==='ru';
+  return sendMessage(only,(ru?'<b>⏳ Счёт ждёт вашего подтверждения</b>':'<b>⏳ The score needs your confirmation</b>')+'\n\n'
     +nudgeDetails(slot,ru?'ru':'en')+'\n'+resultLine(slot)+'\n\n'
     +(ru?'Подтвердите счёт или сообщите о несогласии.':'Confirm the score or dispute it.')
     +(stage==='d1'?(ru?' Без ответа вопрос будет передан организатору.':' Without a reply, the organiser will be asked to review it.') : ''),
@@ -776,29 +797,63 @@ function resultDateBlock(slot,lang="ru") {
 
 // Счёт внесён одной стороной — вторая подтверждает или оспаривает.
 export async function notifyResultForVerification(slot) {
-  const to = opponentOf(slot, slot.result_by);
+  const { isOrganiserResult, resultConfirmationsLeft } = await import('./matchesdb.js');
+  // Счёт от организатора подтверждают оба игрока: он не был на корте, и просить
+  // подпись только у одного из них — значит лишить второго права возразить.
+  // Автором счёта в таком случае честно называем организатора, а не игрока.
+  const organiser = isOrganiserResult(slot);
+  const targets = organiser
+    ? resultConfirmationsLeft(slot).map(id => ({ id }))
+    : [opponentOf(slot, slot.result_by)];
   const by = String(slot.result_by) === String(slot.from_telegram_id)
     ? { name: slot.from_name, username: slot.from_username }
     : { name: slot.to_name, username: slot.to_username };
-  if (!to.id) return null;
-  const lang=await nudgeLang(to.id),ru=lang==='ru';
-  const text = `<b>📊 ${ru?"Подтвердите результат матча":"Confirm the match result"}</b>
+  let delivered = null;
+  for (const to of targets) {
+    if (!to?.id) continue;
+    const lang=await nudgeLang(to.id),ru=lang==='ru';
+    const author = organiser
+      ? (ru?'<b>Организатор</b> внёс счёт вашего матча:':'<b>The organiser</b> submitted your match score:')
+      : `${playerLink(by.name, by.username)} ${ru?"внёс счёт:":"submitted the score:"}`;
+    const tail = organiser
+      ? (ru?"Подтвердить должны оба игрока. Если счёт неверен — нажмите «Не согласен», и организатор разберётся."
+          :"Both players must confirm. If the score is wrong, tap “Disagree” and the organiser will look into it.")
+      : (ru?"Если всё верно — подтвердите. Если нет — нажмите «Не согласен» и внесите свой вариант."
+          :"Confirm if correct. Otherwise, tap “Disagree” and submit your version.");
+    const text = `<b>📊 ${ru?"Подтвердите результат матча":"Confirm the match result"}</b>
 
-${playerLink(by.name, by.username)} ${ru?"внёс счёт:":"submitted the score:"}
+${author}
 ${resultDateBlock(slot,lang)}
 
 ${resultBlock(slot,lang)}
 
-${ru?"Если всё верно — подтвердите. Если нет — нажмите «Не согласен» и внесите свой вариант.":"Confirm if correct. Otherwise, tap “Disagree” and submit your version."}`;
-  const kb = { inline_keyboard: [
-    [{ text: ru?'✅ Подтверждаю':'✅ Confirm', callback_data: `res_ok:${slot.challenge_id}` }],
-    [{ text: ru?'❌ Не согласен':'❌ Disagree', callback_data: `res_no:${slot.challenge_id}` }]
-  ] };
-  if (slot.result_photo_file_id) {
-    return sendPhoto(to.id, slot.result_photo_file_id, { caption: text, reply_markup: kb })
-      .catch(async e => { console.error('result photo failed:', e.message); return sendMessage(to.id, text, { reply_markup: kb }); });
+${tail}`;
+    const kb = { inline_keyboard: [
+      [{ text: ru?'✅ Подтверждаю':'✅ Confirm', callback_data: `res_ok:${slot.challenge_id}` }],
+      [{ text: ru?'❌ Не согласен':'❌ Disagree', callback_data: `res_no:${slot.challenge_id}` }]
+    ] };
+    const sent = slot.result_photo_file_id
+      ? await sendPhoto(to.id, slot.result_photo_file_id, { caption: text, reply_markup: kb })
+          .catch(async e => { console.error('result photo failed:', e.message); return sendMessage(to.id, text, { reply_markup: kb }); })
+      : await sendMessage(to.id, text, { reply_markup: kb });
+    delivered = delivered || sent;
   }
-  return sendMessage(to.id, text, { reply_markup: kb });
+  return delivered;
+}
+
+// Первая подпись из двух: подтвердившему — что ждём второго, второму — что от
+// него ждут ответа. Без этого первый думает, что всё готово, и уходит.
+export async function notifyResultHalfConfirmed(slot, confirmedId) {
+  const { resultConfirmationsLeft } = await import('./matchesdb.js');
+  const left = resultConfirmationsLeft(slot);
+  const other = left.find(id => String(id) !== String(confirmedId));
+  if (confirmedId) {
+    const ru=(await nudgeLang(confirmedId))==='ru';
+    await sendMessage(confirmedId, `<b>✅ ${ru?'Ваше подтверждение принято':'Your confirmation is recorded'}</b>\n\n`
+      + (ru?'Ждём подтверждение соперника — тогда результат уйдёт в таблицу.':'Waiting for your opponent — the result goes into the table once both confirm.')).catch(()=>{});
+  }
+  if (other) await notifyResultForVerification({ ...slot }).catch(()=>{});
+  return true;
 }
 
 // Междивизионный матч: в зачёт он не идёт, поэтому счёт никуда не записан и ждёт

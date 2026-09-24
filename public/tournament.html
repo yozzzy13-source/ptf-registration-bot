@@ -227,7 +227,16 @@ async function api(path, body, method) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...(body || {}), initData, t: token, test: S.test ? '1' : '' })
   });
-  const json = await res.json().catch(() => ({ ok: false, detail: 'Сервер не ответил' }));
+  const raw = await res.text();
+  let json = null;
+  try { json = JSON.parse(raw); } catch (e) { json = null; }
+  if (!json) {
+    const hint = res.status === 502 || res.status === 504
+      ? 'сервер не успел ответить, попробуйте ещё раз'
+      : res.status === 413 ? 'слишком большой ответ'
+      : raw.trim().slice(0, 120).replace(/\s+/g, ' ') || 'пустой ответ';
+    throw new Error(`Ответ ${res.status}: ${hint}`);
+  }
   if (!json.ok) throw new Error(json.detail || json.error || 'Не получилось');
   return json;
 }

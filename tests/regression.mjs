@@ -300,10 +300,15 @@ const scopes={
 };
 for(const [name,fixture] of Object.entries(scopes)) {
  check(!db.stuckItem(fixture,started+14*60000),name+' no reminder before 15 minutes');
- for(const [minutes,stage] of [[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']]) {
+ // «Внесите счёт» напоминаний больше не шлёт: приглашение уходит один раз, а
+ // через 28 часов вопрос уходит организатору. Остальные ступени не тронуты.
+ const stages=name==='score'?[[1680,'close']]:[[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']];
+ for(const [minutes,stage] of stages) {
    const item=db.stuckItem(fixture,started+minutes*60000);
-   check(item?.stage===stage&&item.scope===(name==='initial'?'negotiation':name),name+' reaches '+stage);
+   check(item?.stage===stage&&item.scope===(name==='initial'?'invite':name),name+' reaches '+stage);
  }
+ if(name==='score')for(const minutes of [15,120,240,1440])
+   check(!db.stuckItem(fixture,started+minutes*60000),'Просьба внести счёт не повторяется через '+minutes+' мин');
 }
 check(db.stuckItem(scopes.initial,started+15*60000).waiting.id==='2','Initial direct challenge reminds recipient');
 check(db.stuckItem(scopes.negotiation,started+15*60000).waiting.id==='1','Counter-proposal reminds other side');
@@ -316,12 +321,12 @@ check(db.stageFor(2,['m20','n1'])==='','Do not replay earlier reminder stages');
 await db.createSlot(scopes.initial);
 check((await db.listStuck(started+14*hour)).length===0,'Night hold suppresses staged reminders');
 let item=db.stuckItem(scopes.initial,started+4*hour);
-await db.markStuckNudge('remind','negotiation','n2',item);
+await db.markStuckNudge('remind','invite','n2',item);
 check((await db.findSlot('remind')).nudge_sent==='m20,n1,n2','Night catch-up marks earlier stages instead of sending a burst');
 await db.updateSlot('remind',{nudge_sent:''});
 messages.length=0;
 await server.runStuckNudges(started+15*60000);
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Согласование матча не завершено')),'Scheduler sends first reminder in recipient language');
+check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Вас вызвали на матч')),'Непринятый вызов получает приглашение, а не укор про незавершённое согласование');
 const sentAt15=messages.length;
 await server.runStuckNudges(started+20*60000);
 check(messages.length===sentAt15,'Next scheduler tick does not repeat delivered reminder');
@@ -809,6 +814,182 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/text === '\/tournaments'/.test(bot),'Обработчик команды /tournaments на месте');
  check(/param\.startsWith\('pair_'\)/.test(bot),'Ссылка-приглашение в пару разбирается в /start');
  check(/PERSONAL_PREFIXES[^\n]*'pr:'/.test(bot),'Парные кнопки помечены личными — в группе их не нажать');
+}
+
+
+// --- Сообщения об ошибках счёта доходят до человека -------------------------
+{
+ const ui=await load('ui-errors.js');
+ const generic=ui.uiError('какая-то неизвестная ошибка','ru');
+ for(const msg of ['Указанный победитель не совпадает со счётом','Выберите победителя или результат для обоих','Для RET укажите сыгранный счёт','Выберите двух разных игроков','Игроки должны быть из одного дивизиона','Только для организатора','Профиль не найден'])
+  check(ui.uiError(msg,'ru')!==generic&&ui.uiError(msg,'en')!==ui.uiError('неизвестно','en'),'Переведено: '+msg);
+ check(/переверн/i.test(ui.uiError('Указанный победитель не совпадает со счётом','ru')),'Ошибка про победителя подсказывает, что делать');
+
+ // Ровно та ситуация со скриншота: победитель выбран, а решающий тай-брейк
+ // выигран соперником. Форма обязана сказать это человеческим текстом.
+ const mismatch=await request('post','/api/match/manual','99',{from_telegram_id:'7',to_telegram_id:'9',date:'2099-09-20',court:'Court A',kind:'played',winner:'9',sets:[{a:6,b:3},{a:6,b:7,tba:4,tbb:7},{a:4,b:10}]});
+ check(mismatch.code===400,'Несовпадение победителя и счёта не проходит');
+ check(mismatch.body.code==='Указанный победитель не совпадает со счётом','Машинный код ошибки сохраняется');
+ check(/переверн|flip the score/i.test(mismatch.body.error),'Человек видит подсказку, а не дежурную фразу');
+}
+
+
+// --- Порядок матчей и поиск по имени ---------------------------------------
+{
+ const league=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ const match=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+
+ // Победитель встаёт слева — синхронно с колонками счёта и очков.
+ check(/function orderByWinner/.test(match),'Победитель переставляется влево при выборе');
+ check(/orderByWinner\(prefix\|\|'r',node\)/.test(match),'Перестановка вызывается из выбора победителя');
+ check(/two\.insertBefore\(two\.children\[1\],first\)/.test(match),'Очки переставляются блоками, а не значениями');
+
+ // Свежие матчи сверху во всех трёх списках.
+ check(/function byFreshest/.test(match),'Есть единая сортировка списков матчей');
+ check(/byFreshest\(myMatches\)/.test(match)&&/byFreshest\(resultTasks\)/.test(match),'Мои матчи и результаты идут от свежего к старому');
+ check(/adminMatchTime\(b\)-adminMatchTime\(a\)/.test(match),'Админская вкладка тоже развёрнута свежими вверх');
+ check(/sortableDate\(b\.date\)-sortableDate\(a\.date\)/.test(league),'Лента лиги сортируется по дате, а не по номеру матча');
+ check(/function sortableDate/.test(league),'Дата приводится к числу: «01.09» не встаёт выше «12.08»');
+
+ // Поиск с выпадающим списком во всех трёх местах лиги.
+ check(/function sugBox/.test(league),'Есть общий конструктор поля поиска');
+ for(const [id,handler] of [['rq','race'],['pq','plr'],['fq','feed']]){
+  check(new RegExp(`sugBox\\('${id}'`).test(league),'Поле '+id+' собрано через общий конструктор');
+  for(const suffix of ['Set','Pick','Focus','Blur'])
+   check(new RegExp(`function ${handler}${suffix}\\(`).test(league),'Обработчик '+handler+suffix+' определён');
+ }
+ check(/Focus\(\)\{[a-zA-Z]+SugOpen=true/.test(league),'Список открывается целиком по нажатию, а не только при вводе');
+ check(!/function setPQuery|function pickPQ|function setRaceQuery|function setFQuery/.test(league),'Старые обработчики поиска убраны, двух путей к одному полю не осталось');
+
+ // Игрок в ручном матче выбирается из списка или набирается руками.
+ check(/list="mPlayerList"/.test(match)&&/<datalist id="mPlayerList">/.test(match),'Игрок в ручном матче выбирается из выпадающего списка');
+ check(/function manualPerson\(value\)/.test(match),'Игрок ищется по тексту поля, а не по telegram_id');
+ check(/manualPerson\(\$\('mOpp'\)\.value\)\.telegram_id/.test(match),'На сервер уходит найденный telegram_id, а не введённый текст');
+ check(/sugMore/.test(league),'Подсказка «сколько ещё» переведена');
+ check(/awaitingResult\.sort\(\(a, b\) => byStart\(b, a\)\)/.test(await fs.readFile(path.join(root,'matchesdb.js'),'utf8')),'Сводка /matches: сыгранные без счёта идут от свежего к старому');
+}
+
+
+// --- Непринятый вызов и кнопка «Напомнить» ---------------------------------
+{
+ const invite={challenge_id:'inv1',match_type:'direct',status:'open',division:'Division C',season:'2',group:'1',
+   from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',
+   dates:'2099-10-10',time_from:'10:00',time_to:'12:00',duration_min:'120',courts:'Court A',created_at:'2099-01-01T00:00:00+07:00'};
+ const pending={...invite,challenge_id:'neg1',status:'pending',pending_by:'2',responded_at:'2099-01-01T00:00:00+07:00'};
+
+ // Непринятый адресный вызов больше не выдаёт себя за идущее согласование.
+ check(db.pendingAction(invite).scope==='invite','Непринятый вызов — отдельная ветка invite');
+ check(db.pendingAction(invite).waitingIds.join()==='2','Ждём того, кого вызвали');
+ check(db.pendingAction(pending).scope==='negotiation','Ответивший матч остаётся согласованием');
+ check(db.pendingAction({...invite,status:'accepted',result_status:'confirmed'})===null,'У закрытого матча ждать нечего');
+
+ // Ступени напоминаний не тронуты: те же 15 минут, 2, 4, 24 часа.
+ const hours=h=>Date.parse(invite.created_at)+h*3600000;
+ check(!db.stuckItem(invite,hours(0.1)),'До 15 минут никто никого не дёргает');
+ check(db.stuckItem(invite,hours(0.3)).stage==='m20','Первая ступень на 15 минутах осталась');
+ check(db.stuckItem(invite,hours(3)).stage==='n1','Вторая ступень осталась');
+ check(db.stuckItem(invite,hours(5)).stage==='n2','Третья ступень осталась');
+ check(db.stuckItem(invite,hours(30)).stage==='close','Автозакрытие через 28 часов осталось');
+ check(db.stuckItem(invite,hours(0.3)).scope==='invite','Напоминание по вызову идёт своей веткой');
+
+ // Сводка: адресный вызов не лежит среди открытых окон.
+ const overview=await db.matchesOverview();
+ check(!overview.openSlots.some(x=>x.challenge_id==='inv1'),'Адресный вызов не считается открытым окном');
+
+ // Текст напоминания по непринятому вызову — приглашение, а не укор.
+ const matchesSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/Вас вызвали на матч/.test(matchesSrc)&&/You have a match challenge/.test(matchesSrc),'У непринятого вызова свой заголовок на двух языках');
+ check(/nudgeWarning\(stage,ru,initial\)/.test(matchesSrc),'Предупреждение о снятии сформулировано отдельно для вызова');
+
+ // Ручное напоминание.
+ check(routes.some(r=>r.method==='post'&&r.p==='/api/match/nudge'),'Эндпоинт ручного напоминания зарегистрирован');
+ const page=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/function nudgeOpponent/.test(page)&&/function waitingOnOpponent/.test(page),'В интерфейсе есть кнопка и правило её показа');
+ check(/nudge:'🔔 Напомнить'/.test(page)&&/nudge:'🔔 Remind'/.test(page),'Кнопка переведена');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/MANUAL_NUDGE_MS = 60 \* 60 \* 1000/.test(idx),'Ручное напоминание ограничено одним разом в час');
+ check(/isNightHold\(Date\.now\(\),TIMEZONE,win\)/.test(idx),'Ночью ручное напоминание тоже молчит');
+ check(/pendingAction\(slot\)/.test(idx),'Кого будить, решает сервер, а не интерфейс');
+ // Живые проверки доступа: до ночного правила и лимита частоты.
+ await db.createSlot({...invite,challenge_id:'nudge1',status:'pending',pending_by:'2',responded_at:new Date().toISOString()});
+ // pending_by — тот, кто предложил; ждём другого. Напоминать может предложивший.
+ const self=await request('post','/api/match/nudge','1',{challenge_id:'nudge1'});
+ check(self.code===409,'Тому, за кем ход, кнопка ничего не отправляет');
+ const stranger=await request('post','/api/match/nudge','3',{challenge_id:'nudge1'});
+ check(stranger.code===403,'Посторонний не может слать напоминания по чужому матчу');
+ const missing=await request('post','/api/match/nudge','1',{challenge_id:'нет-такого'});
+ check(missing.code===404,'Несуществующий матч честно отвечает «не найден»');
+}
+
+
+
+// --- 90 минут, отключённые напоминания о счёте, двойное подтверждение -------
+{
+ // Просьба внести счёт приходит через 90 минут ПОСЛЕ НАЧАЛА, а не после конца.
+ const start=Date.parse('2099-05-05T10:00:00+07:00');
+ await db.createSlot({challenge_id:'p90',match_type:'manual',status:'accepted',division:'Division C',season:'2',group:'1',
+   from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',
+   dates:'2099-05-05',time_from:'10:00',time_to:'12:00',duration_min:'120',courts:'Court A',
+   agreed_date:'2099-05-05',agreed_time:'10:00',agreed_court:'Court A'});
+ check(db.RESULT_PROMPT_AFTER_MIN===90,'По умолчанию просим счёт через 90 минут');
+ check(await db.resultPromptDelayMin()===90,'Без настройки берём значение по умолчанию');
+ const soon=(await db.listMatchesNeedingResultPrompt(start+89*60000)).some(x=>x.challenge_id==='p90');
+ const due=(await db.listMatchesNeedingResultPrompt(start+91*60000)).some(x=>x.challenge_id==='p90');
+ check(!soon&&due,'Через 89 минут ещё рано, через 91 — пора');
+
+ // Значение настраивается из Settings без правки кода.
+ tables.set('crm|Settings',[['key','value'],['season_number','2'],['league_seasons','2:active'],['result_prompt_after_min','75']]);
+ sheets.invalidateSheetCache();
+ await new Promise(r=>setTimeout(r,0));
+ check(db.RESULT_PROMPT_AFTER_MIN===90,'Значение по умолчанию остаётся в коде неизменным');
+
+ // Счёт от организатора: автор — не игрок, подтверждают оба.
+ const organiser={from_telegram_id:'1',to_telegram_id:'2',result_by:'99'};
+ check(db.isOrganiserResult(organiser),'Счёт от организатора отличается по автору');
+ check(!db.isOrganiserResult({...organiser,result_by:'1'}),'Счёт от игрока остаётся обычным');
+ check(db.resultConfirmationsLeft(organiser).join()==='1,2','Сначала ждём обоих');
+ check(db.resultConfirmationsLeft({...organiser,result_confirmed_by:'1'}).join()==='2','После первой подписи ждём второго');
+ check(db.resultConfirmationsLeft({...organiser,result_by:'1'}).length===0,'У обычного счёта списка подписей нет');
+
+ // Живая цепочка: организатор вносит счёт за двоих.
+ const byAdmin=await request('post','/api/match/manual','99',{from_telegram_id:'1',to_telegram_id:'2',
+   date:'2099-05-06',court:'Court A',kind:'played',winner:'1',sets:[{a:6,b:3},{a:6,b:4}],perspective:'winner'});
+ check(byAdmin.body.ok,'Организатор внёс счёт за двоих');
+ const made=await db.findSlot(byAdmin.body.challenge_id);
+ check(String(made.result_by)==='99','Автором счёта записан организатор, а не первый игрок формы');
+ check(db.isOrganiserResult(made),'Матч распознаётся как внесённый организатором');
+
+ messages.length=0;
+ const first=await db.confirmResult(made.challenge_id,{telegram_id:'1',name:'Alice One'});
+ check(first.ok&&first.waiting,'Первая подпись не закрывает результат');
+ check(String(first.slot.result_status)==='pending','Пока ждём второго, результат не засчитан');
+ const second=await db.confirmResult(made.challenge_id,{telegram_id:'2',name:'Bob Two'});
+ check(second.ok&&!second.waiting,'Вторая подпись закрывает результат');
+ check(String(second.slot.result_status)==='confirmed','После двух подписей результат засчитан');
+ check(db.resultConfirmedBy(second.slot).sort().join()==='1,2','В таблице видно, кто именно подтвердил');
+
+ // Несогласие любого из двоих отправляет счёт в спор и стирает подписи.
+ const byAdmin2=await request('post','/api/match/manual','99',{from_telegram_id:'1',to_telegram_id:'2',
+   date:'2099-05-07',court:'Court A',kind:'played',winner:'2',sets:[{a:6,b:0},{a:6,b:0}],perspective:'winner'});
+ const slot2=byAdmin2.body.challenge_id;
+ await db.confirmResult(slot2,{telegram_id:'1',name:'Alice One'});
+ const disputed=await db.disputeResult(slot2,{telegram_id:'2',name:'Bob Two'});
+ check(disputed.ok,'Второй игрок может не согласиться');
+ const after=await db.findSlot(slot2);
+ check(String(after.result_status)==='disputed'&&!String(after.result_confirmed_by||'').trim(),'Спор стирает собранные подписи');
+
+ // Автору непринятого вызова бот больше ничего не пишет.
+ const src=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/if\(stage==='n2'&&!initial&&proposer\?\.id\)/.test(src),'По непринятому вызову автору ничего не уходит');
+ check(/Подтвердить должны оба игрока/.test(src),'В уведомлении сказано, что подтверждают оба');
+ check(/Организатор<\/b> внёс счёт/.test(src),'В уведомлении честно указан организатор как автор счёта');
+ const ui=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/function byOrganiser/.test(ui)&&/function canConfirmResult/.test(ui),'Интерфейс различает счёт от организатора');
+ check(/alreadyConfirmed/.test(ui),'Подтвердивший второй раз кнопку не видит');
+ check(/waitingOther:'Вы подтвердили, ждём соперника'/.test(ui)&&/waitingOther:'You confirmed/.test(ui),'Ожидание второго подтверждения переведено');
+ check(/appendObjects/.test(await fs.readFile(path.join(root,'tournaments.js'),'utf8')),'Перенос сезона пишет участников одним запросом');
+ const page=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
+ check(/Ответ \$\{res\.status\}/.test(page),'Турнирная админка показывает настоящий код ответа, а не «сервер не ответил»');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

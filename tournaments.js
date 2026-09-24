@@ -22,7 +22,7 @@
 // турнирные листы читаются и пишутся с пометкой TEST. Составы игроков и
 // Players_Master при этом читаются настоящие и никогда не меняются — турнирный
 // модуль не пишет ни в одну таблицу организатора.
-import { getRows, appendObject, updateObjectByRow, ensureExtraSheet, invalidateSheetCache, sameName, getAllActiveLeaguePlayers, getAllApplicants } from './sheets.js';
+import { getRows, appendObject, appendObjects, updateObjectByRow, ensureExtraSheet, invalidateSheetCache, sameName, getAllActiveLeaguePlayers, getAllApplicants } from './sheets.js';
 import { seasonRoster, latestSeason, divisionLetter, divisionDisplayName } from './division.js';
 import { uid, nowISO } from './util.js';
 
@@ -79,6 +79,10 @@ async function rows(key, test = false, useCache = true) {
 async function insert(key, obj, test = false) {
   const name = await sheet(key, test);
   return appendObject(name, obj);
+}
+async function insertMany(key, list = [], test = false) {
+  const name = await sheet(key, test);
+  return appendObjects(name, list);
 }
 async function patch(key, rowNumber, data, test = false) {
   const name = await sheet(key, test);
@@ -904,15 +908,18 @@ export async function createManualTournamentMatch(tournamentId, data = {}, actor
 export async function tournamentState(tournamentId, test = false) {
   const tournament = await getTournament(tournamentId, test);
   if (!tournament) throw new Error('Турнир не найден');
-  const [entries, pairs, stages, matches] = await Promise.all([
-    listEntries(tournamentId, test),
-    lower(tournament.kind) === 'doubles' ? listPairs(tournamentId, test) : Promise.resolve([]),
-    listStages(tournamentId, test),
-    listMatches(tournamentId, test)
+  // Каждый лист читаем со своей страховкой: если один недоступен, экран всё
+  // равно откроется, а не встретит человека пустой ошибкой.
+  const safe = (promise, fallback) => promise.catch(e => { console.error('tournament state:', e.message); return fallback; });
+  const doubles = lower(tournament.kind) === 'doubles';
+  const [entries, pairs, stages, matches, inviteRows] = await Promise.all([
+    safe(listEntries(tournamentId, test), []),
+    doubles ? safe(listPairs(tournamentId, test), []) : Promise.resolve([]),
+    safe(listStages(tournamentId, test), []),
+    safe(listMatches(tournamentId, test), []),
+    doubles ? safe(rows('invites', test), []) : Promise.resolve([])
   ]);
-  const invites = lower(tournament.kind) === 'doubles'
-    ? (await rows('invites', test).catch(() => [])).filter(i => txt(i.tournament_id) === txt(tournamentId))
-    : [];
+  const invites = inviteRows.filter(i => txt(i.tournament_id) === txt(tournamentId));
   const groupStage = stages.find(s => lower(s.kind) === 'group');
   const groupMatches = groupStage ? matches.filter(m => txt(m.stage_id) === txt(groupStage.stage_id) && lower(m.status) !== 'cancelled') : [];
   const standings = standingsFor(playingEntries(entries), groupMatches, scoringOf(tournament));
@@ -981,15 +988,17 @@ export async function importSeason(season = '', { division = '', name = '' } = {
   const stage = await createStage(tournament.tournament_id, { kind: 'group', name: 'Групповой этап' }, actor, test);
   const league = await getAllActiveLeaguePlayers().catch(() => []);
   const idOf = name => txt(league.find(p => sameName(p.name, name))?.telegram_id || '');
-  let seed = 0;
-  for (const p of players) {
-    seed++;
-    await addEntry(tournament.tournament_id, {
-      player_id: idOf(p.name), player_name: txt(p.name), display_name: txt(p.name),
-      status: 'accepted', division: divisionDisplayName(p.letter),
-      group: txt(p.group) || groupNameByIndex(0), seed: String(seed)
-    }, actor, test);
-  }
+  // Одним запросом, а не по строке на человека: тридцать отдельных записей
+  // подряд Google обслуживает медленно, и ответ успевает оборваться.
+  const rows = players.map((p, index) => ({
+    entry_id: uid('ent'), tournament_id: tournament.tournament_id, entrant_type: 'player',
+    player_id: idOf(p.name), player_name: txt(p.name), pair_id: '', display_name: txt(p.name),
+    status: 'accepted', seed: String(index + 1), rating: '',
+    division: divisionDisplayName(p.letter), group: txt(p.group) || groupNameByIndex(0),
+    checked_in_at: '', withdrawn_at: '', withdrawal_reason: '', replaced_by: '',
+    payment_status: '', note: '', created_at: nowISO(), updated_at: nowISO()
+  }));
+  await insertMany('entries', rows, test);
   await logAction(tournament.tournament_id, actor, 'season_imported', use, '', { players: players.length, division }, '', test);
   return { tournament, stage, players: players.length };
 }

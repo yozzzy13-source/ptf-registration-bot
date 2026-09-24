@@ -27,7 +27,7 @@ const SLOT_HEADERS = [
   'chat_id', 'message_thread_id', 'message_id',
   'created_at', 'responded_at', 'cancelled_at',
   'result_status', 'result_by', 'result_winner', 'result_score', 'result_set3_mode',
-  'result_kind', 'result_points_from', 'result_points_to', 'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_note',
+  'result_kind', 'result_points_from', 'result_points_to', 'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_confirmed_by', 'result_note',
   'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge',
   'court_pending_at', 'court_nudge', 'score_nudge',
   'unfinished_by', 'unfinished_at', 'unfinished_note', 'unfinished_photo_file_id'
@@ -613,6 +613,22 @@ export async function nightWindow() {
   } catch { nightWindowCache = { t: Date.now(), v: { from: NIGHT_FROM_MIN, to: NIGHT_TO_MIN } }; }
   return nightWindowCache.v;
 }
+// Через сколько минут ПОСЛЕ НАЧАЛА матча просить внести счёт. Раньше ждали
+// ровно длительность брони (два часа) — к этому моменту люди уже расходились,
+// и счёт вносился на следующий день. Значение меняется в Settings без правки
+// кода: ключ result_prompt_after_min.
+export const RESULT_PROMPT_AFTER_MIN = 90;
+let promptDelayCache = { t: 0, v: RESULT_PROMPT_AFTER_MIN };
+export async function resultPromptDelayMin() {
+  if (Date.now() - promptDelayCache.t < NIGHT_SETTINGS_MS) return promptDelayCache.v;
+  try {
+    const { getSetting } = await import('./sheets.js');
+    const raw = Number(String(await getSetting('result_prompt_after_min').catch(() => '')).trim());
+    const value = Number.isFinite(raw) && raw >= 15 && raw <= 600 ? raw : RESULT_PROMPT_AFTER_MIN;
+    promptDelayCache = { t: Date.now(), v: value };
+  } catch { promptDelayCache = { t: Date.now(), v: RESULT_PROMPT_AFTER_MIN }; }
+  return promptDelayCache.v;
+}
 export function localMinutes(now = Date.now(), timeZone = TIMEZONE) {
   const p = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })
     .formatToParts(new Date(now));
@@ -681,8 +697,14 @@ export async function matchesOverview(now = Date.now()) {
   for (const r of rows) {
     const status = String(r.status || '').toLowerCase();
     const result = String(r.result_status || '').toLowerCase();
-    if (status === 'open') { out.openSlots.push(r); continue; }
-    if (status === 'pending') { out.awaitingAnswer.push(r); continue; }
+    // Адресный вызов — это не открытое окно: он ждёт ответа конкретного
+    // человека, и в сводке его место рядом с остальными «ждут ответа».
+    if (status === 'open') {
+      if (String(r.match_type || '') === 'direct' && r.to_telegram_id) out.awaitingAnswer.push({ ...r, _stage: 'invite' });
+      else out.openSlots.push(r);
+      continue;
+    }
+    if (status === 'pending') { out.awaitingAnswer.push({ ...r, _stage: 'negotiation' }); continue; }
     if (status !== 'accepted') continue;
     if (result === 'confirmed') continue;
     const start = slotStartMs(r);
@@ -696,7 +718,11 @@ export async function matchesOverview(now = Date.now()) {
     if (!r.court_confirmed_at) out.awaitingCourt.push(r);
   }
   const byStart = (a, b) => (slotStartMs(a) || 0) - (slotStartMs(b) || 0);
-  out.upcoming.sort(byStart); out.awaitingCourt.sort(byStart); out.awaitingResult.sort(byStart);
+  // Будущее читают вперёд: ближайший матч первым. Прошедшее — наоборот, от
+  // свежего к старому: вчерашний матч без счёта нужен раньше, чем месячной
+  // давности.
+  out.upcoming.sort(byStart); out.awaitingCourt.sort(byStart);
+  out.awaitingResult.sort((a, b) => byStart(b, a));
   return out;
 }
 
@@ -730,40 +756,78 @@ function courtReset(slot) {
 }
 export function reminderStep(slot,scope) {
   const base=[slot.status,slot.result_status,scope];
-  if(scope==='negotiation')base.push(slot.responded_at||slot.created_at,slot.pending_by,slot.round,slot.to_telegram_id);
+  if(scope==='negotiation'||scope==='invite')base.push(slot.responded_at||slot.created_at,slot.pending_by,slot.round,slot.to_telegram_id,slot.status);
   if(scope==='time')base.push(...String(slot.time_change||'').split('|').slice(0,3));
   if(scope==='court')base.push(slot.court_pending_at||slot.responded_at||slot.created_at,slot.court_confirmed_at,slot.result_status,slot.agreed_date,slot.agreed_time,slot.time_change);
   if(scope==='result')base.push(slot.result_status,slot.result_submitted_at,slot.result_by,slot.result_score);
   if(scope==='score')base.push(slot.result_status,slot.result_prompt_sent_at,slot.agreed_date,slot.agreed_time);
   return JSON.stringify(base.map(v=>String(v??'')));
 }
-export function stuckItem(slot,now=Date.now()) {
+// Чего матч ждёт прямо сейчас — без оглядки на ступени напоминаний. Отсюда
+// берут ответ и автоматические напоминания, и ручная кнопка «Напомнить»:
+// иначе они разошлись бы, и кнопка будила бы не того человека.
+//
+// `invite` — отдельная ветка: адресный вызов, на который ещё ни разу не
+// ответили. Раньше он попадал в общую ветку согласования и получал письма
+// «согласование не завершено», хотя согласовывать было нечего — человеку
+// просто предложили сыграть.
+export function pendingAction(slot) {
   const status=String(slot.status||'').toLowerCase();
-  let item=null,since='',done=[];
-  if(status==='pending'||(status==='open'&&slot.match_type==='direct'&&slot.to_telegram_id)) {
-    const first=status==='open';
-    item={slot,scope:'negotiation',initial:first,
-      waiting:first?{id:String(slot.to_telegram_id),name:slot.to_name,username:slot.to_username}:awaitingSide(slot),
-      proposer:first?{id:String(slot.from_telegram_id),name:slot.from_name,username:slot.from_username}:proposerSide(slot)};
-    since=slot.responded_at||slot.created_at;done=marks(slot.nudge_sent);
-  } else if(status==='accepted'&&!['confirmed','unfinished'].includes(String(slot.result_status||'').toLowerCase())) {
-    const waitingFor=id=>String(id)===String(slot.from_telegram_id)?slot.to_telegram_id:slot.from_telegram_id;
-    const proposal=parseTimeChange(slot.time_change);
-    if(slot.result_status==='pending') {
-      item={slot,scope:'result',waitingId:waitingFor(slot.result_by)};
-      since=slot.result_submitted_at;done=marks(slot.result_nudge);
-    } else if(proposal) {
-      item={slot,scope:'time',proposal,waitingId:waitingFor(proposal.by)};
-      since=proposal.at;done=marks(String(slot.time_change).split('|')[3]);
-    } else if(!slot.court_confirmed_at&&slot.match_type!=='manual'&&!slot.result_status) {
-      item={slot,scope:'court'};since=slot.court_pending_at||slot.responded_at||slot.created_at;done=marks(slot.court_nudge);
-    } else if(slot.result_prompt_sent_at&&!slot.result_status) {
-      item={slot,scope:'score'};since=slot.result_prompt_sent_at;done=marks(slot.score_nudge);
-    }
+  if(status==='open'&&slot.match_type==='direct'&&slot.to_telegram_id) {
+    return {slot,scope:'invite',initial:true,
+      waiting:{id:String(slot.to_telegram_id),name:slot.to_name,username:slot.to_username},
+      proposer:{id:String(slot.from_telegram_id),name:slot.from_name,username:slot.from_username},
+      waitingIds:[String(slot.to_telegram_id)],
+      since:slot.responded_at||slot.created_at,done:marks(slot.nudge_sent)};
   }
+  if(status==='pending') {
+    const waiting=awaitingSide(slot);
+    return {slot,scope:'negotiation',initial:false,waiting,proposer:proposerSide(slot),
+      waitingIds:[String(waiting?.id||'')].filter(Boolean),
+      since:slot.responded_at||slot.created_at,done:marks(slot.nudge_sent)};
+  }
+  if(status!=='accepted'||['confirmed','unfinished'].includes(String(slot.result_status||'').toLowerCase()))return null;
+  const waitingFor=id=>String(id)===String(slot.from_telegram_id)?slot.to_telegram_id:slot.from_telegram_id;
+  const proposal=parseTimeChange(slot.time_change);
+  if(slot.result_status==='pending') {
+    // У счёта от организатора ждём обоих, кто ещё не подписал. У обычного —
+    // соперника автора.
+    const left=resultConfirmationsLeft(slot);
+    const waitingIds=left.length?left:[String(waitingFor(slot.result_by)||'')].filter(Boolean);
+    return {slot,scope:'result',waitingId:waitingIds[0]||'',waitingIds,
+      since:slot.result_submitted_at,done:marks(slot.result_nudge)};
+  }
+  if(proposal) {
+    const waitingId=waitingFor(proposal.by);
+    return {slot,scope:'time',proposal,waitingId,waitingIds:[String(waitingId||'')].filter(Boolean),
+      since:proposal.at,done:marks(String(slot.time_change).split('|')[3])};
+  }
+  if(!slot.court_confirmed_at&&slot.match_type!=='manual'&&!slot.result_status) {
+    return {slot,scope:'court',waitingIds:[String(slot.from_telegram_id||'')].filter(Boolean),
+      since:slot.court_pending_at||slot.responded_at||slot.created_at,done:marks(slot.court_nudge)};
+  }
+  if(slot.result_prompt_sent_at&&!slot.result_status) {
+    // Ветка жива ради кнопки «Напомнить» и эскалации организатору: сами
+    // автоматические напоминания по ней отключены (см. stuckItem).
+    return {slot,scope:'score',
+      waitingIds:[String(slot.from_telegram_id||''),String(slot.to_telegram_id||'')].filter(Boolean),
+      since:slot.result_prompt_sent_at,done:marks(slot.score_nudge)};
+  }
+  return null;
+}
+// По каким этапам бот напоминает сам. «Внесите счёт» отсюда убрано намеренно:
+// приглашение уходит один раз, дальше человека не дёргаем — нужен толчок,
+// соперник жмёт «Напомнить», а через 28 часов вопрос уходит организатору.
+const AUTO_NUDGE_SCOPES = new Set(['invite','negotiation','result','time','court']);
+export function stuckItem(slot,now=Date.now()) {
+  const item=pendingAction(slot);
   if(!item)return null;
-  const stage=stageFor(hoursBetween(Date.parse(since||''),now),done);
-  return stage?{...item,stage,step:reminderStep(slot,item.scope)}:null;
+  const stage=stageFor(hoursBetween(Date.parse(item.since||''),now),item.done);
+  if(!stage)return null;
+  // Эскалацию организатору через 28 часов оставляем даже там, где напоминаний
+  // игрокам нет: иначе счёт может зависнуть навсегда и этого никто не увидит.
+  if(!AUTO_NUDGE_SCOPES.has(item.scope)&&stage!=='close')return null;
+  return {...item,stage,step:reminderStep(slot,item.scope)};
 }
 export async function listStuck(now=Date.now()) {
   // Ночью повторные напоминания молчат: человек не должен просыпаться от того,
@@ -801,7 +865,9 @@ export async function closeStuckSlot(challengeId,{scope='negotiation',expected=n
     if(expected&&reminderStep(slot,scope)!==expected.step)return {ok:false,reason:'stale'};
     const eligible=scope==='court'
       ?slot.status==='accepted'&&!slot.court_confirmed_at&&!slot.result_status&&!slot.time_change
-      :slot.status==='pending'||(slot.status==='open'&&slot.match_type==='direct');
+      :scope==='invite'
+        ?slot.status==='open'&&slot.match_type==='direct'
+        :slot.status==='pending';
     if(!eligible)return {ok:false,reason:'not_pending',slot};
     const dates=cellToList(slot.dates).filter(d=>{
       const end=Date.parse(d+'T'+(slot.time_to||'23:59')+':00+07:00');
@@ -964,15 +1030,15 @@ export async function rejectTimeChange(challengeId, actor = {}, expectedTime = '
 // ---------------------------------------------------------------------------
 
 // Матч сыгран (время закончилось), результата ещё нет, напоминание не отправляли.
-export async function listMatchesNeedingResultPrompt() {
-  const rows = await allSlots();
+export async function listMatchesNeedingResultPrompt(now = Date.now()) {
+  const [rows, delay] = await Promise.all([allSlots(), resultPromptDelayMin()]);
   return rows.filter(r => {
     if (String(r.status || '').toLowerCase() !== 'accepted') return false;
     if (r.result_status || r.time_change || (!r.court_confirmed_at && r.match_type!=='manual')) return false;
     if (r.result_prompt_sent_at) return false;
-    const end = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
-    if (Number.isNaN(end)) return false;
-    return Date.now() > end + Number(r.duration_min || 120) * 60000;
+    const start = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
+    if (Number.isNaN(start)) return false;
+    return now > start + delay * 60000;
   });
 }
 
@@ -1089,7 +1155,7 @@ export async function submitResult(challengeId, actor = {}, result = {}) {
       result_photo_file_id: String(result.photoFileId || slot.result_photo_file_id || ''),
       result_note: String(result.note || ''),
       result_submitted_at: nowISO(),
-      result_confirmed_at: '', result_nudge: '', score_nudge: ''
+      result_confirmed_at: '', result_confirmed_by: '', result_nudge: '', score_nudge: ''
     };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
@@ -1113,7 +1179,7 @@ export async function submitResultByAdmin(challengeId, actor = {}, result = {}) 
       result_points_to:result.pointsTo === '' || result.pointsTo === undefined ? '' : String(result.pointsTo),
       result_photo_file_id:String(result.photoFileId || slot.result_photo_file_id || ''),
       result_note:String(result.note || ''), result_submitted_at:nowISO(),
-      result_confirmed_at:'', result_nudge:'', score_nudge:''
+      result_confirmed_at:'', result_confirmed_by:'', result_nudge:'', score_nudge:''
     };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged={...slot,...patch};
@@ -1122,6 +1188,21 @@ export async function submitResultByAdmin(challengeId, actor = {}, result = {}) 
   });
 }
 
+// Счёт внесён организатором, а не кем-то из игроков. Отличаем по автору: он не
+// совпадает ни с одной из сторон. Отдельного поля для этого не нужно.
+export function isOrganiserResult(slot = {}) {
+  const by = String(slot.result_by || '');
+  return Boolean(by) && ![String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(by);
+}
+// Кто уже подтвердил. Список ведём только для счёта от организатора: когда счёт
+// вносит игрок, подтверждение по-прежнему одно — от соперника.
+export const resultConfirmedBy = slot => String(slot?.result_confirmed_by || '').split(',').map(x => x.trim()).filter(Boolean);
+export function resultConfirmationsLeft(slot = {}) {
+  if (!isOrganiserResult(slot)) return [];
+  const done = resultConfirmedBy(slot);
+  return [String(slot.from_telegram_id || ''), String(slot.to_telegram_id || '')]
+    .filter(Boolean).filter(id => !done.includes(id));
+}
 export async function confirmResult(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
@@ -1134,9 +1215,24 @@ export async function confirmResult(challengeId, actor = {}) {
     }
     if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
     // Подтверждает всегда ВТОРАЯ сторона — не та, что вносила счёт.
-    if (String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
+    const organiser = isOrganiserResult(slot);
+    if (!organiser && String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
-    if (!sides.includes(String(actor.telegram_id))) return { ok: false, reason: 'not_a_player', slot };
+    const me = String(actor.telegram_id);
+    if (!sides.includes(me)) return { ok: false, reason: 'not_a_player', slot };
+    // Счёт от организатора подтверждают ОБА игрока: он не был на корте, и одна
+    // подпись тут ничего не доказывает. Пока второй молчит, результат ждёт.
+    if (organiser) {
+      const done = [...new Set([...resultConfirmedBy(slot), me])];
+      const left = sides.filter(id => id && !done.includes(id));
+      const patch = left.length
+        ? { result_confirmed_by: done.join(',') }
+        : { result_status: 'confirmed', result_confirmed_at: nowISO(), result_confirmed_by: done.join(',') };
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+      const merged = { ...slot, ...patch };
+      await logMatchEvent(left.length ? 'result_confirmed_half' : 'result_confirmed', merged, actor, merged.result_score);
+      return { ok: true, slot: merged, waiting: left.length ? left : null };
+    }
     const patch = { result_status: 'confirmed', result_confirmed_at: nowISO() };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
@@ -1194,7 +1290,7 @@ export async function disputeResult(challengeId, actor = {}) {
     if (String(slot.result_status || '').toLowerCase() !== 'pending') return { ok: false, reason: 'not_pending', slot };
     if (String(slot.result_by) === String(actor.telegram_id)) return { ok: false, reason: 'own_result', slot };
     const previous = { ...slot };
-    const patch = { result_status: 'disputed', result_confirmed_at: '' };
+    const patch = { result_status: 'disputed', result_confirmed_at: '', result_confirmed_by: '' };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     await logMatchEvent('result_disputed', slot, actor, slot.result_score);
     return { ok: true, slot: { ...slot, ...patch }, previous };
@@ -1208,7 +1304,7 @@ export async function rejectResultByAdmin(challengeId, actor = {}) {
   return withClaimLock(challengeId, async () => {
     const slot = await findSlot(challengeId);
     if (!slot) return { ok: false, reason: 'not_found' };
-    const patch = { result_status: 'disputed', result_confirmed_at: '', result_note: 'отклонён организатором' };
+    const patch = { result_status: 'disputed', result_confirmed_at: '', result_confirmed_by: '', result_note: 'отклонён организатором' };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     await logMatchEvent('result_rejected_admin', slot, actor, slot.result_score);
     return { ok: true, slot: { ...slot, ...patch } };

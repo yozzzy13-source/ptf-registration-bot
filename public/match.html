@@ -211,7 +211,7 @@ var T={
       sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
       manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
       manualHint:'Выберите соперника, дату и корт — счёт так же уйдёт ему на подтверждение.',courtManual:'Например, Rawai — можно не указывать',
-      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
+      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',nudge:'🔔 Напомнить',nudgeSent:'✅ Напомнил',resultHalf:'✅ Ваше подтверждение принято. Ждём соперника — тогда счёт уйдёт в таблицу.',waitingOther:'Вы подтвердили, ждём соперника',byOrganiser:'Счёт внёс организатор',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
       vs:'против',back:'⬅️ Назад',
       tBook:'Бронь корта',bookTitle:'Забронировать корт',
       bookHint:'Это отдельная бронь, не привязанная к матчу лиги. Отметьте площадки — бот подготовит по сообщению на каждую, а отправите вы сами из WhatsApp.',
@@ -254,7 +254,7 @@ var T={
       sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
       manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
       manualHint:'Pick the opponent, date and court — the score goes to them for confirmation too.',courtManual:'For example, Rawai — optional',
-      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
+      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',nudge:'🔔 Remind',nudgeSent:'✅ Reminded',resultHalf:'✅ Your confirmation is recorded. Waiting for your opponent before the score goes into the table.',waitingOther:'You confirmed — waiting for your opponent',byOrganiser:'Score entered by the organiser',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
       vs:'vs',back:'⬅️ Back',
       tBook:'Book a court',bookTitle:'Book a court',
       bookHint:'A standalone booking, not tied to a league match. Tick the venues — the bot prepares one message per venue, and you send them yourself from WhatsApp.',
@@ -529,6 +529,14 @@ function historyBlock(){
     +(list.length>histLimit?'<button class="mini" style="width:100%;padding:12px;margin-top:8px" onclick="moreHist()">'+esc(X.histMore)+'</button>':'');
 }
 
+// Списки матчей везде идут от свежего к старому: ближняя дата сверху.
+// Порядок один и тот же в «Моих матчах», в «Результате» и в админской вкладке,
+// чтобы не приходилось привыкать заново на каждом экране.
+function byFreshest(list){
+  return (Array.isArray(list)?list:[]).slice().sort(function(a,b){
+    return adminMatchTime(b)-adminMatchTime(a)||String(b.challenge_id||'').localeCompare(String(a.challenge_id||''));
+  });
+}
 function adminMatchTime(s){
   var dates=(Array.isArray(s.dates)?s.dates:[]).slice().sort();
   var date=String(s.agreed_date||dates[0]||'').trim();
@@ -550,7 +558,7 @@ function renderAdmin(){
   var nameSugs=(adminSugOpen&&qSug)?adminPlayers.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qSug)>=0}).slice(0,6):[];
   var controls='<div class="card"><h3 style="margin:0 0 10px;font-size:17px">'+esc(X.adminTitle)+'</h3><div class="row"><select onchange="adminDiv=this.value;renderAdmin()"><option value="">'+esc(X.adminAll)+'</option>'+divisions.map(function(d){return '<option value="'+esc(d)+'"'+(adminDiv===d?' selected':'')+'>'+esc(d)+'</option>'}).join('')+'</select><div class="searchwrap"><input id="adminSearch" value="'+esc(adminQuery)+'" placeholder="'+esc(X.adminSearch)+'" autocomplete="off" oninput="adminQueryChanged(this)" onblur="adminSearchBlur()">'
     +(nameSugs.length?'<div class="psug">'+nameSugs.map(function(p){return '<button type="button" class="pi" onmousedown="event.preventDefault()" onclick="adminPickName(\''+esc(String(p.name||'').replace(/\'/g,"\\'"))+'\')">'+esc(p.name)+'</button>'}).join('')+'</div>':'')+'</div></div></div>';
-  var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){var rs=String(s.result_status||'').trim().toLowerCase();var done=rs==='confirmed'||Boolean(String(s.result_confirmed_at||'').trim());return !done&&(!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)}).sort(function(a,b){return adminMatchTime(a)-adminMatchTime(b)||String(a.challenge_id||'').localeCompare(String(b.challenge_id||''))});
+  var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){var rs=String(s.result_status||'').trim().toLowerCase();var done=rs==='confirmed'||Boolean(String(s.result_confirmed_at||'').trim());return !done&&(!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)}).sort(function(a,b){return adminMatchTime(b)-adminMatchTime(a)||String(b.challenge_id||'').localeCompare(String(a.challenge_id||''))});
   var cards=list.map(function(s){
     var status=String(s.status||'').toLowerCase(),resultStatus=String(s.result_status||'').toLowerCase();
     var label=status==='accepted'?X.adminAccepted:status==='pending'?X.adminPending:X.adminOpen;
@@ -560,6 +568,7 @@ function renderAdmin(){
     if(s.from_contact&&s.from_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.from_contact.url)+'\')">💬 '+esc(s.from_name||'1')+'</button>';
     if(s.to_contact&&s.to_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.to_contact.url)+'\')">💬 '+esc(s.to_name||'2')+'</button>';
     if(resultStatus==='pending'){acts+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';acts+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';}
+    if(resultStatus!=='pending')acts+=nudgeButton(s);
     if(resultStatus!=='confirmed')acts+='<button class="mini" onclick="deleteAdminMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.deleteMatch)+'</button>';
     acts+='</div>';
     return '<div class="slot"><div class="who">'+esc(s.from_name||'—')+' → '+esc(to)+'</div>'
@@ -580,7 +589,7 @@ function renderMine(){
     retimeId='';
   }
   if(!myMatches.length){$('viewMine').innerHTML='<div class="empty">'+esc(X.emptyMine)+'</div>'+historyBlock();return}
-  $('viewMine').innerHTML=myMatches.map(function(s){
+  $('viewMine').innerHTML=byFreshest(myMatches).map(function(s){
     var agreed=s.status==='accepted';var pending=s.status==='pending';var unfinished=String(s.result_status||'')==='unfinished';
     var iAmAuthor=String(s.from_telegram_id)===String(me&&me.id);
     var opp=iAmAuthor?{name:s.to_name,username:s.to_username}:{name:s.from_name,username:s.from_username};
@@ -601,6 +610,7 @@ function matchContactUrl(s,opp){return s.contact&&s.contact.url || (opp.username
 function requestActions(s,opp){
   var b='<div class="acts">',contact=matchContactUrl(s,opp);
   if(contact)b+='<button class="mini" onclick="openLink(\''+esc(contact)+'\')">💬 '+esc(X.contact)+'</button>';
+  if(waitingOnOpponent(s))b+=nudgeButton(s);
   b+='<button class="mini" onclick="cancelRequest(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancelMatch)+'</button>';
   return b+'</div>';
 }
@@ -608,6 +618,20 @@ function requestActions(s,opp){
 // Что можно сделать с согласованным матчем: написать, перенести время, отменить.
 // Перенос после подтверждения корта доступен только тому, кто корт подтверждал.
 function pendingTime(s){ return String(s.time_change||'').split('|')[0]||'' }
+// Счёт внёс организатор, а не кто-то из игроков: автор не совпадает ни с одной
+// из сторон. Такой счёт подтверждают оба, и каждый — только один раз.
+function byOrganiser(s){
+  var by=String(s.result_by||'');
+  return !!by&&by!==String(s.from_telegram_id)&&by!==String(s.to_telegram_id);
+}
+function alreadyConfirmed(s){
+  return String(s.result_confirmed_by||'').split(',').map(function(x){return x.trim()})
+    .indexOf(String(me&&me.id||''))>=0;
+}
+function canConfirmResult(s){
+  if(byOrganiser(s))return !alreadyConfirmed(s);
+  return String(s.result_by)!==String(me&&me.id);
+}
 function matchEnded(s){var d=String(s.agreed_date||''),t=String(s.agreed_time||s.time_from||'00:00');var end=Date.parse(d+'T'+t+':00+07:00')+Number(s.duration_min||matchDuration)*60000;return Number.isFinite(end)&&end<=Date.now()}
 function canRetime(s){return String(s.from_telegram_id)===String(me&&me.id)}
 function agreedActions(s,opp){
@@ -615,7 +639,8 @@ function agreedActions(s,opp){
   var contact=matchContactUrl(s,opp),st=String(s.result_status||'');
   if(contact)b+='<button class="mini" onclick="openLink(\''+esc(contact)+'\')">💬 '+(L?'Написать':'Message')+'</button>';
   if(st==='pending'){
-    if(String(s.result_by)!==String(me&&me.id))b+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    if(canConfirmResult(s))b+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    else if(byOrganiser(s))b+='<span class="hint">'+esc(X.waitingOther)+'</span>';
     else b+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';
     return b+'</div>';
   }
@@ -628,8 +653,36 @@ function agreedActions(s,opp){
   }
   if(canRetime(s)&&!s.court_confirmed_at&&!pendingTime(s))b+='<button class="mini primary" onclick="bookingHelper(\''+esc(s.challenge_id)+'\',this)">'+esc(L?'📲 Забронировать корт':'📲 Book court')+'</button>';
   if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';
+  if(waitingOnOpponent(s))b+=nudgeButton(s);
   b+='<button class="mini" onclick="cancelMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancelMatch)+'</button>';
   return b+'</div>';
+}
+// Ждём ли мы сейчас соперника. Точное решение всё равно принимает сервер —
+// здесь мы только решаем, показывать ли кнопку, чтобы она не висела там,
+// где напоминать некому.
+function waitingOnOpponent(s){
+  var my=String(me&&me.id||''),st=String(s.status||'').toLowerCase(),rs=String(s.result_status||'').toLowerCase();
+  if(st==='open')return String(s.match_type||'')==='direct'&&String(s.from_telegram_id)===my;
+  if(st==='pending')return String(s.pending_by)===my;
+  if(st!=='accepted'||rs==='confirmed'||rs==='unfinished')return false;
+  if(rs==='pending')return String(s.result_by)===my;
+  var t=String(s.time_change||'').split('|');
+  if(t[0])return String(t[1]||'')===my;
+  if(!s.court_confirmed_at&&String(s.match_type||'')!=='manual')return String(s.from_telegram_id)!==my;
+  return false;
+}
+function nudgeButton(s){
+  return '<button class="mini" onclick="nudgeOpponent(\''+esc(s.challenge_id)+'\',this)">'+esc(X.nudge)+'</button>';
+}
+function nudgeOpponent(id,btn){
+  btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
+  fetch('/api/match/nudge',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
+    .then(function(r){return r.json()}).then(function(j){
+      btn.textContent=j.ok?X.nudgeSent:'⛔ '+(j.error||'');
+      if(!j.ok)setTimeout(function(){btn.disabled=false;btn.textContent=old},4000);
+    })
+    .catch(function(e){btn.disabled=false;btn.textContent=old;alert('⛔ '+e.message)});
 }
 // Перенос: дата и корт остаются, меняется только время — как и в чате с ботом.
 var retimeId='';
@@ -855,12 +908,13 @@ function renderRes(){
     if(s)return resultMode==='unfinished'?renderUnfinishedForm(s):renderResultForm(s);
   }
   if(!resultTasks.length)h+='<div class="empty">'+esc(X.emptyRes)+'</div>';
-  else h+=resultTasks.map(function(s){
+  else h+=byFreshest(resultTasks).map(function(s){
     var opp=isAdmin?{n:(s.from_name||'')+' — '+(s.to_name||'')}:(String(s.from_telegram_id)===String(me&&me.id)?{n:s.to_name}:{n:s.from_name});
     var pending=s.result_status==='pending',unfinished=s.result_status==='unfinished';
     var mine=String(s.result_by)===String(me&&me.id);
     var actions='<div class="acts">';
-    if(pending&&(!mine||isAdmin))actions+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    if(pending&&(isAdmin||canConfirmResult(s)))actions+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    else if(pending&&byOrganiser(s))actions+='<span class="hint">'+esc(X.waitingOther)+'</span>';
     else if(unfinished)actions+='<button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(X.matchCompleted)+'</button>';
     else if(!pending)actions+='<button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(s.result_status==='confirmed'&&isAdmin?X.editResult:X.resTitle)+'</button>';
     else actions+='<span class="hint">'+esc(X.pendingRes)+'</span>';
@@ -894,7 +948,7 @@ function resendResultConfirmation(id,btn){
     initData:initData,t:linkToken,challenge_id:id
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
-    if(tg&&tg.showAlert)tg.showAlert(j.review?X.resultReview:X.resultConfirmed);
+    if(tg&&tg.showAlert)tg.showAlert(j.waiting?X.resultHalf:(j.review?X.resultReview:X.resultConfirmed));
     adminLoaded=false;resultSlotId='';load(true);
   }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
 }
@@ -981,7 +1035,24 @@ function pickWinner(node,prefix){
   Array.prototype.forEach.call(box.querySelectorAll('.s'),function(s){if(s!==node){s.classList.remove('on');if(s.dataset.w!=='both')loser=s.dataset.n||''}});
   node.classList.add('on');selWinner=node.dataset.w;
   if(selWinner!=='both')setScoreNames(prefix||'r',node.dataset.n||'',loser);
+  orderByWinner(prefix||'r',node);
   syncScore(prefix||'r');syncPointDefaults(prefix||'r');
+}
+// Победитель переезжает влево — туда же, где стоит его колонка счёта. Раньше
+// кнопки сверху не двигались, а имена под ними менялись местами, и человек
+// вводил счёт не в ту сторону, глядя на верхний ряд.
+function orderByWinner(prefix,node){
+  if(!node||node.dataset.w==='both')return;
+  var box=node.parentNode;
+  if(box&&box.firstElementChild!==node)box.insertBefore(node,box.firstElementChild);
+  var pts=$(prefix+'Points');
+  var two=pts?pts.querySelector('.two'):null;
+  if(!two||two.children.length<2)return;
+  // Переставляем целые блоки, а не значения: id полей остаются при своих
+  // игроках, поэтому points_from и points_to никуда не съезжают.
+  var first=two.children[0],hint=first.querySelector('.hint');
+  var name=node.dataset.n||'';
+  if(name&&hint&&hint.textContent!==name)two.insertBefore(two.children[1],first);
 }
 function submitResult(id,btn){
   var res=$('rRes');res.className='res';var sets=collectSets('r');
@@ -995,8 +1066,16 @@ function submitResult(id,btn){
 }
 function openManual(){
   var today=new Date(),list=isAdmin?adminPlayers:opponents;
-  var opts=list.map(function(o){return '<option value="'+esc(o.telegram_id)+'">'+esc(o.name)+(o.division?' · '+esc(o.division)+(o.group?' / '+esc(o.group):''):'')+'</option>'}).join('');
-  var playersHtml=isAdmin?'<label>'+esc(L?'Первый игрок':'First player')+'</label><select id="mFrom">'+opts+'</select><label>'+esc(L?'Второй игрок':'Second player')+'</label><select id="mOpp">'+opts+'</select>':'<label>'+esc(X.opp)+'</label><select id="mOpp">'+(opts||'<option value="">—</option>')+'</select>';
+  // Игрок выбирается из списка ИЛИ набирается руками в том же поле: список
+  // длинный, и листать его на телефоне дольше, чем напечатать три буквы.
+  var opts='<datalist id="mPlayerList">'+list.map(function(o){return '<option value="'+esc(manualLabel(o))+'"></option>'}).join('')+'</datalist>';
+  var field=function(id,label,ph){
+    return '<label>'+esc(label)+'</label><input id="'+id+'" list="mPlayerList" autocomplete="off" placeholder="'+esc(ph)+'" oninput="renderManualWinner()">';
+  };
+  var pick=L?'Выберите из списка или начните вводить имя':'Pick from the list or start typing a name';
+  var playersHtml=opts+(isAdmin
+    ? field('mFrom',L?'Первый игрок':'First player',pick)+field('mOpp',L?'Второй игрок':'Second player',pick)
+    : field('mOpp',X.opp,pick));
   var roundHtml=isAdmin?'<label>'+esc(L?'Этап матча':'Match stage')+'</label><select id="mRound"><option value="">'+esc(L?'Регулярный матч':'Regular match')+'</option><option value="QF">'+esc(L?'Четвертьфинал':'Quarterfinal')+'</option><option value="SF">'+esc(L?'Полуфинал':'Semifinal')+'</option><option value="Final">'+esc(L?'Финал':'Final')+'</option><option value="3rd">'+esc(L?'Матч за 3-е место':'Third-place match')+'</option></select>':'';
   $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3><div class="hint">'+esc(X.manualHint)+'</div>'+playersHtml
     +roundHtml+'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
@@ -1004,10 +1083,24 @@ function openManual(){
     +resultKindPicker('m')+'<label>'+esc(X.winner)+'</label><div class="hint">'+esc(X.winnerFirst)+'</div><div class="seg" id="mWinSeg"></div>'
     +'<div id="mScoreBox">'+renderScoreEditor('m')+'</div><div id="mPointsHost"></div>'+photoField('mPhoto')
     +'<label>'+esc(X.note)+'</label><textarea id="mNote"></textarea><button class="primary" onclick="submitManual(this)">'+esc(X.sendRes)+'</button><button onclick="backToRes()">'+esc(X.back)+'</button><div id="mResBox" class="res"></div></div>';
-  if($('mFrom'))$('mFrom').onchange=renderManualWinner;if($('mOpp'))$('mOpp').onchange=renderManualWinner;
   resultKind='played';renderManualWinner();
 }
-function manualPerson(id){return (isAdmin?adminPlayers:opponents).filter(function(p){return String(p.telegram_id)===String(id)})[0]||{}}
+function manualLabel(o){
+  return String(o&&o.name||'')+(o&&o.division?' · '+o.division+(o.group?' / '+o.group:''):'');
+}
+// Ищем человека по тому, что осталось в поле: сначала точное совпадение с
+// подписью из списка, потом по имени, потом по началу и вхождению. Так работает
+// и выбор мышью, и «набрал три буквы и хватит».
+function manualPerson(value){
+  var list=isAdmin?adminPlayers:opponents,v=String(value||'').trim().toLowerCase();
+  if(!v)return {};
+  var by=function(fn){return list.filter(fn)[0]};
+  return by(function(p){return manualLabel(p).toLowerCase()===v})
+    ||by(function(p){return String(p.name||'').toLowerCase()===v})
+    ||by(function(p){return String(p.name||'').toLowerCase().indexOf(v)===0})
+    ||by(function(p){return String(p.name||'').toLowerCase().indexOf(v)>=0})
+    ||{};
+}
 function renderManualWinner(){
   var seg=$('mWinSeg');if(!seg)return;
   var from=isAdmin?manualPerson($('mFrom').value):{telegram_id:String(me&&me.id||''),name:me&&me.name||''};
@@ -1024,7 +1117,7 @@ function submitManual(btn){
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    initData:initData,t:linkToken,from_telegram_id:$('mFrom')?$('mFrom').value:'',to_telegram_id:$('mOpp').value,date:$('mDate').value,
+    initData:initData,t:linkToken,from_telegram_id:$('mFrom')?(manualPerson($('mFrom').value).telegram_id||''):'',to_telegram_id:manualPerson($('mOpp').value).telegram_id||'',date:$('mDate').value,
     court:(($('mCourt')&&$('mCourt').value)||'').trim(),round:$('mRound')?$('mRound').value:'',kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:(($('mNote')&&$('mNote').value)||'').trim(),
     points_from:$('mPts1')?$('mPts1').value:'',points_to:$('mPts2')?$('mPts2').value:''
   })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;resPhoto='';load(true)})

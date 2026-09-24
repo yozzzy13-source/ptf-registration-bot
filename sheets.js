@@ -981,6 +981,30 @@ export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
   return task;
 }
 
+// Пакетная запись: несколько строк одним обращением к Google. Раньше перенос
+// сезона в турнир дописывал участников по одному, и на трёх десятках человек
+// это превращалось в шесть десятков запросов подряд — Google начинал
+// притормаживать, а Railway успевал оборвать ответ по таймауту.
+export async function appendObjects(sheetName, list = []) {
+  const items = (list || []).filter(Boolean);
+  if (!items.length) return [];
+  const prev = appendQueue.get(sheetName) || Promise.resolve();
+  const task = prev.catch(() => {}).then(async () => {
+    const { headers, values } = await getRows(sheetName, { useCache:false });
+    if (!headers.length) throw new Error(`Sheet "${sheetName}" has no header row`);
+    const start = values.length + 1;
+    await ensureRowCapacity(sheetName, start + items.length);
+    await valuesUpdate(
+      `'${sheetName}'!A${start}:${colToA1(headers.length)}${start + items.length - 1}`,
+      items.map(obj => headers.map(h => obj[h] ?? ''))
+    );
+    cache.clear();
+    return items.map((obj, i) => ({ ...obj, _rowNumber: start + i, isNew: true }));
+  });
+  appendQueue.set(sheetName, task);
+  return task;
+}
+
 // Физическое удаление строки. Нужно ровно там, где след не нужен вовсе —
 // удалённое событие не должно оставаться серой строкой в списке. Всё остальное
 // по-прежнему помечаем статусом, а не стираем.

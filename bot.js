@@ -1671,6 +1671,13 @@ export async function handleCallback(q) {
         not_found: ru ? 'Матч не найден.' : 'Not found.' };
       return answerCallbackQuery(q.id, texts[r.reason] || uiError(r.reason,lang), true).catch(() => {});
     }
+    // Счёт от организатора требует подписи обоих игроков. Пока подписал один,
+    // в таблицы ничего не пишем — только отмечаем и ждём второго.
+    if (r.waiting) {
+      const { notifyResultHalfConfirmed } = await import('./matches.js');
+      await notifyResultHalfConfirmed(r.slot, String(from.id)).catch(e => console.error('half confirm notice:', e.message));
+      return null;
+    }
     const write = await writeConfirmedResult(r.slot).catch(e => ({ status:'error', reason:e.message }));
     // Междивизионный матч в зачёт не идёт: счёт никуда не записан, решает организатор.
     // Игрокам про это не пишем — для них матч просто ждёт проверки.

@@ -1393,7 +1393,7 @@ export async function adminMatchesOverview(msg) {
   }
   body += block('Ждут подтверждения корта', data.awaitingCourt, s => `• ${when(s)} · ${pair(s)}`);
   body += block('Ждут ответа соперника', data.awaitingAnswer, s =>
-    `• ${pair(s)}${s.division ? ` · ${escapeHtml(s.division)}` : ''}`);
+    `• ${pair(s)}${s.division ? ` · ${escapeHtml(s.division)}` : ''}${s._stage === 'invite' ? ' — вызов ещё не открывали' : ''}`);
   body += block('Сыграны, счёта нет', data.awaitingResult, s =>
     `• ${when(s)} · ${pair(s)} — ${s._stage === 'verify' ? 'ждёт подтверждения счёта' : 'счёт не внесён'}`);
   body += block('Открытые окна', data.openSlots, s =>
