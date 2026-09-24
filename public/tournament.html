@@ -217,10 +217,13 @@ let S = {
   log: [], busy: false, msg: '', err: '', season: '', pick: null
 };
 
+// Читающие ручки. Список явный: наличие параметров не делает запрос записью,
+// а угадывание метода по данным уводило чтения на POST и в ошибку 404.
+const GET_PATHS = new Set(['bootstrap','state','candidates','log','stages','pairs','open','my-invites']);
 // Один вход для всех запросов. Ошибку сервер везёт в detail — общий
 // переводчик /api подменяет текст в поле error на дежурную фразу.
 async function api(path, body, method) {
-  const isGet = (method || (body ? 'POST' : 'GET')) === 'GET';
+  const isGet = method ? method === 'GET' : GET_PATHS.has(path);
   const q = new URLSearchParams({ initData, t: token, test: S.test ? '1' : '' });
   if (isGet && body) for (const [k, v] of Object.entries(body)) q.set(k, String(v ?? ''));
   const res = await fetch('/api/tournaments/' + path + (isGet ? '?' + q : ''), isGet ? {} : {
@@ -234,11 +237,18 @@ async function api(path, body, method) {
     const hint = res.status === 502 || res.status === 504
       ? 'сервер не успел ответить, попробуйте ещё раз'
       : res.status === 413 ? 'слишком большой ответ'
-      : raw.trim().slice(0, 120).replace(/\s+/g, ' ') || 'пустой ответ';
+      : plainError(raw) || 'пустой ответ';
     throw new Error(`Ответ ${res.status}: ${hint}`);
   }
   if (!json.ok) throw new Error(json.detail || json.error || 'Не получилось');
   return json;
+}
+// Из HTML-страницы ошибки вытаскиваем суть: express кладёт её в <pre>, и без
+// этого в сообщение попадала одна разметка, а сам адрес обрезался.
+function plainError(raw) {
+  const text = String(raw || '');
+  const pre = /<pre>([\s\S]*?)<\/pre>/i.exec(text);
+  return (pre ? pre[1] : text.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 function flash(text, isError) { S.msg = isError ? '' : text; S.err = isError ? text : ''; render(); setTimeout(() => { S.msg = ''; S.err = ''; render(); }, 4200); }
 async function run(fn, done) {
