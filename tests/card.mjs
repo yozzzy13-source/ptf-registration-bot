@@ -27,6 +27,7 @@ const deps = {
     findApplicantByTelegramId:async id=>({avatar_file_id:id==='1'?'applicants-avatar':''}),
     getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']])
   }),
+  './sponsors.js':mock({ sponsorsAvailable:()=>false, sponsorStrip:async()=>null }),
   'node:fs':mock({default:{readdirSync:dir=>String(dir).includes('match-card-logos')?logoFiles:[],readFileSync:()=>Buffer.from('test-font'),writeFileSync:()=>{},mkdtempSync:p=>String(p)+'tmp'}}),
   'node:path':mock({default:{join:(...parts)=>parts.join('/'),dirname:x=>x}}),
   'node:os':mock({default:{tmpdir:()=>'/tmp'}}),

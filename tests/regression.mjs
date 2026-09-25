@@ -1078,11 +1078,10 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(!/DejaVu Sans,Arial/.test(src),'Зашитый чужой шрифт убран — берём шрифт карточки');
 
  // Один общий файл спонсоров, и без него плашки просто нет.
- check(/const SPONSOR_FILE=path\.join\(ASSETS_DIR,'sponsors\.png'\)/.test(src),'Спонсоры читаются из assets/sponsors.png');
- check(/\$\{S\?`<rect/.test(src),'Без файла спонсоров плашка не рисуется');
-
+ const sponsorsSrc=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
+ check(/SPONSOR_FILE = path\.join\(ASSETS_DIR, 'sponsors\.png'\)/.test(sponsorsSrc),'Спонсоры читаются из assets/sponsors.png');
  const poster=await import(pathToFileURL(path.join(root,'matchposter.js')).href);
- check(poster.sponsorsAvailable()===false,'Файла спонсоров сейчас нет — и это не ошибка');
+ check(poster.sponsorsAvailable()===false,'Без файла спонсоров лента просто не рисуется');
  check(poster.posterStageLabel({round:'SF'})==='PLAYOFF · SEMIFINAL','Стадия читается из round слота');
  check(poster.posterStageLabel({round:'QF'})==='PLAYOFF · QUARTERFINAL','Четвертьфинал подписан');
  check(poster.posterStageLabel({round:'Final'})==='PLAYOFF · FINAL','Финал подписывается финалом');
@@ -1093,7 +1092,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const drawn=src.split('\n').filter(line=>!/^\s*\/\//.test(line)).join('\n');
  const cyrillic=[...drawn.matchAll(/>[^<>]*[А-Яа-яЁё][^<>]*</g)].map(m=>m[0]);
  check(!cyrillic.length,'В разметке постера нет русского текста: '+cyrillic.join(' | '));
- check(/SEASON PARTNERS/.test(src),'Подпись плашки спонсоров английская');
+ check(!/SEASON PARTNERS/.test(src),'Подписи над логотипами нет — только сама лента');
  check(poster.posterStageLabel({label:'TECHNICAL RESULT'})==='TECHNICAL RESULT','Техническое поражение перебивает стадию');
 
  // Стадия доезжает из слота в данные постера.
@@ -1219,14 +1218,21 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/Do not light one player brightly and the other in shadow/.test(poster),'Запрет на разное освещение сформулирован прямо');
  // Плашка опущена, спонсорская стала компактнее.
  check(/panel:\{ x:40, y:1120/.test(poster),'Информационная плашка опущена ниже');
- check(/sponsor:\{ bottom:1818, top:1552, maxW:1000, maxH:200/.test(poster),'Плашка партнёров занимает всю полосу под панелью счёта');
+ check(/sponsor:\{ top:1556, bottom:1818 \}/.test(poster),'Под партнёров оставлена свободная полоса под панелью счёта');
  const panelBottom=1120+424;
  check(1818<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
- check(panelBottom<1552,'Плашки не накладываются друг на друга');
- check(/export async function sponsorLayout/.test(poster),'Плашка считается по фактическому файлу логотипов');
- check(/fit:'inside', withoutEnlargement:true/.test(poster),'Логотипы не растягиваются под рамку');
- check(poster.includes('export const SPONSOR_BOX'),'Размер поля под логотипы доступен снаружи');
- check(/const sponsor=await sponsorLayout\(\)/.test(poster)&&/posterLogoLayers\(sponsor\)/.test(poster),'Рамка и сама картинка считаются из одного места');
+ check(panelBottom<1556,'Лента не налезает на панель счёта');
+ check(!/SEASON PARTNERS/.test(poster),'Плашки и подписи под спонсорами больше нет');
+ check(!/<rect[^>]*S\.x/.test(poster),'Рамки вокруг логотипов не рисуем');
+ const strip=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
+ check(/fit: 'inside'/.test(strip),'Логотипы вписываются целиком, без растяжения и обрезки');
+ check(/width: Math\.round\(width \|\| canvas\)/.test(strip),'Лента идёт во всю ширину картинки');
+ check(/export async function sponsorStrip/.test(strip),'Лента партнёров собирается в одном месте для всех картинок');
+ const cardSrc=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ const standSrc=await fs.readFile(path.join(root,'standings.js'),'utf8');
+ check(/sponsorStrip/.test(cardSrc),'Карточка матча берёт ту же ленту');
+ check(/sponsorStrip/.test(standSrc),'Постер таблицы берёт ту же ленту');
+ check(/sponsorsAvailable\(\)/.test(cardSrc),'Общий файл партнёров главнее папки с отдельными логотипами');
 }
 
 
