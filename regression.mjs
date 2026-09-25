@@ -1269,9 +1269,10 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(st.groupTitle('B','2','')==='DIVISION B · GROUP 2','Заголовок группы по-английски');
  check(!/[А-Яа-я]/.test(st.groupTitle('W','1','')),'В заголовке картинки нет кириллицы');
 
- const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]},'DIVISION B · GROUP 2','SEASON 2');
- check(/DIVISION B · GROUP 2/.test(cap),'Подпись называет группу');
- check(/#phukettennisfamily/.test(cap),'В подписи есть хэштеги');
+ const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]});
+ check(!/#/.test(cap),'В подписи к сторис нет хэштегов');
+ check(!/DIVISION|GROUP|SEASON/i.test(cap),'Дивизион, группа и сезон в тексте не повторяются — они на картинке');
+ check(cap.split(/\s+/).length<=16,'Подпись — одно короткое предложение');
  check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
  check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
 
@@ -1280,6 +1281,22 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/sources\?\.master\.find\(\(\[n\]\) => sameName\(n, name\)\)/.test(src),'Фото из Players_Master подбирается терпимым сравнением имён');
  check(/async function orgLogoLayer/.test(src),'В шапке таблицы есть логотип лиги');
  check(/'match-card-logos', 'ptf\.png'/.test(src),'Логотип берётся из того же файла, что на постере матча');
+ const tg4=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/export async function sendDocumentBuffer/.test(tg4),'Картинки уходят файлом, без пережатия Телеграмом');
+ check(/sendDocumentBuffer\(chatId, item\.buffer, tableFileName\(item\)/.test(src),'Таблица приходит файлом');
+ check(/table-\$\{String\(item\.key/.test(src),'У файла осмысленное имя');
+ const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/sendDocumentBuffer\(chatId,finalBuffer,posterFileName/.test(bot4),'Постер матча приходит файлом');
+ check(/result\?\.document\?\.file_id/.test(bot4),'file_id у файла читается из document, а не из photo');
+ const pub4=await fs.readFile(path.join(root,'publicity.js'),'utf8');
+ check(/sendDocumentAlbumBuffers/.test(pub4),'Недельные подборки уходят файлами');
+ check(/>G<\/text>/.test(src),'Колонка сыгранных матчей подписана G — Games');
+ check(/const SPONSOR = \{ top: 1398, bottom: 1660 \}/.test(src),'Лента партнёров поднята выше кнопок сторис');
+ check(/title: 236, logoTop: 268/.test(src),'Шапка опущена ниже полосы просмотра сторис');
+ check(/Math\.min\(L\.row, Math\.floor\(\(bandBottom - bandTop\) \/ rows\.length\)\)/.test(src),'Длинная группа ужимается по высоте строки, а не вылезает за кадр');
+ const league=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(/colM:'И',colW:'П',colWR:'WR',colPts:'ОЧК'/.test(league),'В русском интерфейсе колонки И · П · ОЧК');
+ check(/colM:'G',colW:'W',colWR:'WR',colPts:'PTS'/.test(league),'В английском интерфейсе колонки G · W · PTS');
  check(/Standings Snapshots/.test(src),'Снимки мест лежат в нашей таблице, а не в таблицах дивизионов');
  check(/ensureExtraSheet/.test(src),'Лист снимков заводится сам');
  check(/const move = Number\.isFinite\(was\) \? was - p\.place : null/.test(src),'Движение считается от прошлого выпуска, а не от начала сезона');
