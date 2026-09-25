@@ -1207,6 +1207,52 @@ export async function enrichEventsWithStats(events=[]) {
 let avatarColumnsReady = null;
 // Instagram в анкете — необязательное поле: нужно, чтобы отмечать игрока в
 // публикациях лиги. Колонку заводим один раз и только если её ещё нет.
+// Инстаграм и согласие на публикацию живут в анкете игрока. Колонки заводим
+// сами: организатор их не создаёт, а без них опрос было бы некуда записывать.
+let publicityColumnsReady = null;
+export async function ensurePublicityColumns() {
+  if (!publicityColumnsReady) {
+    publicityColumnsReady = ensureSheetWithHeaders(SHEETS.applicants, ['instagram', 'photo_publication_consent', 'photo_consent_at'])
+      .catch(e => { publicityColumnsReady = null; throw e; });
+  }
+  return publicityColumnsReady;
+}
+// Публикуем по умолчанию. Запрет — только явный отказ: молчание не согласие,
+// но и не запрет, а на постере человек и так появляется в лиге публично.
+export const PHOTO_CONSENT = { yes: 'YES', no: 'NO', unknown: '' };
+export const photoConsentOf = row => String(row?.photo_publication_consent || '').trim().toUpperCase();
+export const publicationAllowed = row => photoConsentOf(row) !== 'NO';
+export async function setPhotoConsent(telegramId, value) {
+  await ensurePublicityColumns();
+  const clean = String(value || '').trim().toUpperCase() === 'NO' ? 'NO' : 'YES';
+  await updateApplicantByTelegramId(telegramId, { photo_publication_consent: clean, photo_consent_at: nowISO() });
+  return clean;
+}
+// Инстаграм приводим к одному виду: люди присылают и ссылку, и с собачкой,
+// и без. Пустое значение остаётся пустым — поле необязательное.
+export function normalizeInstagramHandle(value = '') {
+  const v = String(value || '').trim()
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, '')
+    .replace(/[?/].*$/, '')
+    .replace(/^@+/, '')
+    .trim();
+  return /^[A-Za-z0-9._]{1,30}$/.test(v) ? '@' + v : '';
+}
+export async function setPlayerInstagram(telegramId, value) {
+  await ensurePublicityColumns();
+  const handle = normalizeInstagramHandle(value);
+  if (!handle) return '';
+  await updateApplicantByTelegramId(telegramId, { instagram: handle });
+  return handle;
+}
+// Кто отказался публиковаться. Организатору нужен цельный список, а не поиск
+// по строкам таблицы.
+export async function listOptedOutPlayers() {
+  const { rows } = await getRows(SHEETS.applicants);
+  return rows.filter(r => photoConsentOf(r) === 'NO')
+    .map(r => ({ telegram_id: String(r.telegram_id || ''), name: String(r.name || ''), at: String(r.photo_consent_at || '') }));
+}
+
 let instagramColumnReady = null;
 export async function ensureInstagramColumn() {
   if (!instagramColumnReady) {

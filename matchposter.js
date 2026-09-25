@@ -44,6 +44,9 @@ Both players wear premium modern minimalist tennis apparel in clearly different 
 
 The setting is a premium blue hard court at a luxury tennis club in Phuket during a vibrant tropical sunset, rendered as a softly blurred background behind the portraits. The sky has a rich gradient of fiery orange, deep violet and soft pink. Palm trees and tropical foliage are suggested in the background bokeh. Use warm low-angle sunlight, cinematic rim lighting on the shoulders and hair, realistic skin texture, shallow depth of field and polished professional sports portrait photography.
 
+LIGHTING — both players must look photographed together
+Light both people with the SAME key light, from the same direction, at the same intensity and the same color temperature, as if they were standing side by side in one photograph taken at one moment. Their faces must have equal brightness, equal contrast and matching shadow direction. Do not light one player brightly and the other in shadow. Do not give one a warm golden look and the other a cool or flat look. Do not make one face noticeably sharper, more contrasty or more saturated than the other. Match their skin tones to the same exposure and white balance, while keeping each person's real complexion. The two portraits must read as one photograph, not as two images pasted together.
+
 Keep the bottom 30 percent of the image dark, calm and free from faces, hands and important scene details. That area is covered later by an information panel and by real sponsor logos added by code.
 
 Do not generate text, letters, player names, scores, rankings, badges, banners, logos, watermarks, scoreboards, trophies or fake sponsor marks. The image generator creates only the photographic scene.`;
@@ -91,8 +94,8 @@ function fillTokens(template, values) {
     (whole,key) => Object.prototype.hasOwnProperty.call(values,key.toLowerCase()) ? values[key.toLowerCase()] : whole);
 }
 const VARIANT_NOTES = [
-  'Composition option 1: calm premium editorial portraits, both faces at the same height, soft symmetrical lighting, chest-level crop.',
-  'Composition option 2: slightly different head angles and a stronger sunset rim light, one player a touch closer to camera, still a chest-level crop with both faces large and readable.'
+  'Composition option 1: calm premium editorial portraits, both faces at the same height, one shared soft key light falling equally on both, chest-level crop.',
+  'Composition option 2: slightly different head angles and a stronger sunset rim light — applied equally to both players — with a chest-level crop and both faces large, evenly lit and readable.'
 ];
 
 export function buildPosterPrompt(match={}, { comment='', variant=1 }={}) {
@@ -103,7 +106,7 @@ export function buildPosterPrompt(match={}, { comment='', variant=1 }={}) {
     `Reference assignment: player 1 is ${values.player_1 || 'the first supplied portrait'}; player 2 is ${values.player_2 || 'the second supplied portrait'}.`,
     VARIANT_NOTES[n - 1] || VARIANT_NOTES[0],
     comment ? `Organizer direction: ${comment}` : '',
-    'Mandatory composition constraints: close portrait crop just below the shoulders, faces large and identical to the references, no tennis rackets, balls or equipment, and a dark calm bottom third for the information panel and sponsor logos.',
+    'Mandatory constraints: close portrait crop just below the shoulders; faces large and identical to the references; identical lighting on both players — same direction, same intensity, same color temperature, no one left in shadow; no tennis rackets, balls or equipment; dark calm bottom third for the information panel and sponsor logos.',
     'The image generator creates only the photographic scene. Exact names, score, rankings, form and organization logos are added later by code.'
   ].filter(Boolean).join('\n');
   return base + '\n\n' + context;
@@ -228,10 +231,22 @@ const C={
 // содержимое прижато к краям, а фон идёт во весь кадр без обрезки.
 const L={
   titleY:168, logoTop:198, logoBox:{ w:240, h:150 },
-  panel:{ x:40, y:1010, w:1000, h:424, r:38 },
-  cxL:262, cxR:818, scoreRoom:420,
-  sponsor:{ x:40, y:1498, w:1000, h:268, r:34, boxX:90, boxY:56, boxW:900, boxH:186 }
+  panel:{ x:40, y:1120, w:1000, h:424, r:38 },
+  cxL:240, cxR:840, nameMax:300, nameSize:40, nameMin:26, scoreMax:58, scoreMin:28, gap:26,
+  sponsor:{ x:88, y:1578, w:904, h:228, r:30, boxX:76, boxY:54, boxW:752, boxH:160 }
 };
+// Ширину текста считаем приблизительно: точных метрик шрифта у нас нет, а
+// librsvg их не отдаёт. Коэффициент подобран по этому начертанию и намеренно
+// щедрый — лучше уменьшить кегль на пару пунктов, чем наехать на соседа.
+const textWidth = (text='', size=40, k=0.56) => String(text).length * size * k;
+// Имя ужимаем по ширине колонки, а не по числу букв: «Olga Sauer» и «Maria E.»
+// занимают разное место при одинаковой длине.
+function nameFit(name='') {
+  const text=fit(name,18);
+  let size=L.nameSize;
+  while(size>L.nameMin&&textWidth(text,size)>L.nameMax)size-=1;
+  return { text, size, width:Math.min(L.nameMax,textWidth(text,size)) };
+}
 
 function positionData(meta) {
   const pos=meta?.position||{};
@@ -278,9 +293,13 @@ function formSvg(items=[], cx=0, y=0, r=17, gap=44) {
 function scoreLine(score='') {
   return String(score||'').replace(/\([^)]*\)/g,' ').replace(/\s+/g,' ').trim();
 }
-function scoreSize(text='', room=L.scoreRoom, max=64) {
+// Кегль счёта подбираем под фактический просвет между именами. Раньше здесь
+// стояло фиксированное число, и счёт из трёх сетов налезал на имена.
+function scoreSize(text='', room=380) {
   const len=Math.max(1,String(text).length);
-  return Math.max(30,Math.min(max,Math.floor(room/(len*0.56))));
+  let size=L.scoreMax;
+  while(size>L.scoreMin&&textWidth(text,size,0.58)>room)size-=1;
+  return size;
 }
 // Стадия матча: из round слота (QF/SF/Final/3rd) или из label, если он задан.
 // Подписи только английские — постер один на всех, в том числе для Instagram.
@@ -330,7 +349,10 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
   if (!backgroundBuffer) throw new Error('poster_background_missing');
   const P=L.panel;
   const score=scoreLine(match.score);
-  const size=scoreSize(score);
+  const left=nameFit(match.winner),right=nameFit(match.loser);
+  // Просвет: от правого края левого имени до левого края правого, минус поля.
+  const room=Math.max(160,(L.cxR-right.width/2)-(L.cxL+left.width/2)-L.gap*2);
+  const size=scoreSize(score,room);
   const divisionName=String(match.division||'').trim();
   const division=[
     divisionName&&!/^Division\b/i.test(divisionName)?`DIVISION ${divisionName}`:divisionName.toUpperCase(),
@@ -353,12 +375,12 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
     letter-spacing="4" fill="${C.amber}">${esc(posterStageLabel(match))}</text>
   ${division?`<text x="${WIDTH/2}" y="${P.y+80}" text-anchor="middle" font-family="${FONT}" font-size="17"
     font-weight="700" letter-spacing="3" fill="${C.dim}">${esc(division)}</text>`:''}
-  <text x="${L.cxL}" y="${P.y+154}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="900"
-    fill="${C.gold}">${esc(fit(match.winner))}</text>
-  <text x="${L.cxR}" y="${P.y+154}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="900"
-    fill="${C.silver}">${esc(fit(match.loser))}</text>
-  <rect x="${L.cxL-66}" y="${P.y+170}" width="132" height="3" rx="2" fill="${C.gold}" opacity=".8"/>
-  <rect x="${L.cxR-66}" y="${P.y+170}" width="132" height="3" rx="2" fill="${C.silver}" opacity=".6"/>
+  <text x="${L.cxL}" y="${P.y+154}" text-anchor="middle" font-family="${FONT}" font-size="${left.size}" font-weight="900"
+    fill="${C.gold}">${esc(left.text)}</text>
+  <text x="${L.cxR}" y="${P.y+154}" text-anchor="middle" font-family="${FONT}" font-size="${right.size}" font-weight="900"
+    fill="${C.silver}">${esc(right.text)}</text>
+  <rect x="${L.cxL-left.width/2}" y="${P.y+170}" width="${left.width}" height="3" rx="2" fill="${C.gold}" opacity=".8"/>
+  <rect x="${L.cxR-right.width/2}" y="${P.y+170}" width="${right.width}" height="3" rx="2" fill="${C.silver}" opacity=".6"/>
   <text x="${WIDTH/2}" y="${P.y+166}" text-anchor="middle" font-family="${FONT}" font-size="${size}"
     font-weight="900" letter-spacing="1" fill="${C.amber}">${esc(score||'—')}</text>
   ${formSvg(match.winnerMeta?.form,L.cxL,P.y+216)}
@@ -366,7 +388,7 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
   ${rankPlate(match.winnerMeta,L.cxL,P.y+256)}
   ${rankPlate(match.loserMeta,L.cxR,P.y+256)}
   ${hasSponsors?`<rect x="${S.x}" y="${S.y}" width="${S.w}" height="${S.h}" rx="${S.r}" fill="${C.bg2}" fill-opacity=".72" stroke="${C.plateLine}"/>
-  <text x="${WIDTH/2}" y="${S.y+38}" text-anchor="middle" font-family="${FONT}" font-size="13" font-weight="800"
+  <text x="${WIDTH/2}" y="${S.y+34}" text-anchor="middle" font-family="${FONT}" font-size="12" font-weight="800"
     letter-spacing="4" fill="${C.mute}">SEASON PARTNERS</text>`:''}
 </svg>`);
   const logos=await posterLogoLayers();

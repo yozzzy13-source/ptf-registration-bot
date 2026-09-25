@@ -560,7 +560,7 @@ export async function matchDataForSlot(slot = {}, { winnerFirstScore, season = '
     loser: winnerIsFrom ? slot.to_name : slot.from_name,
     winnerId: winnerIsFrom ? slot.from_telegram_id : slot.to_telegram_id,
     loserId: winnerIsFrom ? slot.to_telegram_id : slot.from_telegram_id,
-    label:bothTechnical?'TECHNICAL RESULT':'',
+    label:bothTechnical?'TECHNICAL RESULT':'', round:slot.round||'',
     score, division: [slot.division, slot.group ? `Group ${slot.group}` : ''].filter(Boolean).join(' · '), season,
     date: slot.agreed_date ? fmtDate(slot.agreed_date) : '',
     court: slot.agreed_court || '',

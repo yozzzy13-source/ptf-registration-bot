@@ -12,6 +12,8 @@ import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { registerTournamentRoutes } from './tournamentsapi.js';
 import { setPairBotUsername } from './pairflow.js';
+import { takeMedia, refreshToken, instagramEnabled } from './instagram.js';
+import { runWeeklyCarousel, runWeeklyPhotos } from './publicity.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultHalfConfirmed, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
@@ -1454,6 +1456,16 @@ app.post('/api/avatar/upload', async (req, res) => {
 // Картинка для витрины. Постоянный адрес: при перегенерации меняется
 // содержимое, а ссылка остаётся прежней.
 const avatarCache = new Map();
+// Instagram не принимает файл — он скачивает картинку по ссылке. Держим её в
+// памяти полчаса и отдаём здесь; после публикации ссылка умирает сама.
+app.get('/ig/:id.jpg', (req, res) => {
+  const item = takeMedia(String(req.params.id || ''));
+  if (!item) return res.status(404).send('expired');
+  res.set('Content-Type', item.mime || 'image/jpeg');
+  res.set('Cache-Control', 'public, max-age=600');
+  return res.send(item.buffer);
+});
+
 app.get('/avatar/:id.png', async (req, res) => {
   try {
     const id = String(req.params.id || '').replace(/\.png$/, '');
@@ -1891,6 +1903,17 @@ app.listen(PORT, async () => {
   ]).catch(() => {});
   warm();
   setInterval(warm, 8 * 60 * 1000).unref();
+  // Токен Instagram живёт 60 дней. Продлеваем раз в сутки: продлить раньше
+  // срока ничего не стоит, а пропущенное окно останавливает публикации молча.
+  if (instagramEnabled()) {
+    const renew = async () => {
+      const out = await refreshToken().catch(e => ({ ok:false, reason:e.message }));
+      if (out.ok) console.log(`instagram token продлён на ${Math.round((out.expires_in||0)/86400)} дн.`);
+      else console.error('instagram token не продлился:', out.reason);
+    };
+    renew();
+    setInterval(renew, 24 * 60 * 60 * 1000).unref?.();
+  }
   // Time can create a result task without a player pressing a button.
   setInterval(async()=>{try{const rows=await allSlots();queueMatchAttention([...new Set(rows.filter(s=>s.status==='accepted').flatMap(s=>[s.from_telegram_id,s.to_telegram_id]).filter(Boolean))]);}catch(e){console.error('attention sweep:',e.message);}},5*60*1000).unref();
   console.log(`PTF Registration Bot listening on ${PORT}`);
@@ -1938,6 +1961,19 @@ app.listen(PORT, async () => {
       const { getAdminChatId } = await import('./admin.js');
       const evAdmin = await getAdminChatId().catch(() => '');
       await runWaitlistOffers(Date.now(), evAdmin).catch(e => console.error('waitlist offers failed:', e.message));
+      // Воскресенье, 19:00 — собираем подборку недели и складываем её туда,
+      // куда привязана тема командой /instagram_here. Публикация в ленту без
+      // человека не происходит: кнопка появляется только когда Instagram
+      // подключён.
+      try {
+        const { setWeeklyBatch } = await import('./bot.js');
+        const weekly = await runWeeklyCarousel(Date.now(), evAdmin);
+        if (weekly.ok && weekly.prepared?.images?.length) setWeeklyBatch('cards', weekly.prepared);
+        // Четверг, 19:00 — фотографии с корта. Отдельный день от карточек:
+        // две подборки в один вечер читаются как спам.
+        const photos = await runWeeklyPhotos(Date.now(), evAdmin);
+        if (photos.ok && photos.prepared?.images?.length) setWeeklyBatch('photos', photos.prepared);
+      } catch (e) { console.error('weekly carousel failed:', e.message); }
     } catch (e) {
       console.error('match sweep failed:', e.message);
     } finally { resultSweepBusy = false; }

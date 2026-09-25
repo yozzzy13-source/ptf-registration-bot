@@ -17,7 +17,9 @@ const second=poster.buildPosterPrompt(match,{comment:'Season semifinal',variant:
 assert.match(first,/BASE Alice One vs Bob Two/);
 assert.match(first,/Season semifinal/);
 assert.match(first,/no tennis rackets/);
-assert.match(first,/bottom 15 percent/);
+assert.match(first,/close portrait crop just below the shoulders/);
+assert.match(first,/dark calm bottom third/);
+
 assert.notEqual(first,second);
 assert.equal(poster.posterPromptSource(),'MATCH_POSTER_PROMPT');
 assert.equal(poster.posterSettings().apiConnected,true);

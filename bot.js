@@ -16,12 +16,19 @@ import { invalidateDivisionCache } from './division.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
 import { sendDoublesTournaments, handlePairStart, handlePairCallback, isPairCallback } from './pairflow.js';
+import { broadcastInstagramAsk, sendInstagramAsk, handlePublicityCallback, isPublicityCallback, isAwaitingInstagram, handleInstagramReply, publishPosterToStory, publishWeeklyCarousel, runWeeklyCarousel, publishWeeklyPhotos, runWeeklyPhotos, matchPublicity } from './publicity.js';
+import { instagramEnabled, instagramStatus, IG_ACCOUNT } from './instagram.js';
 import { authorizeSlot, sameScope } from './access.js';
 import { uiError } from './ui-errors.js';
 
 export const userState = new Map();
 const posterRuns = new Map();
 const posterJobsInFlight = new Set();
+// Собранная карусель недели ждёт кнопки. В памяти, а не в таблице: если бот
+// перезапустится, её проще собрать заново, чем хранить десяток картинок.
+const weeklyBatches = new Map();
+export function setWeeklyBatch(kind, prepared) { weeklyBatches.set(String(kind), prepared); }
+export function setWeeklyCarousel(prepared) { setWeeklyBatch('cards', prepared); }
 function rememberPosterVariant(matchId, variant, data) {
   const key=String(matchId || '');
   const current=posterRuns.get(key) || {};
@@ -100,6 +107,7 @@ async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', on
         ...opts,
         caption,
         reply_markup:{inline_keyboard:[
+          [{text:`📤 Опубликовать в сторис · ${variant}`,callback_data:`poster:ig:${variant}:${matchId}`}],
           [{text:`✅ Вариант ${variant} готов`,callback_data:`poster:ready:${variant}:${matchId}`}],
           [
             {text:'🔄 Ещё вариант',callback_data:`poster:regen:${variant}:${matchId}`},
@@ -108,7 +116,9 @@ async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', on
         ]}
       });
       const fileId=(result?.photo || result?.result?.photo || []).slice(-1)[0]?.file_id || '';
-      rememberPosterVariant(matchId,variant,{fileId,comment:job.comment,createdAt:new Date().toISOString()});
+      // Готовую картинку держим в памяти: для Instagram нужен сам файл, а не
+      // telegram file_id, и перегенерировать её ради публикации незачем.
+      rememberPosterVariant(matchId,variant,{fileId,buffer:finalBuffer,comment:job.comment,createdAt:new Date().toISOString()});
       sent.push({variant,fileId});
     }
     if(sent.length > 1) {
@@ -499,8 +509,8 @@ async function sendHelp(chatId, lang, from = {}, msg = {}) {
 // Эмодзи у раздела — чтобы в длинном списке было видно, где что, а не сплошная
 // стена команд. Раздел берётся из ADMIN_COMMAND_LIST: добавил команду — она сама
 // встала и сюда, и в меню по слэшу.
-const ADMIN_HELP_ICON = { 'Лига':'🏆', 'Матчи':'🎾', 'Турниры':'🥇', 'Панель и рассылки':'📣', 'Настройка':'⚙️', 'Прочее':'🧰' };
-const ADMIN_HELP_GROUP_EN = { 'Лига':'League and players', 'Матчи':'Matches and results', 'Турниры':'Tournaments', 'Панель и рассылки':'Panel and broadcasts', 'Настройка':'Setup', 'Прочее':'Other' };
+const ADMIN_HELP_ICON = { 'Лига':'🏆', 'Матчи':'🎾', 'Турниры':'🥇', 'Instagram':'📸', 'Панель и рассылки':'📣', 'Настройка':'⚙️', 'Прочее':'🧰' };
+const ADMIN_HELP_GROUP_EN = { 'Лига':'League and players', 'Матчи':'Matches and results', 'Турниры':'Tournaments', 'Instagram':'Instagram', 'Панель и рассылки':'Panel and broadcasts', 'Настройка':'Setup', 'Прочее':'Other' };
 const ADMIN_HELP_TAIL = {
   ru: [
     '', '👉 <b>Кнопками, а не командами</b>',
@@ -510,6 +520,11 @@ const ADMIN_HELP_TAIL = {
     '• Рассылка умеет слать записанным на событие: во вкладке «Рассылка» переключи «Кому» на «По событию», выбери ивент и кого из записанных (все / участвуют / лист ожидания / не оплатили). Счётчик покажет число получателей до отправки. В тексте работают подстановки <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code>.',
     '• Касса: игрок выбирается из списка, пополнение/списание/возврат — кнопками, комментарий обязателен.',
     '• Вкладка «Кнопки» — что видит каждая группа игроков: вкладки мини-приложения, кнопки под сообщением и нижняя клавиатура в чате. Там же «Прислать в бот» и «Открыть мини-апп» — посмотреть всё глазами выбранной группы, без второго аккаунта.',
+    '', '📸 <b>Instagram</b>',
+    '• Публикуем по умолчанию. Нет инстаграма — просто не отметим. Останавливает только явное «не публиковать меня».',
+    '• Отказ одного человека снимает с публикации ВЕСЬ матч: в карточке двое, вырезать одного нельзя.',
+    '• Ничего не уходит само. Сторис — кнопкой под постером, карусель — кнопкой под собранным постом.',
+    '• Токен Instagram живёт 60 дней и продлевается сам раз в сутки. Новый токен видно в логах Railway.',
     '', '🥇 <b>Турниры</b>',
     '• <code>/tournaments</code> — отдельное приложение: турниры, заявки, группы, сетка, правка счёта, журнал. Внутри админки его нет намеренно — это другой инструмент.',
     '• Позиции и таблица нигде не хранятся: они считаются из матчей при каждом открытии. Поэтому исправление счёта задним числом само чинит и таблицу, и сетку.',
@@ -1106,6 +1121,13 @@ export async function handleMessage(msg) {
   const text = (msg.text || '').trim();
   const isPrivate = msg.chat.type === 'private';
 
+  // Человек жмёт «прислать инстаграм» и следом пишет ник — ловим это раньше
+  // остальных состояний, иначе сообщение уйдёт в общий обработчик.
+  if (isPrivate && text && !text.startsWith('/') && isAwaitingInstagram(from.id)) {
+    const { getAdminChatId } = await import('./admin.js');
+    return handleInstagramReply(msg, lang, { adminChatId: await getAdminChatId().catch(() => '') });
+  }
+
   if (text === '/cancel') {
     closeContactSession(chatId);
     userState.delete(String(chatId));
@@ -1316,6 +1338,56 @@ function findConfirmedSlot(done, wanted) {
         reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть', web_app: { url: `${PUBLIC_URL}/league` } }]] }
       });
     }
+    // Опрос про Instagram и ручная сборка карусели недели.
+    if (text.startsWith('/instagram_ask')) {
+      const force=/\bforce\b/i.test(text);
+      await sendMessage(chatId,force?'Рассылаю опрос всем активным игрокам, включая тех, кто уже отвечал…':'Рассылаю опрос тем, кто ещё не отвечал…');
+      const out=await broadcastInstagramAsk(chatId,{force});
+      return out;
+    }
+    // Тема для материалов Instagram. Выполняется прямо в нужной теме, как
+    // /results_here: складывать подборку недели в общий админский чат неудобно.
+    if (text === '/instagram_here') {
+      const { setSetting } = await import('./sheets.js');
+      await setSetting('instagram_chat_id', String(msg.chat.id), 'Чат для материалов Instagram');
+      await setSetting('instagram_topic_id', String(msg.message_thread_id || ''), 'Тема для материалов Instagram');
+      return sendMessage(chatId, `✅ Материалы для Instagram будут приходить сюда.\n\nchat_id: <code>${escapeHtml(msg.chat.id)}</code>${msg.message_thread_id?`\ntopic: <code>${escapeHtml(msg.message_thread_id)}</code>`:''}`, msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+    }
+    if (text === '/instagram_status') {
+      const { listOptedOutPlayers } = await import('./sheets.js');
+      const st=instagramStatus();
+      const out=await listOptedOutPlayers().catch(()=>[]);
+      return sendMessage(chatId,[
+        '<b>📸 Instagram</b>','',
+        `Аккаунт: <b>@${escapeHtml(st.account)}</b>`,
+        `Подключение: <b>${st.enabled?'готово':'НЕ НАСТРОЕНО'}</b>`,
+        `Вход: ${escapeHtml(st.login==='facebook'?'через страницу Facebook':'через Instagram')}`,
+        `IG_USER_ID: <code>${escapeHtml(st.user_id||'нет')}</code>`,
+        `Токен: <code>${escapeHtml(st.token||'нет')}</code>`,
+        '',
+        out.length?`<b>Просили не публиковать (${out.length}):</b>\n`+out.map(p=>'• '+escapeHtml(p.name||p.telegram_id)).join('\n'):'Отказов от публикации нет.'
+      ].join('\n'));
+    }
+    if (text === '/instagram_week') {
+      await sendMessage(chatId,'Собираю карточки за неделю…');
+      try {
+        const out=await runWeeklyCarousel(Date.now(),chatId,{force:true});
+        if(out.prepared)setWeeklyBatch('cards',out.prepared);
+        return null;
+      } catch(error) {
+        return sendMessage(chatId,`⛔ ${escapeHtml(error.message)}`);
+      }
+    }
+    if (text === '/instagram_photos') {
+      await sendMessage(chatId,'Собираю фотографии за неделю…');
+      try {
+        const out=await runWeeklyPhotos(Date.now(),chatId,{force:true});
+        if(out.prepared)setWeeklyBatch('photos',out.prepared);
+        return null;
+      } catch(error) {
+        return sendMessage(chatId,`⛔ ${escapeHtml(error.message)}`);
+      }
+    }
     // Турнирная админка: отдельное приложение, не вкладка внутри админки.
     if (text === '/tournaments') {
       return sendMessage(chatId, '<b>🏆 Турниры</b>\n\nСоздание турниров, заявки, группы, сетка плей-офф, правка результатов и парные заявки.\n\nПереключатель «Тест» в шапке пишет всё в листы с пометкой TEST — боевые таблицы при этом не меняются.', {
@@ -1522,6 +1594,10 @@ export async function handleCallback(q) {
 
   // Парная цепочка живёт отдельным файлом: здесь только перенаправление.
   if (isPairCallback(data)) return handlePairCallback(q, lang);
+  if (isPublicityCallback(data)) {
+    const { getAdminChatId } = await import('./admin.js');
+    return handlePublicityCallback(q, lang, { adminChatId: await getAdminChatId().catch(() => '') });
+  }
 
   if (data.startsWith('lang_select:')) {
     const selected = data.split(':')[1] === 'ru' ? 'ru' : 'en';
@@ -1845,7 +1921,46 @@ export async function handleCallback(q) {
       run.selected=variant;
       posterRuns.set(challengeId,run);
       await answerCallbackQuery(q.id,`Вариант ${variant} отмечен готовым`).catch(()=>{});
-      return sendMessage(chatId,`✅ <b>Вариант ${variant} отмечен готовым.</b>\n\nОн остаётся в этом топике, откуда его можно сохранить. Кнопку публикации в Instagram подключим отдельным этапом.`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      return sendMessage(chatId,`✅ <b>Вариант ${variant} отмечен готовым.</b>\n\nОн остаётся в этом топике, откуда его можно сохранить. Кнопка «Опубликовать в сторис» — под самим изображением.`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+    }
+    // Публикация постера в сторис. Ничего не уходит само: только этой кнопкой.
+    if (data.startsWith('poster:ig:')) {
+      const rest=data.slice('poster:ig:'.length);
+      const split=rest.indexOf(':');
+      const variant=Number(rest.slice(0,split));
+      const challengeId=rest.slice(split+1);
+      const run=posterRuns.get(challengeId) || {};
+      const saved=run[String(variant)];
+      if(!saved?.buffer)return sendMessage(chatId,'Картинка этого варианта уже не в памяти — сгенерируйте постер заново.',msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      const slot=await findMatchSlot(challengeId);
+      if(!slot)return sendMessage(chatId,'Матч не найден.');
+      await answerCallbackQuery(q.id,'Публикую…').catch(()=>{});
+      try {
+        const out=await publishPosterToStory(saved.buffer,slot);
+        const tagged=out.tagged?.length?`\n\nОтмечены: ${out.tagged.map(h=>'@'+escapeHtml(h)).join(', ')}`:'\n\nНикого не отметили: ни у кого из двоих нет инстаграма в анкете.';
+        const warn=out.tag_error?`\n\n⚠️ Отметки не прошли, постер опубликован без них: ${escapeHtml(out.tag_error)}`:'';
+        return sendMessage(chatId,`📤 <b>Опубликовано в сторис</b>${tagged}${warn}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      } catch(error) {
+        return sendMessage(chatId,`⛔ Не опубликовалось: ${escapeHtml(error.message)}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      }
+    }
+    // Подборки недели: собраны заранее, публикуются тоже только кнопкой.
+    if (data === 'igweek:go' || data === 'igphotos:go') {
+      const cards=data==='igweek:go';
+      const prepared=weeklyBatches.get(cards?'cards':'photos');
+      const again=cards?'/instagram_week':'/instagram_photos';
+      if(!prepared?.images?.length)return sendMessage(chatId,`Подборка уже не в памяти — соберите её заново командой ${again}.`);
+      await answerCallbackQuery(q.id,'Публикую…').catch(()=>{});
+      try {
+        const out=cards?await publishWeeklyCarousel(prepared):await publishWeeklyPhotos(prepared);
+        weeklyBatches.delete(cards?'cards':'photos');
+        const tagged=out.tagged?.length?`\n\nОтмечены: ${out.tagged.map(h=>'@'+escapeHtml(h)).join(', ')}`:'';
+        const warn=out.tag_error?`\n\n⚠️ Отметки не прошли, пост опубликован без них: ${escapeHtml(out.tag_error)}`:'';
+        const cut=out.trimmed?`\n\n⚠️ Instagram не принял длинную карусель — опубликованы первые ${out.count}. Оставшиеся ${out.trimmed} сохраните из этой темы и выложите вторым постом.`:'';
+        return sendMessage(chatId,`📤 <b>Опубликовано</b>\n\nКартинок в посте: <b>${out.count}</b>${cut}${tagged}${warn}`);
+      } catch(error) {
+        return sendMessage(chatId,`⛔ Не опубликовалось: ${escapeHtml(error.message)}`);
+      }
     }
     if (data.startsWith('poster:regen:')) {
       const rest=data.slice('poster:regen:'.length);

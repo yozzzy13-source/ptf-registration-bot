@@ -138,16 +138,21 @@ export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', 
   if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
   return json.result;
 }
-export async function sendPhotoAlbumBuffers(chat_id, items = []) {
+export async function sendPhotoAlbumBuffers(chat_id, items = [], opts = {}) {
   if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
-  if (!Array.isArray(items) || items.length < 2 || items.length > 10) throw new Error('sendMediaGroup: нужно от 2 до 10 фотографий');
+  if (!Array.isArray(items) || !items.length) throw new Error('sendMediaGroup: нет файлов');
+  if (items.length > 10) throw new Error('sendMediaGroup: не больше 10 фотографий за раз');
+  if (items.length === 1) {
+    return sendPhotoBuffer(chat_id, items[0].buffer, items[0].mimeType || items[0].mime || 'image/jpeg', opts);
+  }
   const form = new FormData();
   form.append('chat_id', String(chat_id));
+  if (opts.message_thread_id) form.append('message_thread_id', String(opts.message_thread_id));
   const media = [];
   items.forEach((item, index) => {
     const buffer = item?.buffer;
     if (!buffer?.length) throw new Error('sendMediaGroup: пустой файл');
-    const mimeType = String(item.mimeType || 'image/jpeg');
+    const mimeType = String(item.mimeType || item.mime || 'image/jpeg');
     const ext = mimeType.split('/')[1] || 'jpg';
     const bytes = new Uint8Array(buffer.length);
     bytes.set(buffer);
@@ -265,6 +270,30 @@ export const ADMIN_COMMAND_LIST = [
     short_en:'Live result test with rollback', help_en:'run a match through the whole chain for real: both logs, the season, places, form and Fantasy points, then the card. Nothing is published — the card comes only to you, with a «Roll back» button. Score is written winner-first: /test_match Ivan | Peter | 6:4 6:3', help:'прогнать матч по всей цепочке по-настоящему: запись в общий лог и в таблицу дивизиона, сезон, пересчёт мест, снимок формы и очков Fantasy, карточка. В ленту и игрокам ничего не уходит — карточка приходит только вам, а под ней кнопка «Откатить», которая возвращает таблицы в исходное состояние. Счёт пишется от победителя: /test_match Иван | Пётр | 6:4 6:3' },
   { cmd:'fix_result',   group:'Матчи', short:'Перевыпустить карточку результата', args_en:'<message id> [player name]', args:'<id сообщения> [имя игрока]',
     short_en:'Reissue a result card', help_en:'replace the picture, text and buttons of an already published result; the message id is the last number in its link; editing works for 48 hours', help:'заменить картинку, текст и кнопки у уже опубликованного результата в ленте; id сообщения — последнее число в ссылке на пост, вторым аргументом можно назвать игрока, иначе берётся последний результат; править можно первые 48 часов' },
+  { cmd:'instagram_ask',   group:'Instagram', short:'Опрос про Instagram', args:'[force]', args_en:'[force]',
+    short_en:'Ask players about Instagram',
+    help:'разослать активным игрокам просьбу прислать свой Instagram и подписаться на наш аккаунт. Тем, кто уже ответил, повторно не пишем — чтобы написать всем, добавьте слово force. В том же сообщении у игрока есть кнопка «Не публиковать меня»: нажал — его матчи в Instagram больше не уходят, и вы получите об этом сообщение',
+    help_en:'ask active players to send their Instagram and follow the league account. Players who already answered are skipped — add the word force to write to everyone. The same message carries a "Don\u2019t publish me" button: once tapped, that player\u2019s matches stop going to Instagram and you get a notice' },
+  { cmd:'instagram_status', group:'Instagram', short:'Состояние Instagram',
+    short_en:'Instagram status',
+    help:'подключён ли Instagram, какой аккаунт и токен используются, и полный список тех, кто просил себя не публиковать',
+    help_en:'whether Instagram is connected, which account and token are in use, and the full list of players who asked not to be published' },
+  { cmd:'instagram_here',  group:'Instagram', short:'Материалы Instagram сюда',
+    short_en:'Instagram materials here',
+    help:'привязать текущую тему как место, куда будут приходить карточки недели и подпись к посту. Выполняется прямо в нужной теме, как /results_here. Не привязано — всё падает в общий админский чат',
+    help_en:'bind the current topic as the place where the weekly cards and the post caption arrive. Run it inside the topic you want, like /results_here. If not bound, everything goes to the main admin chat' },
+  { cmd:'instagram_week',  group:'Instagram', short:'Карусель недели',
+    short_en:'Weekly carousel',
+    help:'собрать карточки матчей за последние семь дней и прислать их пачками вместе с готовой подписью и хэштегами — чтобы можно было сохранить и выложить самому. То же самое бот делает сам по воскресеньям в 19:00. Кнопка публикации появляется, только когда Instagram подключён',
+    help_en:'collect this week\u2019s match cards and send them in batches with a ready caption and hashtags, so you can save and post them yourself. The bot does the same on Sundays at 19:00. The publish button appears only once Instagram is connected' },
+  { cmd:'instagram_photos', group:'Instagram', short:'Фотографии недели',
+    short_en:'Weekly photos',
+    help:'собрать фотографии, которые игроки прикладывали к результатам за последние семь дней, и прислать их пачками с готовой подписью. Учитывается отказ от публикации: если хоть один игрок матча просил себя не публиковать, фото не войдёт. То же самое бот делает сам по четвергам в 19:00',
+    help_en:'collect the photos players attached to their results over the last seven days and send them in batches with a ready caption. Opt-outs are respected: if either player of a match asked not to be published, the photo is left out. The bot does the same on Thursdays at 19:00' },
+  { cmd:'poster_test',  group:'Матчи', short:'Постер по сыгранному матчу', args_en:'[player name]', args:'[имя игрока]',
+    short_en:'Poster for a played match',
+    help:'собрать постер 9:16 по любому уже сыгранному матчу: имена, счёт, стадия, форма и движение по таблице берутся заново, поэтому старые матчи получают постер по действующему макету. Вторым словом можно назвать игрока, иначе берётся последний подтверждённый результат. Результат повторно не публикуется — два варианта приходят только вам',
+    help_en:'build a 9:16 poster for any match already played: names, score, stage, form and table movement are recalculated, so old matches get a poster in the current layout. Name a player as the second word, otherwise the latest confirmed result is used. Nothing is republished — both variants come only to you' },
   { cmd:'match_test',   group:'Настройка', short:'Проверка таблиц', short_en:'Sheets check', help_en:'match sheets, league sheets and the division registry; also re-reads the registry', help:'таблицы матчей, таблицы лиги и реестр дивизионов; заодно перечитывает реестр' },
   { cmd:'avatar',       group:'Прочее', short:'Мои варианты аватарки', short_en:'My avatar options', help_en:'my avatar options', help:'мои варианты аватарки' },
   { cmd:'help',         group:'Прочее', short:'Все команды', short_en:'All commands', help_en:'this list', help:'этот список' },
