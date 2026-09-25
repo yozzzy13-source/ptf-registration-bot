@@ -1021,4 +1021,45 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/function plainError/.test(page),'Ошибку сервера показываем текстом, а не разметкой');
 }
 
+
+// --- Приглашение и форма счёта открываются в один и тот же момент -----------
+// Ровно здесь сломалось у живого игрока: бот звал вносить счёт через 90 минут
+// после начала, а список задач ждал конца брони — и человек упирался в пустой
+// экран на полчаса.
+{
+ const start=Date.parse('2099-06-06T11:00:00+07:00');
+ const two={challenge_id:'win2h',match_type:'manual',status:'accepted',division:'Division C',season:'2',group:'1',
+   from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',
+   dates:'2099-06-06',time_from:'11:00',time_to:'13:00',duration_min:'120',courts:'Court A',
+   agreed_date:'2099-06-06',agreed_time:'11:00',agreed_court:'Court A',court_confirmed_at:'2099-06-05T10:00:00+07:00'};
+ await db.createSlot(two);
+ const hour={...two,challenge_id:'win1h',time_to:'12:00',duration_min:'60'};
+ await db.createSlot(hour);
+
+ check(db.resultOpenMs(two)===start+90*60000,'Двухчасовой матч открывает счёт через 90 минут после начала');
+ check(db.resultOpenMs(hour)===start+60*60000,'Часовой матч не заставляет ждать дольше своей брони');
+ check(db.resultOpenMs({agreed_date:'',agreed_time:''})===null,'Матч без даты порога не имеет');
+
+ const at=m=>start+m*60000;
+ const prompted=async m=>(await db.listMatchesNeedingResultPrompt(at(m))).some(x=>x.challenge_id==='win2h');
+ const tasked=async m=>(await db.listResultTasks('1',at(m))).some(x=>x.challenge_id==='win2h');
+ check(!await prompted(89)&&!await tasked(89),'До порога нет ни приглашения, ни задачи');
+ check(await prompted(91),'После порога приглашение уходит');
+ check(await tasked(91),'И в тот же момент матч появляется в списке «внести результат»');
+ // Старое поведение: приглашение есть, а задачи нет. Проверяем, что окна больше нет.
+ for(const m of [91,100,115,119]) check(await tasked(m),'В окне между порогом и концом брони матч доступен ('+m+' мин)');
+
+ // «Матч не доигран» открывается тогда же, а не по концу брони.
+ const early=await db.markMatchUnfinished('win2h',{telegram_id:'1',name:'Alice One'});
+ check(!early.ok&&early.reason==='match_not_ended','До порога отметить недоигранным нельзя');
+
+ // Интерфейс считает по тому же правилу и берёт число с сервера.
+ const ui=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/resultAfterMin=Number\(j\.result_after_min\|\|90\)/.test(ui),'Интерфейс берёт порог с сервера, а не зашивает своё число');
+ check(/Math\.min\(Number\(resultAfterMin\)\|\|90,Number\(s\.duration_min\|\|matchDuration\)\|\|120\)/.test(ui),'Интерфейс считает порог той же формулой');
+ check(/myMatches\.filter\(function\(x\)\{return x\.challenge_id===resultSlotId/.test(ui),'Ссылка из бота открывает форму, даже если матча нет в списке задач');
+ const boot=await request('get','/api/match/bootstrap','1');
+ check(Number(boot.body.result_after_min)===90,'Порог уезжает в интерфейс при загрузке');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
