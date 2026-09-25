@@ -1326,9 +1326,12 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(pub3.carouselDue(at('2099-01-04T12:00:00Z'))&&!pub3.carouselDue(at('2099-01-01T12:00:00Z')),'Карточки и фото разведены по разным дням');
 
  const cap=pub3.photosCaption([{slot:{from_name:'A',to_name:'B'}}],at('2099-01-01T12:00:00Z'),['a.t']);
- check(/Photos sent in by the players themselves/.test(cap),'Подпись говорит, что фото прислали сами игроки');
  check(/@a\.t/.test(cap)&&cap.includes(pub3.CAROUSEL_HASHTAGS.join(' ')),'В подписи есть упоминания и хэштеги');
  check(!/[А-Яа-я]/.test(cap),'Подпись к фотопосту без русского текста');
+ check(!/\d/.test(cap.replace(/#\S+|@\S+/g,'')),'Ни дат, ни числа игроков — никакой статистики в подписи');
+ check(!/Sept|players on court/i.test(cap),'Даты и счётчики убраны');
+ check(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(cap.split('\n')[0]),'Заголовок с эмодзи');
+ check(cap.split('\n')[2].length>30,'Под заголовком живой текст про неделю, а не метрика');
  check(pub3.photosCaption([],at('2099-01-01T12:00:00Z'),[]).split('\n')[0]
    !==pub3.photosCaption([],at('2099-01-08T12:00:00Z'),[]).split('\n')[0],'Первая фраза меняется от недели к неделе');
 
