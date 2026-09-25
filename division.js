@@ -325,23 +325,6 @@ export async function recentFormBefore(spreadsheetId, playerName, upTo, limit = 
   return out.slice(-limit).map(x => (x.win ? 'W' : 'L'));
 }
 
-// Номер матча в журнале дивизиона по именам обоих игроков. Другого ключа в
-// этих таблицах нет: слот матча и строка журнала связаны только именами.
-// Если игроки встречались дважды, берём последнюю встречу.
-export async function findMatchNumber(spreadsheetId, nameA, nameB) {
-  const { rows } = await readMatchLog(spreadsheetId).catch(() => ({ rows: [] }));
-  const { sameName } = await import('./sheets.js');
-  let found = 0;
-  for (const r of rows) {
-    const m = num(r.match);
-    if (!m) continue;
-    const pair = (sameName(r.player_1, nameA) && sameName(r.player_2, nameB))
-      || (sameName(r.player_1, nameB) && sameName(r.player_2, nameA));
-    if (pair && m > found) found = m;
-  }
-  return found;
-}
-
 async function readCrossGroupRows(letter, season) {
   if (!LEAGUE_RESULTS_SHEET_ID) return [];
   try {
@@ -388,14 +371,9 @@ export async function livePlaces(season = '') {
   return out;
 }
 
-// upTo — считать таблицу так, как она выглядела ПОСЛЕ матча с этим номером
-// (остальные матчи игнорируются). Нужно для карточки и постера, которые
-// показывают движение по дивизиону: место «до» — это таблица по матч upTo-1.
-// Такие срезы в общий кэш не кладём: их берут по одному разу на карточку.
-export async function getDivisionTable(letter, season = '', group = '', { upTo = 0 } = {}) {
+export async function getDivisionTable(letter, season = '', group = '') {
   const key = divisionLetter(letter);
-  const cut = Number(upTo) > 0 ? Number(upTo) : 0;
-  const cacheId = `${season || '-'}:${key}:${group || '-'}${cut ? `:<=${cut}` : ''}`;
+  const cacheId = `${season || '-'}:${key}:${group || '-'}`;
   const hit = cache.get(cacheId);
   if (hit && Date.now() - hit.t < CACHE_MS) return hit.v;
 
@@ -445,7 +423,7 @@ export async function getDivisionTable(letter, season = '', group = '', { upTo =
   // Круговая система: n игроков → n(n-1)/2 матчей группы, дальше плей-офф.
   const n = players.size;
   const regularMax = n > 1 ? (n * (n - 1)) / 2 : 0;
-  const isGroup = (r) => { const m = num(r.match); return m >= 1 && m <= regularMax && (!cut || m <= cut); };
+  const isGroup = (r) => { const m = num(r.match); return m >= 1 && m <= regularMax; };
 
   const matrix = {};
   const setCell = (a, b, v) => { matrix[`${a}-${b}`] = v; };
@@ -487,9 +465,7 @@ export async function getDivisionTable(letter, season = '', group = '', { upTo =
 
   // Строка без имени — незаполненное место в расписании дивизиона. Показывать
   // её незачем: в таблице она выглядела как игрок «?» с нулями.
-  // Срез «на момент матча» считаем только по журналу дивизиона: у кросс-матчей
-  // и плей-офф нет сквозной нумерации, и подмешивать их в прошлое нельзя.
-  const crossMatches = grouped && !cut ? await readCrossGroupRows(key, season) : [];
+  const crossMatches = grouped ? await readCrossGroupRows(key, season) : [];
   const byName = name => [...players.values()].find(p => txt(p.name).toLowerCase() === txt(name).toLowerCase());
   for (const r of crossMatches.filter(x => txt(x.status).toLowerCase() === 'confirmed')) {
     const first=byName(r.player_1),second=byName(r.player_2),local=first||second;
@@ -552,7 +528,7 @@ export async function getDivisionTable(letter, season = '', group = '', { upTo =
     if (c) champion = { id: c.id, name: c.name, photo: c.photo };
   }
   let playoff={qf:[],sf:[sf1,sf2].filter(Boolean),sf1,sf2,final,third,champion};
-  if(grouped&&!cut){
+  if(grouped){
     const raw=await readPlayoffRows(key,season),make=r=>{const firstName=txt(r.player_1),secondName=txt(r.player_2),winner=txt(r.winner);return{first:firstName?{id:firstName,name:firstName,photo:portrait(firstName)}:null,second:secondName?{id:secondName,name:secondName,photo:portrait(secondName)}:null,score:txt(r.score),winner_id:winner,played:txt(r.status).toLowerCase()==='confirmed'||Boolean(txt(r.score)),slot:txt(r.slot),stage:txt(r.stage)}};
     const stage=x=>raw.filter(r=>txt(r.stage).toLowerCase()===x).sort((a,b)=>num(a.slot)-num(b.slot)).map(make);
     const qf=stage('qf'),sf=stage('sf'),fin=stage('final')[0]||null,bronze=stage('3rd')[0]||null;
@@ -561,7 +537,7 @@ export async function getDivisionTable(letter, season = '', group = '', { upTo =
   }
 
   const value = {
-    ok: true, division: key, season, grouped, up_to: cut, players: table, matrix, cross_matches: crossMatches,
+    ok: true, division: key, season, grouped, players: table, matrix, cross_matches: crossMatches,
     playoff,
     regular_matches: regularMax
   };
