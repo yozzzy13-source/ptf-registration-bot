@@ -175,7 +175,7 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120;
+var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120,resultAfterMin=90;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
@@ -632,7 +632,13 @@ function canConfirmResult(s){
   if(byOrganiser(s))return !alreadyConfirmed(s);
   return String(s.result_by)!==String(me&&me.id);
 }
-function matchEnded(s){var d=String(s.agreed_date||''),t=String(s.agreed_time||s.time_from||'00:00');var end=Date.parse(d+'T'+t+':00+07:00')+Number(s.duration_min||matchDuration)*60000;return Number.isFinite(end)&&end<=Date.now()}
+function matchEnded(s){
+  var d=String(s.agreed_date||''),t=String(s.agreed_time||s.time_from||'00:00');
+  var start=Date.parse(d+'T'+t+':00+07:00');
+  if(!Number.isFinite(start))return false;
+  var wait=Math.min(Number(resultAfterMin)||90,Number(s.duration_min||matchDuration)||120);
+  return start+wait*60000<=Date.now();
+}
 function canRetime(s){return String(s.from_telegram_id)===String(me&&me.id)}
 function agreedActions(s,opp){
   var b='<div class="acts">';
@@ -904,7 +910,8 @@ function renderRes(){
   if(!canMatch){$('viewRes').innerHTML='<div class="empty">'+esc(X.subNone)+'</div>';return;}
   var h='';
   if(resultSlotId){
-    var s=resultTasks.filter(function(x){return x.challenge_id===resultSlotId})[0];
+    var s=resultTasks.filter(function(x){return x.challenge_id===resultSlotId})[0]
+      ||myMatches.filter(function(x){return x.challenge_id===resultSlotId&&String(x.status||'')==='accepted'&&String(x.result_status||'')!=='confirmed'})[0];
     if(s)return resultMode==='unfinished'?renderUnfinishedForm(s):renderResultForm(s);
   }
   if(!resultTasks.length)h+='<div class="empty">'+esc(X.emptyRes)+'</div>';
@@ -1279,7 +1286,7 @@ function load(keepTab){
     .then(function(r){return r.json()}).then(function(j){
       if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
       if(!j.ok)throw new Error(j.error||(L?'Ошибка':'Error'));
-      me=j.user;division=j.division||'';canMatch=!!j.can_match;matchGroup=j.match_group||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
+      me=j.user;division=j.division||'';canMatch=!!j.can_match;matchGroup=j.match_group||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);resultAfterMin=Number(j.result_after_min||90);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
       attention=j.attention||{total:0,open:0,mine:0,res:0};
       unplayed=j.unplayed||{known:false,names:[]};
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];adminPlayers=j.admin_players||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
