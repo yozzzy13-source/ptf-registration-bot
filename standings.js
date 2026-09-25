@@ -112,9 +112,12 @@ export async function buildStandings(season, letter, group = '', snapshots = nul
 // ------------------------------------------------------------- рисование
 const MAX_ROWS = Math.max(4, Math.min(14, Number(process.env.STANDINGS_MAX_ROWS || 12)));
 const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
+// Интерфейс сторис съедает заметно больше, чем 5%: сверху лежит имя аккаунта
+// с полосой просмотра, снизу — поле ответа и кнопки. Поэтому вся наша вёрстка
+// живёт между 230 и 1660: шапка ниже, лента партнёров выше.
 const L = {
-  title: 96, logoTop: 126, logoBox: { w: 200, h: 112 }, name: 300, sub: 340,
-  head: 322, first: 366, row: 104,
+  title: 236, logoTop: 268, logoBox: { w: 200, h: 112 }, name: 442, sub: 482,
+  row: 104,
   colPlace: 74, colAvatar: 150, colName: 232,
   colP: 690, colW: 790, colPts: 910, colMove: 1006
 };
@@ -208,22 +211,25 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
   const rows = (data.rows || []).slice(0, MAX_ROWS);
   // Партнёры: та же лента, что на постере матча, в той же свободной полосе —
   // без рамки и подписи, просто снизу кадра.
-  const SPONSOR = { top: 1556, bottom: 1818 };
+  const SPONSOR = { top: 1398, bottom: 1660 };
   const sponsor = await sponsorStrip(SPONSOR);
   // Блок строк центрируем в полосе между шапкой и плашкой партнёров: группы
   // разной длины, и прибитая к верху таблица оставляла бы внизу пустоту.
-  const bandTop = 372, bandBottom = SPONSOR.top - 28;
-  const first = Math.round(bandTop + Math.max(0, (bandBottom - bandTop - rows.length * L.row) / 2));
+  const bandTop = 566, bandBottom = SPONSOR.top - 28;
+  // Строка ужимается, если группа длинная: лучше чуть плотнее, чем вылезти
+  // за безопасную зону сторис.
+  const rowH = rows.length ? Math.min(L.row, Math.floor((bandBottom - bandTop) / rows.length)) : L.row;
+  const first = Math.round(bandTop + Math.max(0, (bandBottom - bandTop - rows.length * rowH) / 2));
   const head = first - 26;
-  const bodyBottom = first + rows.length * L.row + 18;
+  const bodyBottom = first + rows.length * rowH + 18;
   const zone = i => (data.group ? (i < 4 ? C.win : '') : (i < 4 ? C.win : i < 6 ? C.amber : C.loss));
 
   let body = '';
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i], y = first + i * L.row, mid = y + L.row / 2;
+    const r = rows[i], y = first + i * rowH, mid = y + rowH / 2;
     const accent = zone(i);
-    body += `<rect x="40" y="${y}" width="1000" height="${L.row - 12}" rx="24" fill="${C.plate}" stroke="${C.plateLine}"/>`;
-    if (accent) body += `<rect x="40" y="${y}" width="7" height="${L.row - 12}" rx="3.5" fill="${accent}" opacity=".85"/>`;
+    body += `<rect x="40" y="${y}" width="1000" height="${rowH - 12}" rx="24" fill="${C.plate}" stroke="${C.plateLine}"/>`;
+    if (accent) body += `<rect x="40" y="${y}" width="7" height="${rowH - 12}" rx="3.5" fill="${accent}" opacity=".85"/>`;
     body += `<text x="${L.colPlace}" y="${mid + 4}" text-anchor="middle" font-family="${FONT}" font-size="34"
         font-weight="900" fill="${i < 4 ? C.gold : C.text}">${r.place}</text>`;
     body += `<text x="${L.colName}" y="${mid + 4}" font-family="${FONT}" font-size="34" font-weight="800"
@@ -253,7 +259,7 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
   <text x="${L.colName}" y="${head}" font-family="${FONT}" font-size="15"
     font-weight="800" letter-spacing="2" fill="${C.mute}">PLAYER</text>
   <text x="${L.colP}" y="${head}" text-anchor="middle" font-family="${FONT}" font-size="15"
-    font-weight="800" letter-spacing="2" fill="${C.mute}">P</text>
+    font-weight="800" letter-spacing="2" fill="${C.mute}">G</text>
   <text x="${L.colW}" y="${head}" text-anchor="middle" font-family="${FONT}" font-size="15"
     font-weight="800" letter-spacing="2" fill="${C.mute}">W</text>
   <text x="${L.colPts}" y="${head}" text-anchor="middle" font-family="${FONT}" font-size="15"
@@ -261,7 +267,7 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
   ${data.baseline ? '' : `<text x="${L.colMove}" y="${head}" text-anchor="middle" font-family="${FONT}" font-size="15"
     font-weight="800" letter-spacing="2" fill="${C.mute}">+/-</text>`}
   ${body}
-  ${data.baseline ? `<text x="${WIDTH / 2}" y="${Math.min(bodyBottom + 40, 1500)}" text-anchor="middle" font-family="${FONT}"
+  ${data.baseline ? `<text x="${WIDTH / 2}" y="${Math.min(bodyBottom + 40, SPONSOR.top - 40)}" text-anchor="middle" font-family="${FONT}"
     font-size="18" font-weight="700" letter-spacing="2" fill="${C.mute}">FIRST ISSUE — MOVEMENT STARTS NEXT WEEK</text>` : ''}
 </svg>`);
 
@@ -272,7 +278,7 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
   const size = 62;
   for (let i = 0; i < rows.length; i++) {
     const circle = await avatarCircle(rows[i], size, sources).catch(() => null);
-    if (circle) layers.push({ input: circle, left: L.colAvatar - size / 2, top: first + i * L.row + Math.round((L.row - 12 - size) / 2) });
+    if (circle) layers.push({ input: circle, left: L.colAvatar - size / 2, top: first + i * rowH + Math.round((rowH - 12 - size) / 2) });
   }
   if (sponsor?.layer) layers.push(sponsor.layer);
   return sharp({ create: { width: WIDTH, height: HEIGHT, channels: 4, background: { r: 12, g: 11, b: 11, alpha: 1 } } })
