@@ -354,38 +354,45 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
 // ---------------------------------------------- фотографии недели (четверг)
 // Живые фотографии с корта, которые игроки прикладывали к результату. Здесь
 // та же проверка согласия: отказался один — матч не публикуем целиком.
-const PHOTO_OPENERS = [
-  'Faces of the week on the Phuket courts.',
-  'Straight from the court — this week in photos.',
-  'Our players, our week.',
-  'A few frames from the last seven days.',
-  'This is what league week looks like in Phuket.',
-  'Sweat, sunsets and smiles — the week in pictures.',
-  'Behind the scores: the people who played them.',
-  'Photo round-up from the league.',
-  'Some moments from the courts this week.',
-  'The week as our players saw it.'
+// Подпись к фотоподборке: заголовок с эмодзи и живой текст про то, как прошла
+// неделя. Ни дат, ни числа игроков, ни прочей статистики — это подборка про
+// людей, а не отчёт. Отметки игроков и хэштеги остаются: ради них всё и есть.
+//
+// Заголовок и текст чередуются по номеру недели, поэтому подряд идущие посты
+// не выглядят копиями друг друга.
+const PHOTO_HEADLINES = [
+  '🎾 Faces of the week',
+  '📸 This is our tennis',
+  '🌴 Courtside moments',
+  '🔥 The week on court',
+  '🤝 New faces, old friends',
+  '☀️ Another week in paradise',
+  '💛 Our people, our game',
+  '🎾 Smiles between the points'
+];
+const PHOTO_LINES = [
+  'They met, they played, they laughed — and somewhere in between there was tennis. 🙌',
+  'New rivals turning into friends, one match at a time. 🤝 This is what the league is really about.',
+  'Long rallies, close scores and a whole lot of smiles. 😄 Thanks to everyone who came out to play.',
+  'Handshakes at the net, jokes on the bench, tennis in the middle. 🎾 Our kind of week.',
+  'Great matches, better company. 🌴 Phuket courts were busy and loud in the best way.',
+  'Sweat, sunshine and a few new friendships. ☀️ Another one for the album.',
+  'Some came to win, everyone came to play. 🎾 And that is exactly how we like it.',
+  'Rackets down, smiles up. 😎 Thank you all for another beautiful week on court.'
 ];
 export function photosCaption(matches = [], span = Date.now(), handles = []) {
   const range = typeof span === 'number' ? { from: span - WEEK_MS, to: span, shownTo: span } : span;
-  const day = ms => new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, day: '2-digit', month: 'short' }).format(new Date(ms));
-  const opener = PHOTO_OPENERS[weekIndex(range.from) % PHOTO_OPENERS.length];
-  const players = new Set();
-  for (const m of matches) { players.add(txt(m.slot?.from_name)); players.add(txt(m.slot?.to_name)); }
-  players.delete('');
+  const index = weekIndex(range.from);
   const mentions = (handles || []).map(h => '@' + String(h).replace(/^@/, '')).join(' ');
   return [
-    `📸 ${opener}`,
+    PHOTO_HEADLINES[index % PHOTO_HEADLINES.length],
     '',
-    `${day(range.from)} — ${day(range.shownTo ?? range.to)}`,
-    players.size ? `${players.size} players on court` : '',
-    '',
-    'Photos sent in by the players themselves. Results and tables in the league app.',
+    PHOTO_LINES[index % PHOTO_LINES.length],
     mentions ? '' : null,
     mentions || null,
     '',
     CAROUSEL_HASHTAGS.join(' ')
-  ].filter(x => x !== null && x !== '' || x === '').filter((x, i, arr) => !(x === '' && arr[i - 1] === '')).join('\n');
+  ].filter(x => x !== null).join('\n');
 }
 
 // Четверг, 19:00. Отдельный день от карточек нарочно: две подборки в один
