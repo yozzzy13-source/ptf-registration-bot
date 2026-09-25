@@ -16,7 +16,7 @@ import { invalidateDivisionCache } from './division.js';
 import { notifyIncomingMessage, notifyPaymentProof, notifyPlayerMedia, notifyAboutPlayer, adminTopicTest, adminTopicSync, adminTopicBackfill, adminMatchTest, adminMatchesOverview, notifyAdmin, isAdminUser, handleAdminInit, adminStats, adminEvents, adminPending, adminMessages, adminProfile, adminWhois, adminIdCheck, adminPhotoCheck, startBroadcast, startBroadcastWithMenu, handleBroadcastMessage, handleBroadcastMenuMessage, handleBroadcastSegment, executeBroadcast, executeBroadcastWithMenu, sendRatingRequestTo, notifyAvatarVariant, pickAvatarVariant, showAvatarGallery, adminState, setApplicationStatus, setPaymentStatus, attachMediaToPayment, sendInvoiceToApplicant, paymentAutoOn, setPaymentAuto, activatePlayer, waitlistPlayer, eventPreview, eventPublish, eventDrop, eventDeleteDo, eventJoin, eventPayFromDeposit, eventCancelAsk, eventCancelDo, askAddToEvent, askRemoveFromEvent, eventAddDo, eventRemoveDo, getAdminChatId } from './admin.js';
 
 import { sendDoublesTournaments, handlePairStart, handlePairCallback, isPairCallback } from './pairflow.js';
-import { broadcastInstagramAsk, sendInstagramAsk, handlePublicityCallback, isPublicityCallback, isAwaitingInstagram, handleInstagramReply, publishPosterToStory, publishWeeklyCarousel, runWeeklyCarousel, publishWeeklyPhotos, runWeeklyPhotos, matchPublicity } from './publicity.js';
+import { broadcastInstagramAsk, sendInstagramAsk, instagramAskText, instagramAskKeyboard, parseRange, handlePublicityCallback, isPublicityCallback, isAwaitingInstagram, handleInstagramReply, publishPosterToStory, publishWeeklyCarousel, runWeeklyCarousel, publishWeeklyPhotos, runWeeklyPhotos, matchPublicity } from './publicity.js';
 import { instagramEnabled, instagramStatus, IG_ACCOUNT } from './instagram.js';
 import { authorizeSlot, sameScope } from './access.js';
 import { uiError } from './ui-errors.js';
@@ -1340,6 +1340,16 @@ function findConfirmedSlot(done, wanted) {
     }
     // Опрос про Instagram и ручная сборка карусели недели.
     if (text.startsWith('/instagram_ask')) {
+      // Перед рассылкой полезно посмотреть, что именно уйдёт людям. С аргументом
+      // test оба языка приходят только сюда и никому больше.
+      if(/\btest\b/i.test(text)) {
+        const opts=msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{};
+        await sendMessage(chatId,'🧪 <b>Так опрос выглядит у игрока.</b> Никому, кроме вас, это не уходит. Кнопки рабочие — не нажимайте «Не публиковать меня», иначе отказ запишется на вас.',opts);
+        await sendMessage(chatId,'<b>— русская версия —</b>',opts);
+        await sendMessage(chatId,instagramAskText('ru'),{...opts,reply_markup:instagramAskKeyboard('ru')});
+        await sendMessage(chatId,'<b>— english version —</b>',opts);
+        return sendMessage(chatId,instagramAskText('en'),{...opts,reply_markup:instagramAskKeyboard('en')});
+      }
       const force=/\bforce\b/i.test(text);
       await sendMessage(chatId,force?'Рассылаю опрос всем активным игрокам, включая тех, кто уже отвечал…':'Рассылаю опрос тем, кто ещё не отвечал…');
       const out=await broadcastInstagramAsk(chatId,{force});
@@ -1368,20 +1378,22 @@ function findConfirmedSlot(done, wanted) {
         out.length?`<b>Просили не публиковать (${out.length}):</b>\n`+out.map(p=>'• '+escapeHtml(p.name||p.telegram_id)).join('\n'):'Отказов от публикации нет.'
       ].join('\n'));
     }
-    if (text === '/instagram_week') {
-      await sendMessage(chatId,'Собираю карточки за неделю…');
+    if (text.startsWith('/instagram_week')) {
+      const range=parseRange(text.replace(/^\/instagram_week(?:@\w+)?/i,''));
+      await sendMessage(chatId,`Собираю карточки за отрезок: ${escapeHtml(range.label)}…`);
       try {
-        const out=await runWeeklyCarousel(Date.now(),chatId,{force:true});
+        const out=await runWeeklyCarousel(Date.now(),chatId,{force:true,range});
         if(out.prepared)setWeeklyBatch('cards',out.prepared);
         return null;
       } catch(error) {
         return sendMessage(chatId,`⛔ ${escapeHtml(error.message)}`);
       }
     }
-    if (text === '/instagram_photos') {
-      await sendMessage(chatId,'Собираю фотографии за неделю…');
+    if (text.startsWith('/instagram_photos')) {
+      const range=parseRange(text.replace(/^\/instagram_photos(?:@\w+)?/i,''));
+      await sendMessage(chatId,`Собираю фотографии за отрезок: ${escapeHtml(range.label)}…`);
       try {
-        const out=await runWeeklyPhotos(Date.now(),chatId,{force:true});
+        const out=await runWeeklyPhotos(Date.now(),chatId,{force:true,range});
         if(out.prepared)setWeeklyBatch('photos',out.prepared);
         return null;
       } catch(error) {

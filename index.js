@@ -12,7 +12,7 @@ import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { registerTournamentRoutes } from './tournamentsapi.js';
 import { setPairBotUsername } from './pairflow.js';
-import { takeMedia, refreshToken, instagramEnabled } from './instagram.js';
+import { takeMedia, refreshToken, instagramEnabled, IG_PROFILE_URL } from './instagram.js';
 import { runWeeklyCarousel, runWeeklyPhotos } from './publicity.js';
 import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, notifyMatchAgreed, setBotUsername,
   notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultHalfConfirmed, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
@@ -282,7 +282,7 @@ app.post('/api/save-profile'
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en'; const username = user.username || '';
     const racketRating = requireRacketRating(profile);
     await ensureInstagramColumn().catch(() => {});
-    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), instagram:normalizeInstagram(profile.instagram), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:withRatingSourceTag('ptf_waitlist,profile_completed', ratingSource(profile.ntrp_source)), increment_application_count:false });
+    const applicant = await upsertApplicant({ name:safe(profile.name)||[user.first_name,user.last_name].filter(Boolean).join(' '), ntrp:racketRating, status:'waitlist', experience:safe(profile.experience), gender:safe(profile.gender), age:safe(profile.age), country_of_origin:safe(profile.country_of_origin), telegram:username?`t.me/${username}`:'', whatsapp:safe(profile.whatsapp), instagram:normalizeInstagram(profile.instagram), photo_publication_consent:consentFromForm(profile), notes:safe(profile.notes), telegram_id:user.id, telegram_username:username, language:lang, source:'telegram_webapp', last_application_event:'PTF Player Profile / Waitlist', selfie_status:'optional_missing', crm_tags:withRatingSourceTag('ptf_waitlist,profile_completed', ratingSource(profile.ntrp_source)), increment_application_count:false });
     // Анкета без события раньше не приходила никуда: человек заполнял всё,
     // попадал в лист ожидания и пропадал из виду. Теперь это событие в его теме.
     const wasCompleted = isProfileCompleted(existingProfile);
@@ -365,6 +365,7 @@ app.post('/api/submit-application', async (req, res) => {
       telegram: username ? `t.me/${username}` : '',
       whatsapp: safe(effectiveProfile.whatsapp),
       instagram: normalizeInstagram(effectiveProfile.instagram),
+      photo_publication_consent: consentFromForm(effectiveProfile),
       notes: safe(effectiveProfile.notes),
       telegram_id: user.id,
       telegram_username: username,
@@ -441,9 +442,13 @@ Please choose a payment method below.`);
       await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}. Детали подтверждения участия будут отправлены через Telegram-бота.` : `✅ Your event application has been saved: ${eventName}. Participation confirmation details will be sent through the Telegram bot.`);
     } else await sendMessage(user.id, lang === 'ru' ? `✅ Анкета сохранена в системе PTF.
 
-Теперь вы можете подать заявку в открытое событие.` : `✅ Your profile has been saved in the PTF system.
+Теперь вы можете подать заявку в открытое событие.
 
-You can now join an open event.`, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '🏆 Участвовать в событии' : '🏆 Join Event', web_app:{ url:`${PUBLIC_URL}/apply?mode=event` } } ],[ { text: lang === 'ru' ? '🏠 Главное меню' : '🏠 Main menu', callback_data:'main' } ]] } });
+📸 Постеры матчей и результаты выкладываем в <a href="${IG_PROFILE_URL}">Instagram</a> — подпишитесь, чтобы видеть свои матчи.` : `✅ Your profile has been saved in the PTF system.
+
+You can now join an open event.
+
+📸 Match posters and results go to our <a href="${IG_PROFILE_URL}">Instagram</a> — follow us to see your own matches there.`, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '🏆 Участвовать в событии' : '🏆 Join Event', web_app:{ url:`${PUBLIC_URL}/apply?mode=event` } } ],[ { text: lang === 'ru' ? '🏠 Главное меню' : '🏠 Main menu', callback_data:'main' } ]] } });
 
     res.json({ ok:true, application_id:appRow.application_id, event:eventName, price_thb:priceThb, price_usdt:priceUsdt, payment_required:paymentRequired, application_status: applicationStatus, payment_status: paymentStatus });
   } catch (e) {
@@ -460,6 +465,12 @@ You can now join an open event.`, { reply_markup:{ inline_keyboard:[[ { text: la
 // ---------------------------------------------------------------------------
 // Instagram пишем в одном виде — @nick: люди присылают и ссылку, и с собачкой,
 // и без. Пустое значение остаётся пустым, поле необязательное.
+// В анкете спрашиваем прямо: публиковать в Instagram или нет. Пустой ответ
+// оставляем пустым — это не согласие и не отказ, спросим позже опросом.
+function consentFromForm(profile = {}) {
+  const v = String(profile.photo_publication_consent || '').trim().toUpperCase();
+  return v === 'YES' || v === 'NO' ? v : '';
+}
 function normalizeInstagram(value = '') {
   let v = String(value || '').trim();
   if (!v) return '';

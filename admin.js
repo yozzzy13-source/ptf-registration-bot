@@ -1,6 +1,7 @@
 import { sendMessage, sendPhoto, sendDocument, sendVideo, sendVoice, sendAudio, sendVideoNote, sendSticker, copyMessage, createForumTopic, getChat, getWebhookInfo, getMe } from './telegram.js';
 import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logBroadcastResult, findApplication, findLatestApplicationByTelegramId, logPayment, updateApplication, updateApplicantStatusByTelegramId, updatePayment, findApplicantByTelegramId, updateApplicantByTelegramId, findApplicantByTelegramIdentity, updateApplicantAdminTopic, ensureApplicantAdminColumns, ensureApplicantLead, createOrUpdateApplication, getActiveEvents, getAllEvents, findLatestApplicationByTelegramId as _findLatestApp, playerGroup, canonicalStatus, getPlayerLeagueInfo } from './sheets.js';
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
+import { IG_PROFILE_URL as INSTAGRAM_URL } from './instagram.js';
 import { nowISO, escapeHtml, uid } from './util.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard, welcomeKeyboard } from './keyboards.js';
@@ -1730,6 +1731,8 @@ export function welcomeMessage(lang = 'en') {
 
 Заходи — там живое общение: ищем партнёров на корт, делимся впечатлениями, шутим. Отзывы и идеи по боту тоже пиши туда, они реально идут в работу.
 
+📸 Постеры матчей и результаты выкладываем в <a href="${INSTAGRAM_URL}">Instagram</a> — подпишись, чтобы видеть свои матчи. Хочешь, чтобы тебя отмечали, — пришли свой ник организатору.
+
 ⚠️ Только не блокируй бота — через него приходят вызовы на матч, согласование времени, напоминания и результаты. Без него легко пропустить свою игру.` : `<b>Welcome to Phuket Tennis Family</b> 🎾
 
 Your payment is confirmed and your place in the season is secured. Thank you for trusting us — let's make this season a great one.
@@ -1747,6 +1750,8 @@ The buttons below open these sections, and the same ones stay at the bottom of y
 <b>Club chat</b>
 
 Come join us — that is where it all happens: finding hitting partners, sharing impressions, having a laugh. Feedback and ideas about the bot go there too, and they really do get acted on.
+
+📸 Match posters and results go to our <a href="${INSTAGRAM_URL}">Instagram</a> — follow us to see your own matches. Want to be tagged? Send your handle to the organiser.
 
 ⚠️ Just please don't block the bot — match challenges, time coordination, reminders and results all come through it. Without it, it is easy to miss your own match.`;
 }

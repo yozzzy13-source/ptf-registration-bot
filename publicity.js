@@ -30,10 +30,12 @@ export function instagramAskText(lang = 'ru') {
     ? `📸 <b>Отмечаем игроков в Instagram</b>\n\n`
       + `Мы публикуем постеры матчей и карточки результатов в нашем аккаунте. Хотите, чтобы вас отмечали — пришлите свой Instagram, и мы будем ставить отметку на ваших публикациях.\n\n`
       + `И подпишитесь на <b>@${esc(IG_ACCOUNT)}</b> — отметить можно только того, кто виден в ленте.\n\n`
+      + `Не ответите — ничего страшного: матчи публикуются как обычно, просто без отметки.\n\n`
       + `Если публиковаться не хотите — нажмите «Не публиковать меня», и ваши матчи в Instagram не попадут. В самой лиге всё останется как есть.`
     : `📸 <b>Getting tagged on Instagram</b>\n\n`
       + `We publish match posters and result cards on our account. If you want to be tagged, send us your Instagram and we will mention you in posts about your matches.\n\n`
       + `Please also follow <b>@${esc(IG_ACCOUNT)}</b> — we can only tag accounts that can see the post.\n\n`
+      + `No answer is fine too: your matches are published as usual, just without a tag.\n\n`
       + `If you would rather not appear there, tap "Don't publish me" and your matches will stay out of Instagram. Nothing changes inside the league itself.`;
 }
 export function instagramAskKeyboard(lang = 'ru') {
@@ -185,16 +187,40 @@ export function carouselDue(now = Date.now(), timeZone = TIMEZONE) {
   return weekday === 'Sun' && hour === 19;
 }
 
+// Какой отрезок собираем. По умолчанию последние семь дней, но подборку можно
+// сделать и за любую прошлую неделю: «-2» — позапрошлая, пара дат — точный
+// отрезок. Нужно, чтобы догнать первые недели сезона задним числом.
+export function parseRange(input = '', now = Date.now()) {
+  const text = txt(input);
+  const dates = text.match(/\d{4}-\d{2}-\d{2}/g) || [];
+  if (dates.length >= 2) {
+    const from = Date.parse(`${dates[0]}T00:00:00+07:00`);
+    const to = Date.parse(`${dates[1]}T23:59:59+07:00`);
+    if (Number.isFinite(from) && Number.isFinite(to) && to > from) return { from, to, shownTo: to, label: `${dates[0]} — ${dates[1]}` };
+  }
+  if (dates.length === 1) {
+    const from = Date.parse(`${dates[0]}T00:00:00+07:00`);
+    if (Number.isFinite(from)) return { from, to: from + WEEK_MS, shownTo: from + WEEK_MS, label: `${dates[0]} + 7 дней` };
+  }
+  const back = /(?:^|\s)-(\d{1,2})(?:\s|$)/.exec(text);
+  if (back) {
+    const weeks = Number(back[1]);
+    const to = now - (weeks - 1) * WEEK_MS;
+    return { from: to - WEEK_MS, to, shownTo: to, label: `${weeks} ${weeks === 1 ? 'неделя' : 'недели'} назад` };
+  }
+  return { from: now - WEEK_MS, to: now + 24 * 60 * 60 * 1000, shownTo: now, label: 'последние 7 дней' };
+}
+
 // Матчи недели: подтверждённые результаты за последние семь дней, без тех,
 // где хоть один игрок просил его не публиковать.
-export async function weeklyMatches(now = Date.now()) {
+export async function weeklyMatches(now = Date.now(), range = null) {
   const { allSlots } = await import('./matchesdb.js');
   const rows = await allSlots();
-  const from = now - WEEK_MS;
+  const { from, to } = range || parseRange('', now);
   const played = rows.filter(r => {
     if (String(r.result_status || '').toLowerCase() !== 'confirmed') return false;
     const day = Date.parse(`${txt(r.agreed_date)}T12:00:00+07:00`);
-    return Number.isFinite(day) && day >= from && day <= now + 24 * 60 * 60 * 1000;
+    return Number.isFinite(day) && day >= from && day <= to;
   }).sort((a, b) => txt(a.agreed_date).localeCompare(txt(b.agreed_date)));
   const out = [], skipped = [];
   for (const slot of played) {
@@ -229,9 +255,10 @@ const WEEK_OPENERS = [
 export const CAROUSEL_HASHTAGS = ['#phuket', '#tennis', '#phukettennis', '#phukettennisfamily'];
 const weekIndex = (now = Date.now()) => Math.floor(now / (7 * 24 * 60 * 60 * 1000));
 
-export function carouselCaption(matches = [], now = Date.now(), handles = []) {
+export function carouselCaption(matches = [], span = Date.now(), handles = []) {
+  const range = typeof span === 'number' ? { from: span - WEEK_MS, to: span, shownTo: span } : span;
   const day = ms => new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, day: '2-digit', month: 'short' }).format(new Date(ms));
-  const opener = WEEK_OPENERS[weekIndex(now) % WEEK_OPENERS.length];
+  const opener = WEEK_OPENERS[weekIndex(range.from) % WEEK_OPENERS.length];
   const count = matches.length;
   const divisions = [...new Set(matches.map(m => txt(m.slot?.division)).filter(Boolean))].sort();
   const players = new Set();
@@ -248,7 +275,7 @@ export function carouselCaption(matches = [], now = Date.now(), handles = []) {
   return [
     `🎾 ${opener}`,
     '',
-    `${day(now - WEEK_MS)} — ${day(now)}`,
+    `${day(range.from)} — ${day(range.shownTo ?? range.to)}`,
     facts,
     '',
     'Swipe for every result. Full tables and match history in the league app.',
@@ -261,16 +288,17 @@ export function carouselCaption(matches = [], now = Date.now(), handles = []) {
 
 // Сборка и отправка организатору на подтверждение. Сама публикация — кнопкой:
 // пост в ленту уходит навсегда, и отдавать это расписанию без человека нельзя.
-export async function buildWeeklyCarousel(now = Date.now()) {
+export async function buildWeeklyCarousel(now = Date.now(), range = null) {
   const { cardForSlot } = await import('./matchcard.js');
-  const { matches, extra, skipped } = await weeklyMatches(now);
+  const span = range || parseRange('', now);
+  const { matches, extra, skipped } = await weeklyMatches(now, span);
   const images = [];
   for (const item of matches) {
     const buffer = await cardForSlot(item.slot).catch(e => { console.error('weekly card failed:', e.message); return null; });
     if (buffer) images.push({ buffer, slot: item.slot });
   }
   const handles = [...new Set(matches.flatMap(m => m.handles))];
-  return { images, handles, caption: carouselCaption(matches, now, handles), extra, skipped, limit: CAROUSEL_MAX };
+  return { images, handles, caption: carouselCaption(matches, span, handles), extra, skipped, limit: CAROUSEL_MAX, range: span };
 }
 
 export async function publishWeeklyCarousel(prepared) {
@@ -333,9 +361,10 @@ const PHOTO_OPENERS = [
   'Some moments from the courts this week.',
   'The week as our players saw it.'
 ];
-export function photosCaption(matches = [], now = Date.now(), handles = []) {
+export function photosCaption(matches = [], span = Date.now(), handles = []) {
+  const range = typeof span === 'number' ? { from: span - WEEK_MS, to: span, shownTo: span } : span;
   const day = ms => new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, day: '2-digit', month: 'short' }).format(new Date(ms));
-  const opener = PHOTO_OPENERS[weekIndex(now) % PHOTO_OPENERS.length];
+  const opener = PHOTO_OPENERS[weekIndex(range.from) % PHOTO_OPENERS.length];
   const players = new Set();
   for (const m of matches) { players.add(txt(m.slot?.from_name)); players.add(txt(m.slot?.to_name)); }
   players.delete('');
@@ -343,8 +372,8 @@ export function photosCaption(matches = [], now = Date.now(), handles = []) {
   return [
     `📸 ${opener}`,
     '',
-    `${day(now - WEEK_MS)} — ${day(now)}`,
-    players.size ? `${players.size} players on court this week` : '',
+    `${day(range.from)} — ${day(range.shownTo ?? range.to)}`,
+    players.size ? `${players.size} players on court` : '',
     '',
     'Photos sent in by the players themselves. Results and tables in the league app.',
     mentions ? '' : null,
@@ -363,15 +392,15 @@ export function photosDue(now = Date.now(), timeZone = TIMEZONE) {
 
 // Матчи недели, к которым игрок приложил фото. Фото живёт в Telegram по
 // file_id — скачиваем его здесь же.
-export async function weeklyPhotos(now = Date.now()) {
+export async function weeklyPhotos(now = Date.now(), range = null) {
   const { allSlots } = await import('./matchesdb.js');
   const rows = await allSlots();
-  const from = now - WEEK_MS;
+  const { from, to } = range || parseRange('', now);
   const withPhoto = rows.filter(r => {
     if (String(r.result_status || '').toLowerCase() !== 'confirmed') return false;
     if (!txt(r.result_photo_file_id)) return false;
     const day = Date.parse(`${txt(r.agreed_date)}T12:00:00+07:00`);
-    return Number.isFinite(day) && day >= from && day <= now + 24 * 60 * 60 * 1000;
+    return Number.isFinite(day) && day >= from && day <= to;
   }).sort((a, b) => txt(a.agreed_date).localeCompare(txt(b.agreed_date)));
   const out = [], skipped = [];
   for (const slot of withPhoto) {
@@ -382,8 +411,9 @@ export async function weeklyPhotos(now = Date.now()) {
   return { matches: out, skipped };
 }
 
-export async function buildWeeklyPhotos(now = Date.now()) {
-  const { matches, skipped } = await weeklyPhotos(now);
+export async function buildWeeklyPhotos(now = Date.now(), range = null) {
+  const span = range || parseRange('', now);
+  const { matches, skipped } = await weeklyPhotos(now, span);
   const images = [];
   for (const item of matches) {
     const file = await getFileBuffer(txt(item.slot.result_photo_file_id)).catch(e => {
@@ -392,7 +422,7 @@ export async function buildWeeklyPhotos(now = Date.now()) {
     if (file?.buffer?.length) images.push({ buffer: file.buffer, mime: file.mime || 'image/jpeg', slot: item.slot });
   }
   const handles = [...new Set(matches.flatMap(m => m.handles))];
-  return { images, handles, caption: photosCaption(matches, now, handles), skipped, limit: CAROUSEL_MAX, extra: Math.max(0, images.length - CAROUSEL_MAX) };
+  return { images, handles, caption: photosCaption(matches, span, handles), skipped, limit: CAROUSEL_MAX, extra: Math.max(0, images.length - CAROUSEL_MAX), range: span };
 }
 
 export async function publishWeeklyPhotos(prepared) {
@@ -401,7 +431,7 @@ export async function publishWeeklyPhotos(prepared) {
   return publishCarousel(prepared.images.slice(0, CAROUSEL_MAX), { caption: prepared.caption, handles: prepared.handles });
 }
 
-export async function runWeeklyPhotos(now = Date.now(), adminChatId = '', { force = false } = {}) {
+export async function runWeeklyPhotos(now = Date.now(), adminChatId = '', { force = false, range = null } = {}) {
   if (!force && !photosDue(now)) return { ok: false, reason: 'not_due' };
   const key = dayKey(now);
   if (!force) {
@@ -411,18 +441,18 @@ export async function runWeeklyPhotos(now = Date.now(), adminChatId = '', { forc
   }
   const target = await instagramTarget(adminChatId);
   if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
-  const prepared = await buildWeeklyPhotos(now);
+  const prepared = await buildWeeklyPhotos(now, range);
   await deliverWeeklyCarousel(prepared, {
     ...target, canPublish: instagramEnabled(),
-    title: 'Фотографии недели', action: 'igphotos:go',
-    empty: 'За неделю никто не прикладывал фото к результату.'
+    title: `Фотографии · ${prepared.range.label}`, action: 'igphotos:go',
+    empty: 'За этот отрезок никто не прикладывал фото к результату.'
   });
   return { ok: true, prepared, key, target };
 }
 
 // Один раз в неделю: помечаем в Settings, чтобы пятнадцатиминутный проход не
 // собрал карусель четыре раза подряд.
-export async function runWeeklyCarousel(now = Date.now(), adminChatId = '', { force = false } = {}) {
+export async function runWeeklyCarousel(now = Date.now(), adminChatId = '', { force = false, range = null } = {}) {
   if (!force && !carouselDue(now)) return { ok: false, reason: 'not_due' };
   const key = dayKey(now);
   if (!force) {
@@ -432,7 +462,7 @@ export async function runWeeklyCarousel(now = Date.now(), adminChatId = '', { fo
   }
   const target = await instagramTarget(adminChatId);
   if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
-  const prepared = await buildWeeklyCarousel(now);
-  await deliverWeeklyCarousel(prepared, { ...target, canPublish: instagramEnabled() });
+  const prepared = await buildWeeklyCarousel(now, range);
+  await deliverWeeklyCarousel(prepared, { ...target, canPublish: instagramEnabled(), title: `Матчи · ${prepared.range.label}` });
   return { ok: true, prepared, key, target };
 }

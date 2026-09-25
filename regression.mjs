@@ -1107,4 +1107,207 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/text\.startsWith\('\/poster_test'\)/.test(bot),'Обработчик /poster_test на месте');
 }
 
+
+// --- Instagram: опрос, согласие, сторис и карусель недели ------------------
+{
+ const pub=await load('publicity.js');
+ const ig=await load('instagram.js');
+
+ // Опрос на двух языках, со ссылкой на аккаунт и кнопкой отказа.
+ const ruText=pub.instagramAskText('ru'), enText=pub.instagramAskText('en');
+ check(/пришлите свой Instagram/i.test(ruText)&&/send us your Instagram|send your Instagram/i.test(enText),'Опрос просит прислать инстаграм на обоих языках');
+ check(ruText.includes(ig.IG_ACCOUNT)&&enText.includes(ig.IG_ACCOUNT),'В тексте назван наш аккаунт');
+ const kb=pub.instagramAskKeyboard('ru').inline_keyboard.flat();
+ check(kb.some(b=>b.url===ig.IG_PROFILE_URL),'В опросе есть прямая ссылка на аккаунт');
+ check(kb.some(b=>b.callback_data==='pub:send')&&kb.some(b=>b.callback_data==='pub:no'),'Есть кнопки «прислать» и «не публиковать»');
+ check(pub.isPublicityCallback('pub:no')&&!pub.isPublicityCallback('pr:join:x'),'Кнопки опроса отделены от остальных');
+
+ // Ник приводится к одному виду, мусор не принимается.
+ check(sheets.normalizeInstagramHandle('https://instagram.com/kostas.p/?hl=ru')==='@kostas.p','Ссылка превращается в ник');
+ check(sheets.normalizeInstagramHandle('@@Kostas_P')==='@Kostas_P','Лишние собачки убираются');
+ check(sheets.normalizeInstagramHandle('не инстаграм')==='','Мусор не принимается');
+ check(sheets.normalizeInstagramHandle('')==='','Пустое остаётся пустым');
+
+ // Согласие: публикуем по умолчанию, останавливает только явный отказ.
+ check(sheets.publicationAllowed({})===true,'Молчание не запрещает публикацию');
+ check(sheets.publicationAllowed({photo_publication_consent:'YES'})===true,'Согласие разрешает');
+ check(sheets.publicationAllowed({photo_publication_consent:'no'})===false,'Явный отказ запрещает, регистр не важен');
+ check(sheets.publicationAllowed({instagram:''})===true,'Отсутствие инстаграма публикации не мешает');
+
+ // Отказ одного игрока снимает весь матч: в карточке двое.
+ await sheets.setPhotoConsent('4','NO');
+ await sheets.setPlayerInstagram('3','@carol.tennis');
+ const both={from_telegram_id:'3',from_name:'Carol Three',to_telegram_id:'4',to_name:'Dan Four'};
+ const verdict=await pub.matchPublicity(both);
+ check(!verdict.allowed&&verdict.blocked.length===1,'Отказ одного снимает весь матч');
+ const clean={from_telegram_id:'3',from_name:'Carol Three',to_telegram_id:'1',to_name:'Alice One'};
+ const ok=await pub.matchPublicity(clean);
+ check(ok.allowed&&ok.handles.join()==='carol.tennis','У разрешённого матча собираются ники для отметок');
+
+ // Запрет доходит до самой публикации, а не только до интерфейса.
+ let blocked='';
+ try { await pub.publishPosterToStory(Buffer.from('x'),both); } catch(e) { blocked=e.message; }
+ check(/не публиков|Instagram не подключ/.test(blocked),'Публикация запрещённого матча не проходит');
+
+ // Воскресенье 19:00 и ничего в другое время.
+ const at=iso=>Date.parse(iso);
+ check(pub.carouselDue(at('2099-01-04T12:00:00Z')),'Воскресенье 19:00 по Пхукету — время карусели');
+ check(!pub.carouselDue(at('2099-01-04T09:00:00Z')),'В воскресенье утром карусель не собирается');
+ check(!pub.carouselDue(at('2099-01-05T12:00:00Z')),'В понедельник карусель не собирается');
+
+ // Подпись к посту — короткий обзор недели, а не список счетов.
+ const week=[{slot:{from_name:'Alice One',to_name:'Bob Two',division:'Division C'}},
+   {slot:{from_name:'Carol Three',to_name:'Dan Four',division:'Division W'}}];
+ const caption=pub.carouselCaption(week,at('2099-01-04T12:00:00Z'),['alice.t','carol.t']);
+ check(!/6:4|def\./.test(caption),'Счёта матчей в подписи нет — он и так на карточках');
+ check(/2 matches played/.test(caption)&&/4 players on court/.test(caption),'В подписи настоящие цифры недели');
+ check(/@alice\.t @carol\.t/.test(caption),'Игроки, давшие согласие, упомянуты в подписи');
+ check(pub.CAROUSEL_HASHTAGS.join(' ')==='#phuket #tennis #phukettennis #phukettennisfamily','Хэштеги те, что просили');
+ check(caption.includes(pub.CAROUSEL_HASHTAGS.join(' ')),'Хэштеги есть в подписи');
+ check(!/[А-Яа-я]/.test(caption),'Подпись к посту без русского текста');
+ // Две недели подряд текст не повторяется.
+ const a=pub.carouselCaption(week,at('2099-01-04T12:00:00Z'),[]);
+ const b=pub.carouselCaption(week,at('2099-01-11T12:00:00Z'),[]);
+ check(a.split('\n')[0]!==b.split('\n')[0],'Первая фраза меняется от недели к неделе');
+
+ // Витрина картинок: ссылка живёт, отдаётся и умирает по требованию.
+ const kept=ig.rememberMedia(Buffer.from('jpeg-bytes'),'image/jpeg');
+ check(/\/ig\/[a-z0-9]+\.jpg$/.test(kept.url),'Картинка получает публичную ссылку');
+ check(ig.takeMedia(kept.id)?.buffer?.toString()==='jpeg-bytes','По ссылке отдаётся та самая картинка');
+ ig.forgetMedia(kept.id);
+ check(ig.takeMedia(kept.id)===null,'После публикации ссылка умирает');
+ check(ig.instagramEnabled()===false,'Без ключей Instagram считается неподключённым');
+ check(ig.CAROUSEL_MAX===20,'В карусель кладём двадцать карточек');
+ check(ig.CAROUSEL_SAFE===10,'Безопасный откат — десять, как обещает документация Meta');
+
+ // Маршрут отдачи и команды на месте.
+ check(routes.some(r=>r.method==='get'&&r.p==='/ig/:id.jpg'),'Маршрут отдачи картинок зарегистрирован');
+ const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ for(const cmd of ['instagram_ask','instagram_status','instagram_week'])
+  check(new RegExp(`cmd:'${cmd}'`).test(tg),'Команда /'+cmd+' в едином списке команд');
+ const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/poster:ig:/.test(bot),'Под постером есть кнопка публикации в сторис');
+ check(/igweek:go/.test(bot),'Под каруселью есть кнопка публикации');
+ check(/'Instagram':'📸'/.test(bot),'Раздел Instagram в админском /help');
+}
+
+
+// --- Подборка недели уходит целиком, лимит Instagram только при публикации --
+{
+ const pub2=await load('publicity.js');
+ const ig2=await load('instagram.js');
+ const src=await fs.readFile(path.join(root,'publicity.js'),'utf8');
+ check(/return { matches: out, extra/.test(src),'Организатору показываем все матчи недели, а не первые десять');
+ check(/prepared\.images\.slice\(0, CAROUSEL_MAX\)/.test(src),'Лимит Instagram применяется только при публикации');
+ check(/for \(let i = 0; i < prepared\.images\.length; i \+= 10\)/.test(src),'Карточки уходят в Telegram пачками по десять — сколько бы их ни было');
+ check(ig2.CAROUSEL_MAX===20,'По умолчанию двадцать');
+ check(/children\.slice\(0, CAROUSEL_SAFE\)/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'При отказе карусель сама урезается до десяти, а не падает');
+ check(/IG_CAROUSEL_MAX/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'Лимит меняется переменной, без правки кода');
+
+ // Тема для материалов задаётся отдельно от админского чата.
+ const bot2=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/text === '\/instagram_here'/.test(bot2),'Есть привязка темы для материалов Instagram');
+ check(/instagram_chat_id/.test(src)&&/instagram_topic_id/.test(src),'Подборка уходит в привязанную тему');
+ check(/canPublish: instagramEnabled\(\)/.test(src),'Кнопка публикации появляется только когда Instagram подключён');
+
+ // Постер: счёт больше не налезает на имена.
+ const poster=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
+ check(/function nameFit/.test(poster)&&/const textWidth/.test(poster),'Ширина имени считается, а не угадывается');
+ check(/const room=Math\.max\(160/.test(poster),'Кегль счёта подбирается под фактический просвет между именами');
+ check(!/scoreRoom:420/.test(poster),'Фиксированный просвет убран');
+ check(/LIGHTING — both players must look photographed together/.test(poster),'В промпте есть требование одинакового света');
+ check(/Do not light one player brightly and the other in shadow/.test(poster),'Запрет на разное освещение сформулирован прямо');
+ // Плашка опущена, спонсорская стала компактнее.
+ check(/panel:\{ x:40, y:1120/.test(poster),'Информационная плашка опущена ниже');
+ check(/sponsor:\{ x:88, y:1578, w:904, h:228/.test(poster),'Плашка спонсоров компактнее и ниже');
+ const panelBottom=1120+424, sponsorBottom=1578+228;
+ check(sponsorBottom<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
+ check(panelBottom<1578,'Плашки не накладываются друг на друга');
+}
+
+
+// --- Фотографии недели: четверг, только с согласия, только с фото -----------
+{
+ const pub3=await load('publicity.js');
+ const at=iso=>Date.parse(iso);
+ check(pub3.photosDue(at('2099-01-01T12:00:00Z')),'Четверг 19:00 по Пхукету — время фотографий');
+ check(!pub3.photosDue(at('2099-01-04T12:00:00Z')),'В воскресенье фотоподборка не собирается');
+ check(!pub3.photosDue(at('2099-01-01T09:00:00Z')),'В четверг утром фотоподборка не собирается');
+ check(pub3.carouselDue(at('2099-01-04T12:00:00Z'))&&!pub3.carouselDue(at('2099-01-01T12:00:00Z')),'Карточки и фото разведены по разным дням');
+
+ const cap=pub3.photosCaption([{slot:{from_name:'A',to_name:'B'}}],at('2099-01-01T12:00:00Z'),['a.t']);
+ check(/Photos sent in by the players themselves/.test(cap),'Подпись говорит, что фото прислали сами игроки');
+ check(/@a\.t/.test(cap)&&cap.includes(pub3.CAROUSEL_HASHTAGS.join(' ')),'В подписи есть упоминания и хэштеги');
+ check(!/[А-Яа-я]/.test(cap),'Подпись к фотопосту без русского текста');
+ check(pub3.photosCaption([],at('2099-01-01T12:00:00Z'),[]).split('\n')[0]
+   !==pub3.photosCaption([],at('2099-01-08T12:00:00Z'),[]).split('\n')[0],'Первая фраза меняется от недели к неделе');
+
+ // Берём только матчи с фотографией и только разрешённые.
+ const src=await fs.readFile(path.join(root,'publicity.js'),'utf8');
+ check(/if \(!txt\(r\.result_photo_file_id\)\) return false;/.test(src),'Без фотографии матч в подборку не попадает');
+ check(/const who = await matchPublicity\(slot\);\n    if \(!who\.allowed\)/.test(src),'Согласие проверяется и здесь');
+ check(/getFileBuffer\(txt\(item\.slot\.result_photo_file_id\)\)/.test(src),'Фото скачивается из Telegram по file_id');
+ check(/instagram_photos_last/.test(src),'Повтор в тот же четверг отсекается отметкой');
+
+ const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/text\.startsWith\('\/instagram_photos'\)/.test(bot3),'Есть команда ручной сборки фотографий');
+ check(/data === 'igweek:go' \|\| data === 'igphotos:go'/.test(bot3),'Обе подборки публикуются одним обработчиком');
+ const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'instagram_photos'/.test(tg3),'Команда /instagram_photos в едином списке');
+ const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/runWeeklyPhotos\(Date\.now\(\), evAdmin\)/.test(idx3),'Четверговая подборка висит на общем проходе');
+}
+
+
+// --- Диапазоны, превью опроса, согласие в анкете, ссылки на Instagram ------
+{
+ const pub4=await load('publicity.js');
+ const now=Date.parse('2099-03-01T12:00:00Z');
+ check(pub4.parseRange('',now).label==='последние 7 дней','Без аргумента — последняя неделя');
+ check(pub4.parseRange('-2',now).label==='2 недели назад','Неделя назад задаётся числом');
+ const exact=pub4.parseRange('2099-01-05 2099-01-11',now);
+ check(exact.label==='2099-01-05 — 2099-01-11'&&exact.to>exact.from,'Точный отрезок разбирается по двум датам');
+ check(pub4.parseRange('2099-02-01',now).label==='2099-02-01 + 7 дней','Одна дата — неделя от неё');
+ check(pub4.parseRange('2099-13-45',now).label==='последние 7 дней','Битая дата не ломает сборку');
+ // Подпись берёт даты из отрезка, а не из «сегодня».
+ const cap=pub4.carouselCaption([{slot:{from_name:'A',to_name:'B',division:'C'}}],exact,[]);
+ check(/05 Jan — 11 Jan/.test(cap),'В подписи стоят даты выбранного отрезка');
+
+ const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/\btest\b/.test(bot4)&&/Так опрос выглядит у игрока/.test(bot4),'Есть превью опроса перед рассылкой');
+ check(/instagramAskText\('ru'\)/.test(bot4)&&/instagramAskText\('en'\)/.test(bot4),'Превью показывает обе языковые версии');
+ check(/parseRange\(text\.replace/.test(bot4),'Команды подборок принимают даты');
+
+ // Анкета спрашивает согласие и прячет ник у отказавшихся.
+ const form=await fs.readFile(path.join(root,'public','apply.html'),'utf8');
+ check(/id="photoConsent"/.test(form),'В анкете есть вопрос про публикацию');
+ check(/consentLabel:'Публиковать вас в Instagram лиги\?'/.test(form)&&/consentLabel:'Publish you on the league Instagram\?'/.test(form),'Вопрос переведён');
+ check(/function toggleInstagram/.test(form),'Поле инстаграма прячется при отказе');
+ check(/photo_publication_consent:\$\('photoConsent'\)\.value/.test(form),'Ответ уезжает на сервер');
+ check(/@phukettennisfamily/.test(form),'Аккаунт назван прямо в подсказке к полю, без отдельной кнопки');
+
+ // Ответ доезжает до таблицы — раньше инстаграм из анкеты терялся.
+ const sh=await fs.readFile(path.join(root,'sheets.js'),'utf8');
+ check(/instagram: profile\.instagram \|\| existing\?\.instagram/.test(sh),'Инстаграм из анкеты попадает в таблицу');
+ check(/photo_publication_consent: profile\.photo_publication_consent/.test(sh),'Согласие из анкеты попадает в таблицу');
+ const idx4=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/function consentFromForm/.test(idx4),'Ответ анкеты приводится к YES/NO/пусто');
+
+ // Ссылка на аккаунт в приветствии и после анкеты.
+ const kb=await fs.readFile(path.join(root,'keyboards.js'),'utf8');
+ // Отдельных кнопок под Instagram нет: ссылка живёт строкой в тексте.
+ check(!/Instagram/.test(kb),'В приветственной клавиатуре нет отдельной кнопки Instagram');
+ check(!/📸 Наш Instagram/.test(idx4),'После анкеты тоже нет отдельной кнопки');
+ check(/href="\$\{IG_PROFILE_URL\}">Instagram<\/a>/.test(idx4),'Ссылка встроена в текст сообщения после анкеты');
+ check(/href="\$\{INSTAGRAM_URL\}">Instagram<\/a>/.test(await fs.readFile(path.join(root,'admin.js'),'utf8')),'Ссылка встроена в текст приветствия');
+ const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
+ check(/Постеры матчей и результаты выкладываем/.test(adm)&&/Match posters and results go to our/.test(adm),'В тексте приветствия сказано про Instagram');
+ // Пропущенный вопрос — это разрешение: публикуем, просто не отмечаем.
+ check(sheets.publicationAllowed({})===true&&sheets.publicationAllowed({photo_publication_consent:''})===true,'Молчание считается разрешением');
+ const silent=await pub4.matchPublicity({from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two'});
+ check(silent.allowed===true,'Матч двоих промолчавших публикуется');
+ check(silent.handles.length===0,'Промолчавших просто не отмечаем');
+ check(/Не ответите — ничего страшного/.test(await fs.readFile(path.join(root,'publicity.js'),'utf8')),'В опросе прямо сказано, что молчание — не отказ');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

@@ -1250,12 +1250,55 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/instagram_photos_last/.test(src),'Повтор в тот же четверг отсекается отметкой');
 
  const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/text === '\/instagram_photos'/.test(bot3),'Есть команда ручной сборки фотографий');
+ check(/text\.startsWith\('\/instagram_photos'\)/.test(bot3),'Есть команда ручной сборки фотографий');
  check(/data === 'igweek:go' \|\| data === 'igphotos:go'/.test(bot3),'Обе подборки публикуются одним обработчиком');
  const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
  check(/cmd:'instagram_photos'/.test(tg3),'Команда /instagram_photos в едином списке');
  const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
  check(/runWeeklyPhotos\(Date\.now\(\), evAdmin\)/.test(idx3),'Четверговая подборка висит на общем проходе');
+}
+
+
+// --- Диапазоны, превью опроса, согласие в анкете, ссылки на Instagram ------
+{
+ const pub4=await load('publicity.js');
+ const now=Date.parse('2099-03-01T12:00:00Z');
+ check(pub4.parseRange('',now).label==='последние 7 дней','Без аргумента — последняя неделя');
+ check(pub4.parseRange('-2',now).label==='2 недели назад','Неделя назад задаётся числом');
+ const exact=pub4.parseRange('2099-01-05 2099-01-11',now);
+ check(exact.label==='2099-01-05 — 2099-01-11'&&exact.to>exact.from,'Точный отрезок разбирается по двум датам');
+ check(pub4.parseRange('2099-02-01',now).label==='2099-02-01 + 7 дней','Одна дата — неделя от неё');
+ check(pub4.parseRange('2099-13-45',now).label==='последние 7 дней','Битая дата не ломает сборку');
+ // Подпись берёт даты из отрезка, а не из «сегодня».
+ const cap=pub4.carouselCaption([{slot:{from_name:'A',to_name:'B',division:'C'}}],exact,[]);
+ check(/05 Jan — 11 Jan/.test(cap),'В подписи стоят даты выбранного отрезка');
+
+ const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/\btest\b/.test(bot4)&&/Так опрос выглядит у игрока/.test(bot4),'Есть превью опроса перед рассылкой');
+ check(/instagramAskText\('ru'\)/.test(bot4)&&/instagramAskText\('en'\)/.test(bot4),'Превью показывает обе языковые версии');
+ check(/parseRange\(text\.replace/.test(bot4),'Команды подборок принимают даты');
+
+ // Анкета спрашивает согласие и прячет ник у отказавшихся.
+ const form=await fs.readFile(path.join(root,'public','apply.html'),'utf8');
+ check(/id="photoConsent"/.test(form),'В анкете есть вопрос про публикацию');
+ check(/consentLabel:'Публиковать вас в Instagram лиги\?'/.test(form)&&/consentLabel:'Publish you on the league Instagram\?'/.test(form),'Вопрос переведён');
+ check(/function toggleInstagram/.test(form),'Поле инстаграма прячется при отказе');
+ check(/photo_publication_consent:\$\('photoConsent'\)\.value/.test(form),'Ответ уезжает на сервер');
+ check(/IG_URL='https:\/\/www\.instagram\.com\/phukettennisfamily\//.test(form),'В анкете есть ссылка на аккаунт');
+
+ // Ответ доезжает до таблицы — раньше инстаграм из анкеты терялся.
+ const sh=await fs.readFile(path.join(root,'sheets.js'),'utf8');
+ check(/instagram: profile\.instagram \|\| existing\?\.instagram/.test(sh),'Инстаграм из анкеты попадает в таблицу');
+ check(/photo_publication_consent: profile\.photo_publication_consent/.test(sh),'Согласие из анкеты попадает в таблицу');
+ const idx4=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/function consentFromForm/.test(idx4),'Ответ анкеты приводится к YES/NO/пусто');
+
+ // Ссылка на аккаунт в приветствии и после анкеты.
+ const kb=await fs.readFile(path.join(root,'keyboards.js'),'utf8');
+ check(/Наш Instagram/.test(kb)&&/Our Instagram/.test(kb),'Кнопка Instagram в приветствии на двух языках');
+ check(/📸 Наш Instagram/.test(idx4),'Кнопка Instagram после сохранения анкеты');
+ const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
+ check(/Мы выкладываем постеры матчей и результаты в Instagram/.test(adm)&&/We publish match posters and results on Instagram/.test(adm),'В тексте приветствия сказано про Instagram');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
