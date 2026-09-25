@@ -10,6 +10,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findApplicantByTelegramId } from './sheets.js';
 import { matchDataForSlot, playerPhotoForPoster } from './matchcard.js';
+import { sponsorsAvailable, sponsorStrip } from './sponsors.js';
+// Пробрасываем дальше: снаружи удобнее спрашивать у модуля постера.
+export { sponsorsAvailable };
 
 const WIDTH = 1080;
 const HEIGHT = 1920;
@@ -237,13 +240,10 @@ const L={
   titleY:168, logoTop:198, logoBox:{ w:240, h:150 },
   panel:{ x:40, y:1120, w:1000, h:424, r:38 },
   cxL:240, cxR:840, nameMax:300, nameSize:40, nameMin:26, scoreMax:58, scoreMin:28, gap:26,
-  // Плашка партнёров подстраивается под сам файл логотипов: жёстко заданы
-  // только границы свободной полосы. Панель счёта кончается на 1544, нижние 5%
-  // кадра (от 1824) закрыты интерфейсом Stories — значит плашка живёт между
-  // 1552 и 1818. Дальше высота и ширина считаются по пропорциям картинки,
-  // см. sponsorLayout(): узкая полоска получит узкую плашку, широкая — во всю
-  // ширину кадра. Растягивать логотипы под рамку нельзя, они бы поехали.
-  sponsor:{ bottom:1818, top:1552, maxW:1000, maxH:200, minW:520, padX:36, padTop:42, padBottom:20, r:32 }
+  // Партнёры: никакой рамки и подписи, просто свободная полоса под панелью
+  // счёта. Панель кончается на 1544, нижние 5% кадра (от 1824) закрыты
+  // интерфейсом Stories — значит лента живёт между 1556 и 1818.
+  sponsor:{ top:1556, bottom:1818 }
 };
 // Ширину текста считаем приблизительно: точных метрик шрифта у нас нет, а
 // librsvg их не отдаёт. Коэффициент подобран по этому начертанию и намеренно
@@ -322,37 +322,11 @@ export function posterStageLabel(match={}) {
   return 'GROUP STAGE';
 }
 
-// Логотипы. Организация — assets/match-card-logos/ptf.png, спонсоры — ОДИН
-// общий файл assets/sponsors.png. Нет файла — плашки спонсоров нет вовсе:
-// пустая рамка на публикации выглядит хуже, чем её отсутствие.
-const SPONSOR_FILE=path.join(ASSETS_DIR,'sponsors.png');
-// Максимальное поле под логотипы. Файл вписывается внутрь с сохранением
-// пропорций, а плашка потом обжимается по фактическому размеру картинки.
-export const SPONSOR_BOX={ width:L.sponsor.maxW, height:L.sponsor.maxH };
-export function sponsorsAvailable() {
-  try { return fs.statSync(SPONSOR_FILE).size>0; } catch { return false; }
-}
-// Считаем плашку от самой картинки: вписали файл в свободную полосу, а рамку
-// нарисовали вокруг того, что получилось. Так любой формат файла — и широкая
-// лента, и почти квадратный блок — лежит в плашке без пустых полей.
-export async function sponsorLayout() {
-  if(!sponsorsAvailable())return null;
-  const S=L.sponsor;
-  try {
-    const strip=await sharp(SPONSOR_FILE)
-      .resize({ width:S.maxW, height:S.maxH, fit:'inside', withoutEnlargement:true }).png().toBuffer();
-    const meta=await sharp(strip).metadata();
-    const iw=meta.width||S.maxW, ih=meta.height||S.maxH;
-    const w=Math.min(S.maxW,Math.max(S.minW,iw+S.padX*2));
-    const h=S.padTop+ih+S.padBottom;
-    const y=Math.max(S.top,S.bottom-h);
-    return {
-      plate:{ x:Math.round((WIDTH-w)/2), y, w, h:S.bottom-y, r:S.r },
-      layer:{ input:strip, left:Math.round((WIDTH-iw)/2), top:y+S.padTop },
-      image:{ width:iw, height:ih }
-    };
-  } catch(e) { console.error('poster sponsors failed:',e.message); return null; }
-}
+// Логотипы. Организация — assets/match-card-logos/ptf.png, партнёры — один
+// общий файл assets/sponsors.png, см. sponsors.js.
+// Свободная полоса под панелью счёта на постере матча.
+export const SPONSOR_BAND={ top:L.sponsor.top, bottom:L.sponsor.bottom };
+export const posterSponsorStrip = () => sponsorStrip(SPONSOR_BAND);
 async function posterLogoLayers(sponsor=null) {
   const layers=[];
   try {
@@ -380,8 +354,7 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
     divisionName&&!/^Division\b/i.test(divisionName)?`DIVISION ${divisionName}`:divisionName.toUpperCase(),
     match.season?`SEASON ${match.season}`:''
   ].filter(Boolean).join(' · ');
-  const sponsor=await sponsorLayout();
-  const S=sponsor?.plate||null;
+  const sponsor=await posterSponsorStrip();
   const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
   <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="${C.bg1}" stop-opacity=".66"/>
@@ -409,9 +382,6 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
   ${formSvg(match.loserMeta?.form,L.cxR,P.y+216)}
   ${rankPlate(match.winnerMeta,L.cxL,P.y+256)}
   ${rankPlate(match.loserMeta,L.cxR,P.y+256)}
-  ${S?`<rect x="${S.x}" y="${S.y}" width="${S.w}" height="${S.h}" rx="${S.r}" fill="${C.bg2}" fill-opacity=".72" stroke="${C.plateLine}"/>
-  <text x="${WIDTH/2}" y="${S.y+30}" text-anchor="middle" font-family="${FONT}" font-size="12" font-weight="800"
-    letter-spacing="4" fill="${C.mute}">SEASON PARTNERS</text>`:''}
 </svg>`);
   const logos=await posterLogoLayers(sponsor);
   return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})

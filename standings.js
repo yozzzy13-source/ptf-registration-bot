@@ -20,7 +20,8 @@ import { sendMessage, sendPhotoBuffer } from './telegram.js';
 import { ensureExtraSheet, appendObjects, getRows, getSetting, setSetting } from './sheets.js';
 import { availableDivisions, divisionGroups, divisionDisplayName, getDivisionTable, latestSeason } from './division.js';
 import { playerPhotoForPoster } from './matchcard.js';
-import { POSTER_FONT as FONT, POSTER_COLORS as C, sponsorLayout } from './matchposter.js';
+import { POSTER_FONT as FONT, POSTER_COLORS as C } from './matchposter.js';
+import { sponsorStrip } from './sponsors.js';
 import { instagramEnabled, publishStory } from './instagram.js';
 import { nowISO } from './util.js';
 
@@ -162,11 +163,13 @@ function moveChip(move, x, y) {
 
 export async function renderStandingsPoster(data = {}, { title = '', subtitle = '' } = {}) {
   const rows = (data.rows || []).slice(0, MAX_ROWS);
-  const sponsor = await sponsorLayout();
-  const S = sponsor?.plate || null;
+  // Партнёры: та же лента, что на постере матча, в той же свободной полосе —
+  // без рамки и подписи, просто снизу кадра.
+  const SPONSOR = { top: 1556, bottom: 1818 };
+  const sponsor = await sponsorStrip(SPONSOR);
   // Блок строк центрируем в полосе между шапкой и плашкой партнёров: группы
   // разной длины, и прибитая к верху таблица оставляла бы внизу пустоту.
-  const bandTop = 340, bandBottom = (S ? S.y : 1760) - 28;
+  const bandTop = 340, bandBottom = SPONSOR.top - 28;
   const first = Math.round(bandTop + Math.max(0, (bandBottom - bandTop - rows.length * L.row) / 2));
   const head = first - 26;
   const bodyBottom = first + rows.length * L.row + 18;
@@ -217,9 +220,6 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
   ${body}
   ${data.baseline ? `<text x="${WIDTH / 2}" y="${Math.min(bodyBottom + 40, 1500)}" text-anchor="middle" font-family="${FONT}"
     font-size="18" font-weight="700" letter-spacing="2" fill="${C.mute}">FIRST ISSUE — MOVEMENT STARTS NEXT WEEK</text>` : ''}
-  ${S ? `<rect x="${S.x}" y="${S.y}" width="${S.w}" height="${S.h}" rx="${S.r}" fill="${C.bg2}" fill-opacity=".72" stroke="${C.plateLine}"/>
-  <text x="${WIDTH / 2}" y="${S.y + 30}" text-anchor="middle" font-family="${FONT}" font-size="12" font-weight="800"
-    letter-spacing="4" fill="${C.mute}">SEASON PARTNERS</text>` : ''}
 </svg>`);
 
   const layers = [{ input: svg, left: 0, top: 0 }];

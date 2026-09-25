@@ -18,6 +18,7 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getFileBuffer } from './telegram.js';
 import { findApplicantByTelegramId, getMasterPhotos } from './sheets.js';
+import { sponsorsAvailable, sponsorStrip } from './sponsors.js';
 
 const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
 const CARD_LOGOS_DIR = path.join(ASSETS_DIR, 'match-card-logos');
@@ -25,7 +26,25 @@ const CARD_LOGOS_DIR = path.join(ASSETS_DIR, 'match-card-logos');
 // Любые прозрачные PNG/WebP/SVG из этой папки автоматически появляются в
 // нижней части следующей карточки. Список перечитывается на каждую генерацию:
 // чтобы сменить партнёров, достаточно заменить файлы и перезапустить не нужно.
+// Свободная полоса под колонками статистики: рамки и подписи там нет, просто
+// пустое место, куда ложится общая лента партнёров во всю ширину карточки.
+const CARD_SPONSOR_BAND = { top: 900, bottom: 1140 };
 async function cardLogoComposites(canvasWidth = 1080, canvasHeight = 1148) {
+  // Один общий файл партнёров главнее папки с отдельными логотипами: он
+  // одинаково выглядит на карточке, постере матча и постере таблицы.
+  if (sponsorsAvailable()) {
+    const layers = [];
+    try {
+      const org = await sharp(path.join(CARD_LOGOS_DIR, 'ptf.png'))
+        .resize({ width: 230, height: 120, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+      const meta = await sharp(org).metadata();
+      layers.push({ input: org, left: Math.round((canvasWidth - (meta.width || 230)) / 2), top: 160 });
+    } catch (e) { if (e && e.code !== 'ENOENT') console.error('match card org logo failed:', e.message); }
+    const band = Math.min(CARD_SPONSOR_BAND.bottom, canvasHeight - 20);
+    const strip = await sponsorStrip({ top: CARD_SPONSOR_BAND.top, bottom: band, canvas: canvasWidth });
+    if (strip?.layer) layers.push(strip.layer);
+    return layers;
+  }
   let files = [];
   try {
     files = fs.readdirSync(CARD_LOGOS_DIR)
