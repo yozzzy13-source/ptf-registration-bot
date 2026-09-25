@@ -537,33 +537,40 @@ export async function renderInstagramMatchCard(match = {}) {
 // контекста, снятого results.js перед записью счёта. Если контекста нет
 // (карточка перевыпущена спустя долгое время, или сервер перезапускался
 // между записью и рассылкой) — просто не показываем эти блоки.
-// Когда контекста нет (постер собирают по старому матчу, или сервер
-// перезапускался между записью счёта и рассылкой) — не оставляем карточку
-// пустой, а восстанавливаем то же самое из журнала дивизиона: форму до этого
-// матча включительно, место после него и место до него. Считается это дольше,
-// чем чтение контекста, зато старый матч получает такую же карточку, как
-// свежий, а не панель с одним счётом.
+// Контекста нет — постер собирают по старому матчу, или сервер перезапускался
+// между записью счёта и рассылкой. Тогда берём ровно ту же логику, что и
+// карточка результата, только считаем её сейчас:
+//
+//  • форма — из витрины профилей (Frontend_Profile_All.recent_form), то есть
+//    по всей истории игрока, а не по одному журналу текущего дивизиона;
+//    витрина не заполнена — падаем на Match_Log, как и карточка;
+//  • место — из живой таблицы дивизиона, теми же терпимыми сравнениями имён.
+//
+// Стрелку движения задним числом не рисуем: место «до» карточка снимает в
+// момент записи счёта, когда строка матча ещё пуста, и восстановить его из
+// сегодняшних данных нельзя. Плашка выходит с номером места, но без пилюли.
 async function metasFromSheets(slot, winnerIsFrom, seasonHint = '') {
   const division = txt(slot.division), season = txt(seasonHint) || txt(slot.season), group = txt(slot.group);
   if (!division) return [null, null];
   const p1 = txt(slot.from_name), p2 = txt(slot.to_name);
   try {
-    const { divisionSheetId, getDivisionTable, recentFormBefore, findMatchNumber } = await import('./division.js');
-    const { sameName } = await import('./sheets.js');
-    const spreadsheetId = await divisionSheetId(division, season, group);
-    if (!spreadsheetId) return [null, null];
-    const number = await findMatchNumber(spreadsheetId, p1, p2);
-    const [form1, form2, after, before] = await Promise.all([
-      recentFormBefore(spreadsheetId, p1, number, 5).catch(() => []),
-      recentFormBefore(spreadsheetId, p2, number, 5).catch(() => []),
+    const { divisionSheetId, getDivisionTable, recentFormBefore } = await import('./division.js');
+    const { sameName, getLeagueProfiles } = await import('./sheets.js');
+    const [table, profiles, spreadsheetId] = await Promise.all([
       getDivisionTable(division, season, group).catch(() => null),
-      number > 1 ? getDivisionTable(division, season, group, { upTo: number - 1 }).catch(() => null) : null
+      getLeagueProfiles().catch(() => []),
+      divisionSheetId(division, season, group).catch(() => '')
     ]);
-    const place = (table, name) => table?.ok
-      ? (table.players || []).find(x => sameName(x.name, name))?.place
-      : undefined;
-    const fromMeta = { form: form1, fp: null, position: { before: place(before, p1), after: place(after, p1) } };
-    const toMeta = { form: form2, fp: null, position: { before: place(before, p2), after: place(after, p2) } };
+    // Та же цепочка, что в results.js: сначала витрина профилей, затем журнал.
+    const formOf = async name => {
+      const shown = profiles.find(x => sameName(x.name, name))?.form;
+      if (Array.isArray(shown) && shown.length) return shown.slice(-5);
+      return spreadsheetId ? recentFormBefore(spreadsheetId, name, 0).catch(() => []) : [];
+    };
+    const [form1, form2] = await Promise.all([formOf(p1), formOf(p2)]);
+    const place = name => table?.ok ? table.players.find(x => sameName(x.name, name))?.place : undefined;
+    const fromMeta = { form: form1, fp: null, position: { after: place(p1) } };
+    const toMeta = { form: form2, fp: null, position: { after: place(p2) } };
     return winnerIsFrom ? [fromMeta, toMeta] : [toMeta, fromMeta];
   } catch (e) { console.error('card meta rebuild failed:', e.message); return [null, null]; }
 }
