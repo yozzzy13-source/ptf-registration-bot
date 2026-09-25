@@ -1062,4 +1062,49 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(Number(boot.body.result_after_min)===90,'Порог уезжает в интерфейс при загрузке');
 }
 
+
+// --- Постер: новая раскладка, стадия матча и один общий файл спонсоров ------
+{
+ const src=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
+ // Промпт: портретное кадрирование вместо общего плана.
+ check(/Crop each player just below the shoulders, at mid-chest level/.test(src),'Промпт требует портретного кадрирования по грудь');
+ check(/Do not show the waist, hips, legs or full torso/.test(src),'Промпт прямо запрещает общий план');
+ check(!/Show both players from approximately the chest or waist upward/.test(src),'Старая формулировка кадрирования убрана');
+
+ // Оформление взято из карточки матча, Fantasy Points нет.
+ check(/gold:'#C9A76A'/.test(src)&&/amber:'#E8A45C'/.test(src),'Палитра та же, что в карточке матча');
+ check(!/FANTASY POINTS/i.test(src.replace(/\/\/[^\n]*/g,'')),'Fantasy Points на постере нет');
+ check(/DIVISION RANK/.test(src),'Место в дивизионе на постере есть');
+ check(!/DejaVu Sans,Arial/.test(src),'Зашитый чужой шрифт убран — берём шрифт карточки');
+
+ // Один общий файл спонсоров, и без него плашки просто нет.
+ check(/const SPONSOR_FILE=path\.join\(ASSETS_DIR,'sponsors\.png'\)/.test(src),'Спонсоры читаются из assets/sponsors.png');
+ check(/hasSponsors\?/.test(src),'Без файла спонсоров плашка не рисуется');
+
+ const poster=await import(pathToFileURL(path.join(root,'matchposter.js')).href);
+ check(poster.sponsorsAvailable()===false,'Файла спонсоров сейчас нет — и это не ошибка');
+ check(poster.posterStageLabel({round:'SF'})==='PLAYOFF · SEMIFINAL','Стадия читается из round слота');
+ check(poster.posterStageLabel({round:'QF'})==='PLAYOFF · QUARTERFINAL','Четвертьфинал подписан');
+ check(poster.posterStageLabel({round:'Final'})==='PLAYOFF · FINAL','Финал подписывается финалом');
+ check(poster.posterStageLabel({round:'3rd'})==='PLAYOFF · THIRD PLACE MATCH','Матч за третье место подписан');
+ check(poster.posterStageLabel({})==='GROUP STAGE','Обычный матч — групповой этап');
+ // На постере не должно быть ни одной русской буквы: картинка уходит всем
+ // сразу, в том числе в Instagram.
+ const drawn=src.split('\n').filter(line=>!/^\s*\/\//.test(line)).join('\n');
+ const cyrillic=[...drawn.matchAll(/>[^<>]*[А-Яа-яЁё][^<>]*</g)].map(m=>m[0]);
+ check(!cyrillic.length,'В разметке постера нет русского текста: '+cyrillic.join(' | '));
+ check(/SEASON PARTNERS/.test(src),'Подпись плашки спонсоров английская');
+ check(poster.posterStageLabel({label:'TECHNICAL RESULT'})==='TECHNICAL RESULT','Техническое поражение перебивает стадию');
+
+ // Стадия доезжает из слота в данные постера.
+ const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ check(/round:slot\.round\|\|''/.test(card),'Стадия матча передаётся из слота в данные постера');
+
+ // Команда на постер по уже сыгранному матчу есть и в /help, и в меню.
+ const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'poster_test'/.test(tg),'Команда /poster_test попала в единый список команд');
+ const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/text\.startsWith\('\/poster_test'\)/.test(bot),'Обработчик /poster_test на месте');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
