@@ -16,7 +16,7 @@
 // SEASON_END автоматика молчит, пока в Settings не появится новый сезон.
 import sharp from 'sharp';
 import { TIMEZONE } from './config.js';
-import { sendMessage, sendPhotoBuffer } from './telegram.js';
+import { sendMessage, sendDocumentBuffer } from './telegram.js';
 import { ensureExtraSheet, appendObjects, getRows, getSetting, setSetting, publishedAvatars, getMasterPhotos, sameName } from './sheets.js';
 import { availableDivisions, divisionGroups, divisionDisplayName, getDivisionTable, latestSeason } from './division.js';
 import { playerPhotoForPoster } from './matchcard.js';
@@ -280,20 +280,21 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
 }
 
 // ------------------------------------------------------------- подпись
-export const STANDINGS_HASHTAGS = ['#phuket', '#tennis', '#phukettennis', '#phukettennisfamily'];
+// Подпись к сторис — одно короткое предложение и всё. Ни хэштегов, ни названия
+// дивизиона, ни дат: в сторис длинный текст просто не помещается, а дивизион,
+// период и все цифры и так нарисованы на самой картинке.
 const TEXT_MODEL = process.env.STANDINGS_TEXT_MODEL || 'gpt-4o-mini';
 const OPENAI_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 
-// Одно предложение по группе. Просим модель, но никогда на неё не полагаемся:
-// если ключа нет или запрос не прошёл, собираем фразу сами из тех же фактов.
-function fallbackSentence(data, title) {
+// Просим модель, но никогда на неё не полагаемся: нет ключа или запрос не
+// прошёл — собираем фразу сами из тех же фактов.
+function fallbackSentence(data) {
   const rows = data.rows || [];
   const top = rows[0];
   const climber = rows.filter(r => Number.isFinite(r.move) && r.move > 0).sort((a, b) => b.move - a.move)[0];
-  const parts = [];
-  if (top) parts.push(`${top.name} leads ${title.replace(/^DIVISION\s+/i, 'Division ')} with ${top.points} points from ${top.matches} matches`);
-  if (climber) parts.push(`${climber.name} is the week's biggest mover, up ${climber.move}`);
-  return (parts.join(', ') || `${title} standings updated`) + '.';
+  if (climber && top) return `${top.name} stays on top, ${climber.name} climbs ${climber.move}.`;
+  if (top) return `${top.name} leads with ${top.points} points.`;
+  return 'Standings updated.';
 }
 async function askForSentence(prompt) {
   if (!OPENAI_KEY) return '';
@@ -304,9 +305,9 @@ async function askForSentence(prompt) {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: TEXT_MODEL, temperature: 0.7, max_tokens: 90,
+        model: TEXT_MODEL, temperature: 0.7, max_tokens: 60,
         messages: [
-          { role: 'system', content: 'You write one short English sentence for an amateur tennis league Instagram story. No emoji, no hashtags, no quotes, max 25 words.' },
+          { role: 'system', content: 'You write ONE short English sentence for an Instagram story about amateur tennis standings. Max 14 words. No emoji, no hashtags, no quotes. Never name the division or the group — the image already shows them. Just say what is happening in the table.' },
           { role: 'user', content: prompt }
         ]
       }),
@@ -318,13 +319,11 @@ async function askForSentence(prompt) {
   finally { clearTimeout(timer); }
 }
 
-export async function groupCaption(data, title, subtitle) {
+export async function groupCaption(data) {
   const rows = (data.rows || []).slice(0, MAX_ROWS);
   const facts = rows.map(r => `${r.place}. ${r.name} — ${r.points} pts, ${r.matches} played, ${r.wins} won`
     + (Number.isFinite(r.move) && r.move !== 0 ? `, ${r.move > 0 ? 'up' : 'down'} ${Math.abs(r.move)}` : '')).join('\n');
-  const sentence = await askForSentence(`League: Phuket Tennis Family. ${title}. Standings after this week:\n${facts}\n\nWrite one sentence about what happened in this group.`)
-    || fallbackSentence(data, title);
-  return [`🎾 ${title}`, '', sentence, '', subtitle, '', STANDINGS_HASHTAGS.join(' ')].join('\n');
+  return await askForSentence(`Standings after this week:\n${facts}`) || fallbackSentence(data);
 }
 
 // ------------------------------------------------------------- выпуск
@@ -349,7 +348,7 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
     const title = groupTitle(g.letter, g.group, g.title);
     const subtitle = `SEASON ${useSeason} · ${spanLabel(data, now)}`;
     const buffer = await renderStandingsPoster(data, { title, subtitle });
-    items.push({ key: label, letter: g.letter, group: g.group, title, subtitle, data, buffer, caption: await groupCaption(data, title, subtitle) });
+    items.push({ key: label, letter: g.letter, group: g.group, title, subtitle, data, buffer, caption: await groupCaption(data) });
   }
   return { season: useSeason, items };
 }
@@ -357,6 +356,7 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
 // Отправка в тему: картинка группы, следом её подпись отдельным сообщением —
 // одним касанием копируется целиком. Кнопка публикации в сторис появляется
 // только когда Instagram подключён.
+const tableFileName = (item = {}) => `table-${String(item.key || 'group').toLowerCase()}-${dayIn()}.png`;
 export async function deliverStandings(prepared, { chatId, threadId = '', canPublish = false } = {}) {
   if (!chatId) return { ok: false, reason: 'no_chat' };
   const opts = threadId ? { message_thread_id: threadId } : {};
@@ -365,7 +365,10 @@ export async function deliverStandings(prepared, { chatId, threadId = '', canPub
     return { ok: true, empty: true };
   }
   for (const item of prepared.items) {
-    await sendPhotoBuffer(chatId, item.buffer, 'image/png', opts).catch(e => console.error('standings photo failed:', e.message));
+    // Файлом, а не фотографией: sendPhoto ужимает картинку до 1280 px, и
+    // сохранённая из чата таблица теряет качество ещё до Instagram.
+    await sendDocumentBuffer(chatId, item.buffer, tableFileName(item), opts)
+      .catch(e => console.error('standings file failed:', e.message));
     await sendMessage(chatId,
       `📊 <b>${esc(item.title)}</b>\n\n<b>Подпись</b> — нажмите, чтобы скопировать:\n<code>${esc(item.caption)}</code>`,
       { ...opts, ...(canPublish ? { reply_markup: { inline_keyboard: [[{ text: '📤 В сторис', callback_data: `igtable:${item.key}` }]] } } : {}) }

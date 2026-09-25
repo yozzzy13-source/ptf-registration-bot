@@ -1,5 +1,5 @@
 import {allSlots,pendingActionsFor} from './matchesdb.js';
-import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST, sendPhotoBuffer, withBulkRetries} from './telegram.js';
+import { sendMessage, editMessageText, answerCallbackQuery, copyMessage, webAppButton, setChatCommands, PLAYER_COMMANDS, MATCH_COMMANDS, ADMIN_COMMANDS, ADMIN_COMMAND_LIST, sendPhotoBuffer, sendDocumentBuffer, withBulkRetries} from './telegram.js';
 import { mainKeyboard, persistentKeyboard, menuAction, MENU_VERSION, textKeyboard, paymentKeyboard, cryptoKeyboard, contactOpenKeyboard, paymentEntryKeyboard, challengeKeyboard, directChatKeyboard, adminPanelKeyboard, languageKeyboard } from './keyboards.js';
 import { getBotText, getSetting, setSetting, getActiveEvents, getAllEvents, getPaymentMethods, findApplication, updateApplication, logMessage, logPayment, updateApplicantStatusByTelegramId, findApplicantByTelegramId, findApplicantByAdminTopicId, isProfileCompleted, createMatchChallenge, updateMatchChallenge, updateApplicantByTelegramId, findLatestPayableApplicationByTelegramId, findLatestApplicationByTelegramId, setUserLanguage, getPlayerLeagueInfo, findMatchChallenge, isActiveLeaguePlayer, setResultsOptOut, isResultsMutedFor, invalidateLeagueCache, buttonsFor, keyboardForGroup } from './sheets.js';
 import { t, tt } from './i18n.js';
@@ -26,6 +26,11 @@ const posterRuns = new Map();
 const posterJobsInFlight = new Set();
 // Собранная карусель недели ждёт кнопки. В памяти, а не в таблице: если бот
 // перезапустится, её проще собрать заново, чем хранить десяток картинок.
+// Имена файлов делаем осмысленными: в галерее и в папке «Загрузки» их потом
+// не приходится искать по дате и размеру.
+const slugName = (v='') => String(v).trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,24) || 'player';
+const today = () => new Date().toISOString().slice(0,10);
+const posterFileName = (match={},variant=1) => `poster-${slugName(match.winner)}-${slugName(match.loser)}-${today()}-v${variant}.png`;
 const weeklyBatches = new Map();
 export function setWeeklyBatch(kind, prepared) { weeklyBatches.set(String(kind), prepared); }
 export function setWeeklyCarousel(prepared) { setWeeklyBatch('cards', prepared); }
@@ -110,7 +115,9 @@ async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', on
       const finalBuffer=await composeMatchPoster(item.buffer,job.match);
       const variant=Number(item.variant || sent.length+1);
       const caption=`<b>🎨 Постер · вариант ${variant}</b>\n\n${escapeHtml(job.match.winner)} — ${escapeHtml(job.match.loser)}\nСчёт: <b>${escapeHtml(job.match.score)}</b>${job.comment?`\nКомментарий: <i>${escapeHtml(job.comment)}</i>`:''}\n\nФайл готов для сохранения из Telegram.`;
-      const result=await sendPhotoBuffer(chatId,finalBuffer,'image/png',{
+      // Файлом, а не фотографией: sendPhoto пережимает картинку до 1280 px,
+      // и сохранённый из чата постер теряет качество ещё до Instagram.
+      const result=await sendDocumentBuffer(chatId,finalBuffer,posterFileName(job.match,variant),{
         ...opts,
         caption,
         reply_markup:{inline_keyboard:[
@@ -122,7 +129,7 @@ async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', on
           ]
         ]}
       });
-      const fileId=(result?.photo || result?.result?.photo || []).slice(-1)[0]?.file_id || '';
+      const fileId=result?.document?.file_id || result?.result?.document?.file_id || '';
       // Готовую картинку держим в памяти: для Instagram нужен сам файл, а не
       // telegram file_id, и перегенерировать её ради публикации незачем.
       rememberPosterVariant(matchId,variant,{fileId,buffer:finalBuffer,comment:job.comment,createdAt:new Date().toISOString()});

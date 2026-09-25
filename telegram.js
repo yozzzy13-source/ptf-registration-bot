@@ -138,6 +138,61 @@ export async function sendPhotoBuffer(chat_id, buffer, mimeType = 'image/jpeg', 
   if (!json.ok) throw new Error(`sendPhoto: ${JSON.stringify(json)}`);
   return json.result;
 }
+// Отправка картинки ФАЙЛОМ. sendPhoto Телеграм пережимает сам: конвертирует
+// в JPEG и ужимает длинную сторону до 1280 px, поэтому сохранённый из чата
+// постер 1080×1920 оказывается копией с двойным сжатием. sendDocument отдаёт
+// файл байт в байт — это то, что нужно для публикации в Instagram руками.
+export async function sendDocumentBuffer(chat_id, buffer, filename = 'file.png', opts = {}) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  if (!buffer || !buffer.length) throw new Error('sendDocument: пустой файл');
+  const name = String(filename || 'file.png');
+  const ext = name.split('.').pop().toLowerCase();
+  const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+  const bytes = new Uint8Array(buffer.length);
+  bytes.set(buffer);
+  const form = new FormData();
+  form.append('chat_id', String(chat_id));
+  for (const [k, v] of Object.entries({ parse_mode: 'HTML', ...opts })) {
+    if (v === undefined || v === null || v === '') continue;
+    form.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+  }
+  form.append('document', new Blob([bytes], { type: mime }), name);
+  const send = async () => {
+    const res = await globalThis.fetch(`${API}/sendDocument`, { method: 'POST', body: form });
+    return res.json().catch(() => ({}));
+  };
+  const json = await callWithRetry(send, 'sendDocument');
+  if (!json.ok) throw new Error(`sendDocument: ${JSON.stringify(json)}`);
+  return json.result;
+}
+// Пачка файлов одним сообщением: те же оригиналы, но альбомом, чтобы недельная
+// подборка не растягивалась на двадцать сообщений.
+export async function sendDocumentAlbumBuffers(chat_id, items = [], opts = {}) {
+  if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
+  if (!Array.isArray(items) || !items.length) throw new Error('sendMediaGroup: нет файлов');
+  if (items.length > 10) throw new Error('sendMediaGroup: не больше 10 файлов за раз');
+  const form = new FormData();
+  form.append('chat_id', String(chat_id));
+  if (opts.message_thread_id) form.append('message_thread_id', String(opts.message_thread_id));
+  const media = [];
+  items.forEach((item, index) => {
+    const buffer = item?.buffer;
+    if (!buffer?.length) throw new Error('sendMediaGroup: пустой файл');
+    const name = String(item.filename || `file-${index + 1}.png`);
+    const ext = name.split('.').pop().toLowerCase();
+    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+    const bytes = new Uint8Array(buffer.length);
+    bytes.set(buffer);
+    const field = 'doc' + index;
+    media.push({ type: 'document', media: 'attach://' + field });
+    form.append(field, new Blob([bytes], { type: mime }), name);
+  });
+  form.append('media', JSON.stringify(media));
+  const res = await globalThis.fetch(API + '/sendMediaGroup', { method: 'POST', body: form });
+  const json = await res.json().catch(() => ({}));
+  if (!json.ok) throw new Error('sendMediaGroup: ' + JSON.stringify(json));
+  return json.result;
+}
 export async function sendPhotoAlbumBuffers(chat_id, items = [], opts = {}) {
   if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
   if (!Array.isArray(items) || !items.length) throw new Error('sendMediaGroup: нет файлов');

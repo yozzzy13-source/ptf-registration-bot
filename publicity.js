@@ -10,7 +10,7 @@
 //     вырезать одного нельзя.
 //  3. Ничего не уходит в Instagram само. Сторис публикуется кнопкой под
 //     постером, карусель собирается по воскресеньям и тоже ждёт кнопки.
-import { sendMessage, sendPhotoBuffer, sendPhotoAlbumBuffers, answerCallbackQuery, getFileBuffer } from './telegram.js';
+import { sendMessage, sendDocumentAlbumBuffers, answerCallbackQuery, getFileBuffer } from './telegram.js';
 import { TIMEZONE } from './config.js';
 import {
   getAllActiveLeaguePlayers, findApplicantByTelegramId, updateApplicantByTelegramId,
@@ -328,8 +328,13 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
   // Telegram отдаёт максимум десять картинок за раз — шлём пачками, чтобы
   // подборка уходила целиком, сколько бы матчей ни было.
   for (let i = 0; i < prepared.images.length; i += 10) {
-    const chunk = prepared.images.slice(i, i + 10).map(x => ({ buffer: x.buffer, mimeType: 'image/png' }));
-    await sendPhotoAlbumBuffers(chatId, chunk, opts).catch(e => console.error('weekly album failed:', e.message));
+    // Файлами, а не фотографиями: sendPhoto ужимает картинку до 1280 px, и
+    // сохранённая из чата карточка теряет качество ещё до Instagram.
+    const chunk = prepared.images.slice(i, i + 10).map((x, n) => ({
+      buffer: x.buffer,
+      filename: `${/^image\/jpe?g$/.test(String(x.mime || '')) ? 'photo' : 'card'}-${i + n + 1}-${dayKey(Date.now())}.${/^image\/jpe?g$/.test(String(x.mime || '')) ? 'jpg' : 'png'}`
+    }));
+    await sendDocumentAlbumBuffers(chatId, chunk, opts).catch(e => console.error('weekly album failed:', e.message));
   }
   const skipped = prepared.skipped?.length
     ? `\n\nНе вошли (просили не публиковать): ${prepared.skipped.map(x => esc(x.blocked.join(', '))).join('; ')}`
