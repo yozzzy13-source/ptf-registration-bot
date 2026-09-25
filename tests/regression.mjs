@@ -1236,6 +1236,24 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 }
 
 
+// --- Постер старого матча: форма и место берутся по логике карточки ---------
+{
+ const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ check(/async function metasFromSheets/.test(card),'Без контекста карточка не остаётся пустой');
+ check(/if \(!ctx\) return metasFromSheets\(slot, winnerIsFrom, seasonHint\)/.test(card),'Запасной путь включается именно при отсутствии контекста');
+ check(/getLeagueProfiles\(\)/.test(card),'Форма берётся из витрины профилей — по всей истории игрока');
+ check(/return spreadsheetId \? recentFormBefore\(spreadsheetId, name, 0\)/.test(card),'Журнал дивизиона остаётся запасным источником формы, как в карточке');
+ check(/sameName\(x\.name, name\)\)\?\.place/.test(card),'Место читается из живой таблицы дивизиона');
+ check(/position: \{ after: place\(p1\) \}/.test(card),'Место «до» задним числом не выдумываем — стрелки нет');
+ check(/fp: null/.test(card),'Fantasy Points задним числом не выдумываем');
+
+ const results2=await fs.readFile(path.join(root,'results.js'),'utf8');
+ check(/recent_form/.test(results2)||/cardFormsBefore/.test(results2),'Карточка по-прежнему снимает контекст при записи счёта');
+ const div=await fs.readFile(path.join(root,'division.js'),'utf8');
+ check(!/upTo = 0/.test(div),'Срезов таблицы в прошлое нет — считаем по живой таблице');
+}
+
+
 // --- Таблицы дивизионов: вторник, снимки мест, по картинке на группу --------
 {
  const st=await load('standings.js');
@@ -1251,12 +1269,27 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(st.groupTitle('B','2','')==='DIVISION B · GROUP 2','Заголовок группы по-английски');
  check(!/[А-Яа-я]/.test(st.groupTitle('W','1','')),'В заголовке картинки нет кириллицы');
 
- const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]},'DIVISION B · GROUP 2','SEASON 2');
- check(/DIVISION B · GROUP 2/.test(cap),'Подпись называет группу');
- check(/#phukettennisfamily/.test(cap),'В подписи есть хэштеги');
+ const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]});
+ check(!/#/.test(cap),'В подписи к сторис нет хэштегов');
+ check(!/DIVISION|GROUP|SEASON/i.test(cap),'Дивизион, группа и сезон в тексте не повторяются — они на картинке');
+ check(cap.split(/\s+/).length<=16,'Подпись — одно короткое предложение');
  check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
  check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
 
+ check(/playerPhotoForPoster\(\{ telegramId, name \}\)/.test(src),'Аватарки идут по той же цепочке, что в карточке матча');
+ check(/publishedAvatars\(\)/.test(src),'Своя аватарка игрока находится по имени через витрину аватарок');
+ check(/sources\?\.master\.find\(\(\[n\]\) => sameName\(n, name\)\)/.test(src),'Фото из Players_Master подбирается терпимым сравнением имён');
+ check(/async function orgLogoLayer/.test(src),'В шапке таблицы есть логотип лиги');
+ check(/'match-card-logos', 'ptf\.png'/.test(src),'Логотип берётся из того же файла, что на постере матча');
+ const tg4=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/export async function sendDocumentBuffer/.test(tg4),'Картинки уходят файлом, без пережатия Телеграмом');
+ check(/sendDocumentBuffer\(chatId, item\.buffer, tableFileName\(item\)/.test(src),'Таблица приходит файлом');
+ check(/table-\$\{String\(item\.key/.test(src),'У файла осмысленное имя');
+ const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/sendDocumentBuffer\(chatId,finalBuffer,posterFileName/.test(bot4),'Постер матча приходит файлом');
+ check(/result\?\.document\?\.file_id/.test(bot4),'file_id у файла читается из document, а не из photo');
+ const pub4=await fs.readFile(path.join(root,'publicity.js'),'utf8');
+ check(/sendDocumentAlbumBuffers/.test(pub4),'Недельные подборки уходят файлами');
  check(/Standings Snapshots/.test(src),'Снимки мест лежат в нашей таблице, а не в таблицах дивизионов');
  check(/ensureExtraSheet/.test(src),'Лист снимков заводится сам');
  check(/const move = Number\.isFinite\(was\) \? was - p\.place : null/.test(src),'Движение считается от прошлого выпуска, а не от начала сезона');
