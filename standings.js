@@ -17,9 +17,12 @@
 import sharp from 'sharp';
 import { TIMEZONE } from './config.js';
 import { sendMessage, sendPhotoBuffer } from './telegram.js';
-import { ensureExtraSheet, appendObjects, getRows, getSetting, setSetting } from './sheets.js';
+import { ensureExtraSheet, appendObjects, getRows, getSetting, setSetting, publishedAvatars, getMasterPhotos, sameName } from './sheets.js';
 import { availableDivisions, divisionGroups, divisionDisplayName, getDivisionTable, latestSeason } from './division.js';
 import { playerPhotoForPoster } from './matchcard.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { POSTER_FONT as FONT, POSTER_COLORS as C } from './matchposter.js';
 import { sponsorStrip } from './sponsors.js';
 import { instagramEnabled, publishStory } from './instagram.js';
@@ -108,8 +111,9 @@ export async function buildStandings(season, letter, group = '', snapshots = nul
 
 // ------------------------------------------------------------- рисование
 const MAX_ROWS = Math.max(4, Math.min(14, Number(process.env.STANDINGS_MAX_ROWS || 12)));
+const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
 const L = {
-  title: 148, name: 206, sub: 250,
+  title: 96, logoTop: 126, logoBox: { w: 200, h: 112 }, name: 300, sub: 340,
   head: 322, first: 366, row: 104,
   colPlace: 74, colAvatar: 150, colName: 232,
   colP: 690, colW: 790, colPts: 910, colMove: 1006
@@ -130,8 +134,34 @@ function fit(name = '', max = 20) {
   return s.slice(0, max - 1) + '…';
 }
 
-async function avatarCircle(row, size) {
-  const buffer = await playerPhotoForPoster({ name: row.name }).catch(() => null);
+// Фотографии игроков ищем по той же цепочке, что и везде в приложении:
+// своя аватарка игрока (avatar_file_id, лежит в Telegram), затем фото из
+// Players_Master, затем инициалы. Имена сверяем терпимо — «Yana D.» в одной
+// таблице и «Yana D» в другой это один человек, и строгое сравнение оставляло
+// половину таблицы без лиц. Карты читаем один раз на всю картинку.
+async function photoSources() {
+  const [avatars, master] = await Promise.all([
+    publishedAvatars().catch(() => new Map()),   // имя → telegram_id владельца аватарки
+    getMasterPhotos().catch(() => new Map())     // имя → ссылка на фото
+  ]);
+  return { avatars: [...avatars], master: [...master] };
+}
+async function playerPhotoBuffer(name, sources) {
+  // Сначала штатная цепочка карточки: своя аватарка игрока, потом
+  // Players_Master. Telegram-id берём из витрины аватарок по имени.
+  const telegramId = sources?.avatars.find(([n]) => sameName(n, name))?.[1] || '';
+  const own = await playerPhotoForPoster({ telegramId, name }).catch(() => null);
+  if (own?.length) return own;
+  // Карточка сверяет имена в Players_Master строго, поэтому «Yana D.» и
+  // «Yana D» для неё разные люди. Здесь добираем терпимым сравнением — иначе
+  // половина таблицы остаётся с инициалами вместо лиц.
+  const url = sources?.master.find(([n]) => sameName(n, name))?.[1];
+  if (!url) return null;
+  return globalThis.fetch(url, { redirect: 'follow' })
+    .then(r => r.ok ? r.arrayBuffer() : null).then(b => b && Buffer.from(b)).catch(() => null);
+}
+async function avatarCircle(row, size, sources) {
+  const buffer = await playerPhotoBuffer(row.name, sources);
   const mask = Buffer.from(`<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="#fff"/></svg>`);
   if (buffer?.length) {
     try {
@@ -145,6 +175,19 @@ async function avatarCircle(row, size) {
       font-size="${Math.round(size * 0.36)}" font-weight="800" fill="${C.mute}">${esc(initials(row.name))}</text>
   </svg>`);
   return sharp(svg).png().toBuffer();
+}
+
+// Логотип лиги в шапке — тот же файл, что на постере матча.
+async function orgLogoLayer() {
+  try {
+    const buffer = await sharp(path.join(ASSETS_DIR, 'match-card-logos', 'ptf.png'))
+      .resize({ width: L.logoBox.w, height: L.logoBox.h, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+    const meta = await sharp(buffer).metadata();
+    return { input: buffer, left: Math.round((WIDTH - (meta.width || L.logoBox.w)) / 2), top: L.logoTop };
+  } catch (e) {
+    if (e?.code !== 'ENOENT') console.error('standings logo failed:', e.message);
+    return null;
+  }
 }
 
 // Ярлычок движения — тот же, что в карточке матча: стрелка и число позиций.
@@ -169,7 +212,7 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
   const sponsor = await sponsorStrip(SPONSOR);
   // Блок строк центрируем в полосе между шапкой и плашкой партнёров: группы
   // разной длины, и прибитая к верху таблица оставляла бы внизу пустоту.
-  const bandTop = 340, bandBottom = SPONSOR.top - 28;
+  const bandTop = 372, bandBottom = SPONSOR.top - 28;
   const first = Math.round(bandTop + Math.max(0, (bandBottom - bandTop - rows.length * L.row) / 2));
   const head = first - 26;
   const bodyBottom = first + rows.length * L.row + 18;
@@ -223,9 +266,12 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
 </svg>`);
 
   const layers = [{ input: svg, left: 0, top: 0 }];
+  const logo = await orgLogoLayer();
+  if (logo) layers.push(logo);
+  const sources = await photoSources();
   const size = 62;
   for (let i = 0; i < rows.length; i++) {
-    const circle = await avatarCircle(rows[i], size).catch(() => null);
+    const circle = await avatarCircle(rows[i], size, sources).catch(() => null);
     if (circle) layers.push({ input: circle, left: L.colAvatar - size / 2, top: first + i * L.row + Math.round((L.row - 12 - size) / 2) });
   }
   if (sponsor?.layer) layers.push(sponsor.layer);
