@@ -77,7 +77,7 @@ const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|c
 synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardContexts=new Map();
-const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data)});
+const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
  if(modules.has(key))return modules.get(key);
@@ -1078,11 +1078,10 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(!/DejaVu Sans,Arial/.test(src),'Зашитый чужой шрифт убран — берём шрифт карточки');
 
  // Один общий файл спонсоров, и без него плашки просто нет.
- check(/const SPONSOR_FILE=path\.join\(ASSETS_DIR,'sponsors\.png'\)/.test(src),'Спонсоры читаются из assets/sponsors.png');
- check(/hasSponsors\?/.test(src),'Без файла спонсоров плашка не рисуется');
-
+ const sponsorsSrc=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
+ check(/SPONSOR_FILE = path\.join\(ASSETS_DIR, 'sponsors\.png'\)/.test(sponsorsSrc),'Спонсоры читаются из assets/sponsors.png');
  const poster=await import(pathToFileURL(path.join(root,'matchposter.js')).href);
- check(poster.sponsorsAvailable()===false,'Файла спонсоров сейчас нет — и это не ошибка');
+ check(poster.sponsorsAvailable()===false,'Без файла спонсоров лента просто не рисуется');
  check(poster.posterStageLabel({round:'SF'})==='PLAYOFF · SEMIFINAL','Стадия читается из round слота');
  check(poster.posterStageLabel({round:'QF'})==='PLAYOFF · QUARTERFINAL','Четвертьфинал подписан');
  check(poster.posterStageLabel({round:'Final'})==='PLAYOFF · FINAL','Финал подписывается финалом');
@@ -1093,7 +1092,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const drawn=src.split('\n').filter(line=>!/^\s*\/\//.test(line)).join('\n');
  const cyrillic=[...drawn.matchAll(/>[^<>]*[А-Яа-яЁё][^<>]*</g)].map(m=>m[0]);
  check(!cyrillic.length,'В разметке постера нет русского текста: '+cyrillic.join(' | '));
- check(/SEASON PARTNERS/.test(src),'Подпись плашки спонсоров английская');
+ check(!/SEASON PARTNERS/.test(src),'Подписи над логотипами нет — только сама лента');
  check(poster.posterStageLabel({label:'TECHNICAL RESULT'})==='TECHNICAL RESULT','Техническое поражение перебивает стадию');
 
  // Стадия доезжает из слота в данные постера.
@@ -1219,10 +1218,84 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/Do not light one player brightly and the other in shadow/.test(poster),'Запрет на разное освещение сформулирован прямо');
  // Плашка опущена, спонсорская стала компактнее.
  check(/panel:\{ x:40, y:1120/.test(poster),'Информационная плашка опущена ниже');
- check(/sponsor:\{ x:88, y:1578, w:904, h:228/.test(poster),'Плашка спонсоров компактнее и ниже');
- const panelBottom=1120+424, sponsorBottom=1578+228;
- check(sponsorBottom<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
- check(panelBottom<1578,'Плашки не накладываются друг на друга');
+ check(/sponsor:\{ top:1556, bottom:1818 \}/.test(poster),'Под партнёров оставлена свободная полоса под панелью счёта');
+ const panelBottom=1120+424;
+ check(1818<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
+ check(panelBottom<1556,'Лента не налезает на панель счёта');
+ check(!/SEASON PARTNERS/.test(poster),'Плашки и подписи под спонсорами больше нет');
+ check(!/<rect[^>]*S\.x/.test(poster),'Рамки вокруг логотипов не рисуем');
+ const strip=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
+ check(/fit: 'inside'/.test(strip),'Логотипы вписываются целиком, без растяжения и обрезки');
+ check(/width: Math\.round\(width \|\| canvas\)/.test(strip),'Лента идёт во всю ширину картинки');
+ check(/export async function sponsorStrip/.test(strip),'Лента партнёров собирается в одном месте для всех картинок');
+ const cardSrc=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ const standSrc=await fs.readFile(path.join(root,'standings.js'),'utf8');
+ check(/sponsorStrip/.test(cardSrc),'Карточка матча берёт ту же ленту');
+ check(/sponsorStrip/.test(standSrc),'Постер таблицы берёт ту же ленту');
+ check(/sponsorsAvailable\(\)/.test(cardSrc),'Общий файл партнёров главнее папки с отдельными логотипами');
+}
+
+
+// --- Постер старого матча: форма и место берутся по логике карточки ---------
+{
+ const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ check(/async function metasFromSheets/.test(card),'Без контекста карточка не остаётся пустой');
+ check(/if \(!ctx\) return metasFromSheets\(slot, winnerIsFrom, seasonHint\)/.test(card),'Запасной путь включается именно при отсутствии контекста');
+ check(/getLeagueProfiles\(\)/.test(card),'Форма берётся из витрины профилей — по всей истории игрока');
+ check(/return spreadsheetId \? recentFormBefore\(spreadsheetId, name, 0\)/.test(card),'Журнал дивизиона остаётся запасным источником формы, как в карточке');
+ check(/sameName\(x\.name, name\)\)\?\.place/.test(card),'Место читается из живой таблицы дивизиона');
+ check(/position: \{ after: place\(p1\) \}/.test(card),'Место «до» задним числом не выдумываем — стрелки нет');
+ check(/fp: null/.test(card),'Fantasy Points задним числом не выдумываем');
+
+ const results2=await fs.readFile(path.join(root,'results.js'),'utf8');
+ check(/recent_form/.test(results2)||/cardFormsBefore/.test(results2),'Карточка по-прежнему снимает контекст при записи счёта');
+ const div=await fs.readFile(path.join(root,'division.js'),'utf8');
+ check(!/upTo = 0/.test(div),'Срезов таблицы в прошлое нет — считаем по живой таблице');
+}
+
+
+// --- Таблицы дивизионов: вторник, снимки мест, по картинке на группу --------
+{
+ const st=await load('standings.js');
+ const at=iso=>Date.parse(iso);
+ const src=await fs.readFile(path.join(root,'standings.js'),'utf8');
+ check(st.WEEKLY_FROM==='2026-10-06','Автовыпуски начинаются 6 октября');
+ check(st.SEASON_END==='2026-11-08','После 8 ноября автоматика молчит');
+ check(st.standingsDue(at('2026-10-06T12:00:00Z')),'Вторник 19:00 по Пхукету — время таблиц');
+ check(!st.standingsDue(at('2026-10-07T12:00:00Z')),'В среду выпуск не собирается');
+ check(!st.standingsDue(at('2026-10-06T09:00:00Z')),'Во вторник утром выпуск не собирается');
+ check(!st.standingsDue(at('2026-09-29T12:00:00Z')),'До 6 октября автоматических выпусков нет — только руками');
+ check(!st.standingsDue(at('2026-11-10T12:00:00Z')),'После конца сезона выпусков нет');
+ check(st.groupTitle('B','2','')==='DIVISION B · GROUP 2','Заголовок группы по-английски');
+ check(!/[А-Яа-я]/.test(st.groupTitle('W','1','')),'В заголовке картинки нет кириллицы');
+
+ const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]},'DIVISION B · GROUP 2','SEASON 2');
+ check(/DIVISION B · GROUP 2/.test(cap),'Подпись называет группу');
+ check(/#phukettennisfamily/.test(cap),'В подписи есть хэштеги');
+ check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
+ check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
+
+ check(/playerPhotoForPoster\(\{ telegramId, name \}\)/.test(src),'Аватарки идут по той же цепочке, что в карточке матча');
+ check(/publishedAvatars\(\)/.test(src),'Своя аватарка игрока находится по имени через витрину аватарок');
+ check(/sources\?\.master\.find\(\(\[n\]\) => sameName\(n, name\)\)/.test(src),'Фото из Players_Master подбирается терпимым сравнением имён');
+ check(/async function orgLogoLayer/.test(src),'В шапке таблицы есть логотип лиги');
+ check(/'match-card-logos', 'ptf\.png'/.test(src),'Логотип берётся из того же файла, что на постере матча');
+ check(/Standings Snapshots/.test(src),'Снимки мест лежат в нашей таблице, а не в таблицах дивизионов');
+ check(/ensureExtraSheet/.test(src),'Лист снимков заводится сам');
+ check(/const move = Number\.isFinite\(was\) \? was - p\.place : null/.test(src),'Движение считается от прошлого выпуска, а не от начала сезона');
+ check(/data\.baseline \? '' :/.test(src),'Первый выпуск выходит без стрелок');
+ check(/if \(save\) for \(const item of prepared\.items\)/.test(src),'Снимок кладётся только после отправки');
+ check(/callback_data: `igtable:\$\{item\.key\}`/.test(src),'У каждой группы своя кнопка публикации');
+ check(/publishStory/.test(src)&&!/publishCarousel/.test(src),'Таблицы уходят в сторис по одной, а не каруселью');
+
+ const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/text\.startsWith\('\/tables'\)/.test(bot3),'Команда /tables есть');
+ check(/data\.startsWith\('igtable:'\)/.test(bot3),'Кнопка «В сторис» обрабатывается');
+ check(/\bdraft\b/.test(bot3),'Черновой прогон не сдвигает точку отсчёта');
+ const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'tables'/.test(tg3),'Команда есть и в /help, и в меню по слэшу');
+ const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/runWeeklyStandings/.test(idx3),'Вторничный выпуск подключён к общему проходу');
 }
 
 
