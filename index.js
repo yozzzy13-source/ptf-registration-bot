@@ -21,7 +21,7 @@ import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlo
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
-  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold } from './matchesdb.js';
+  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
@@ -599,6 +599,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
       can_match:v.canMatch, match_group:v.matchGroup, season:v.season,
       attention:pendingActionsFor(v.user.id,await allSlots()),
       courts, opponents, duration_min: MATCH_DURATION_MIN, is_admin: v.isAdmin,
+      result_after_min: await resultPromptDelayMin().catch(() => 90),
       can_book_court: COURT_BOOKING_OPEN || v.isAdmin,
       unplayed: await getUnplayedOpponents(v.division, v.profile.name, v.season, v.matchGroup).catch(() => ({ known:false, names:[] })),
       open_slots: openSlots.map(shape),
