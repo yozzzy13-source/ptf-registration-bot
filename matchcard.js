@@ -537,9 +537,39 @@ export async function renderInstagramMatchCard(match = {}) {
 // контекста, снятого results.js перед записью счёта. Если контекста нет
 // (карточка перевыпущена спустя долгое время, или сервер перезапускался
 // между записью и рассылкой) — просто не показываем эти блоки.
-async function buildPlayerMetas(slot, winnerIsFrom) {
+// Когда контекста нет (постер собирают по старому матчу, или сервер
+// перезапускался между записью счёта и рассылкой) — не оставляем карточку
+// пустой, а восстанавливаем то же самое из журнала дивизиона: форму до этого
+// матча включительно, место после него и место до него. Считается это дольше,
+// чем чтение контекста, зато старый матч получает такую же карточку, как
+// свежий, а не панель с одним счётом.
+async function metasFromSheets(slot, winnerIsFrom, seasonHint = '') {
+  const division = txt(slot.division), season = txt(seasonHint) || txt(slot.season), group = txt(slot.group);
+  if (!division) return [null, null];
+  const p1 = txt(slot.from_name), p2 = txt(slot.to_name);
+  try {
+    const { divisionSheetId, getDivisionTable, recentFormBefore, findMatchNumber } = await import('./division.js');
+    const { sameName } = await import('./sheets.js');
+    const spreadsheetId = await divisionSheetId(division, season, group);
+    if (!spreadsheetId) return [null, null];
+    const number = await findMatchNumber(spreadsheetId, p1, p2);
+    const [form1, form2, after, before] = await Promise.all([
+      recentFormBefore(spreadsheetId, p1, number, 5).catch(() => []),
+      recentFormBefore(spreadsheetId, p2, number, 5).catch(() => []),
+      getDivisionTable(division, season, group).catch(() => null),
+      number > 1 ? getDivisionTable(division, season, group, { upTo: number - 1 }).catch(() => null) : null
+    ]);
+    const place = (table, name) => table?.ok
+      ? (table.players || []).find(x => sameName(x.name, name))?.place
+      : undefined;
+    const fromMeta = { form: form1, fp: null, position: { before: place(before, p1), after: place(after, p1) } };
+    const toMeta = { form: form2, fp: null, position: { before: place(before, p2), after: place(after, p2) } };
+    return winnerIsFrom ? [fromMeta, toMeta] : [toMeta, fromMeta];
+  } catch (e) { console.error('card meta rebuild failed:', e.message); return [null, null]; }
+}
+async function buildPlayerMetas(slot, winnerIsFrom, seasonHint = '') {
   const ctx = takeCardContext(slot.challenge_id);
-  if (!ctx) return [null, null];
+  if (!ctx) return metasFromSheets(slot, winnerIsFrom, seasonHint);
   const fromMeta = { form: ctx.p1?.form || [], fp: Number.isFinite(ctx.fp?.p1) ? ctx.fp.p1 : null, position: { before: ctx.p1?.place } };
   const toMeta = { form: ctx.p2?.form || [], fp: Number.isFinite(ctx.fp?.p2) ? ctx.fp.p2 : null, position: { before: ctx.p2?.place } };
   try {
@@ -573,7 +603,7 @@ export async function matchDataForSlot(slot = {}, { winnerFirstScore, season = '
   const bothTechnical=String(slot.result_kind||'')==='technical'&&!slot.result_winner;
   const winnerIsFrom = bothTechnical || String(slot.result_winner) === String(slot.from_telegram_id);
   const score = typeof winnerFirstScore === 'function' ? winnerFirstScore(slot) : txt(slot.result_score);
-  const [winnerMeta, loserMeta] = await buildPlayerMetas(slot, winnerIsFrom).catch(() => [null, null]);
+  const [winnerMeta, loserMeta] = await buildPlayerMetas(slot, winnerIsFrom, season).catch(() => [null, null]);
   return {
     winner: winnerIsFrom ? slot.from_name : slot.to_name,
     loser: winnerIsFrom ? slot.to_name : slot.from_name,
