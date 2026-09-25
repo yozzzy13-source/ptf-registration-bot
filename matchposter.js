@@ -214,6 +214,9 @@ function posterFontFile() {
 const POSTER_FONT_FILE=posterFontFile();
 const POSTER_FAMILY=(POSTER_FONT_FILE&&posterFontFamily(path.join(ASSETS_DIR,POSTER_FONT_FILE)))||'DejaVu Sans';
 const FONT=`'${POSTER_FAMILY}', 'DejaVu Sans', 'Liberation Sans', sans-serif`;
+// Шрифт и палитру забирает сторис с таблицей дивизиона: обе картинки уходят в
+// одну ленту, и разница в шрифте или оттенке сразу читается как небрежность.
+export const POSTER_FONT=FONT;
 
 // Палитра — ровно та же, что в карточке матча: постер и карточка ложатся рядом
 // в ленте, и разница в оттенках сразу читается как небрежность.
@@ -226,6 +229,7 @@ const C={
   plate:'rgba(255,255,255,.035)', plateLine:'rgba(255,255,255,.10)',
   gold:'#C9A76A', silver:'#9A948B'
 };
+export const POSTER_COLORS=C;
 
 // Раскладка. Интерфейс Stories съедает примерно по 5% сверху и снизу, поэтому
 // содержимое прижато к краям, а фон идёт во весь кадр без обрезки.
@@ -233,7 +237,13 @@ const L={
   titleY:168, logoTop:198, logoBox:{ w:240, h:150 },
   panel:{ x:40, y:1120, w:1000, h:424, r:38 },
   cxL:240, cxR:840, nameMax:300, nameSize:40, nameMin:26, scoreMax:58, scoreMin:28, gap:26,
-  sponsor:{ x:88, y:1578, w:904, h:228, r:30, boxX:76, boxY:54, boxW:752, boxH:160 }
+  // Плашка партнёров подстраивается под сам файл логотипов: жёстко заданы
+  // только границы свободной полосы. Панель счёта кончается на 1544, нижние 5%
+  // кадра (от 1824) закрыты интерфейсом Stories — значит плашка живёт между
+  // 1552 и 1818. Дальше высота и ширина считаются по пропорциям картинки,
+  // см. sponsorLayout(): узкая полоска получит узкую плашку, широкая — во всю
+  // ширину кадра. Растягивать логотипы под рамку нельзя, они бы поехали.
+  sponsor:{ bottom:1818, top:1552, maxW:1000, maxH:200, minW:520, padX:36, padTop:42, padBottom:20, r:32 }
 };
 // Ширину текста считаем приблизительно: точных метрик шрифта у нас нет, а
 // librsvg их не отдаёт. Коэффициент подобран по этому начертанию и намеренно
@@ -316,10 +326,34 @@ export function posterStageLabel(match={}) {
 // общий файл assets/sponsors.png. Нет файла — плашки спонсоров нет вовсе:
 // пустая рамка на публикации выглядит хуже, чем её отсутствие.
 const SPONSOR_FILE=path.join(ASSETS_DIR,'sponsors.png');
+// Максимальное поле под логотипы. Файл вписывается внутрь с сохранением
+// пропорций, а плашка потом обжимается по фактическому размеру картинки.
+export const SPONSOR_BOX={ width:L.sponsor.maxW, height:L.sponsor.maxH };
 export function sponsorsAvailable() {
   try { return fs.statSync(SPONSOR_FILE).size>0; } catch { return false; }
 }
-async function posterLogoLayers() {
+// Считаем плашку от самой картинки: вписали файл в свободную полосу, а рамку
+// нарисовали вокруг того, что получилось. Так любой формат файла — и широкая
+// лента, и почти квадратный блок — лежит в плашке без пустых полей.
+export async function sponsorLayout() {
+  if(!sponsorsAvailable())return null;
+  const S=L.sponsor;
+  try {
+    const strip=await sharp(SPONSOR_FILE)
+      .resize({ width:S.maxW, height:S.maxH, fit:'inside', withoutEnlargement:true }).png().toBuffer();
+    const meta=await sharp(strip).metadata();
+    const iw=meta.width||S.maxW, ih=meta.height||S.maxH;
+    const w=Math.min(S.maxW,Math.max(S.minW,iw+S.padX*2));
+    const h=S.padTop+ih+S.padBottom;
+    const y=Math.max(S.top,S.bottom-h);
+    return {
+      plate:{ x:Math.round((WIDTH-w)/2), y, w, h:S.bottom-y, r:S.r },
+      layer:{ input:strip, left:Math.round((WIDTH-iw)/2), top:y+S.padTop },
+      image:{ width:iw, height:ih }
+    };
+  } catch(e) { console.error('poster sponsors failed:',e.message); return null; }
+}
+async function posterLogoLayers(sponsor=null) {
   const layers=[];
   try {
     const org=await sharp(path.join(LOGOS_DIR,'ptf.png'))
@@ -327,19 +361,7 @@ async function posterLogoLayers() {
     const meta=await sharp(org).metadata();
     layers.push({ input:org, left:Math.round((WIDTH-(meta.width||L.logoBox.w))/2), top:L.logoTop });
   } catch(e) { if(e?.code!=='ENOENT')console.error('poster org logo failed:',e.message); }
-  if(sponsorsAvailable()) {
-    try {
-      const box=L.sponsor;
-      const strip=await sharp(SPONSOR_FILE)
-        .resize({ width:box.boxW, height:box.boxH, fit:'inside', withoutEnlargement:true }).png().toBuffer();
-      const meta=await sharp(strip).metadata();
-      layers.push({
-        input:strip,
-        left:Math.round((WIDTH-(meta.width||box.boxW))/2),
-        top:box.y+box.boxY+Math.round((box.boxH-(meta.height||box.boxH))/2)
-      });
-    } catch(e) { console.error('poster sponsors failed:',e.message); }
-  }
+  if(sponsor?.layer)layers.push(sponsor.layer);
   return layers;
 }
 
@@ -358,8 +380,8 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
     divisionName&&!/^Division\b/i.test(divisionName)?`DIVISION ${divisionName}`:divisionName.toUpperCase(),
     match.season?`SEASON ${match.season}`:''
   ].filter(Boolean).join(' · ');
-  const hasSponsors=sponsorsAvailable();
-  const S=L.sponsor;
+  const sponsor=await sponsorLayout();
+  const S=sponsor?.plate||null;
   const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
   <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="${C.bg1}" stop-opacity=".66"/>
@@ -387,11 +409,11 @@ export async function composeMatchPoster(backgroundBuffer, match={}) {
   ${formSvg(match.loserMeta?.form,L.cxR,P.y+216)}
   ${rankPlate(match.winnerMeta,L.cxL,P.y+256)}
   ${rankPlate(match.loserMeta,L.cxR,P.y+256)}
-  ${hasSponsors?`<rect x="${S.x}" y="${S.y}" width="${S.w}" height="${S.h}" rx="${S.r}" fill="${C.bg2}" fill-opacity=".72" stroke="${C.plateLine}"/>
-  <text x="${WIDTH/2}" y="${S.y+34}" text-anchor="middle" font-family="${FONT}" font-size="12" font-weight="800"
+  ${S?`<rect x="${S.x}" y="${S.y}" width="${S.w}" height="${S.h}" rx="${S.r}" fill="${C.bg2}" fill-opacity=".72" stroke="${C.plateLine}"/>
+  <text x="${WIDTH/2}" y="${S.y+30}" text-anchor="middle" font-family="${FONT}" font-size="12" font-weight="800"
     letter-spacing="4" fill="${C.mute}">SEASON PARTNERS</text>`:''}
 </svg>`);
-  const logos=await posterLogoLayers();
+  const logos=await posterLogoLayers(sponsor);
   return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})
     .composite([{input:svg,left:0,top:0},...logos]).png({compressionLevel:6}).toBuffer();
 }

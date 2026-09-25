@@ -1984,6 +1984,13 @@ app.listen(PORT, async () => {
         // две подборки в один вечер читаются как спам.
         const photos = await runWeeklyPhotos(Date.now(), evAdmin);
         if (photos.ok && photos.prepared?.images?.length) setWeeklyBatch('photos', photos.prepared);
+        // Вторник, 19:00 — таблицы дивизионов, по картинке на группу. Первый
+        // автоматический выпуск 6 октября, после 8 ноября сезон закончился и
+        // выпуски прекращаются сами.
+        const { runWeeklyStandings } = await import('./standings.js');
+        const { setTableBatch } = await import('./bot.js');
+        const tables = await runWeeklyStandings(Date.now(), evAdmin);
+        if (tables.ok && tables.prepared?.items?.length) setTableBatch(tables.prepared);
       } catch (e) { console.error('weekly carousel failed:', e.message); }
     } catch (e) {
       console.error('match sweep failed:', e.message);

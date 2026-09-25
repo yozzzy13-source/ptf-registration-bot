@@ -29,6 +29,13 @@ const posterJobsInFlight = new Set();
 const weeklyBatches = new Map();
 export function setWeeklyBatch(kind, prepared) { weeklyBatches.set(String(kind), prepared); }
 export function setWeeklyCarousel(prepared) { setWeeklyBatch('cards', prepared); }
+// Готовые таблицы дивизионов: ключ — «B2», значение — картинка с подписью.
+// Нужны, чтобы кнопка «В сторис» под подписью нашла свою картинку.
+const tableBatch = new Map();
+export function setTableBatch(prepared) {
+  tableBatch.clear();
+  for (const item of prepared?.items || []) tableBatch.set(String(item.key), item);
+}
 function rememberPosterVariant(matchId, variant, data) {
   const key=String(matchId || '');
   const current=posterRuns.get(key) || {};
@@ -1400,6 +1407,24 @@ function findConfirmedSlot(done, wanted) {
         return sendMessage(chatId,`⛔ ${escapeHtml(error.message)}`);
       }
     }
+    // Таблицы дивизионов картинками. Без аргумента — все группы, с ним —
+    // одна: /tables B2. Автоматический выпуск идёт по вторникам, эта команда
+    // нужна для теста и для разовых выгрузок вне расписания.
+    if (text.startsWith('/tables')) {
+      const rest=text.replace(/^\/tables(?:@\w+)?/i,'').trim();
+      const draft=/\bdraft\b/i.test(rest);
+      const only=rest.replace(/\bdraft\b/ig,'').trim();
+      const { runWeeklyStandings } = await import('./standings.js');
+      await sendMessage(chatId,only?`Собираю таблицу: ${escapeHtml(only)}…`:'Собираю таблицы по всем группам…');
+      try {
+        const out=await runWeeklyStandings(Date.now(),chatId,{force:true,only,save:!draft});
+        if(out.prepared)setTableBatch(out.prepared);
+        if(draft)await sendMessage(chatId,'Черновой прогон: точка отсчёта для стрелок не сдвинута.');
+        return null;
+      } catch(error) {
+        return sendMessage(chatId,`⛔ ${escapeHtml(error.message)}`);
+      }
+    }
     // Турнирная админка: отдельное приложение, не вкладка внутри админки.
     if (text === '/tournaments') {
       return sendMessage(chatId, '<b>🏆 Турниры</b>\n\nСоздание турниров, заявки, группы, сетка плей-офф, правка результатов и парные заявки.\n\nПереключатель «Тест» в шапке пишет всё в листы с пометкой TEST — боевые таблицы при этом не меняются.', {
@@ -1970,6 +1995,20 @@ export async function handleCallback(q) {
         const warn=out.tag_error?`\n\n⚠️ Отметки не прошли, пост опубликован без них: ${escapeHtml(out.tag_error)}`:'';
         const cut=out.trimmed?`\n\n⚠️ Instagram не принял длинную карусель — опубликованы первые ${out.count}. Оставшиеся ${out.trimmed} сохраните из этой темы и выложите вторым постом.`:'';
         return sendMessage(chatId,`📤 <b>Опубликовано</b>\n\nКартинок в посте: <b>${out.count}</b>${cut}${tagged}${warn}`);
+      } catch(error) {
+        return sendMessage(chatId,`⛔ Не опубликовалось: ${escapeHtml(error.message)}`);
+      }
+    }
+    // Таблица одной группы в сторис. Публикуем по одной: каждая группа — своя
+    // сторис, объединять их в одну картинку нельзя.
+    if (data.startsWith('igtable:')) {
+      const item=tableBatch.get(data.slice('igtable:'.length));
+      if(!item?.buffer?.length)return sendMessage(chatId,'Таблица уже не в памяти — соберите её заново командой /tables.');
+      await answerCallbackQuery(q.id,'Публикую…').catch(()=>{});
+      try {
+        const { publishStandingsStory } = await import('./standings.js');
+        await publishStandingsStory(item);
+        return sendMessage(chatId,`📤 <b>${escapeHtml(item.title)}</b> опубликована в сторис.`);
       } catch(error) {
         return sendMessage(chatId,`⛔ Не опубликовалось: ${escapeHtml(error.message)}`);
       }

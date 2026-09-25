@@ -77,7 +77,7 @@ const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|c
 synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardContexts=new Map();
-const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data)});
+const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
  if(modules.has(key))return modules.get(key);
@@ -1079,7 +1079,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 
  // Один общий файл спонсоров, и без него плашки просто нет.
  check(/const SPONSOR_FILE=path\.join\(ASSETS_DIR,'sponsors\.png'\)/.test(src),'Спонсоры читаются из assets/sponsors.png');
- check(/hasSponsors\?/.test(src),'Без файла спонсоров плашка не рисуется');
+ check(/\$\{S\?`<rect/.test(src),'Без файла спонсоров плашка не рисуется');
 
  const poster=await import(pathToFileURL(path.join(root,'matchposter.js')).href);
  check(poster.sponsorsAvailable()===false,'Файла спонсоров сейчас нет — и это не ошибка');
@@ -1219,10 +1219,54 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/Do not light one player brightly and the other in shadow/.test(poster),'Запрет на разное освещение сформулирован прямо');
  // Плашка опущена, спонсорская стала компактнее.
  check(/panel:\{ x:40, y:1120/.test(poster),'Информационная плашка опущена ниже');
- check(/sponsor:\{ x:88, y:1578, w:904, h:228/.test(poster),'Плашка спонсоров компактнее и ниже');
- const panelBottom=1120+424, sponsorBottom=1578+228;
- check(sponsorBottom<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
- check(panelBottom<1578,'Плашки не накладываются друг на друга');
+ check(/sponsor:\{ bottom:1818, top:1552, maxW:1000, maxH:200/.test(poster),'Плашка партнёров занимает всю полосу под панелью счёта');
+ const panelBottom=1120+424;
+ check(1818<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
+ check(panelBottom<1552,'Плашки не накладываются друг на друга');
+ check(/export async function sponsorLayout/.test(poster),'Плашка считается по фактическому файлу логотипов');
+ check(/fit:'inside', withoutEnlargement:true/.test(poster),'Логотипы не растягиваются под рамку');
+ check(poster.includes('export const SPONSOR_BOX'),'Размер поля под логотипы доступен снаружи');
+ check(/const sponsor=await sponsorLayout\(\)/.test(poster)&&/posterLogoLayers\(sponsor\)/.test(poster),'Рамка и сама картинка считаются из одного места');
+}
+
+
+// --- Таблицы дивизионов: вторник, снимки мест, по картинке на группу --------
+{
+ const st=await load('standings.js');
+ const at=iso=>Date.parse(iso);
+ const src=await fs.readFile(path.join(root,'standings.js'),'utf8');
+ check(st.WEEKLY_FROM==='2026-10-06','Автовыпуски начинаются 6 октября');
+ check(st.SEASON_END==='2026-11-08','После 8 ноября автоматика молчит');
+ check(st.standingsDue(at('2026-10-06T12:00:00Z')),'Вторник 19:00 по Пхукету — время таблиц');
+ check(!st.standingsDue(at('2026-10-07T12:00:00Z')),'В среду выпуск не собирается');
+ check(!st.standingsDue(at('2026-10-06T09:00:00Z')),'Во вторник утром выпуск не собирается');
+ check(!st.standingsDue(at('2026-09-29T12:00:00Z')),'До 6 октября автоматических выпусков нет — только руками');
+ check(!st.standingsDue(at('2026-11-10T12:00:00Z')),'После конца сезона выпусков нет');
+ check(st.groupTitle('B','2','')==='DIVISION B · GROUP 2','Заголовок группы по-английски');
+ check(!/[А-Яа-я]/.test(st.groupTitle('W','1','')),'В заголовке картинки нет кириллицы');
+
+ const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]},'DIVISION B · GROUP 2','SEASON 2');
+ check(/DIVISION B · GROUP 2/.test(cap),'Подпись называет группу');
+ check(/#phukettennisfamily/.test(cap),'В подписи есть хэштеги');
+ check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
+ check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
+
+ check(/Standings Snapshots/.test(src),'Снимки мест лежат в нашей таблице, а не в таблицах дивизионов');
+ check(/ensureExtraSheet/.test(src),'Лист снимков заводится сам');
+ check(/const move = Number\.isFinite\(was\) \? was - p\.place : null/.test(src),'Движение считается от прошлого выпуска, а не от начала сезона');
+ check(/data\.baseline \? '' :/.test(src),'Первый выпуск выходит без стрелок');
+ check(/if \(save\) for \(const item of prepared\.items\)/.test(src),'Снимок кладётся только после отправки');
+ check(/callback_data: `igtable:\$\{item\.key\}`/.test(src),'У каждой группы своя кнопка публикации');
+ check(/publishStory/.test(src)&&!/publishCarousel/.test(src),'Таблицы уходят в сторис по одной, а не каруселью');
+
+ const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/text\.startsWith\('\/tables'\)/.test(bot3),'Команда /tables есть');
+ check(/data\.startsWith\('igtable:'\)/.test(bot3),'Кнопка «В сторис» обрабатывается');
+ check(/\bdraft\b/.test(bot3),'Черновой прогон не сдвигает точку отсчёта');
+ const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'tables'/.test(tg3),'Команда есть и в /help, и в меню по слэшу');
+ const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/runWeeklyStandings/.test(idx3),'Вторничный выпуск подключён к общему проходу');
 }
 
 
@@ -1284,7 +1328,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/consentLabel:'Публиковать вас в Instagram лиги\?'/.test(form)&&/consentLabel:'Publish you on the league Instagram\?'/.test(form),'Вопрос переведён');
  check(/function toggleInstagram/.test(form),'Поле инстаграма прячется при отказе');
  check(/photo_publication_consent:\$\('photoConsent'\)\.value/.test(form),'Ответ уезжает на сервер');
- check(/IG_URL='https:\/\/www\.instagram\.com\/phukettennisfamily\//.test(form),'В анкете есть ссылка на аккаунт');
+ check(/@phukettennisfamily/.test(form),'Аккаунт назван прямо в подсказке к полю, без отдельной кнопки');
 
  // Ответ доезжает до таблицы — раньше инстаграм из анкеты терялся.
  const sh=await fs.readFile(path.join(root,'sheets.js'),'utf8');
@@ -1295,10 +1339,19 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 
  // Ссылка на аккаунт в приветствии и после анкеты.
  const kb=await fs.readFile(path.join(root,'keyboards.js'),'utf8');
- check(/Наш Instagram/.test(kb)&&/Our Instagram/.test(kb),'Кнопка Instagram в приветствии на двух языках');
- check(/📸 Наш Instagram/.test(idx4),'Кнопка Instagram после сохранения анкеты');
+ // Отдельных кнопок под Instagram нет: ссылка живёт строкой в тексте.
+ check(!/Instagram/.test(kb),'В приветственной клавиатуре нет отдельной кнопки Instagram');
+ check(!/📸 Наш Instagram/.test(idx4),'После анкеты тоже нет отдельной кнопки');
+ check(/href="\$\{IG_PROFILE_URL\}">Instagram<\/a>/.test(idx4),'Ссылка встроена в текст сообщения после анкеты');
+ check(/href="\$\{INSTAGRAM_URL\}">Instagram<\/a>/.test(await fs.readFile(path.join(root,'admin.js'),'utf8')),'Ссылка встроена в текст приветствия');
  const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
- check(/Мы выкладываем постеры матчей и результаты в Instagram/.test(adm)&&/We publish match posters and results on Instagram/.test(adm),'В тексте приветствия сказано про Instagram');
+ check(/Постеры матчей и результаты выкладываем/.test(adm)&&/Match posters and results go to our/.test(adm),'В тексте приветствия сказано про Instagram');
+ // Пропущенный вопрос — это разрешение: публикуем, просто не отмечаем.
+ check(sheets.publicationAllowed({})===true&&sheets.publicationAllowed({photo_publication_consent:''})===true,'Молчание считается разрешением');
+ const silent=await pub4.matchPublicity({from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two'});
+ check(silent.allowed===true,'Матч двоих промолчавших публикуется');
+ check(silent.handles.length===0,'Промолчавших просто не отмечаем');
+ check(/Не ответите — ничего страшного/.test(await fs.readFile(path.join(root,'publicity.js'),'utf8')),'В опросе прямо сказано, что молчание — не отказ');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
