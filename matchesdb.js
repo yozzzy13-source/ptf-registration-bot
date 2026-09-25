@@ -629,6 +629,17 @@ export async function resultPromptDelayMin() {
   } catch { promptDelayCache = { t: Date.now(), v: RESULT_PROMPT_AFTER_MIN }; }
   return promptDelayCache.v;
 }
+// Момент, с которого по матчу можно вносить счёт. Одна формула на всех: и
+// приглашение, и список «внести результат», и кнопка «матч не доигран». Когда
+// эти три расходились, человек получал приглашение и упирался в пустой экран.
+// Для короткой брони берём её длительность: ждать 90 минут после часовой игры
+// незачем.
+export function resultOpenMs(slot = {}, delayMin = RESULT_PROMPT_AFTER_MIN) {
+  const start = Date.parse(`${slot.agreed_date}T${slot.agreed_time || slot.time_from || '00:00'}:00+07:00`);
+  if (Number.isNaN(start)) return null;
+  const duration = Number(slot.duration_min || 120) || 120;
+  return start + Math.min(Number(delayMin) || RESULT_PROMPT_AFTER_MIN, duration) * 60000;
+}
 export function localMinutes(now = Date.now(), timeZone = TIMEZONE) {
   const p = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false })
     .formatToParts(new Date(now));
@@ -1036,9 +1047,8 @@ export async function listMatchesNeedingResultPrompt(now = Date.now()) {
     if (String(r.status || '').toLowerCase() !== 'accepted') return false;
     if (r.result_status || r.time_change || (!r.court_confirmed_at && r.match_type!=='manual')) return false;
     if (r.result_prompt_sent_at) return false;
-    const start = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
-    if (Number.isNaN(start)) return false;
-    return now > start + delay * 60000;
+    const open = resultOpenMs(r, delay);
+    return open !== null && now > open;
   });
 }
 
@@ -1047,9 +1057,9 @@ export async function markResultPromptSent(challengeId) {
 }
 
 // Матчи, по которым игрок может внести или подтвердить результат.
-export async function listResultTasks(telegramId) {
+export async function listResultTasks(telegramId, now = Date.now()) {
   const id = String(telegramId);
-  const rows = await allSlots();
+  const [rows, delay] = await Promise.all([allSlots(), resultPromptDelayMin()]);
   return rows.filter(r => {
     if (![String(r.from_telegram_id), String(r.to_telegram_id)].includes(id)) return false;
     if (String(r.status || '').toLowerCase() !== 'accepted') return false;
@@ -1057,8 +1067,10 @@ export async function listResultTasks(telegramId) {
     if (st === 'confirmed') return false;
     if (st === 'unfinished') return true;        // reminders pause, score entry stays available
     if (st === 'pending') return true;           // ждёт подтверждения одной из сторон
-    const end = Date.parse(`${r.agreed_date}T${r.agreed_time || r.time_from || '00:00'}:00+07:00`);
-    return !Number.isNaN(end) && Date.now() > end + Number(r.duration_min || 120) * 60000;
+    // Тот же порог, что у приглашения: иначе бот зовёт вносить счёт, а список
+    // пуст, потому что матч «ещё идёт» по длительности брони.
+    const open = resultOpenMs(r, delay);
+    return open !== null && now > open;
   }).sort((a, b) => String(b.agreed_date).localeCompare(String(a.agreed_date)));
 }
 
@@ -1071,8 +1083,8 @@ export async function markMatchUnfinished(challengeId, actor = {}, evidence = {}
     const access = await authorizeSlot(slot, actor, { joining:false });
     if (!access.ok) return access;
     if (String(slot.status || '').toLowerCase() !== 'accepted') return { ok:false, reason:'not_accepted', slot };
-    const end = slotEndMs(slot);
-    if (end === null || end > Date.now()) return { ok:false, reason:'match_not_ended', slot };
+    const open = resultOpenMs(slot, await resultPromptDelayMin());
+    if (open === null || open > Date.now()) return { ok:false, reason:'match_not_ended', slot };
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
     if (!sides.includes(String(actor.telegram_id))) return { ok:false, reason:'not_a_player', slot };
     const current = String(slot.result_status || '').toLowerCase();
@@ -1405,7 +1417,7 @@ export function pendingActionsFor(telegramId,rows,now=Date.now()) {
    else if(s.result_status==='disputed') {if(String(s.result_by)===id)tab='res';}
    else if(proposal) {if(String(proposal.by)!==id)tab='mine';}
    else if(!s.court_confirmed_at&&s.match_type!=='manual') {if(String(s.from_telegram_id)===id)tab='mine';}
-   else if(slotEndMs(s)!==null&&slotEndMs(s)<=now)tab='res';
+   else {const open=resultOpenMs(s);if(open!==null&&open<=now)tab='res';}
   }
   if(tab){seen.add(s.challenge_id);items.push({challenge_id:s.challenge_id,tab});}
  }
