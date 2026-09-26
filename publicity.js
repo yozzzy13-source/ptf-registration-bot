@@ -286,6 +286,21 @@ export function carouselCaption(matches = [], span = Date.now(), handles = []) {
   ].filter(x => x !== null).join('\n');
 }
 
+// Подборка режется на посты по десять картинок — столько Instagram уверенно
+// принимает в одну карусель, столько же Telegram отдаёт одним альбомом.
+// Каждый пост получает СВОЮ подпись и свои отметки: в посте отмечены ровно те
+// игроки, которые есть на этих десяти картинках, а не все за неделю.
+export const POST_SIZE = 10;
+export function buildPosts(images = [], captionFor = () => '') {
+  const posts = [];
+  for (let i = 0; i < images.length; i += POST_SIZE) {
+    const list = images.slice(i, i + POST_SIZE);
+    const handles = [...new Set(list.flatMap(x => x.handles || []))];
+    posts.push({ index: posts.length, images: list, handles, caption: captionFor(list, handles) });
+  }
+  return posts;
+}
+
 // Сборка и отправка организатору на подтверждение. Сама публикация — кнопкой:
 // пост в ленту уходит навсегда, и отдавать это расписанию без человека нельзя.
 export async function buildWeeklyCarousel(now = Date.now(), range = null) {
@@ -295,16 +310,18 @@ export async function buildWeeklyCarousel(now = Date.now(), range = null) {
   const images = [];
   for (const item of matches) {
     const buffer = await cardForSlot(item.slot).catch(e => { console.error('weekly card failed:', e.message); return null; });
-    if (buffer) images.push({ buffer, slot: item.slot });
+    if (buffer) images.push({ buffer, slot: item.slot, handles: item.handles, match: item });
   }
   const handles = [...new Set(matches.flatMap(m => m.handles))];
-  return { images, handles, caption: carouselCaption(matches, span, handles), extra, skipped, limit: CAROUSEL_MAX, range: span };
+  const posts = buildPosts(images, (list, own) => carouselCaption(list.map(x => x.match).filter(Boolean), span, own));
+  return { images, posts, handles, caption: posts[0]?.caption || carouselCaption(matches, span, handles), extra, skipped, limit: POST_SIZE, range: span };
 }
 
-export async function publishWeeklyCarousel(prepared) {
+export async function publishWeeklyCarousel(prepared, index = 0) {
   if (!instagramEnabled()) throw new Error('Instagram не подключён: задайте IG_USER_ID и IG_ACCESS_TOKEN');
-  if (!prepared?.images?.length) throw new Error('За неделю нет матчей, которые можно опубликовать');
-  return publishCarousel(prepared.images.slice(0, CAROUSEL_MAX), { caption: prepared.caption, handles: prepared.handles });
+  const post = prepared?.posts?.[Number(index) || 0];
+  if (!post?.images?.length) throw new Error('За неделю нет матчей, которые можно опубликовать');
+  return publishCarousel(post.images, { caption: post.caption, handles: post.handles });
 }
 
 // Куда складывать подборку недели. Отдельная тема удобнее админского чата:
@@ -316,39 +333,39 @@ export async function instagramTarget(fallbackChatId = '') {
   return { chatId: txt(fallbackChatId), threadId: '' };
 }
 
-// Доставка подборки человеку: все карточки альбомами по десять, затем подпись
-// отдельным сообщением, откуда её удобно скопировать целиком.
+// Доставка подборки человеку: каждый пост отдельно — сначала его картинки
+// альбомом, следом его подпись. Подпись относится ровно к этим картинкам, и
+// отмечены в ней только те игроки, которые на них есть.
 export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', canPublish = false, title = 'Матчи недели', action = 'igweek:go', empty = 'За неделю нет подтверждённых матчей, которые можно опубликовать.' } = {}) {
   if (!chatId) return { ok: false, reason: 'no_chat' };
   const opts = threadId ? { message_thread_id: threadId } : {};
-  if (!prepared?.images?.length) {
+  const posts = prepared?.posts || [];
+  if (!posts.length) {
     await sendMessage(chatId, `🗓 <b>${esc(title)}</b>\n\n${esc(empty)}`, opts).catch(() => {});
     return { ok: true, empty: true };
-  }
-  // Telegram отдаёт максимум десять картинок за раз — шлём пачками, чтобы
-  // подборка уходила целиком, сколько бы матчей ни было.
-  for (let i = 0; i < prepared.images.length; i += 10) {
-    // Файлами, а не фотографиями: sendPhoto ужимает картинку до 1280 px, и
-    // сохранённая из чата карточка теряет качество ещё до Instagram.
-    const chunk = prepared.images.slice(i, i + 10).map((x, n) => ({
-      buffer: x.buffer,
-      filename: `${/^image\/jpe?g$/.test(String(x.mime || '')) ? 'photo' : 'card'}-${i + n + 1}-${dayKey(Date.now())}.${/^image\/jpe?g$/.test(String(x.mime || '')) ? 'jpg' : 'png'}`
-    }));
-    await sendDocumentAlbumBuffers(chatId, chunk, opts).catch(e => console.error('weekly album failed:', e.message));
   }
   const skipped = prepared.skipped?.length
     ? `\n\nНе вошли (просили не публиковать): ${prepared.skipped.map(x => esc(x.blocked.join(', '))).join('; ')}`
     : '';
-  const limit = prepared.limit || 20;
-  const overflow = prepared.images.length > limit
-    ? `\n\n⚠️ В один пост уйдут первые ${limit} карточек. Остальные ${prepared.images.length - limit} сохраните отсюда и выложите вторым постом.`
-    : '';
-  await sendMessage(chatId,
-    `🗓 <b>${esc(title)}</b>\n\nКартинок: <b>${prepared.images.length}</b>${overflow}${skipped}\n\n`
-    + `<b>Подпись к посту</b> — нажмите, чтобы скопировать:\n<code>${esc(prepared.caption)}</code>`,
-    { ...opts, ...(canPublish ? { reply_markup: { inline_keyboard: [[{ text: '📤 Опубликовать карусель', callback_data: action }]] } } : {}) }
-  ).catch(e => console.error('weekly caption failed:', e.message));
-  return { ok: true, count: prepared.images.length };
+  for (const post of posts) {
+    // Файлами, а не фотографиями: sendPhoto ужимает картинку до 1280 px, и
+    // сохранённая из чата карточка теряет качество ещё до Instagram.
+    const chunk = post.images.map((x, n) => {
+      const jpeg = /^image\/jpe?g$/.test(String(x.mime || ''));
+      return {
+        buffer: x.buffer,
+        filename: `${jpeg ? 'photo' : 'card'}-${post.index * POST_SIZE + n + 1}-${dayKey(Date.now())}.${jpeg ? 'jpg' : 'png'}`
+      };
+    });
+    await sendDocumentAlbumBuffers(chatId, chunk, opts).catch(e => console.error('weekly album failed:', e.message));
+    const head = posts.length > 1 ? `${title} · пост ${post.index + 1} из ${posts.length}` : title;
+    await sendMessage(chatId,
+      `🗓 <b>${esc(head)}</b>\n\nКартинок в посте: <b>${post.images.length}</b>${post.index === 0 ? skipped : ''}\n\n`
+      + `<b>Подпись к посту</b> — нажмите, чтобы скопировать:\n<code>${esc(post.caption)}</code>`,
+      { ...opts, ...(canPublish ? { reply_markup: { inline_keyboard: [[{ text: `📤 Опубликовать пост ${post.index + 1}`, callback_data: `${action}:${post.index}` }]] } } : {}) }
+    ).catch(e => console.error('weekly caption failed:', e.message));
+  }
+  return { ok: true, count: prepared.images.length, posts: posts.length };
 }
 
 // ---------------------------------------------- фотографии недели (четверг)
@@ -431,16 +448,18 @@ export async function buildWeeklyPhotos(now = Date.now(), range = null) {
     const file = await getFileBuffer(txt(item.slot.result_photo_file_id)).catch(e => {
       console.error('weekly photo download failed:', e.message); return null;
     });
-    if (file?.buffer?.length) images.push({ buffer: file.buffer, mime: file.mime || 'image/jpeg', slot: item.slot });
+    if (file?.buffer?.length) images.push({ buffer: file.buffer, mime: file.mime || 'image/jpeg', slot: item.slot, handles: item.handles, match: item });
   }
   const handles = [...new Set(matches.flatMap(m => m.handles))];
-  return { images, handles, caption: photosCaption(matches, span, handles), skipped, limit: CAROUSEL_MAX, extra: Math.max(0, images.length - CAROUSEL_MAX), range: span };
+  const posts = buildPosts(images, (list, own) => photosCaption(list.map(x => x.match).filter(Boolean), span, own));
+  return { images, posts, handles, caption: posts[0]?.caption || photosCaption(matches, span, handles), skipped, limit: POST_SIZE, extra: 0, range: span };
 }
 
-export async function publishWeeklyPhotos(prepared) {
+export async function publishWeeklyPhotos(prepared, index = 0) {
   if (!instagramEnabled()) throw new Error('Instagram не подключён: задайте IG_USER_ID и IG_ACCESS_TOKEN');
-  if (!prepared?.images?.length) throw new Error('За неделю нет фотографий, которые можно опубликовать');
-  return publishCarousel(prepared.images.slice(0, CAROUSEL_MAX), { caption: prepared.caption, handles: prepared.handles });
+  const post = prepared?.posts?.[Number(index) || 0];
+  if (!post?.images?.length) throw new Error('За неделю нет фотографий, которые можно опубликовать');
+  return publishCarousel(post.images, { caption: post.caption, handles: post.handles });
 }
 
 export async function runWeeklyPhotos(now = Date.now(), adminChatId = '', { force = false, range = null } = {}) {
