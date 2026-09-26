@@ -1989,15 +1989,17 @@ export async function handleCallback(q) {
       }
     }
     // Подборки недели: собраны заранее, публикуются тоже только кнопкой.
-    if (data === 'igweek:go' || data === 'igphotos:go') {
-      const cards=data==='igweek:go';
+    if (data.startsWith('igweek:go') || data.startsWith('igphotos:go')) {
+      const cards=data.startsWith('igweek:go');
+      // Публикуем один конкретный пост: в каждом свои десять картинок и свои
+      // отметки, поэтому номер поста приезжает в самой кнопке.
+      const index=Number(data.split(':')[2] || 0) || 0;
       const prepared=weeklyBatches.get(cards?'cards':'photos');
       const again=cards?'/instagram_week':'/instagram_photos';
-      if(!prepared?.images?.length)return sendMessage(chatId,`Подборка уже не в памяти — соберите её заново командой ${again}.`);
+      if(!prepared?.posts?.[index]?.images?.length)return sendMessage(chatId,`Подборка уже не в памяти — соберите её заново командой ${again}.`);
       await answerCallbackQuery(q.id,'Публикую…').catch(()=>{});
       try {
-        const out=cards?await publishWeeklyCarousel(prepared):await publishWeeklyPhotos(prepared);
-        weeklyBatches.delete(cards?'cards':'photos');
+        const out=cards?await publishWeeklyCarousel(prepared,index):await publishWeeklyPhotos(prepared,index);
         const tagged=out.tagged?.length?`\n\nОтмечены: ${out.tagged.map(h=>'@'+escapeHtml(h)).join(', ')}`:'';
         const warn=out.tag_error?`\n\n⚠️ Отметки не прошли, пост опубликован без них: ${escapeHtml(out.tag_error)}`:'';
         const cut=out.trimmed?`\n\n⚠️ Instagram не принял длинную карусель — опубликованы первые ${out.count}. Оставшиеся ${out.trimmed} сохраните из этой темы и выложите вторым постом.`:'';
