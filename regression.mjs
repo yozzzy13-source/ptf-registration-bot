@@ -1197,8 +1197,10 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const ig2=await load('instagram.js');
  const src=await fs.readFile(path.join(root,'publicity.js'),'utf8');
  check(/return { matches: out, extra/.test(src),'Организатору показываем все матчи недели, а не первые десять');
- check(/prepared\.images\.slice\(0, CAROUSEL_MAX\)/.test(src),'Лимит Instagram применяется только при публикации');
- check(/for \(let i = 0; i < prepared\.images\.length; i \+= 10\)/.test(src),'Карточки уходят в Telegram пачками по десять — сколько бы их ни было');
+ check(/export const POST_SIZE = 10/.test(src),'Подборка режется на посты по десять картинок');
+ check(/const handles = \[\.\.\.new Set\(list\.flatMap\(x => x\.handles \|\| \[\]\)\)\]/.test(src),'В посте отмечены только те игроки, чьи картинки в него вошли');
+ check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост со своей подписью и своими отметками');
+ check(/callback_data: `\$\{action\}:\$\{post\.index\}`/.test(src),'У каждого поста своя кнопка публикации');
  check(ig2.CAROUSEL_MAX===20,'По умолчанию двадцать');
  check(/children\.slice\(0, CAROUSEL_SAFE\)/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'При отказе карусель сама урезается до десяти, а не падает');
  check(/IG_CAROUSEL_MAX/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'Лимит меняется переменной, без правки кода');
@@ -1344,7 +1346,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 
  const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/text\.startsWith\('\/instagram_photos'\)/.test(bot3),'Есть команда ручной сборки фотографий');
- check(/data === 'igweek:go' \|\| data === 'igphotos:go'/.test(bot3),'Обе подборки публикуются одним обработчиком');
+ check(/data\.startsWith\('igweek:go'\) \|\| data\.startsWith\('igphotos:go'\)/.test(bot3),'Обе подборки публикуются одним обработчиком');
+ check(/publishWeeklyCarousel\(prepared,index\)/.test(bot3),'Кнопка публикует именно свой пост, а не всю подборку');
  const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
  check(/cmd:'instagram_photos'/.test(tg3),'Команда /instagram_photos в едином списке');
  const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
