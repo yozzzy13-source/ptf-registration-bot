@@ -333,8 +333,14 @@ function remember(key, buffer) {
   return buffer;
 }
 
+// Фото в Players_Master лежат на postimg.cc (за Cloudflare): запрос без
+// браузерного User-Agent оттуда чаще обрывается, поэтому представляемся браузером.
+const PHOTO_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+};
 async function fromUrl(url) {
-  const res = await globalThis.fetch(url, { redirect: 'follow' });
+  const res = await globalThis.fetch(url, { redirect: 'follow', headers: PHOTO_HEADERS });
   if (!res.ok) throw new Error(`фото не скачалось: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }

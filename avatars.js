@@ -183,7 +183,54 @@ export async function requestAnotherAvatar(telegramId) {
 // уже имеют avatar_file_id и пропускаются, поэтому запускаем его после старта
 // и раз в сутки — так подхватываются и игроки, добавленные позже.
 const IMPORT_LIMIT = 40;        // за один прогон, чтобы не упереться в лимиты
-const IMPORT_PAUSE_MS = 400;
+// Фото в Players_Master лежат на postimg.cc — он за Cloudflare и после серии
+// быстрых запросов с адреса дата-центра начинает обрывать соединения. Поэтому
+// ходим как браузер, медленно, с паузой и повтором после обрыва, а если хост
+// упёрся несколько раз подряд — прекращаем прогон и досылаем остальных позже.
+const IMPORT_PAUSE_MS = 2500;
+const IMPORT_RETRY_PAUSE_MS = 30 * 1000;
+const IMPORT_STOP_AFTER = 3;    // подряд неудач по сети — хост нас притормозил
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9'
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+// «fetch failed» ничего не объясняет — настоящая причина лежит в e.cause.
+function networkReason(e) {
+  const code = e?.cause?.code || e?.code || '';
+  const known = {
+    ECONNRESET: 'хост оборвал соединение', ETIMEDOUT: 'хост не ответил вовремя',
+    UND_ERR_CONNECT_TIMEOUT: 'хост не ответил вовремя', ECONNREFUSED: 'хост отказал в соединении',
+    ENOTFOUND: 'адрес не существует', EAI_AGAIN: 'адрес не определился',
+    UND_ERR_SOCKET: 'хост оборвал соединение', AbortError: 'хост не ответил за 20 с'
+  };
+  if (e?.name === 'AbortError') return known.AbortError;
+  return known[code] || (code ? `ошибка сети ${code}` : (e?.message || 'ошибка сети'));
+}
+async function downloadImage(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20 * 1000);
+  try {
+    const res = await globalThis.fetch(url, { redirect: 'follow', headers: BROWSER_HEADERS, signal: controller.signal });
+    if (!res.ok) { const err = new Error(`ссылка ответила ${res.status}`); err.http = true; throw err; }
+    const mime = String(res.headers.get('content-type') || '').split(';')[0].trim();
+    if (!/^image\//.test(mime)) { const err = new Error(`по ссылке не картинка (${mime || 'пусто'})`); err.http = true; throw err; }
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (!buffer.length) { const err = new Error('пустой файл'); err.http = true; throw err; }
+    return { buffer, mime };
+  } finally { clearTimeout(timer); }
+}
+// Одна повторная попытка после паузы: обрыв часто разовый.
+async function downloadWithRetry(url) {
+  try { return await downloadImage(url); }
+  catch (e) {
+    if (e.http) throw e;
+    await sleep(IMPORT_RETRY_PAUSE_MS);
+    return downloadImage(url);
+  }
+}
+
 export async function importMasterAvatars({ adminChatId = '' } = {}) {
   if (!adminChatId) return { ok: false, reason: 'no_admin_chat' };
   const { getRows, getMasterPhotos, sameName, invalidateLeagueCache } = await import('./sheets.js');
@@ -208,14 +255,13 @@ export async function importMasterAvatars({ adminChatId = '' } = {}) {
   // поправили в Players_Master.
   todo.sort((a, b) => Number(a.retried) - Number(b.retried));
   const done = [], failed = [];
+  let networkStreak = 0, stoppedEarly = false, tried = 0;
   for (const item of todo.slice(0, IMPORT_LIMIT)) {
+    if (networkStreak >= IMPORT_STOP_AFTER) { stoppedEarly = true; break; }
+    tried++;
     try {
-      const res = await globalThis.fetch(item.url, { redirect: 'follow' });
-      if (!res.ok) throw new Error(`ссылка ответила ${res.status}`);
-      const mime = String(res.headers.get('content-type') || '').split(';')[0].trim();
-      if (!/^image\//.test(mime)) throw new Error(`по ссылке не картинка (${mime || 'пусто'})`);
-      const buffer = Buffer.from(await res.arrayBuffer());
-      if (!buffer.length) throw new Error('пустой файл');
+      const { buffer, mime } = await downloadWithRetry(item.url);
+      networkStreak = 0;
       const sent = await sendPhotoBuffer(adminChatId, buffer, mime, { disable_notification: true });
       const fileId = (sent?.photo || []).slice(-1)[0]?.file_id || '';
       if (sent?.message_id) await deleteMessage(adminChatId, sent.message_id).catch(() => {});
@@ -225,12 +271,17 @@ export async function importMasterAvatars({ adminChatId = '' } = {}) {
       });
       done.push(item.name);
     } catch (e) {
-      failed.push({ name: item.name, error: e.message });
-      console.error(`avatar import failed for ${item.name}:`, e.message);
-      await updateApplicantByTelegramId(item.telegramId, { avatar_error: `master_import: ${e.message}`.slice(0, 200) }).catch(() => {});
+      const reason = e.http ? e.message : networkReason(e);
+      if (!e.http) networkStreak++;
+      failed.push({ name: item.name, error: reason, network: !e.http });
+      console.error(`avatar import failed for ${item.name}:`, reason, item.url);
+      await updateApplicantByTelegramId(item.telegramId, { avatar_error: `master_import: ${reason}`.slice(0, 200) }).catch(() => {});
     }
-    await new Promise(r => setTimeout(r, IMPORT_PAUSE_MS));
+    await sleep(IMPORT_PAUSE_MS);
   }
   if (done.length) invalidateLeagueCache?.();
-  return { ok: true, done, failed, left: Math.max(0, todo.length - IMPORT_LIMIT) };
+  // Сетевые неудачи — не битые ссылки: хост просто притормозил нас. Их и
+  // непройденный остаток досылаем следующим прогоном.
+  const retryable = failed.filter(f => f.network).length + Math.max(0, todo.length - tried);
+  return { ok: true, done, failed, stoppedEarly, retryable, left: Math.max(0, todo.length - tried) };
 }

@@ -1975,19 +1975,28 @@ app.listen(PORT, async () => {
   // собственные аватарки игроков. Через минуту после старта (чтобы не мешать
   // прогреву таблиц) и дальше раз в сутки: так подхватываются и новые игроки.
   // Организатору пишем только если что-то реально перенеслось.
+  // Если хост с фото притормозил нас, остаток досылаем через час, а не через
+  // сутки. Организатору пишем только когда что-то реально перенеслось, чтобы
+  // пустые повторные прогоны не шумели в чате.
+  let avatarRetry = null;
   const avatarImport = async () => {
     try {
       const { getAdminChatId } = await import('./admin.js');
       const { importMasterAvatars } = await import('./avatars.js');
       const adminChatId = await getAdminChatId().catch(() => '');
       const out = await importMasterAvatars({ adminChatId });
+      if (out.ok && out.retryable && !avatarRetry) {
+        avatarRetry = setTimeout(() => { avatarRetry = null; avatarImport(); }, 60 * 60 * 1000);
+        avatarRetry.unref?.();
+      }
       if (!out.ok || !out.done?.length) return;
-      const failed = out.failed?.length
-        ? `\n\nНе получилось (${out.failed.length}):\n` + out.failed.map(f => `• ${escapeHtml(f.name)} — ${escapeHtml(f.error)}`).join('\n')
+      const broken = (out.failed || []).filter(f => !f.network);
+      const brokenText = broken.length
+        ? `\n\nБитые ссылки в Players_Master (${broken.length}) — поправь фото там:\n` + broken.map(f => `• ${escapeHtml(f.name)} — ${escapeHtml(f.error)}`).join('\n')
         : '';
-      const left = out.left ? `\n\nОстальные ${out.left} перенесутся завтра.` : '';
+      const later = out.retryable ? `\n\nЕщё ${out.retryable} — хост с фото притормозил, досылаю через час.` : '';
       await sendMessage(adminChatId, `🖼 <b>Аватарки из Players_Master перенесены в Telegram: ${out.done.length}</b>\n\n`
-        + out.done.map(n => '• ' + escapeHtml(n)).join('\n') + failed + left, { disable_notification: true }).catch(() => {});
+        + out.done.map(n => '• ' + escapeHtml(n)).join('\n') + brokenText + later, { disable_notification: true }).catch(() => {});
     } catch (e) { console.error('avatar import failed:', e.message); }
   };
   setTimeout(avatarImport, 60 * 1000).unref?.();

@@ -160,7 +160,9 @@ async function playerPhotoBuffer(name, sources) {
   // половина таблицы остаётся с инициалами вместо лиц.
   const url = sources?.master.find(([n]) => sameName(n, name))?.[1];
   if (!url) return null;
-  return globalThis.fetch(url, { redirect: 'follow' })
+  return globalThis.fetch(url, { redirect: 'follow', headers: {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' } })
     .then(r => r.ok ? r.arrayBuffer() : null).then(b => b && Buffer.from(b)).catch(() => null);
 }
 async function avatarCircle(row, size, sources) {

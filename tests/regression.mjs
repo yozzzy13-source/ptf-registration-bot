@@ -1239,6 +1239,10 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/if \(!telegramId \|\| String\(row\.avatar_file_id \|\| ''\)\.trim\(\)\) continue;/.test(avSrc),'Свои аватарки игроков не трогаем');
  check(!/sendMessage\(item\.telegramId/.test(avSrc),'Игрокам при переносе ничего не пишем');
  check(/avatarImport, 60 \* 1000/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'Перенос идёт сам после старта, без команды');
+ check(/const BROWSER_HEADERS/.test(avSrc)&&/headers: BROWSER_HEADERS/.test(avSrc),'Фото качаются как из браузера — postimg за Cloudflare иначе рвёт соединение');
+ check(/IMPORT_STOP_AFTER/.test(avSrc)&&/async function downloadWithRetry/.test(avSrc),'После обрыва — пауза и повтор, при серии обрывов прогон останавливается');
+ check(/function networkReason/.test(avSrc),'Вместо «fetch failed» в отчёте настоящая причина');
+ check(/60 \* 60 \* 1000\);\n\s*avatarRetry\.unref/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'Остаток досылается через час, а не через сутки');
  check(/sameName\(n, wanted\)/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Фото на карточке ищется по имени терпимо');
 
  check(pub.CAROUSEL_HASHTAGS.join(' ')==='#phuket #tennis #phukettennis #phukettennisfamily','Хэштеги те, что просили');
