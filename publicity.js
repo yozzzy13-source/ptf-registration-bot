@@ -233,63 +233,59 @@ export async function weeklyMatches(now = Date.now(), range = null) {
   return { matches: out, extra: Math.max(0, out.length - CAROUSEL_MAX), skipped };
 }
 
-// Подпись к посту. Счёт каждого матча не пишем — он и так на карточках, а в
-// подписи превращается в простыню. Вместо этого короткий обзор недели: живая
-// первая фраза, пара настоящих цифр, упоминания игроков и хэштеги.
+// Подпись к подборке карточек — одна на всю рассылку, сколько бы постов из
+// неё ни получилось. Ни дат, ни числа игроков, ни перечисления дивизионов:
+// единственная цифра, которая тут к месту, — сколько матчей сыграно за неделю.
+// Всё остальное видно на самих карточках.
 //
-// Первая фраза берётся из набора по номеру недели, поэтому две недели подряд
-// текст не повторяется. Набор, а не нейросеть: подпись должна быть готова
-// мгновенно, ничего не стоить и никогда не выдумать того, чего не было.
+// Заголовок и фраза чередуются по номеру недели, чтобы две недели подряд текст
+// не повторялся. Набор, а не нейросеть: подпись должна быть готова мгновенно,
+// ничего не стоить и никогда не выдумать того, чего не было.
+const WEEK_HEADLINES = [
+  '🎾 Another week, another set of battles',
+  '🔥 The week on the Phuket courts',
+  '🏆 Results are in',
+  '🌴 Sunset tennis, tight scorelines',
+  '💪 A week of long rallies',
+  '⚡️ Seven days of league tennis',
+  '🎾 That was our week',
+  '🙌 The courts did not stay empty'
+];
 const WEEK_OPENERS = [
-  'A busy week on the Phuket courts.',
-  'Another hot week in Phuket — and not only because of the weather.',
-  'The week is in the books. Here is how it went.',
-  'Long rallies, close sets and a few surprises this week.',
-  'Match week recap from the Phuket Tennis Family.',
-  'Seven days, a full set of results. Here they are.',
-  'The courts did not stay empty this week.',
-  'Sunset tennis, tight scorelines — that was our week.',
-  'A week worth scrolling through.',
-  'Fresh results from the league. Swipe through.'
+  'Close sets, comebacks and a few surprises. Swipe through every result. 👀',
+  'Some cruised, some fought for every point — and all of them showed up. 👏',
+  'Every match tells a story. Here are this week\'s. 🎾',
+  'Hard-fought, well played and all in good spirit. Swipe for the scores. 🤝',
+  'Big serves, longer rallies and no easy matches. 💥',
+  'New names on the scoreboard and a few statements made. 🔥',
+  'Tennis, sweat and a sunset or two. Swipe through. 🌅',
+  'Another week where the league delivered. 🎾'
 ];
 export const CAROUSEL_HASHTAGS = ['#phuket', '#tennis', '#phukettennis', '#phukettennisfamily'];
 const weekIndex = (now = Date.now()) => Math.floor(now / (7 * 24 * 60 * 60 * 1000));
 
 export function carouselCaption(matches = [], span = Date.now(), handles = []) {
   const range = typeof span === 'number' ? { from: span - WEEK_MS, to: span, shownTo: span } : span;
-  const day = ms => new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, day: '2-digit', month: 'short' }).format(new Date(ms));
-  const opener = WEEK_OPENERS[weekIndex(range.from) % WEEK_OPENERS.length];
+  const index = weekIndex(range.from);
   const count = matches.length;
-  const divisions = [...new Set(matches.map(m => txt(m.slot?.division)).filter(Boolean))].sort();
-  const players = new Set();
-  for (const m of matches) { players.add(txt(m.slot?.from_name)); players.add(txt(m.slot?.to_name)); }
-  players.delete('');
-  // Три сухих факта вместо перечисления счетов: сколько матчей, сколько людей,
-  // какие дивизионы. Всё честное, ничего не выдумано.
-  const facts = [
-    `${count} ${count === 1 ? 'match' : 'matches'} played`,
-    players.size ? `${players.size} players on court` : '',
-    divisions.length ? (divisions.length === 1 ? divisions[0] : `${divisions.length} divisions in action`) : ''
-  ].filter(Boolean).join(' · ');
   const mentions = (handles || []).map(h => '@' + String(h).replace(/^@/, '')).join(' ');
   return [
-    `🎾 ${opener}`,
+    WEEK_HEADLINES[index % WEEK_HEADLINES.length],
     '',
-    `${day(range.from)} — ${day(range.shownTo ?? range.to)}`,
-    facts,
+    WEEK_OPENERS[index % WEEK_OPENERS.length],
     '',
-    'Swipe for every result. Full tables and match history in the league app.',
+    count ? `${count} ${count === 1 ? 'match' : 'matches'} played this week.` : '',
     mentions ? '' : null,
     mentions || null,
     '',
     CAROUSEL_HASHTAGS.join(' ')
-  ].filter(x => x !== null).join('\n');
+  ].filter(x => x !== null).filter((x, i, arr) => !(x === '' && arr[i - 1] === '')).join('\n');
 }
 
-// Подборка режется на посты по десять картинок — столько Instagram уверенно
-// принимает в одну карусель, столько же Telegram отдаёт одним альбомом.
-// Каждый пост получает СВОЮ подпись и свои отметки: в посте отмечены ровно те
-// игроки, которые есть на этих десяти картинках, а не все за неделю.
+// Instagram берёт в одну карусель десять картинок, Telegram отдаёт альбомом
+// столько же. Поэтому длинная подборка режется на посты по десять. Подпись у
+// них общая — одна на всю рассылку, — а отметки свои: в посте отмечены ровно
+// те игроки, чьи картинки в него вошли.
 export const POST_SIZE = 10;
 export function buildPosts(images = [], captionFor = () => '') {
   const posts = [];
@@ -305,16 +301,22 @@ export function buildPosts(images = [], captionFor = () => '') {
 // пост в ленту уходит навсегда, и отдавать это расписанию без человека нельзя.
 export async function buildWeeklyCarousel(now = Date.now(), range = null) {
   const { cardForSlot } = await import('./matchcard.js');
+  // Счёт на карточке всегда пишется от победителя. В таблице он хранится от
+  // первого игрока вызова, поэтому без этой функции у матчей, где выиграл
+  // второй, имена и счёт расходились местами.
+  const { winnerFirstScore } = await import('./matches.js');
   const span = range || parseRange('', now);
   const { matches, extra, skipped } = await weeklyMatches(now, span);
   const images = [];
   for (const item of matches) {
-    const buffer = await cardForSlot(item.slot).catch(e => { console.error('weekly card failed:', e.message); return null; });
+    const buffer = await cardForSlot(item.slot, { winnerFirstScore, season: String(item.slot.season || '') })
+      .catch(e => { console.error('weekly card failed:', e.message); return null; });
     if (buffer) images.push({ buffer, slot: item.slot, handles: item.handles, match: item });
   }
   const handles = [...new Set(matches.flatMap(m => m.handles))];
-  const posts = buildPosts(images, (list, own) => carouselCaption(list.map(x => x.match).filter(Boolean), span, own));
-  return { images, posts, handles, caption: posts[0]?.caption || carouselCaption(matches, span, handles), extra, skipped, limit: POST_SIZE, range: span };
+  const caption = carouselCaption(matches, span, handles);
+  const posts = buildPosts(images, () => caption);
+  return { images, posts, handles, caption, extra, skipped, limit: POST_SIZE, range: span };
 }
 
 export async function publishWeeklyCarousel(prepared, index = 0) {
@@ -333,9 +335,11 @@ export async function instagramTarget(fallbackChatId = '') {
   return { chatId: txt(fallbackChatId), threadId: '' };
 }
 
-// Доставка подборки человеку: каждый пост отдельно — сначала его картинки
-// альбомом, следом его подпись. Подпись относится ровно к этим картинкам, и
-// отмечены в ней только те игроки, которые на них есть.
+// Доставка подборки человеку: сначала все картинки альбомами, потом ОДНА
+// подпись на всю рассылку — её и копируют в Instagram. Если картинок больше
+// десяти, Instagram не примет их одним постом, поэтому под подписью появляется
+// по кнопке на каждый пост: текст у них общий, а отмечают в каждом только тех
+// игроков, чьи карточки в этот пост вошли.
 export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', canPublish = false, title = 'Матчи недели', action = 'igweek:go', empty = 'За неделю нет подтверждённых матчей, которые можно опубликовать.' } = {}) {
   if (!chatId) return { ok: false, reason: 'no_chat' };
   const opts = threadId ? { message_thread_id: threadId } : {};
@@ -344,9 +348,6 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
     await sendMessage(chatId, `🗓 <b>${esc(title)}</b>\n\n${esc(empty)}`, opts).catch(() => {});
     return { ok: true, empty: true };
   }
-  const skipped = prepared.skipped?.length
-    ? `\n\nНе вошли (просили не публиковать): ${prepared.skipped.map(x => esc(x.blocked.join(', '))).join('; ')}`
-    : '';
   for (const post of posts) {
     // Файлами, а не фотографиями: sendPhoto ужимает картинку до 1280 px, и
     // сохранённая из чата карточка теряет качество ещё до Instagram.
@@ -358,13 +359,21 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
       };
     });
     await sendDocumentAlbumBuffers(chatId, chunk, opts).catch(e => console.error('weekly album failed:', e.message));
-    const head = posts.length > 1 ? `${title} · пост ${post.index + 1} из ${posts.length}` : title;
-    await sendMessage(chatId,
-      `🗓 <b>${esc(head)}</b>\n\nКартинок в посте: <b>${post.images.length}</b>${post.index === 0 ? skipped : ''}\n\n`
-      + `<b>Подпись к посту</b> — нажмите, чтобы скопировать:\n<code>${esc(post.caption)}</code>`,
-      { ...opts, ...(canPublish ? { reply_markup: { inline_keyboard: [[{ text: `📤 Опубликовать пост ${post.index + 1}`, callback_data: `${action}:${post.index}` }]] } } : {}) }
-    ).catch(e => console.error('weekly caption failed:', e.message));
   }
+  const skipped = prepared.skipped?.length
+    ? `\n\nНе вошли (просили не публиковать): ${prepared.skipped.map(x => esc(x.blocked.join(', '))).join('; ')}`
+    : '';
+  const split = posts.length > 1
+    ? `\n\nInstagram берёт не больше ${POST_SIZE} картинок в один пост, поэтому их будет ${posts.length}. Подпись у всех одна — эта.`
+    : '';
+  const buttons = canPublish
+    ? posts.map(post => [{ text: posts.length > 1 ? `📤 Опубликовать пост ${post.index + 1}` : '📤 Опубликовать', callback_data: `${action}:${post.index}` }])
+    : [];
+  await sendMessage(chatId,
+    `🗓 <b>${esc(title)}</b>\n\nКартинок: <b>${prepared.images.length}</b>${split}${skipped}\n\n`
+    + `<b>Подпись к посту</b> — нажмите, чтобы скопировать:\n<code>${esc(prepared.caption)}</code>`,
+    { ...opts, ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}) }
+  ).catch(e => console.error('weekly caption failed:', e.message));
   return { ok: true, count: prepared.images.length, posts: posts.length };
 }
 
@@ -451,8 +460,9 @@ export async function buildWeeklyPhotos(now = Date.now(), range = null) {
     if (file?.buffer?.length) images.push({ buffer: file.buffer, mime: file.mime || 'image/jpeg', slot: item.slot, handles: item.handles, match: item });
   }
   const handles = [...new Set(matches.flatMap(m => m.handles))];
-  const posts = buildPosts(images, (list, own) => photosCaption(list.map(x => x.match).filter(Boolean), span, own));
-  return { images, posts, handles, caption: posts[0]?.caption || photosCaption(matches, span, handles), skipped, limit: POST_SIZE, extra: 0, range: span };
+  const caption = photosCaption(matches, span, handles);
+  const posts = buildPosts(images, () => caption);
+  return { images, posts, handles, caption, skipped, limit: POST_SIZE, extra: 0, range: span };
 }
 
 export async function publishWeeklyPhotos(prepared, index = 0) {
