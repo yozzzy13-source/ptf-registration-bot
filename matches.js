@@ -795,16 +795,38 @@ function resultDateBlock(slot,lang="ru") {
   return slot.agreed_date ? `📅 ${escapeHtml(formatDate(slot.agreed_date,lang))}` : '';
 }
 
+// Повторная отправка просьбы подтвердить одному человеку. Нужна, когда игрок
+// полез вносить счёт заново, не заметив уведомления: одно и то же сообщение
+// шлём не чаще раза в несколько минут, иначе от трёх нажатий подряд прилетит
+// три одинаковых письма.
+const confirmResent = new Map();
+const RESEND_GAP_MS = 5 * 60 * 1000;
+function resendAllowed(challengeId, who) {
+  const key = `${challengeId}:${who}`, now = Date.now();
+  for (const [k, t] of confirmResent) if (now - t > RESEND_GAP_MS) confirmResent.delete(k);
+  if (confirmResent.has(key)) return false;
+  confirmResent.set(key, now);
+  return true;
+}
+
 // Счёт внесён одной стороной — вторая подтверждает или оспаривает.
-export async function notifyResultForVerification(slot) {
+// only — прислать только этому человеку (повтор по его же просьбе).
+export async function notifyResultForVerification(slot, { only = '' } = {}) {
   const { isOrganiserResult, resultConfirmationsLeft } = await import('./matchesdb.js');
   // Счёт от организатора подтверждают оба игрока: он не был на корте, и просить
   // подпись только у одного из них — значит лишить второго права возразить.
   // Автором счёта в таком случае честно называем организатора, а не игрока.
   const organiser = isOrganiserResult(slot);
-  const targets = organiser
+  let targets = organiser
     ? resultConfirmationsLeft(slot).map(id => ({ id }))
     : [opponentOf(slot, slot.result_by)];
+  // Страховка: автор счёта подтверждать себя не должен никогда, даже если
+  // result_by по какой-то причине окажется неверным.
+  targets = targets.filter(t => String(t?.id || '') && String(t.id) !== String(slot.result_by || ''));
+  if (only) {
+    targets = targets.filter(t => String(t.id) === String(only));
+    if (!targets.length || !resendAllowed(slot.challenge_id, only)) return null;
+  }
   const by = String(slot.result_by) === String(slot.from_telegram_id)
     ? { name: slot.from_name, username: slot.from_username }
     : { name: slot.to_name, username: slot.to_username };

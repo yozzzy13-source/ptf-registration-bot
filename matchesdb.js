@@ -747,19 +747,25 @@ export const NUDGE_CLOSE_H = 28;
 // в таблице уже отмечены отправленные напоминания, и переименование заставило
 // бы бот написать всем этим людям заново.
 const NUDGE_STAGES = [['m20',0.25],['n1',2],['n2',4],['d1',24]];
+// Подтверждение чужого счёта — отдельная, редкая лесенка: человек уже получил
+// само уведомление, дёргать его четыре раза за сутки незачем. Две ступени:
+// через 4 часа и через сутки, дальше вопрос всё равно уходит организатору.
+const CONFIRM_STAGES = [['n2',4],['d1',24]];
+export const stagesFor = scope => scope==='result' ? CONFIRM_STAGES : NUDGE_STAGES;
 const marks = cell => String(cell || '').split(',').filter(Boolean);
 export function hoursBetween(fromMs,toMs) {
   return Number.isFinite(fromMs)&&Number.isFinite(toMs)?(toMs-fromMs)/3600000:0;
 }
-export function stageFor(hours,done=[]) {
+export function stageFor(hours,done=[],scope='') {
   if(hours>=NUDGE_CLOSE_H)return done.includes('close')?'':'close';
   // Only the latest due stage: no burst of old reminders after the night hold.
-  const due=NUDGE_STAGES.filter(([,h])=>hours>=h).at(-1);
+  const due=stagesFor(scope).filter(([,h])=>hours>=h).at(-1);
   return due&&!done.includes(due[0])?due[0]:'';
 }
-function markedThrough(done,stage) {
-  const pos=NUDGE_STAGES.findIndex(([name])=>name===stage);
-  return [...new Set([...done,...(stage==='close'?NUDGE_STAGES:NUDGE_STAGES.slice(0,pos+1)).map(([name])=>name),stage])].join(',');
+function markedThrough(done,stage,scope='') {
+  const ladder=stagesFor(scope);
+  const pos=ladder.findIndex(([name])=>name===stage);
+  return [...new Set([...done,...(stage==='close'?ladder:ladder.slice(0,pos+1)).map(([name])=>name),stage])].join(',');
 }
 const nudgeField = scope => ({result:'result_nudge',court:'court_nudge',score:'score_nudge'})[scope]||'nudge_sent';
 function courtReset(slot) {
@@ -833,7 +839,7 @@ const AUTO_NUDGE_SCOPES = new Set(['invite','negotiation','result','time','court
 export function stuckItem(slot,now=Date.now()) {
   const item=pendingAction(slot);
   if(!item)return null;
-  const stage=stageFor(hoursBetween(Date.parse(item.since||''),now),item.done);
+  const stage=stageFor(hoursBetween(Date.parse(item.since||''),now),item.done,item.scope);
   if(!stage)return null;
   // Эскалацию организатору через 28 часов оставляем даже там, где напоминаний
   // игрокам нет: иначе счёт может зависнуть навсегда и этого никто не увидит.
@@ -862,10 +868,10 @@ export async function markStuckNudge(challengeId,scope,stage,expected=null) {
     if(scope==='time') {
       const [time,by,at,sent]=String(slot.time_change||'').split('|');
       if(!time)return null;
-      return updateSlot(challengeId,{time_change:[time,by,at,markedThrough(marks(sent),stage)].join('|')});
+      return updateSlot(challengeId,{time_change:[time,by,at,markedThrough(marks(sent),stage,scope)].join('|')});
     }
     const field=nudgeField(scope);
-    return updateSlot(challengeId,{[field]:markedThrough(marks(slot[field]),stage)});
+    return updateSlot(challengeId,{[field]:markedThrough(marks(slot[field]),stage,scope)});
   });
 }
 // Unconfirmed matchmaking may close; played results are never auto-cancelled.

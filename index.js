@@ -843,6 +843,15 @@ app.post('/api/match/nudge', async (req,res) => {
     if(!slot)return res.status(404).json({ok:false,error:ru?'Матч не найден.':'Match not found.'});
     const sides=[String(slot.from_telegram_id),String(slot.to_telegram_id)];
     if(!v.isAdmin&&!sides.includes(String(v.user.id)))return res.status(403).json({ok:false,error:ru?'Это не ваш матч.':'This is not your match.'});
+    // self=1 — человек сам открыл экран подтверждения и просит прислать то же
+    // сообщение ещё раз: он мог не заметить первое. Тихие часы и лесенку
+    // напоминаний это не трогает, повтор ограничен изнутри уведомления.
+    if(String(b.self||'')==='1'){
+      if(String(slot.result_status||'').toLowerCase()!=='pending')return res.json({ok:true,skipped:true});
+      if(String(slot.result_by||'')===String(v.user.id))return res.json({ok:true,skipped:true});
+      await notifyResultForVerification(slot,{only:String(v.user.id)}).catch(()=>{});
+      return res.json({ok:true,self:true});
+    }
     const item=pendingAction(slot);
     if(!item)return res.status(409).json({ok:false,error:ru?'Сейчас никто ничего не ждёт — напоминать не о чем.':'Nothing is pending on this match right now.'});
     const waiting=(item.waitingIds||[]).map(String).filter(Boolean);
@@ -873,6 +882,30 @@ app.post('/api/match/nudge', async (req,res) => {
     for(const [k,t] of manualNudges) if(Date.now()-t>MANUAL_NUDGE_MS)manualNudges.delete(k);
     res.json({ok:true,scope:item.scope});
   } catch(e) { console.error('manual nudge failed:',e);res.status(502).json({ok:false,error:e.message}); }
+});
+// «Не согласен» из мини-приложения. Раньше это жило только кнопкой в чате, и
+// человек, открывший приложение по старой ссылке, не мог возразить — только
+// подтвердить или уйти.
+app.post('/api/match/result/dispute', async (req,res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    const { disputeResult }=await import('./matchesdb.js');
+    const action=await disputeResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name});
+    if(!action.ok){
+      const ru=v.lang==='ru';
+      const errors={
+        not_found:ru?'Матч не найден.':'Match not found.',
+        not_pending:ru?'Результат уже обработан.':'The result has already been processed.',
+        own_result:ru?'Свой же счёт оспорить нельзя.':'You cannot dispute your own score.',
+        not_a_player:ru?'Это не ваш матч.':'This is not your match.'
+      };
+      return res.status(409).json({ok:false,error:errors[action.reason]||(ru?'Не удалось отклонить счёт.':'Could not reject the score.')});
+    }
+    const { notifyResultDisputed }=await import('./matches.js');
+    await notifyResultDisputed(action.previous).catch(e=>console.error('notifyResultDisputed failed:',e.message));
+    res.json({ok:true});
+  } catch(e) { console.error('result dispute failed:',e);res.status(500).json({ok:false,error:e.message}); }
 });
 app.post('/api/match/result/confirm', async (req,res) => {
   try {
@@ -924,6 +957,19 @@ app.post('/api/match/result', async (req, res) => {
     if(!slot)return res.status(404).json({ok:false,error:'Match not found'});
     const sides=[String(slot.from_telegram_id),String(slot.to_telegram_id)],participant=sides.includes(String(v.user.id));
     if(!participant&&!v.isAdmin)return res.status(403).json({ok:false,error:'Not your match'});
+    // Счёт уже внесён и ждёт подтверждения: второй игрок не переписывает его
+    // заново, а подтверждает или жмёт «Не согласен». Иначе result_by менялся
+    // местами, и просьба подтвердить прилетала тому, кто счёт и внёс.
+    // Организатору править не мешаем: это его инструмент исправления.
+    if(String(slot.result_status||'').toLowerCase()==='pending'&&!v.isAdmin
+      &&String(slot.result_by||'')!==String(v.user.id)){
+      // Человек мог не увидеть уведомление — присылаем его заново.
+      notifyResultForVerification(slot,{only:String(v.user.id)}).catch(()=>{});
+      return res.status(409).json({ok:false,error:'result_pending_confirm',
+        detail:v.lang==='ru'
+          ?'Соперник уже внёс счёт — подтвердите его или нажмите «Не согласен».'
+          :'Your opponent already submitted the score — confirm it or tap “Disagree”.'});
+    }
     const kind=['retired','technical'].includes(String(b.kind||'').toLowerCase())?String(b.kind).toLowerCase():'played';
     if(kind==='technical'&&!v.isAdmin)return res.status(403).json({ok:false,error:'Only the organiser can record W/L'});
     const requestedWinner=String(b.winner||'');

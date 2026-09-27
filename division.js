@@ -325,6 +325,45 @@ export async function recentFormBefore(spreadsheetId, playerName, upTo, limit = 
   return out.slice(-limit).map(x => (x.win ? 'W' : 'L'));
 }
 
+// Форма игрока по журналам дивизионов — через сезоны.
+//
+// Витрина профилей для этого не годится: её собирают формулы, порядок в
+// колонке задаёт таблица, а не код, и обновляется она с задержкой до получаса.
+// Журнал дивизиона стабильнее: там сквозная нумерация матчей, и порядок наш.
+//
+// Идём от свежего сезона к старым и останавливаемся, как только набрали нужное
+// число матчей. У кого сезон только начался, пятёрка доберётся прошлым сезоном
+// — Костас хочет видеть форму целиком, а не обрыв на границе сезонов.
+//
+// upTo — номер матча в ТЕКУЩЕМ сезоне, по который считать включительно. Нужен
+// карточке: она снимается до записи счёта, и матч дописывается отдельно.
+// Результат — в хронологическом порядке, от старых к новым.
+export async function playerFormAcrossSeasons(name, { season = '', limit = 5, upTo = 0 } = {}) {
+  const target = txt(name);
+  if (!target) return [];
+  const { sameName } = await import('./sheets.js');
+  const reg = await divisionRegistry().catch(() => []);
+  const seasons = [...new Set(reg.map(r => txt(r.season)).filter(Boolean))]
+    .sort((a, b) => Number(b) - Number(a));
+  const current = txt(season) || await latestSeason().catch(() => '');
+  const out = [];
+  for (const one of seasons) {
+    // Будущие сезоны в форму не попадают: карточка показывает прошлое.
+    if (current && Number(one) > Number(current)) continue;
+    const roster = await seasonRoster(one).catch(() => null);
+    const mine = (roster?.players || []).filter(p => sameName(p.name, target));
+    for (const spot of mine) {
+      const spreadsheetId = await divisionSheetId(spot.letter, one, spot.group).catch(() => '');
+      if (!spreadsheetId) continue;
+      const cut = current && String(one) === String(current) ? upTo : 0;
+      const items = await recentFormBefore(spreadsheetId, target, cut, 50).catch(() => []);
+      out.unshift(...items);
+    }
+    if (out.length >= limit) break;
+  }
+  return out.slice(-limit);
+}
+
 async function readCrossGroupRows(letter, season) {
   if (!LEAGUE_RESULTS_SHEET_ID) return [];
   try {

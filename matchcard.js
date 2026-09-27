@@ -419,7 +419,9 @@ function statColumn(meta, side) {
 // приложении. Подписи нет намеренно: у части игроков истории меньше пяти
 // матчей, и подпись «last 5» там врала бы.
 function formChipsSvg(form, cx, y, { gap=44, r=17 }={}) {
-  const items = (form || []).slice(-5);
+  // Данные хранятся хронологически, а рисуем свежим слева: слева самый
+  // последний матч, дальше вправо всё старее.
+  const items = (form || []).slice(-5).reverse();
   if (!items.length) return '';
   let x = cx - (items.length * gap) / 2 + gap / 2;
   let out = '';
@@ -554,18 +556,19 @@ async function metasFromSheets(slot, winnerIsFrom, seasonHint = '') {
   if (!division) return [null, null];
   const p1 = txt(slot.from_name), p2 = txt(slot.to_name);
   try {
-    const { divisionSheetId, getDivisionTable, recentFormBefore } = await import('./division.js');
+    const { getDivisionTable, playerFormAcrossSeasons } = await import('./division.js');
     const { sameName, getLeagueProfiles } = await import('./sheets.js');
-    const [table, profiles, spreadsheetId] = await Promise.all([
+    const [table, profiles] = await Promise.all([
       getDivisionTable(division, season, group).catch(() => null),
-      getLeagueProfiles().catch(() => []),
-      divisionSheetId(division, season, group).catch(() => '')
+      getLeagueProfiles().catch(() => [])
     ]);
-    // Та же цепочка, что в results.js: сначала витрина профилей, затем журнал.
+    // Та же цепочка, что в results.js: сначала журналы дивизионов сквозь
+    // сезоны, витрина профилей — запасной вариант.
     const formOf = async name => {
+      const live = await playerFormAcrossSeasons(name, { season, limit: 5 }).catch(() => []);
+      if (live.length) return live;
       const shown = profiles.find(x => sameName(x.name, name))?.form;
-      if (Array.isArray(shown) && shown.length) return shown.slice(-5);
-      return spreadsheetId ? recentFormBefore(spreadsheetId, name, 0).catch(() => []) : [];
+      return Array.isArray(shown) && shown.length ? shown.slice(-5) : [];
     };
     const [form1, form2] = await Promise.all([formOf(p1), formOf(p2)]);
     const place = name => table?.ok ? table.players.find(x => sameName(x.name, name))?.place : undefined;

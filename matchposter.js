@@ -286,7 +286,8 @@ function rankPlate(meta, cx, y, w=186) {
       fill="${fg}">${data.up?'▲':'▼'} ${data.delta}</text>`;
 }
 function formSvg(items=[], cx=0, y=0, r=17, gap=44) {
-  const list=(Array.isArray(items)?items:[]).slice(-5).map(x=>String(x||'').toUpperCase()).filter(x=>x==='W'||x==='L');
+  // Свежий матч слева — так же, как в карточке и в мини-приложении.
+  const list=(Array.isArray(items)?items:[]).slice(-5).map(x=>String(x||'').toUpperCase()).filter(x=>x==='W'||x==='L').reverse();
   if(!list.length)return '';
   let x=cx-(list.length*gap)/2+gap/2,out='';
   for(const v of list) {

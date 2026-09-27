@@ -1711,6 +1711,16 @@ export async function handleCallback(q) {
     const id=data.split(':')[1],slot=await findMatchSlot(id);
     if(!slot)return sendMessage(chatId,lang==='ru'?'Матч не найден.':'Match not found.');
     const ru=lang==='ru';
+    // Счёт уже внесён и ждёт подтверждения — «не доигран» отмечать нечего.
+    // Человек, скорее всего, просто не заметил уведомления: присылаем его
+    // заново вместе с кнопками подтверждения.
+    if(String(slot.result_status||'').toLowerCase()==='pending'&&String(slot.result_by||'')!==String(chatId)){
+      const { notifyResultForVerification }=await import('./matches.js');
+      await notifyResultForVerification(slot,{only:String(chatId)}).catch(()=>{});
+      return sendMessage(chatId,ru
+        ?'Счёт по этому матчу уже внесён и ждёт вашего подтверждения — подтвердите его или нажмите «Не согласен».'
+        :'The score for this match is already submitted and waiting for you — confirm it or tap “Disagree”.');
+    }
     return sendMessage(chatId,(ru?'<b>⏸ Отметить матч как недоигранный?</b>':'<b>⏸ Mark this match unfinished?</b>')+'\n\n'
       +(ru?'После подтверждения напоминания остановятся, а организатор получит уведомление. Когда матч завершится, результат можно будет внести обычным способом.':'After confirmation, reminders will stop and the organiser will be notified. You can submit the result normally after the match is completed.'),
       {reply_markup:{inline_keyboard:[
