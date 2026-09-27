@@ -113,11 +113,59 @@ function openSlotKeyboard(slot) {
   return { inline_keyboard: [[{ text: '🎾 Играю', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slot.challenge_id)}` } }]] };
 }
 
+// С кем автор окна уже сыграл в этом сезоне. Круговой турнир: каждая пара
+// встречается один раз, и слать окно тому, с кем матч уже состоялся, — спам.
+// Смотрим в два места: журнал дивизиона (там лежат и матчи, внесённые мимо
+// бота) и собственные слоты бота (там матч виден сразу, ещё до того как
+// журнал пересчитается). Пару считаем занятой и когда матч уже согласован, но
+// ещё не сыгран: второй раз договариваться с тем же человеком незачем.
+async function alreadyPairedNames(slot) {
+  const { sameName } = await import('./sheets.js');
+  const me = String(slot.from_name || '').trim();
+  const myId = String(slot.from_telegram_id || '');
+  const taken = [];
+  const add = name => { const n = String(name || '').trim(); if (n && !taken.some(x => sameName(x, n))) taken.push(n); };
+  try {
+    const { divisionSheetId, readMatchLog } = await import('./division.js');
+    const spreadsheetId = await divisionSheetId(slot.division, slot.season, slot.group).catch(() => '');
+    if (spreadsheetId && me) {
+      const { rows } = await readMatchLog(spreadsheetId);
+      for (const r of rows) {
+        const p1 = String(r.player_1 || ''), p2 = String(r.player_2 || '');
+        if (!p1 || !p2) continue;
+        // Строка расписания без результата — матч ещё не сыгран, пара свободна.
+        const played = String(r.completed || '').trim().toLowerCase() === 'yes'
+          || String(r.p1_techloss || '').trim() !== '' || String(r.p2_techloss || '').trim() !== '';
+        if (!played) continue;
+        if (sameName(p1, me)) add(p2); else if (sameName(p2, me)) add(p1);
+      }
+    }
+  } catch (e) { console.error('paired names from division log failed:', e.message); }
+  try {
+    const { allSlots } = await import('./matchesdb.js');
+    for (const r of await allSlots()) {
+      if (String(r.challenge_id) === String(slot.challenge_id)) continue;
+      const from = String(r.from_telegram_id || ''), to = String(r.to_telegram_id || '');
+      if (!from || !to || (from !== myId && to !== myId)) continue;
+      const status = String(r.status || '').toLowerCase();
+      const result = String(r.result_status || '').toLowerCase();
+      // Занята пара, если матч согласован или результат уже где-то зафиксирован.
+      if (!['accepted'].includes(status) && !['pending', 'confirmed', 'disputed', 'unfinished'].includes(result)) continue;
+      add(from === myId ? r.to_name : r.from_name);
+    }
+  } catch (e) { console.error('paired names from slots failed:', e.message); }
+  return taken;
+}
+
 export async function publishOpenSlot(slot) {
-  const recipients = await getDivisionOpponents(slot.division, slot.from_telegram_id, slot.season, slot.group).catch(e => {
+  const all = await getDivisionOpponents(slot.division, slot.from_telegram_id, slot.season, slot.group).catch(e => {
     console.error('division recipients failed:', e.message);
     return [];
   });
+  const { sameName } = await import('./sheets.js');
+  const paired = await alreadyPairedNames(slot);
+  const recipients = all.filter(r => !paired.some(n => sameName(n, r.name)));
+  const skipped = all.length - recipients.length;
   const text = openSlotText(slot);
   const opts = { reply_markup: openSlotKeyboard(slot) };
   let sent = 0, failed = 0;
@@ -132,17 +180,18 @@ export async function publishOpenSlot(slot) {
     }
   }
   await logMatchEvent('broadcast', slot, { telegram_id: slot.from_telegram_id, name: slot.from_name },
-    `дивизион ${slot.division}: отправлено ${sent}, ошибок ${failed}`);
+    `дивизион ${slot.division}: отправлено ${sent}, ошибок ${failed}, пропущено уже сыгранных ${skipped}`);
 
   // Автору — сводка, сколько игроков увидели окно.
   const ru=(await nudgeLang(slot.from_telegram_id))==='ru';
-  await sendMessage(slot.from_telegram_id, !ru ? (sent ? `📣 Your slot was sent to <b>${sent}</b> division players. I’ll notify you when someone responds.` : '📣 There are no eligible opponents with Telegram in your group yet.') : sent
+  await sendMessage(slot.from_telegram_id, !ru ? (sent ? `📣 Your slot was sent to <b>${sent}</b> division players. I’ll notify you when someone responds.` : '📣 Nobody left to send it to — you have already played or agreed a match with everyone in your group.') : sent
     ? `📣 Окно отправлено игрокам дивизиона: <b>${sent}</b>.\nКак только кто-то откликнется, я пришлю предложение.`
-    : `📣 В вашем дивизионе пока некому отправить окно — нет активных игроков с Telegram.`,{reply_markup:{inline_keyboard:[[{text:ru?'✖️ Отменить запрос':'✖️ Cancel request',callback_data:'match_cancel:'+slot.challenge_id}],[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]]}}).catch(() => {});
+    : `📣 Отправлять окно некому: со всеми в группе вы уже сыграли или договорились.`,{reply_markup:{inline_keyboard:[[{text:ru?'✖️ Отменить запрос':'✖️ Cancel request',callback_data:'match_cancel:'+slot.challenge_id}],[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]]}}).catch(() => {});
 
-  await adminMatchCopy(slot, `<b>📣 Новое окно</b>\n\n${text}\n\nРазослано игрокам: <b>${sent}</b>`);
+  await adminMatchCopy(slot, `<b>📣 Новое окно</b>\n\n${text}\n\nРазослано игрокам: <b>${sent}</b>`
+    + (skipped ? `\nПропущено (уже сыграли или договорились): <b>${skipped}</b>` : ''));
 
-  return { sent, failed };
+  return { sent, failed, skipped };
 }
 
 // Окно рассылалось в личку многим игрокам, поэтому «закрывать карточку» негде.
@@ -1244,5 +1293,3 @@ export async function matchContact(slot,viewerId) {
  return {id:opp.id,name:opp.name,username,url:username?`https://t.me/${username}`:`tg://user?id=${encodeURIComponent(opp.id)}`};
 }
 async function contactRow(slot,id,lang) {const c=await matchContact(slot,id);return c?[{text:lang==="ru"?"💬 Написать":"💬 Message",url:c.url}]:[];}
-
-
