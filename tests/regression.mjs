@@ -302,11 +302,16 @@ for(const [name,fixture] of Object.entries(scopes)) {
  check(!db.stuckItem(fixture,started+14*60000),name+' no reminder before 15 minutes');
  // «Внесите счёт» напоминаний больше не шлёт: приглашение уходит один раз, а
  // через 28 часов вопрос уходит организатору. Остальные ступени не тронуты.
- const stages=name==='score'?[[1680,'close']]:[[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']];
+ // Подтверждение чужого счёта дёргаем реже всех: две ступени вместо четырёх.
+ const stages=name==='score'?[[1680,'close']]
+   :name==='result'?[[240,'n2'],[1440,'d1'],[1680,'close']]
+   :[[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']];
  for(const [minutes,stage] of stages) {
    const item=db.stuckItem(fixture,started+minutes*60000);
    check(item?.stage===stage&&item.scope===(name==='initial'?'invite':name),name+' reaches '+stage);
  }
+ if(name==='result')for(const minutes of [15,120])
+   check(!db.stuckItem(fixture,started+minutes*60000),'Подтверждение счёта не дёргают через '+minutes+' мин');
  if(name==='score')for(const minutes of [15,120,240,1440])
    check(!db.stuckItem(fixture,started+minutes*60000),'Просьба внести счёт не повторяется через '+minutes+' мин');
 }
@@ -851,18 +856,49 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/sortableDate\(b\.date\)-sortableDate\(a\.date\)/.test(league),'Лента лиги сортируется по дате, а не по номеру матча');
  check(/function sortableDate/.test(league),'Дата приводится к числу: «01.09» не встаёт выше «12.08»');
 
+ // Повторная подача счёта и цепочка подтверждения.
+ const idxSrc=await fs.readFile(path.join(root,'index.js'),'utf8');
+ const matchesSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/result_pending_confirm/.test(idxSrc),'Пока счёт ждёт подтверждения, второй игрок его не переписывает');
+ check(/notifyResultForVerification\(slot,\{only:String\(v\.user\.id\)\}\)/.test(idxSrc),'Не заметил уведомление — присылаем то же самое заново');
+ check(/String\(t\.id\) !== String\(slot\.result_by \|\| ''\)/.test(matchesSrc),'Автору счёта просьба подтвердить не уходит никогда');
+ check(/const RESEND_GAP_MS/.test(matchesSrc),'Повтор ограничен по времени — три нажатия не дадут трёх писем');
+ check(/app\.post\('\/api\/match\/result\/dispute'/.test(idxSrc),'«Не согласен» работает и из мини-приложения');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/Счёт по этому матчу уже внесён и ждёт вашего подтверждения/.test(botSrc),'Кнопка «Матч не доигран» при внесённом счёте отвечает подсказкой');
+ check(/function renderConfirmScreen/.test(match),'Вместо формы показывается экран подтверждения');
+ check(/pingConfirmation\(s\.challenge_id\)/.test(match),'Открыл экран — бот продублировал сообщение в чат');
+ const dbSrc=await fs.readFile(path.join(root,'matchesdb.js'),'utf8');
+ check(/const CONFIRM_STAGES = \[\['n2',4\],\['d1',24\]\]/.test(dbSrc),'У подтверждения своя лесенка: две ступени');
+
+ // Форма создания вызова: выбор корта не сбрасывает время и комментарий.
+ check(/function keepNewForm/.test(match),'Перед перерисовкой форма запоминает введённое');
+ check(/toggleCourt\(name\)\{keepNewForm\(\)/.test(match),'Клик по корту сохраняет время');
+ check(/toggleDate\(iso\)\{keepNewForm\(\)/.test(match),'Клик по дате сохраняет время');
+ check(/timeOptions\(selFrom\)/.test(match)&&/timeOptions\(selTo\)/.test(match),'Время рисуется из сохранённого, а не из 17:00');
+ check(/oninput="selComment=this\.value"/.test(match),'Комментарий тоже переживает перерисовку');
+
  // Поиск с выпадающим списком во всех трёх местах лиги.
  check(/function sugBox/.test(league),'Есть общий конструктор поля поиска');
  for(const [id,handler] of [['rq','race'],['pq','plr'],['fq','feed']]){
   check(new RegExp(`sugBox\\('${id}'`).test(league),'Поле '+id+' собрано через общий конструктор');
-  for(const suffix of ['Set','Pick','Focus','Blur'])
+  for(const suffix of ['Set','Pick','Blur'])
    check(new RegExp(`function ${handler}${suffix}\\(`).test(league),'Обработчик '+handler+suffix+' определён');
+  check(!new RegExp(`function ${handler}Focus\\(`).test(league),'По касанию поля список больше не открывается: '+handler);
  }
- check(/Focus\(\)\{[a-zA-Z]+SugOpen=true/.test(league),'Список открывается целиком по нажатию, а не только при вводе');
+ check(!/onfocus="/.test(league),'Обработчика onfocus у поиска нет вовсе');
+ check(/var hits=qq\?uniq\.filter/.test(league),'Подсказки появляются только после ввода символов');
+ check(/open&&qq&&rows/.test(league),'Пустой запрос списка не рисует');
+ check(/class="sugx"/.test(league),'У поля поиска есть крестик очистки');
+ check(/max-height:46vh/.test(league),'Список ограничен по высоте и не накрывает соседние поля');
+ check(/if\(document\.activeElement!==el\)el\.focus\(\)/.test(league),'Фокус возвращается после перерисовки — клавиатура не закрывается');
  check(!/function setPQuery|function pickPQ|function setRaceQuery|function setFQuery/.test(league),'Старые обработчики поиска убраны, двух путей к одному полю не осталось');
 
  // Игрок в ручном матче выбирается из списка или набирается руками.
- check(/list="mPlayerList"/.test(match)&&/<datalist id="mPlayerList">/.test(match),'Игрок в ручном матче выбирается из выпадающего списка');
+ check(!/datalist/.test(match),'Нативных выпадающих списков в ручном матче не осталось');
+ check(/function comboBox\(id,names,placeholder,onpick\)/.test(match),'Поля игрока и корта собраны своим поиском');
+ check(/if\(!v\)\{box\.style\.display='none'/.test(match),'Пустое поле списка не показывает');
+ check(/function comboClear/.test(match)&&/class="sugx"/.test(match),'Список можно закрыть и очистить');
  check(/function manualPerson\(value\)/.test(match),'Игрок ищется по тексту поля, а не по telegram_id');
  check(/manualPerson\(\$\('mOpp'\)\.value\)\.telegram_id/.test(match),'На сервер уходит найденный telegram_id, а не введённый текст');
  check(/sugMore/.test(league),'Подсказка «сколько ещё» переведена');
@@ -1197,8 +1233,10 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const ig2=await load('instagram.js');
  const src=await fs.readFile(path.join(root,'publicity.js'),'utf8');
  check(/return { matches: out, extra/.test(src),'Организатору показываем все матчи недели, а не первые десять');
- check(/prepared\.images\.slice\(0, CAROUSEL_MAX\)/.test(src),'Лимит Instagram применяется только при публикации');
- check(/for \(let i = 0; i < prepared\.images\.length; i \+= 10\)/.test(src),'Карточки уходят в Telegram пачками по десять — сколько бы их ни было');
+ check(/export const POST_SIZE = 10/.test(src),'Подборка режется на посты по десять картинок');
+ check(/const handles = \[\.\.\.new Set\(list\.flatMap\(x => x\.handles \|\| \[\]\)\)\]/.test(src),'В посте отмечены только те игроки, чьи картинки в него вошли');
+ check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост со своей подписью и своими отметками');
+ check(/callback_data: `\$\{action\}:\$\{post\.index\}`/.test(src),'У каждого поста своя кнопка публикации');
  check(ig2.CAROUSEL_MAX===20,'По умолчанию двадцать');
  check(/children\.slice\(0, CAROUSEL_SAFE\)/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'При отказе карусель сама урезается до десяти, а не падает');
  check(/IG_CAROUSEL_MAX/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'Лимит меняется переменной, без правки кода');
@@ -1237,12 +1275,28 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 
 
 // --- Постер старого матча: форма и место берутся по логике карточки ---------
+ // Форма: журналы дивизионов главнее витрины, сквозь сезоны, свежее слева.
+ const divForm=await fs.readFile(path.join(root,'division.js'),'utf8');
+ check(/export async function playerFormAcrossSeasons/.test(divForm),'Форма собирается по журналам дивизионов сквозь сезоны');
+ check(/if \(out\.length >= limit\) break;/.test(divForm),'Прошлый сезон добирается только пока не набрана пятёрка');
+ check(/if \(current && Number\(one\) > Number\(current\)\) continue;/.test(divForm),'Будущие сезоны в форму не попадают');
+ const res5=await fs.readFile(path.join(root,'results.js'),'utf8');
+ check(/const live = await playerFormAcrossSeasons\(name, \{ season, upTo, limit: 5 \}\)/.test(res5),'Карточка берёт форму из журналов, витрина — запасной вариант');
+ const card5=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ check(/const live = await playerFormAcrossSeasons\(name, \{ season, limit: 5 \}\)/.test(card5),'Постер старого матча берёт форму оттуда же');
+ check(/slice\(-5\)\.reverse\(\)/.test(card5),'На карточке свежий матч слева');
+ const post5=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
+ check(/\.filter\(x=>x==='W'\|\|x==='L'\)\.reverse\(\)/.test(post5),'На постере свежий матч слева');
+ const lg5=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(/form\.slice\(-5\)\.reverse\(\)/.test(lg5),'В мини-приложении свежий матч слева');
+
+
 {
  const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
  check(/async function metasFromSheets/.test(card),'Без контекста карточка не остаётся пустой');
  check(/if \(!ctx\) return metasFromSheets\(slot, winnerIsFrom, seasonHint\)/.test(card),'Запасной путь включается именно при отсутствии контекста');
- check(/getLeagueProfiles\(\)/.test(card),'Форма берётся из витрины профилей — по всей истории игрока');
- check(/return spreadsheetId \? recentFormBefore\(spreadsheetId, name, 0\)/.test(card),'Журнал дивизиона остаётся запасным источником формы, как в карточке');
+ check(/playerFormAcrossSeasons/.test(card),'Форма берётся из журналов дивизионов сквозь сезоны');
+ check(/getLeagueProfiles\(\)/.test(card),'Витрина профилей осталась запасным источником формы');
  check(/sameName\(x\.name, name\)\)\?\.place/.test(card),'Место читается из живой таблицы дивизиона');
  check(/position: \{ after: place\(p1\) \}/.test(card),'Место «до» задним числом не выдумываем — стрелки нет');
  check(/fp: null/.test(card),'Fantasy Points задним числом не выдумываем');
@@ -1250,7 +1304,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const results2=await fs.readFile(path.join(root,'results.js'),'utf8');
  check(/recent_form/.test(results2)||/cardFormsBefore/.test(results2),'Карточка по-прежнему снимает контекст при записи счёта');
  const div=await fs.readFile(path.join(root,'division.js'),'utf8');
- check(!/upTo = 0/.test(div),'Срезов таблицы в прошлое нет — считаем по живой таблице');
+ check(!/getDivisionTable\(letter, season = '', group = '', \{ upTo/.test(div),'Срезов таблицы в прошлое нет — место считаем по живой таблице');
 }
 
 
@@ -1290,6 +1344,13 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/result\?\.document\?\.file_id/.test(bot4),'file_id у файла читается из document, а не из photo');
  const pub4=await fs.readFile(path.join(root,'publicity.js'),'utf8');
  check(/sendDocumentAlbumBuffers/.test(pub4),'Недельные подборки уходят файлами');
+ check(/>G<\/text>/.test(src),'Колонка сыгранных матчей подписана G — Games');
+ check(/const SPONSOR = \{ top: 1398, bottom: 1660 \}/.test(src),'Лента партнёров поднята выше кнопок сторис');
+ check(/title: 236, logoTop: 268/.test(src),'Шапка опущена ниже полосы просмотра сторис');
+ check(/Math\.min\(L\.row, Math\.floor\(\(bandBottom - bandTop\) \/ rows\.length\)\)/.test(src),'Длинная группа ужимается по высоте строки, а не вылезает за кадр');
+ const league=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(/colM:'И',colW:'П',colWR:'WR',colPts:'ОЧК'/.test(league),'В русском интерфейсе колонки И · П · ОЧК');
+ check(/colM:'G',colW:'W',colWR:'WR',colPts:'PTS'/.test(league),'В английском интерфейсе колонки G · W · PTS');
  check(/Standings Snapshots/.test(src),'Снимки мест лежат в нашей таблице, а не в таблицах дивизионов');
  check(/ensureExtraSheet/.test(src),'Лист снимков заводится сам');
  check(/const move = Number\.isFinite\(was\) \? was - p\.place : null/.test(src),'Движение считается от прошлого выпуска, а не от начала сезона');
@@ -1319,9 +1380,12 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(pub3.carouselDue(at('2099-01-04T12:00:00Z'))&&!pub3.carouselDue(at('2099-01-01T12:00:00Z')),'Карточки и фото разведены по разным дням');
 
  const cap=pub3.photosCaption([{slot:{from_name:'A',to_name:'B'}}],at('2099-01-01T12:00:00Z'),['a.t']);
- check(/Photos sent in by the players themselves/.test(cap),'Подпись говорит, что фото прислали сами игроки');
  check(/@a\.t/.test(cap)&&cap.includes(pub3.CAROUSEL_HASHTAGS.join(' ')),'В подписи есть упоминания и хэштеги');
  check(!/[А-Яа-я]/.test(cap),'Подпись к фотопосту без русского текста');
+ check(!/\d/.test(cap.replace(/#\S+|@\S+/g,'')),'Ни дат, ни числа игроков — никакой статистики в подписи');
+ check(!/Sept|players on court/i.test(cap),'Даты и счётчики убраны');
+ check(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(cap.split('\n')[0]),'Заголовок с эмодзи');
+ check(cap.split('\n')[2].length>30,'Под заголовком живой текст про неделю, а не метрика');
  check(pub3.photosCaption([],at('2099-01-01T12:00:00Z'),[]).split('\n')[0]
    !==pub3.photosCaption([],at('2099-01-08T12:00:00Z'),[]).split('\n')[0],'Первая фраза меняется от недели к неделе');
 
@@ -1334,7 +1398,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 
  const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/text\.startsWith\('\/instagram_photos'\)/.test(bot3),'Есть команда ручной сборки фотографий');
- check(/data === 'igweek:go' \|\| data === 'igphotos:go'/.test(bot3),'Обе подборки публикуются одним обработчиком');
+ check(/data\.startsWith\('igweek:go'\) \|\| data\.startsWith\('igphotos:go'\)/.test(bot3),'Обе подборки публикуются одним обработчиком');
+ check(/publishWeeklyCarousel\(prepared,index\)/.test(bot3),'Кнопка публикует именно свой пост, а не всю подборку');
  const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
  check(/cmd:'instagram_photos'/.test(tg3),'Команда /instagram_photos в едином списке');
  const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
