@@ -1210,8 +1210,15 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
    {slot:{from_name:'Carol Three',to_name:'Dan Four',division:'Division W'}}];
  const caption=pub.carouselCaption(week,at('2099-01-04T12:00:00Z'),['alice.t','carol.t']);
  check(!/6:4|def\./.test(caption),'Счёта матчей в подписи нет — он и так на карточках');
- check(/2 matches played/.test(caption)&&/4 players on court/.test(caption),'В подписи настоящие цифры недели');
+ check(/2 matches played this week/.test(caption),'Единственная цифра в подписи — сколько матчей сыграно');
+ check(!/players on court|divisions in action|Jan|Sept/.test(caption),'Ни игроков, ни дивизионов, ни дат в подписи нет');
+ check(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(caption.split('\n')[0]),'Заголовок с эмодзи');
  check(/@alice\.t @carol\.t/.test(caption),'Игроки, давшие согласие, упомянуты в подписи');
+ const pubSrc=await fs.readFile(path.join(root,'publicity.js'),'utf8');
+ check(/const caption = carouselCaption\(matches, span, handles\);/.test(pubSrc),'Подпись одна на всю подборку, а не на каждый пост');
+ check(/const buttons = canPublish/.test(pubSrc),'Кнопки публикации собраны под одной подписью');
+ check(/cardForSlot\(item\.slot, \{ winnerFirstScore, season/.test(pubSrc),'Счёт на карточке недели развёрнут от победителя');
+
  check(pub.CAROUSEL_HASHTAGS.join(' ')==='#phuket #tennis #phukettennis #phukettennisfamily','Хэштеги те, что просили');
  check(caption.includes(pub.CAROUSEL_HASHTAGS.join(' ')),'Хэштеги есть в подписи');
  check(!/[А-Яа-я]/.test(caption),'Подпись к посту без русского текста');
@@ -1250,7 +1257,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/return { matches: out, extra/.test(src),'Организатору показываем все матчи недели, а не первые десять');
  check(/export const POST_SIZE = 10/.test(src),'Подборка режется на посты по десять картинок');
  check(/const handles = \[\.\.\.new Set\(list\.flatMap\(x => x\.handles \|\| \[\]\)\)\]/.test(src),'В посте отмечены только те игроки, чьи картинки в него вошли');
- check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост со своей подписью и своими отметками');
+ check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост: подпись общая, отметки свои');
  check(/callback_data: `\$\{action\}:\$\{post\.index\}`/.test(src),'У каждого поста своя кнопка публикации');
  check(ig2.CAROUSEL_MAX===20,'По умолчанию двадцать');
  check(/children\.slice\(0, CAROUSEL_SAFE\)/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'При отказе карусель сама урезается до десяти, а не падает');
@@ -1432,9 +1439,11 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(exact.label==='2099-01-05 — 2099-01-11'&&exact.to>exact.from,'Точный отрезок разбирается по двум датам');
  check(pub4.parseRange('2099-02-01',now).label==='2099-02-01 + 7 дней','Одна дата — неделя от неё');
  check(pub4.parseRange('2099-13-45',now).label==='последние 7 дней','Битая дата не ломает сборку');
- // Подпись берёт даты из отрезка, а не из «сегодня».
+ // Подпись сама по себе дат не показывает, но отрезок всё равно определяет её
+ // содержание: по нему выбирается заголовок недели.
  const cap=pub4.carouselCaption([{slot:{from_name:'A',to_name:'B',division:'C'}}],exact,[]);
- check(/05 Jan — 11 Jan/.test(cap),'В подписи стоят даты выбранного отрезка');
+ check(!/Jan|Feb/.test(cap),'Дат в подписи нет');
+ check(/1 match played this week/.test(cap),'Число матчей считается по выбранному отрезку');
 
  const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/\btest\b/.test(bot4)&&/Так опрос выглядит у игрока/.test(bot4),'Есть превью опроса перед рассылкой');
