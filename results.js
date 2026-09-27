@@ -13,7 +13,6 @@ import { scoreValues, detectSet3Mode, reverseScore, cellToScore, formatScore } f
 import { divisionSheetId, divisionLetter, getDivisionTable, recentFormBefore, playerFormAcrossSeasons } from './division.js';
 import { getLeagueProfiles, getSetting, sameName } from './sheets.js';
 import { slotScope, sameScope } from './access.js';
-import { buildFantasyCatalog, scoreFantasyMatch, fantasyPlayerKey } from './fantasy.js';
 import { rememberCardContext } from './matchcard.js';
 
 const DATA_START_ROW = 2;
@@ -440,22 +439,9 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
     season, season_write: seasonWrite, columns: headers.length, spreadsheet_id: spreadsheetId };
 }
 
-// Счёт от лица конкретного игрока (p1=slot.from_name или его разворот) для
-// Fantasy: то же правило, что и для записи в таблицу (RET/W-O — раздельная
-// строка-маркер, обычный счёт форматируется из уже распарсенного объекта).
-function scoreTextFor(slot, parsed, reversed) {
-  const kind = resultKind(slot);
-  if (kind === 'technical') return resultMarker(slot, reversed) || (slot.result_winner ? (reversed ? 'L/W' : 'W/L') : 'L/L');
-  const p = reversed ? reverseScore(parsed) : parsed;
-  const s = formatScore(p);
-  return kind === 'retired' ? s + ' RET' : s;
-}
-
-// Снимок контекста карточки результата: место в дивизионе «до» этого матча,
-// живая форма (W/L строго до него) и очки Fantasy за этот конкретный матч —
-// для ОБОИХ игроков, даже если кто-то из них не в текущем roster-каталоге
-// Fantasy: Костас хочет, чтобы очки считались всем, кто реально сыграл.
-// Цена по умолчанию 10 (как для дебютанта), если игрока нет в каталоге.
+// Снимок контекста карточки результата: место в дивизионе «до» этого матча
+// и живая форма (W/L строго до него). Очки Fantasy сюда больше не входят —
+// в публичные материалы они не идут; сама Fantasy считает их у себя.
 // Форму берём из журналов дивизионов — сквозь сезоны. Это стабильный источник:
 // порядок матчей задаёт их нумерация, а не формула в таблице, и обновляется он
 // сразу после записи счёта. Витрина профилей осталась запасным вариантом на
@@ -474,12 +460,11 @@ async function cardFormsBefore(names, fallbacks, { season = '', upTo = 0 } = {})
 async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot, d1 }) {
   const p1Group=String(pair.groupA || pair.a?.group || '').trim();
   const p2Group=String(pair.groupB || pair.b?.group || '').trim();
-  const [p1Table,p2Table,p1Sheet,p2Sheet,catalog]=await Promise.all([
+  const [p1Table,p2Table,p1Sheet,p2Sheet]=await Promise.all([
     getDivisionTable(d1,season,p1Group).catch(()=>null),
     getDivisionTable(d1,season,p2Group).catch(()=>null),
     divisionSheetId(d1,season,p1Group).catch(()=>''),
-    divisionSheetId(d1,season,p2Group).catch(()=>''),
-    buildFantasyCatalog({mode:'live'}).catch(()=>null)
+    divisionSheetId(d1,season,p2Group).catch(()=>'')
   ]);
   const [historyP1,historyP2]=await cardFormsBefore([p1,p2],[
     () => p1Sheet ? recentFormBefore(p1Sheet,p1,0) : Promise.resolve([]),
@@ -488,17 +473,12 @@ async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot
   const place=(table,name)=>table?.ok
     ? table.players.find(x=>sameName(x.name,name))?.place
     : undefined;
-  const priceOf=name=>catalog?.players?.find(p=>fantasyPlayerKey(p.name)===fantasyPlayerKey(name))?.price??10;
   const bothTechnical=resultKind(slot)==='technical'&&!slot.result_winner;
   const p1Won=!bothTechnical&&String(slot.result_winner)===String(slot.from_telegram_id);
-  const p2Won=!bothTechnical&&!p1Won;
-  const fp1=bothTechnical?0:scoreFantasyMatch({score:scoreTextFor(slot,parsed,false),result:p1Won?'WIN':'LOSS'},priceOf(p1),priceOf(p2)).total;
-  const fp2=bothTechnical?0:scoreFantasyMatch({score:scoreTextFor(slot,parsed,true),result:p2Won?'WIN':'LOSS'},priceOf(p2),priceOf(p1)).total;
   const withCurrent=(history,won)=>(bothTechnical?history:[...history,won?'W':'L']).slice(-5);
   rememberCardContext(slot.challenge_id,{
     p1:{name:p1,group:p1Group,place:place(p1Table,p1),form:withCurrent(historyP1,p1Won)},
-    p2:{name:p2,group:p2Group,place:place(p2Table,p2),form:withCurrent(historyP2,p2Won)},
-    fp:{p1:fp1,p2:fp2},
+    p2:{name:p2,group:p2Group,place:place(p2Table,p2),form:withCurrent(historyP2,!bothTechnical&&!p1Won)},
     division:d1,season,group:'cross',cross_group:true
   });
 }
@@ -526,19 +506,16 @@ async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed
   const findPlace = name => beforeTable?.ok
     ? beforeTable.players.find(x => sameName(x.name, name))?.place
     : undefined;
-  const catalog = await buildFantasyCatalog({ mode: 'live' }).catch(() => null);
-  const priceOf = name => catalog?.players?.find(p => fantasyPlayerKey(p.name) === fantasyPlayerKey(name))?.price ?? 10;
+  // Fantasy Points в публичные материалы не идут, поэтому здесь их больше не
+  // считаем: снимок нужен карточке, а карточке — только форма и место.
   const bothTechnical = resultKind(slot) === 'technical' && !slot.result_winner;
   const p1Won = !bothTechnical && String(slot.result_winner) === String(slot.from_telegram_id);
   const p2Won = !bothTechnical && !p1Won;
-  const fp1 = bothTechnical ? 0 : scoreFantasyMatch({ score: scoreTextFor(slot, parsed, false), result: p1Won ? 'WIN' : 'LOSS' }, priceOf(p1), priceOf(p2)).total;
-  const fp2 = bothTechnical ? 0 : scoreFantasyMatch({ score: scoreTextFor(slot, parsed, true), result: p2Won ? 'WIN' : 'LOSS' }, priceOf(p2), priceOf(p1)).total;
   // Двойное техническое поражение победителя не даёт — такой матч в форму не идёт.
   const withCurrent = (history, won) => (bothTechnical ? history : [...history, won ? 'W' : 'L']).slice(-5);
   rememberCardContext(slot.challenge_id, {
     p1: { name: p1, place: findPlace(p1), form: withCurrent(historyP1, p1Won) },
     p2: { name: p2, place: findPlace(p2), form: withCurrent(historyP2, p2Won) },
-    fp: { p1: fp1, p2: fp2 },
     division: d1, season, group: pair.group
   });
 }

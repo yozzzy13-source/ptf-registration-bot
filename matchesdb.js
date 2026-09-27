@@ -30,7 +30,10 @@ const SLOT_HEADERS = [
   'result_kind', 'result_points_from', 'result_points_to', 'result_photo_file_id', 'result_submitted_at', 'result_confirmed_at', 'result_confirmed_by', 'result_note',
   'result_prompt_sent_at', 'reminder_sent', 'nudge_sent', 'result_nudge',
   'court_pending_at', 'court_nudge', 'score_nudge',
-  'unfinished_by', 'unfinished_at', 'unfinished_note', 'unfinished_photo_file_id'
+  'unfinished_by', 'unfinished_at', 'unfinished_note', 'unfinished_photo_file_id',
+  // Готовая карточка результата — сохраняется в момент результата и потом
+  // пересылается как есть, а не пересобирается задним числом.
+  'result_card_file_id'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 

@@ -10,7 +10,7 @@
 //
 // Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
 // дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
-import { sendMessage as telegramSendMessage, sendPhoto, sendPhotoBuffer, editMessageMedia, deleteMessage, withBulkRetries } from './telegram.js';
+import { sendMessage as telegramSendMessage, sendPhoto, sendPhotoBuffer, sendDocumentBuffer, editMessageMedia, deleteMessage, withBulkRetries } from './telegram.js';
 import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers, getWebsiteProfileUrl } from './sheets.js';
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts } from './matchesdb.js';
@@ -1112,6 +1112,8 @@ export async function refreshResultPost(slot, messageId, adminChatId) {
   const full = { ...slot, season: scope.season, group: scope.group };
   const card = await feedCard(full, 'en');
   const media = await resultMedia(full);
+  // Перевыпущенная карточка заменяет и сохранённую — в подборку уйдёт новая.
+  if (media.buffer) await archiveResultCard(full, media.buffer);
   let fileId = media.fileId || '';
   let temp = null;
   if (!fileId && media.buffer) {
@@ -1157,6 +1159,28 @@ export async function previewResultPost(slot, chatId, { withButtons = true } = {
   return true;
 }
 
+// Карточку результата сохраняем в момент, когда она собрана с правильными
+// данными: форма и место на момент матча живут в памяти сервера всего пару
+// часов, и пересобранная через неделю карточка показывала бы сегодняшнее
+// состояние игроков. Файл отправляем в админский чат ФАЙЛОМ (оригинальное
+// качество, без пережатия), забираем его id и тут же удаляем сообщение — в
+// чате ничего не остаётся, а файл у Telegram живёт бессрочно.
+export async function archiveResultCard(slot, buffer) {
+  if (!buffer?.length || !slot?.challenge_id) return '';
+  const chatId = await getAdminChatId().catch(() => '');
+  if (!chatId) return '';
+  try {
+    const sent = await sendDocumentBuffer(chatId, buffer, `card-${slot.challenge_id}.png`, { disable_notification: true });
+    const fileId = sent?.document?.file_id || sent?.result?.document?.file_id || '';
+    if (sent?.message_id) await deleteMessage(chatId, sent.message_id).catch(() => {});
+    if (fileId) await updateSlot(slot.challenge_id, { result_card_file_id: fileId });
+    return fileId;
+  } catch (e) {
+    console.error('result card archive failed:', e.message);
+    return '';
+  }
+}
+
 export async function broadcastResult(slot) {
   const scope = await slotScope(slot);
   slot = {...slot,season:scope.season,group:scope.group};
@@ -1165,6 +1189,7 @@ export async function broadcastResult(slot) {
   // В личку каждый получает свой язык (см. ниже).
   const { text, reply_markup } = cards.en;
   const media = await resultMedia(slot);
+  if (media.buffer) await archiveResultCard(slot, media.buffer);
   const extraPhoto = slot.result_photo_file_id || '';
   // Первая отправка загружает файл, остальные — уже по file_id.
   const sendWith = async (chatId, caption, opts) => {
@@ -1293,3 +1318,5 @@ export async function matchContact(slot,viewerId) {
  return {id:opp.id,name:opp.name,username,url:username?`https://t.me/${username}`:`tg://user?id=${encodeURIComponent(opp.id)}`};
 }
 async function contactRow(slot,id,lang) {const c=await matchContact(slot,id);return c?[{text:lang==="ru"?"💬 Написать":"💬 Message",url:c.url}]:[];}
+
+

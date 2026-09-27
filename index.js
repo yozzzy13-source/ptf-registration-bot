@@ -5,7 +5,7 @@ import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEET
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
 import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
-import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe } from './util.js';
+import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe, escapeHtml } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
@@ -1971,6 +1971,27 @@ app.listen(PORT, async () => {
     renew();
     setInterval(renew, 24 * 60 * 60 * 1000).unref?.();
   }
+  // Фото из Players_Master переносим в Telegram — туда же, где лежат
+  // собственные аватарки игроков. Через минуту после старта (чтобы не мешать
+  // прогреву таблиц) и дальше раз в сутки: так подхватываются и новые игроки.
+  // Организатору пишем только если что-то реально перенеслось.
+  const avatarImport = async () => {
+    try {
+      const { getAdminChatId } = await import('./admin.js');
+      const { importMasterAvatars } = await import('./avatars.js');
+      const adminChatId = await getAdminChatId().catch(() => '');
+      const out = await importMasterAvatars({ adminChatId });
+      if (!out.ok || !out.done?.length) return;
+      const failed = out.failed?.length
+        ? `\n\nНе получилось (${out.failed.length}):\n` + out.failed.map(f => `• ${escapeHtml(f.name)} — ${escapeHtml(f.error)}`).join('\n')
+        : '';
+      const left = out.left ? `\n\nОстальные ${out.left} перенесутся завтра.` : '';
+      await sendMessage(adminChatId, `🖼 <b>Аватарки из Players_Master перенесены в Telegram: ${out.done.length}</b>\n\n`
+        + out.done.map(n => '• ' + escapeHtml(n)).join('\n') + failed + left, { disable_notification: true }).catch(() => {});
+    } catch (e) { console.error('avatar import failed:', e.message); }
+  };
+  setTimeout(avatarImport, 60 * 1000).unref?.();
+  setInterval(avatarImport, 24 * 60 * 60 * 1000).unref?.();
   // Time can create a result task without a player pressing a button.
   setInterval(async()=>{try{const rows=await allSlots();queueMatchAttention([...new Set(rows.filter(s=>s.status==='accepted').flatMap(s=>[s.from_telegram_id,s.to_telegram_id]).filter(Boolean))]);}catch(e){console.error('attention sweep:',e.message);}},5*60*1000).unref();
   console.log(`PTF Registration Bot listening on ${PORT}`);

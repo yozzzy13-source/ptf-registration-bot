@@ -245,9 +245,17 @@ const futureUnfinished={...unfinishedFixture,challenge_id:'unfinished-future',da
 await db.createSlot(futureUnfinished);
 check((await db.markMatchUnfinished('unfinished-future',{telegram_id:'1'})).reason==='match_not_ended','A future match cannot be marked unfinished');
 
+// Круговой турнир: окно уходит только тем, с кем ещё не играли.
+messages.length=0;
+await matches.publishOpenSlot({challenge_id:'private2',match_type:'open',status:'open',division:'Division W',
+  from_telegram_id:'7',from_name:'Wendy One',dates:'2099-09-14',time_from:'10:00',time_to:'14:00',duration_min:'120',courts:'Court A',season:'2',group:'1'});
+check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='8'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'Open slot reaches the same group with RU button');
+check(!messages.some(m=>m.method==='sendMessage'&&['1','2','3','4'].includes(String(m.args[0]))),'Open slot is not sent to other groups or divisions');
+messages.length=0;
+// У Алисы с Бобом матч уже есть — окно ему больше не уходит.
 await matches.publishOpenSlot({...slot,challenge_id:'private',season:'2',group:'1'});
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'Open slot reaches the same group with RU button');
-check(!messages.some(m=>m.method==='sendMessage'&&['3','4','7','8','9','10'].includes(String(m.args[0]))),'Open slot is not sent to other groups or divisions');
+check(!messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'С кем уже сыграли или договорились — окно не шлём');
+check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&/уже сыграли|already played/i.test(String(m.args[1]||''))),'Автору честно говорят, что рассылать некому');
 messages.length=0;
 await matches.broadcastResult({...result2,challenge_id:'broadcast',result_photo_file_id:'user-photo'});
 check(messages.some(m=>m.method==='sendPhotoBuffer'),'Result card generated despite user photo');
@@ -413,8 +421,8 @@ const actions=[
  ['deadline',()=>matches.notifyDeadline('1',{names:['Bob Two'],daysLeft:2,division:'C'})]
 ];
 for(const [label,action]of actions){messages.length=0;await action();const english=messages.filter(m=>String(m.args[0])==='1'&&['sendPhoto','sendMessage'].includes(m.method));check(english.length>0,label+' reaches English recipient');for(const m of english){const opts=m.method==='sendPhoto'?m.args[2]:m.args[2];const text=m.method==='sendPhoto'?opts.caption:m.args[1];check(!/[а-яё]/i.test(text+' '+JSON.stringify(opts?.reply_markup||{})),label+' body and buttons use EN');}}
-messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author',season:'2',group:'1',from_telegram_id:'2',from_name:'Bob Two'});
-check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
+messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author',division:'Division W',season:'2',group:'1',from_telegram_id:'8',from_name:'Wendy Two'});
+check(messages.some(m=>String(m.args[0])==='7'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
 messages.length=0;await matches.notifyMatchAgreed(languageSlot);
 for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);const buttons=m.args[2].reply_markup.inline_keyboard.flat();check(buttons.some(b=>b.url&&/t.me|tg:\/\//.test(b.url)),'Contact button on agreement for '+id);check(buttons.some(b=>b.callback_data?.startsWith('match_book:'))===(id==='1'),'Only creator gets booking button '+id);}
 for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);check(m.args[2].reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='match_cancel:language'),'Both players get a chat cancel button '+id);}
@@ -856,6 +864,13 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/sortableDate\(b\.date\)-sortableDate\(a\.date\)/.test(league),'Лента лиги сортируется по дате, а не по номеру матча');
  check(/function sortableDate/.test(league),'Дата приводится к числу: «01.09» не встаёт выше «12.08»');
 
+ // Окно уходит только тем, с кем ещё не играли.
+ const openSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/async function alreadyPairedNames/.test(openSrc),'Уже сыгранные соперники отсеиваются');
+ check(/String\(r\.completed \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'yes'/.test(openSrc),'Строка расписания без результата парой не считается');
+ check(/\['pending', 'confirmed', 'disputed', 'unfinished'\]\.includes\(result\)/.test(openSrc),'Согласованный матч тоже занимает пару');
+ check(/пропущено уже сыгранных/.test(openSrc),'Сколько пропустили — видно в журнале');
+
  // Повторная подача счёта и цепочка подтверждения.
  const idxSrc=await fs.readFile(path.join(root,'index.js'),'utf8');
  const matchesSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
@@ -892,6 +907,9 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/class="sugx"/.test(league),'У поля поиска есть крестик очистки');
  check(/max-height:46vh/.test(league),'Список ограничен по высоте и не накрывает соседние поля');
  check(/if\(document\.activeElement!==el\)el\.focus\(\)/.test(league),'Фокус возвращается после перерисовки — клавиатура не закрывается');
+ check(/if\(typingIn!==id\|\|Date\.now\(\)-typingAt>1500\)return;/.test(league),'Фокус возвращается только пока человек печатает — страница сама клавиатуру не открывает');
+ for(const h of ['feed','race','plr'])
+  check(new RegExp(`function ${h}Set\\(v\\)\\{markTyping\\(`).test(league),'Ввод в '+h+' отмечает, что человек печатает');
  check(!/function setPQuery|function pickPQ|function setRaceQuery|function setFQuery/.test(league),'Старые обработчики поиска убраны, двух путей к одному полю не осталось');
 
  // Игрок в ручном матче выбирается из списка или набирается руками.
@@ -1195,8 +1213,34 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
    {slot:{from_name:'Carol Three',to_name:'Dan Four',division:'Division W'}}];
  const caption=pub.carouselCaption(week,at('2099-01-04T12:00:00Z'),['alice.t','carol.t']);
  check(!/6:4|def\./.test(caption),'Счёта матчей в подписи нет — он и так на карточках');
- check(/2 matches played/.test(caption)&&/4 players on court/.test(caption),'В подписи настоящие цифры недели');
+ check(/2 matches played this week/.test(caption),'Единственная цифра в подписи — сколько матчей сыграно');
+ check(!/players on court|divisions in action|Jan|Sept/.test(caption),'Ни игроков, ни дивизионов, ни дат в подписи нет');
+ check(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(caption.split('\n')[0]),'Заголовок с эмодзи');
  check(/@alice\.t @carol\.t/.test(caption),'Игроки, давшие согласие, упомянуты в подписи');
+ const pubSrc=await fs.readFile(path.join(root,'publicity.js'),'utf8');
+ check(/const caption = carouselCaption\(used, span, handles\);/.test(pubSrc),'Подпись одна на всю подборку, а не на каждый пост');
+ check(/const buttons = canPublish/.test(pubSrc),'Кнопки публикации собраны под одной подписью');
+ // Карточки недели не пересобираются — пересылается сохранённая в момент результата.
+ check(!/cardForSlot/.test(pubSrc.slice(pubSrc.indexOf('export async function buildWeeklyCarousel'),pubSrc.indexOf('export async function publishWeeklyCarousel'))),'Подборка недели карточки не пересобирает');
+ check(/txt\(item\.slot\.result_card_file_id\)/.test(pubSrc),'Берётся сохранённая карточка матча');
+ check(/Нет сохранённой карточки/.test(pubSrc),'Матчи без сохранённой карточки названы в сводке');
+ const mSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/export async function archiveResultCard/.test(mSrc),'Карточка сохраняется в момент результата');
+ check(/if \(media\.buffer\) await archiveResultCard\(slot, media\.buffer\)/.test(mSrc),'Сохраняется та же картинка, что уходит в ленту');
+ check(/sendDocumentBuffer\(chatId, buffer, `card-/.test(mSrc)&&/deleteMessage\(chatId, sent\.message_id\)/.test(mSrc),'Файлом, в оригинале, и сообщение сразу удаляется');
+ check(/'result_card_file_id'/.test(await fs.readFile(path.join(root,'matchesdb.js'),'utf8')),'Под карточку есть колонка в Match Slots');
+ // Fantasy Points в публичные материалы не идут.
+ const rSrc=await fs.readFile(path.join(root,'results.js'),'utf8');
+ check(!/buildFantasyCatalog|scoreFantasyMatch/.test(rSrc),'Снимок для карточки больше не считает очки Fantasy');
+ check(!/FANTASY POINTS/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Плашки Fantasy на карточке нет даже в коде');
+ // Аватарки из Players_Master переезжают в Telegram.
+ const avSrc=await fs.readFile(path.join(root,'avatars.js'),'utf8');
+ check(/export async function importMasterAvatars/.test(avSrc),'Есть перенос фото из Players_Master');
+ check(/if \(!telegramId \|\| String\(row\.avatar_file_id \|\| ''\)\.trim\(\)\) continue;/.test(avSrc),'Свои аватарки игроков не трогаем');
+ check(!/sendMessage\(item\.telegramId/.test(avSrc),'Игрокам при переносе ничего не пишем');
+ check(/avatarImport, 60 \* 1000/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'Перенос идёт сам после старта, без команды');
+ check(/sameName\(n, wanted\)/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Фото на карточке ищется по имени терпимо');
+
  check(pub.CAROUSEL_HASHTAGS.join(' ')==='#phuket #tennis #phukettennis #phukettennisfamily','Хэштеги те, что просили');
  check(caption.includes(pub.CAROUSEL_HASHTAGS.join(' ')),'Хэштеги есть в подписи');
  check(!/[А-Яа-я]/.test(caption),'Подпись к посту без русского текста');
@@ -1235,7 +1279,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/return { matches: out, extra/.test(src),'Организатору показываем все матчи недели, а не первые десять');
  check(/export const POST_SIZE = 10/.test(src),'Подборка режется на посты по десять картинок');
  check(/const handles = \[\.\.\.new Set\(list\.flatMap\(x => x\.handles \|\| \[\]\)\)\]/.test(src),'В посте отмечены только те игроки, чьи картинки в него вошли');
- check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост со своей подписью и своими отметками');
+ check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост: подпись общая, отметки свои');
  check(/callback_data: `\$\{action\}:\$\{post\.index\}`/.test(src),'У каждого поста своя кнопка публикации');
  check(ig2.CAROUSEL_MAX===20,'По умолчанию двадцать');
  check(/children\.slice\(0, CAROUSEL_SAFE\)/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'При отказе карусель сама урезается до десяти, а не падает');
@@ -1299,7 +1343,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/getLeagueProfiles\(\)/.test(card),'Витрина профилей осталась запасным источником формы');
  check(/sameName\(x\.name, name\)\)\?\.place/.test(card),'Место читается из живой таблицы дивизиона');
  check(/position: \{ after: place\(p1\) \}/.test(card),'Место «до» задним числом не выдумываем — стрелки нет');
- check(/fp: null/.test(card),'Fantasy Points задним числом не выдумываем');
+ check(!/fp:/.test(card),'Fantasy Points в данных карточки нет вовсе');
 
  const results2=await fs.readFile(path.join(root,'results.js'),'utf8');
  check(/recent_form/.test(results2)||/cardFormsBefore/.test(results2),'Карточка по-прежнему снимает контекст при записи счёта');
@@ -1417,9 +1461,11 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(exact.label==='2099-01-05 — 2099-01-11'&&exact.to>exact.from,'Точный отрезок разбирается по двум датам');
  check(pub4.parseRange('2099-02-01',now).label==='2099-02-01 + 7 дней','Одна дата — неделя от неё');
  check(pub4.parseRange('2099-13-45',now).label==='последние 7 дней','Битая дата не ломает сборку');
- // Подпись берёт даты из отрезка, а не из «сегодня».
+ // Подпись сама по себе дат не показывает, но отрезок всё равно определяет её
+ // содержание: по нему выбирается заголовок недели.
  const cap=pub4.carouselCaption([{slot:{from_name:'A',to_name:'B',division:'C'}}],exact,[]);
- check(/05 Jan — 11 Jan/.test(cap),'В подписи стоят даты выбранного отрезка');
+ check(!/Jan|Feb/.test(cap),'Дат в подписи нет');
+ check(/1 match played this week/.test(cap),'Число матчей считается по выбранному отрезку');
 
  const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/\btest\b/.test(bot4)&&/Так опрос выглядит у игрока/.test(bot4),'Есть превью опроса перед рассылкой');

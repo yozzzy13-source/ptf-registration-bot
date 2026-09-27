@@ -25,7 +25,8 @@ const deps = {
   }}),
   './sheets.js':mock({
     findApplicantByTelegramId:async id=>({avatar_file_id:id==='1'?'applicants-avatar':''}),
-    getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']])
+    getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']]),
+    sameName:(a,b)=>String(a||'').trim().toLowerCase().replace(/[.\s]+/g,' ')===String(b||'').trim().toLowerCase().replace(/[.\s]+/g,' ')
   }),
   './sponsors.js':mock({ sponsorsAvailable:()=>false, sponsorStrip:async()=>null }),
   'node:fs':mock({default:{readdirSync:dir=>String(dir).includes('match-card-logos')?logoFiles:[],readFileSync:()=>Buffer.from('test-font'),writeFileSync:()=>{},mkdtempSync:p=>String(p)+'tmp'}}),

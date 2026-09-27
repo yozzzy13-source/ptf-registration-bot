@@ -299,24 +299,28 @@ export function buildPosts(images = [], captionFor = () => '') {
 
 // Сборка и отправка организатору на подтверждение. Сама публикация — кнопкой:
 // пост в ленту уходит навсегда, и отдавать это расписанию без человека нельзя.
+// Подборка недели НЕ пересобирает карточки. Пересобранная через неделю
+// карточка брала бы сегодняшнюю форму и место игроков, а не те, что были на
+// момент матча. Поэтому берём ту самую картинку, что ушла в ленту: она
+// сохраняется в момент результата (result_card_file_id). Матчи без
+// сохранённой карточки — всё, что сыграно до этого изменения, — пропускаем и
+// называем в сводке: их забирают из ленты руками.
 export async function buildWeeklyCarousel(now = Date.now(), range = null) {
-  const { cardForSlot } = await import('./matchcard.js');
-  // Счёт на карточке всегда пишется от победителя. В таблице он хранится от
-  // первого игрока вызова, поэтому без этой функции у матчей, где выиграл
-  // второй, имена и счёт расходились местами.
-  const { winnerFirstScore } = await import('./matches.js');
   const span = range || parseRange('', now);
   const { matches, extra, skipped } = await weeklyMatches(now, span);
-  const images = [];
+  const images = [], noCard = [];
   for (const item of matches) {
-    const buffer = await cardForSlot(item.slot, { winnerFirstScore, season: String(item.slot.season || '') })
-      .catch(e => { console.error('weekly card failed:', e.message); return null; });
-    if (buffer) images.push({ buffer, slot: item.slot, handles: item.handles, match: item });
+    const fileId = txt(item.slot.result_card_file_id);
+    if (!fileId) { noCard.push(item.slot); continue; }
+    const file = await getFileBuffer(fileId).catch(e => { console.error('stored card download failed:', e.message); return null; });
+    if (file?.buffer?.length) images.push({ buffer: file.buffer, mime: 'image/png', slot: item.slot, handles: item.handles, match: item });
+    else noCard.push(item.slot);
   }
-  const handles = [...new Set(matches.flatMap(m => m.handles))];
-  const caption = carouselCaption(matches, span, handles);
+  const used = images.map(x => x.match);
+  const handles = [...new Set(used.flatMap(m => m.handles))];
+  const caption = carouselCaption(used, span, handles);
   const posts = buildPosts(images, () => caption);
-  return { images, posts, handles, caption, extra, skipped, limit: POST_SIZE, range: span };
+  return { images, posts, handles, caption, extra, skipped, noCard, limit: POST_SIZE, range: span };
 }
 
 export async function publishWeeklyCarousel(prepared, index = 0) {
@@ -345,7 +349,10 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
   const opts = threadId ? { message_thread_id: threadId } : {};
   const posts = prepared?.posts || [];
   if (!posts.length) {
-    await sendMessage(chatId, `🗓 <b>${esc(title)}</b>\n\n${esc(empty)}`, opts).catch(() => {});
+    const missing = prepared?.noCard?.length
+      ? `\n\nМатчей без сохранённой карточки: <b>${prepared.noCard.length}</b> — они сыграны до обновления, заберите их из ленты результатов.`
+      : '';
+    await sendMessage(chatId, `🗓 <b>${esc(title)}</b>\n\n${esc(empty)}${missing}`, opts).catch(() => {});
     return { ok: true, empty: true };
   }
   for (const post of posts) {
@@ -363,6 +370,10 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
   const skipped = prepared.skipped?.length
     ? `\n\nНе вошли (просили не публиковать): ${prepared.skipped.map(x => esc(x.blocked.join(', '))).join('; ')}`
     : '';
+  const noCard = prepared.noCard?.length
+    ? `\n\nНет сохранённой карточки (сыграны до обновления) — заберите из ленты результатов: `
+      + prepared.noCard.map(s => esc(`${txt(s.from_name)} — ${txt(s.to_name)}`)).join('; ')
+    : '';
   const split = posts.length > 1
     ? `\n\nInstagram берёт не больше ${POST_SIZE} картинок в один пост, поэтому их будет ${posts.length}. Подпись у всех одна — эта.`
     : '';
@@ -370,7 +381,7 @@ export async function deliverWeeklyCarousel(prepared, { chatId, threadId = '', c
     ? posts.map(post => [{ text: posts.length > 1 ? `📤 Опубликовать пост ${post.index + 1}` : '📤 Опубликовать', callback_data: `${action}:${post.index}` }])
     : [];
   await sendMessage(chatId,
-    `🗓 <b>${esc(title)}</b>\n\nКартинок: <b>${prepared.images.length}</b>${split}${skipped}\n\n`
+    `🗓 <b>${esc(title)}</b>\n\nКартинок: <b>${prepared.images.length}</b>${split}${skipped}${noCard}\n\n`
     + `<b>Подпись к посту</b> — нажмите, чтобы скопировать:\n<code>${esc(prepared.caption)}</code>`,
     { ...opts, ...(buttons.length ? { reply_markup: { inline_keyboard: buttons } } : {}) }
   ).catch(e => console.error('weekly caption failed:', e.message));

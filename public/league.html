@@ -1943,9 +1943,15 @@ function divisionsOfPlayers(){
 function setRaceFilter(f){rFilter=(rFilter===f?'':f);renderRace()}
 function toggleFilters(){rFiltersOpen=!rFiltersOpen;renderRace()}
 function setSort(k){ if(rSort===k)rDesc=!rDesc; else {rSort=k;rDesc=(k!=='name'&&k!=='pos')} renderRace() }
-// Возврат фокуса после перерисовки. Раньше срабатывал только при непустом
-// значении, поэтому на первом символе клавиатура закрывалась.
+// Возврат фокуса после перерисовки — ТОЛЬКО если человек прямо сейчас печатает
+// в этом поле. Перерисовка пересоздаёт поле, и без возврата клавиатура
+// закрывалась бы на каждой букве. Но при открытии страницы, смене вкладки или
+// подгрузке данных фокус ставить нельзя: тогда клавиатура выскакивала сама,
+// будто человек ткнул в поиск.
+var typingIn='',typingAt=0;
+function markTyping(id){typingIn=id;typingAt=Date.now()}
 function keepFocus(id,val){
+  if(typingIn!==id||Date.now()-typingAt>1500)return;
   var el=$(id);if(!el)return;
   var v=String(val==null?el.value:val);
   if(document.activeElement!==el)el.focus();
@@ -2316,14 +2322,17 @@ function renderFeed(){
 function setFDiv(d){fDiv=d;fLimit=20;renderFeed()}
 // По четыре обработчика на поле: ввод, выбор из списка, открытие и закрытие.
 // Закрытие с задержкой — иначе blur успевает съесть нажатие по подсказке.
-function feedSet(v){fQuery=v;fSugOpen=!!String(v||'').trim();fLimit=20;renderFeed()}
-function feedPick(n){fQuery=n;fSugOpen=false;fLimit=20;renderFeed();keepFocus('fq',n)}
+// Set — человек печатает: фокус держим. Pick с именем — выбор сделан, клавиатура
+// больше не нужна. Pick('') — это крестик очистки: человек собирается
+// печатать заново, фокус возвращаем.
+function feedSet(v){markTyping('fq');fQuery=v;fSugOpen=!!String(v||'').trim();fLimit=20;renderFeed()}
+function feedPick(n){if(!n)markTyping('fq');else typingIn='';fQuery=n;fSugOpen=false;fLimit=20;renderFeed()}
 function feedBlur(){setTimeout(function(){if(!fSugOpen)return;fSugOpen=false;renderFeed()},180)}
-function raceSet(v){rQuery=v;rSugOpen=!!String(v||'').trim();renderRace()}
-function racePick(n){rQuery=n;rSugOpen=false;renderRace();keepFocus('rq',n)}
+function raceSet(v){markTyping('rq');rQuery=v;rSugOpen=!!String(v||'').trim();renderRace()}
+function racePick(n){if(!n)markTyping('rq');else typingIn='';rQuery=n;rSugOpen=false;renderRace()}
 function raceBlur(){setTimeout(function(){if(!rSugOpen)return;rSugOpen=false;renderRace()},180)}
-function plrSet(v){pQuery=v;pSugOpen=!!String(v||'').trim();renderPlayers()}
-function plrPick(n){pQuery=n;pSugOpen=false;renderPlayers();keepFocus('pq',n)}
+function plrSet(v){markTyping('pq');pQuery=v;pSugOpen=!!String(v||'').trim();renderPlayers()}
+function plrPick(n){if(!n)markTyping('pq');else typingIn='';pQuery=n;pSugOpen=false;renderPlayers()}
 function plrBlur(){setTimeout(function(){if(!pSugOpen)return;pSugOpen=false;renderPlayers()},180)}
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){

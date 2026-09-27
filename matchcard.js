@@ -17,7 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getFileBuffer } from './telegram.js';
-import { findApplicantByTelegramId, getMasterPhotos } from './sheets.js';
+import { findApplicantByTelegramId, getMasterPhotos, sameName } from './sheets.js';
 import { sponsorsAvailable, sponsorStrip } from './sponsors.js';
 
 const ASSETS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets');
@@ -160,7 +160,6 @@ const W = 1200, H = 650, R = 200;
 // Центры портретов. По краям карточки — колонки со статистикой (место в
 // дивизионе и очки Fantasy), между портретами — счёт.
 const CENTER = [{ x: 330, y: 288 }, { x: 870, y: 288 }];
-const PLATE = { w: 196, x: [24, 980], rankY: 168, fpY: 312, fpH: 96 };
 const SCORE_ROOM = 340;
 
 // Палитра Noir — та же, что в мини-приложении, чтобы картинка не выглядела
@@ -351,17 +350,19 @@ async function playerPhoto({ telegramId = '', name = '', fresh = false } = {}) {
     const fileId = txt(row?.avatar_file_id);
     if (fileId) {
       if (!fresh && photoCache.has(fileId)) return photoCache.get(fileId);
-      const hit = await getFileBuffer(fileId).then(f => f.buffer).catch(() => null);
+      const hit = await getFileBuffer(fileId).then(f => f.buffer).catch(e => { console.error(`card avatar for ${telegramId} failed:`, e.message); return null; });
       if (hit) return remember(fileId, hit);
     }
   }
-  const wanted = txt(name).toLowerCase();
+  const wanted = txt(name);
   if (wanted) {
+    // Имена сверяем терпимо — так же, как таблица дивизиона: «Yana D.» и
+    // «Yana D», лишний пробел или регистр не должны оставлять карточку без фото.
     const master = await getMasterPhotos().catch(() => new Map());
     for (const [n, url] of master) {
-      if (txt(n).toLowerCase() !== wanted || !url) continue;
+      if (!url || !sameName(n, wanted)) continue;
       if (!fresh && photoCache.has(url)) return photoCache.get(url);
-      const hit = await fromUrl(url).catch(() => null);
+      const hit = await fromUrl(url).catch(e => { console.error(`card photo for ${wanted} failed:`, e.message); return null; });
       if (hit) return remember(url, hit);
       break;
     }
@@ -373,47 +374,12 @@ export async function playerPhotoForPoster(player = {}) {
   return playerPhoto({ ...player, fresh:true });
 }
 
-// Плашка статистики в боковой колонке: подпись, крупное число и — только у
-// места в дивизионе — пилюля со стрелкой, на сколько позиций игрок сместился.
-function plateSvg(x, y, height, label, value, color, pill) {
-  const cx = x + PLATE.w / 2;
-  const head = `<rect x="${x}" y="${y}" width="${PLATE.w}" height="${height}" rx="18" fill="${C.plate}" stroke="${C.plateLine}"/>
-    <text x="${cx}" y="${y + 27}" text-anchor="middle" font-family="${FONT}" font-size="13" font-weight="800"
-      letter-spacing="2.2" fill="${C.mute}">${esc(label)}</text>
-    <text x="${cx}" y="${y + 74}" text-anchor="middle" font-family="${FONT}" font-size="46" font-weight="900"
-      fill="${color}">${esc(value)}</text>`;
-  if (!pill) return head;
-  return head + `<rect x="${cx - pill.w / 2}" y="${y + 84}" width="${pill.w}" height="30" rx="15"
-      fill="${pill.bg}" stroke="${pill.line}"/>
-    <text x="${cx}" y="${y + 104}" text-anchor="middle" font-family="${FONT}" font-size="16" font-weight="800"
-      fill="${pill.fg}">${esc(pill.text)}</text>`;
-}
 // Сколько позиций и куда. Без «было #3»: стрелка с числом и так читается.
 function rankPill(before, after) {
   if (!Number.isFinite(before) || !Number.isFinite(after) || before === after) return null;
   return after < before
     ? { w: 66, text: `▲ ${before - after}`, bg: C.upBg, line: C.upLine, fg: C.win }
     : { w: 66, text: `▼ ${after - before}`, bg: C.lossBg, line: C.lossLine, fg: C.loss };
-}
-// Колонка статистики одного игрока. Плашки рисуются только если данные есть:
-// нет контекста матча — карточка просто остаётся без колонок.
-function statColumn(meta, side) {
-  if (!meta) return '';
-  const x = PLATE.x[side];
-  const pos = meta.position || {};
-  let out = '';
-  // Место показываем всегда, когда игрок вообще есть в таблице дивизиона —
-  // даже если матчей у него ещё не было и двигаться было неоткуда. Стрелка
-  // появляется только при реальном изменении.
-  const rank = Number.isFinite(pos.after) ? pos.after : (Number.isFinite(pos.before) ? pos.before : null);
-  if (rank !== null) {
-    const pill = rankPill(pos.before, pos.after);
-    out += plateSvg(x, PLATE.rankY, pill ? 122 : 96, 'DIVISION RANK', `#${rank}`, C.text, pill);
-  }
-  if (Number.isFinite(meta.fp)) {
-    out += plateSvg(x, PLATE.fpY, PLATE.fpH, 'FANTASY POINTS', `+${meta.fp}`, C.amber, null);
-  }
-  return out;
 }
 // Форма — последние до 5 матчей строго до этого, W/L кружками, как в
 // приложении. Подписи нет намеренно: у части игроков истории меньше пяти
@@ -572,16 +538,16 @@ async function metasFromSheets(slot, winnerIsFrom, seasonHint = '') {
     };
     const [form1, form2] = await Promise.all([formOf(p1), formOf(p2)]);
     const place = name => table?.ok ? table.players.find(x => sameName(x.name, name))?.place : undefined;
-    const fromMeta = { form: form1, fp: null, position: { after: place(p1) } };
-    const toMeta = { form: form2, fp: null, position: { after: place(p2) } };
+    const fromMeta = { form: form1, position: { after: place(p1) } };
+    const toMeta = { form: form2, position: { after: place(p2) } };
     return winnerIsFrom ? [fromMeta, toMeta] : [toMeta, fromMeta];
   } catch (e) { console.error('card meta rebuild failed:', e.message); return [null, null]; }
 }
 async function buildPlayerMetas(slot, winnerIsFrom, seasonHint = '') {
   const ctx = takeCardContext(slot.challenge_id);
   if (!ctx) return metasFromSheets(slot, winnerIsFrom, seasonHint);
-  const fromMeta = { form: ctx.p1?.form || [], fp: Number.isFinite(ctx.fp?.p1) ? ctx.fp.p1 : null, position: { before: ctx.p1?.place } };
-  const toMeta = { form: ctx.p2?.form || [], fp: Number.isFinite(ctx.fp?.p2) ? ctx.fp.p2 : null, position: { before: ctx.p2?.place } };
+  const fromMeta = { form: ctx.p1?.form || [], position: { before: ctx.p1?.place } };
+  const toMeta = { form: ctx.p2?.form || [], position: { before: ctx.p2?.place } };
   try {
     if (ctx.division && ctx.season) {
       const { getDivisionTable } = await import('./division.js');

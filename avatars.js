@@ -169,3 +169,68 @@ export async function requestAnotherAvatar(telegramId) {
   await enqueueAvatar(telegramId);
   return { ok: true };
 }
+
+// ------------------------------------------------ перенос фото из Players_Master
+// В Players_Master фото лежат ссылками — чаще всего на Google Drive. Такие
+// ссылки то отдают картинку, то нет, а найти их можно только по имени, и
+// «Tom Sauer» с лишним пробелом уже не совпадал. Поэтому переносим эти фото
+// туда же, где живут собственные аватарки игроков: в Telegram, по file_id.
+// Ровно то же самое, что делает организатор, загружая аватарку в админке, —
+// только без уведомления каждому игроку: это массовый перенос, а не новость.
+//
+// Трогаем ТОЛЬКО тех, у кого своей аватарки нет. Кто сделал себе аватарку,
+// остаётся со своей. Прогон безопасно повторять: перенесённые в следующий раз
+// уже имеют avatar_file_id и пропускаются, поэтому запускаем его после старта
+// и раз в сутки — так подхватываются и игроки, добавленные позже.
+const IMPORT_LIMIT = 40;        // за один прогон, чтобы не упереться в лимиты
+const IMPORT_PAUSE_MS = 400;
+export async function importMasterAvatars({ adminChatId = '' } = {}) {
+  if (!adminChatId) return { ok: false, reason: 'no_admin_chat' };
+  const { getRows, getMasterPhotos, sameName, invalidateLeagueCache } = await import('./sheets.js');
+  const { SHEETS } = await import('./config.js');
+  const { deleteMessage } = await import('./telegram.js');
+  await ensureAvatarColumns().catch(() => {});
+  const [{ rows }, master] = await Promise.all([
+    getRows(SHEETS.applicants, { useCache: false }),
+    getMasterPhotos().catch(() => new Map())
+  ]);
+  const photos = [...master].filter(([, url]) => String(url || '').trim());
+  const todo = [];
+  for (const row of rows || []) {
+    const telegramId = String(row.telegram_id || '').trim();
+    if (!telegramId || String(row.avatar_file_id || '').trim()) continue;
+    const hit = photos.find(([name]) => sameName(name, row.name));
+    if (hit) todo.push({ telegramId, name: String(row.name || ''), url: String(hit[1]).trim(),
+      retried: String(row.avatar_error || '').startsWith('master_import') });
+  }
+  // Сначала те, кого ещё не пробовали: битые ссылки не должны навсегда занять
+  // собой лимит прогона. Их повторяем в конце очереди — вдруг ссылку уже
+  // поправили в Players_Master.
+  todo.sort((a, b) => Number(a.retried) - Number(b.retried));
+  const done = [], failed = [];
+  for (const item of todo.slice(0, IMPORT_LIMIT)) {
+    try {
+      const res = await globalThis.fetch(item.url, { redirect: 'follow' });
+      if (!res.ok) throw new Error(`ссылка ответила ${res.status}`);
+      const mime = String(res.headers.get('content-type') || '').split(';')[0].trim();
+      if (!/^image\//.test(mime)) throw new Error(`по ссылке не картинка (${mime || 'пусто'})`);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (!buffer.length) throw new Error('пустой файл');
+      const sent = await sendPhotoBuffer(adminChatId, buffer, mime, { disable_notification: true });
+      const fileId = (sent?.photo || []).slice(-1)[0]?.file_id || '';
+      if (sent?.message_id) await deleteMessage(adminChatId, sent.message_id).catch(() => {});
+      if (!fileId) throw new Error('Telegram не принял фото');
+      await updateApplicantByTelegramId(item.telegramId, {
+        avatar_file_id: fileId, avatar_status: AVATAR_STATUS.published, avatar_error: '', avatar_updated_at: nowISO()
+      });
+      done.push(item.name);
+    } catch (e) {
+      failed.push({ name: item.name, error: e.message });
+      console.error(`avatar import failed for ${item.name}:`, e.message);
+      await updateApplicantByTelegramId(item.telegramId, { avatar_error: `master_import: ${e.message}`.slice(0, 200) }).catch(() => {});
+    }
+    await new Promise(r => setTimeout(r, IMPORT_PAUSE_MS));
+  }
+  if (done.length) invalidateLeagueCache?.();
+  return { ok: true, done, failed, left: Math.max(0, todo.length - IMPORT_LIMIT) };
+}

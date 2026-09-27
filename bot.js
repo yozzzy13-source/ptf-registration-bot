@@ -1097,7 +1097,7 @@ async function adminTestMatch(msg, text) {
     const line = (who, name) => {
       const side = ctx?.[who];
       if (!side) return `• <b>${escapeHtml(name)}</b>: снимок не снялся`;
-      return `• <b>${escapeHtml(name)}</b>: место до <b>${side.place ?? '—'}</b>, форма <b>${(side.form || []).join(' ') || '—'}</b>, Fantasy <b>+${ctx.fp?.[who] ?? '—'}</b>`;
+      return `• <b>${escapeHtml(name)}</b>: место до <b>${side.place ?? '—'}</b>, форма <b>${(side.form || []).join(' ') || '—'}</b>`;
     };
     const seasonNote = d.season_write?.column
       ? `✅ сезон записан: <code>${escapeHtml(d.season_write.value)}</code> → ${escapeHtml(d.season_write.column)}`
