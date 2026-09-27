@@ -48,8 +48,13 @@ select,input,textarea{width:100%;padding:12px;border-radius:12px;border:1px soli
 textarea{min-height:60px;resize:vertical}
 .row{display:flex;gap:10px}.row>*{flex:1;min-width:0}
 .searchwrap{position:relative}
+.bigscore{font-size:30px;font-weight:800;letter-spacing:1px;margin:10px 0 2px}
 .psug{position:absolute;left:0;right:0;top:calc(100% - 4px);z-index:9;background:var(--card2);border:1px solid var(--border);
-border-radius:12px;overflow:hidden;box-shadow:0 14px 30px rgba(0,0,0,.28)}
+border-radius:12px;overflow-y:auto;max-height:46vh;-webkit-overflow-scrolling:touch;box-shadow:0 14px 30px rgba(0,0,0,.28)}
+.sugx{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;
+display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:17px;cursor:pointer;z-index:10}
+.sugx:active{background:var(--card)}
+.searchwrap input{padding-right:38px}
 .psug .pi{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line2);
 margin:0;padding:10px 13px;font:inherit;font-size:14px;font-weight:400;color:var(--text);cursor:pointer}
 .psug .pi:last-child{border-bottom:0}
@@ -175,7 +180,7 @@ var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
-var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120,resultAfterMin=90;
+var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selFrom='17:00',selTo='21:00',selComment='',selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120,resultAfterMin=90;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
@@ -211,7 +216,7 @@ var T={
       sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
       manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
       manualHint:'Выберите соперника, дату и корт — счёт так же уйдёт ему на подтверждение.',courtManual:'Например, Rawai — можно не указывать',
-      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',nudge:'🔔 Напомнить',nudgeSent:'✅ Напомнил',resultHalf:'✅ Ваше подтверждение принято. Ждём соперника — тогда счёт уйдёт в таблицу.',waitingOther:'Вы подтвердили, ждём соперника',byOrganiser:'Счёт внёс организатор',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
+      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',nudge:'🔔 Напомнить',nudgeSent:'✅ Напомнил',resultHalf:'✅ Ваше подтверждение принято. Ждём соперника — тогда счёт уйдёт в таблицу.',waitingOther:'Вы подтвердили, ждём соперника',byOrganiser:'Счёт внёс организатор',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',confirmTitle:'Подтвердите счёт',confirmBy:'внёс счёт матча',confirmHint:'Если счёт верный — подтвердите. Если нет — нажмите «Не согласен», и вы сможете внести свой вариант.',disagree:'❌ Не согласен',disagreeDone:'Счёт отклонён. Договоритесь с соперником и внесите согласованный счёт.',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
       vs:'против',back:'⬅️ Назад',
       tBook:'Бронь корта',bookTitle:'Забронировать корт',
       bookHint:'Это отдельная бронь, не привязанная к матчу лиги. Отметьте площадки — бот подготовит по сообщению на каждую, а отправите вы сами из WhatsApp.',
@@ -254,7 +259,7 @@ var T={
       sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
       manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
       manualHint:'Pick the opponent, date and court — the score goes to them for confirmation too.',courtManual:'For example, Rawai — optional',
-      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',nudge:'🔔 Remind',nudgeSent:'✅ Reminded',resultHalf:'✅ Your confirmation is recorded. Waiting for your opponent before the score goes into the table.',waitingOther:'You confirmed — waiting for your opponent',byOrganiser:'Score entered by the organiser',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
+      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',nudge:'🔔 Remind',nudgeSent:'✅ Reminded',resultHalf:'✅ Your confirmation is recorded. Waiting for your opponent before the score goes into the table.',waitingOther:'You confirmed — waiting for your opponent',byOrganiser:'Score entered by the organiser',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',confirmTitle:'Confirm the score',confirmBy:'submitted the match score',confirmHint:'Confirm if the score is right. If not, tap “Disagree” and you will be able to submit your own version.',disagree:'❌ Disagree',disagreeDone:'Score rejected. Agree with your opponent and submit the corrected score.',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
       vs:'vs',back:'⬅️ Back',
       tBook:'Book a court',bookTitle:'Book a court',
       bookHint:'A standalone booking, not tied to a league match. Tick the venues — the bot prepares one message per venue, and you send them yourself from WhatsApp.',
@@ -912,6 +917,10 @@ function renderRes(){
   if(resultSlotId){
     var s=resultTasks.filter(function(x){return x.challenge_id===resultSlotId})[0]
       ||myMatches.filter(function(x){return x.challenge_id===resultSlotId&&String(x.status||'')==='accepted'&&String(x.result_status||'')!=='confirmed'})[0];
+    // Счёт уже внесён соперником и ждёт ответа — форму не показываем вовсе:
+    // иначе второй игрок перепишет счёт, роли поменяются местами и просьба
+    // подтвердить прилетит тому, кто её только что внёс.
+    if(s&&String(s.result_status||'')==='pending'&&!isAdmin&&canConfirmResult(s))return renderConfirmScreen(s);
     if(s)return resultMode==='unfinished'?renderUnfinishedForm(s):renderResultForm(s);
   }
   if(!resultTasks.length)h+='<div class="empty">'+esc(X.emptyRes)+'</div>';
@@ -939,6 +948,38 @@ function renderRes(){
     +'<div class="hint">'+esc(X.manualHint)+'</div>'
     +'<button class="primary" onclick="openManual()">'+esc(X.manual)+'</button></div>';
   $('viewRes').innerHTML=h;
+}
+// Экран вместо формы: что внёс соперник и две кнопки. Заодно просим бота
+// прислать то же самое сообщением в чат — человек мог не заметить первое.
+function renderConfirmScreen(s){
+  var who=String(s.from_telegram_id)===String(me&&me.id)?s.to_name:s.from_name;
+  var byOrg=byOrganiser(s);
+  $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.confirmTitle)+'</h3>'
+    +'<div class="hint">'+esc(byOrg?X.byOrganiser:(who||'')+' '+X.confirmBy)+'</div>'
+    +'<div class="bigscore">'+esc(s.result_score||'')+'</div>'
+    +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
+    +'<div class="hint" style="margin-top:10px">'+esc(X.confirmHint)+'</div>'
+    +'<button class="primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>'
+    +'<button onclick="disputePendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.disagree)+'</button>'
+    +'<button onclick="backToRes()">'+esc(X.back)+'</button>'
+    +'<div id="cfRes" class="res"></div></div>';
+  pingConfirmation(s.challenge_id);
+}
+var confirmPinged={};
+function pingConfirmation(id){
+  if(confirmPinged[id])return;confirmPinged[id]=1;
+  fetch('/api/match/result/remind',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id,self:1})}).catch(function(){});
+}
+function disputePendingResult(id,btn){
+  btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
+  fetch('/api/match/result/dispute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,challenge_id:id
+  })}).then(function(r){return r.json()}).then(function(j){
+    if(!j.ok)throw new Error(j.error||'Error');
+    if(tg&&tg.showAlert)tg.showAlert(X.disagreeDone);
+    resultSlotId='';resultMode='';load(true);
+  }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
 }
 function resendResultConfirmation(id,btn){
   btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
@@ -1071,14 +1112,56 @@ function submitResult(id,btn){
   })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;selWinner='';resPhoto='';resultSlotId='';load(true)})
   .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
+// Свой поиск вместо браузерного списка: тот на телефоне вываливался весь
+// сразу, закрывал соседние поля, не давал клавиатуре открыться и никак не
+// закрывался. Здесь список появляется только после ввода символов.
+var comboState={};
+function comboBox(id,names,placeholder,onpick){
+  comboState[id]={names:names||[],onpick:onpick||''};
+  return '<div class="searchwrap" id="'+id+'wrap"><input id="'+id+'" autocomplete="off" placeholder="'+esc(placeholder)+'"'
+    +' oninput="comboInput(\''+id+'\')" onblur="comboBlur(\''+id+'\')">'
+    +'<div class="sugx" onmousedown="event.preventDefault()" onclick="comboClear(\''+id+'\')" style="display:none">×</div>'
+    +'<div class="psug" id="'+id+'sug" style="display:none"></div></div>';
+}
+function comboInput(id){
+  var el=$(id);if(!el)return;
+  var v=String(el.value||'').trim().toLowerCase(),box=$(id+'sug'),x=el.parentNode.querySelector('.sugx');
+  if(x)x.style.display=el.value?'flex':'none';
+  if(!v){box.style.display='none';box.innerHTML='';comboChanged(id);return}
+  var hits=(comboState[id].names||[]).filter(function(n){return String(n).toLowerCase().indexOf(v)>=0}).slice(0,8);
+  if(!hits.length){box.innerHTML='<button type="button" class="pi" disabled>'+esc(L?'Никого не нашли':'Nobody found')+'</button>';}
+  else box.innerHTML=hits.map(function(n){
+    return '<button type="button" class="pi" onmousedown="event.preventDefault()" onclick="comboPick(\''+id+'\',this.dataset.v)" data-v="'+esc(n)+'">'+esc(n)+'</button>';
+  }).join('');
+  box.style.display='block';
+  comboChanged(id);
+}
+function comboPick(id,value){
+  var el=$(id);if(!el)return;
+  el.value=value;$(id+'sug').style.display='none';
+  var x=el.parentNode.querySelector('.sugx');if(x)x.style.display='flex';
+  comboChanged(id);
+}
+function comboClear(id){
+  var el=$(id);if(!el)return;
+  el.value='';$(id+'sug').style.display='none';$(id+'sug').innerHTML='';
+  var x=el.parentNode.querySelector('.sugx');if(x)x.style.display='none';
+  el.focus();comboChanged(id);
+}
+function comboBlur(id){setTimeout(function(){var b=$(id+'sug');if(b)b.style.display='none'},180)}
+function comboChanged(id){
+  var fn=comboState[id]&&comboState[id].onpick;
+  if(fn&&window[fn])window[fn]();
+}
 function openManual(){
   var today=new Date(),list=isAdmin?adminPlayers:opponents;
   // Игрок выбирается из списка ИЛИ набирается руками в том же поле: список
   // длинный, и листать его на телефоне дольше, чем напечатать три буквы.
-  var opts='<datalist id="mPlayerList">'+list.map(function(o){return '<option value="'+esc(manualLabel(o))+'"></option>'}).join('')+'</datalist>';
+  var names=list.map(manualLabel);
   var field=function(id,label,ph){
-    return '<label>'+esc(label)+'</label><input id="'+id+'" list="mPlayerList" autocomplete="off" placeholder="'+esc(ph)+'" oninput="renderManualWinner()">';
+    return '<label>'+esc(label)+'</label>'+comboBox(id,names,ph,'renderManualWinner');
   };
+  var opts='';
   var pick=L?'Выберите из списка или начните вводить имя':'Pick from the list or start typing a name';
   var playersHtml=opts+(isAdmin
     ? field('mFrom',L?'Первый игрок':'First player',pick)+field('mOpp',L?'Второй игрок':'Second player',pick)
@@ -1086,7 +1169,7 @@ function openManual(){
   var roundHtml=isAdmin?'<label>'+esc(L?'Этап матча':'Match stage')+'</label><select id="mRound"><option value="">'+esc(L?'Регулярный матч':'Regular match')+'</option><option value="QF">'+esc(L?'Четвертьфинал':'Quarterfinal')+'</option><option value="SF">'+esc(L?'Полуфинал':'Semifinal')+'</option><option value="Final">'+esc(L?'Финал':'Final')+'</option><option value="3rd">'+esc(L?'Матч за 3-е место':'Third-place match')+'</option></select>':'';
   $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3><div class="hint">'+esc(X.manualHint)+'</div>'+playersHtml
     +roundHtml+'<label>'+esc(X.pickDate)+'</label><input type="date" id="mDate" max="'+isoDate(today)+'" value="'+isoDate(today)+'">'
-    +'<label>'+esc(X.pickCourt)+'</label><input id="mCourt" list="mCourtList" placeholder="'+esc(X.courtManual)+'"><datalist id="mCourtList">'+courts.map(function(c){return '<option value="'+esc(c)+'">'}).join('')+'</datalist>'
+    +'<label>'+esc(X.pickCourt)+'</label>'+comboBox('mCourt',courts.map(function(c){return String(c&&c.name?c.name:c)}),X.courtManual,'')
     +resultKindPicker('m')+'<label>'+esc(X.winner)+'</label><div class="hint">'+esc(X.winnerFirst)+'</div><div class="seg" id="mWinSeg"></div>'
     +'<div id="mScoreBox">'+renderScoreEditor('m')+'</div><div id="mPointsHost"></div>'+photoField('mPhoto')
     +'<label>'+esc(X.note)+'</label><textarea id="mNote"></textarea><button class="primary" onclick="submitManual(this)">'+esc(X.sendRes)+'</button><button onclick="backToRes()">'+esc(X.back)+'</button><div id="mResBox" class="res"></div></div>';
@@ -1217,21 +1300,30 @@ function renderNew(){
     +'<div class="dowhead">'+dow.map(function(d){return '<div class="dowlabel">'+d+'</div>'}).join('')+'</div>'
     +'<div class="dtwrap fold"><div class="datestrip" id="strip">'+days+'</div></div>'+dtMore()
     +'<label>'+esc(X.time)+' <span class="pill">'+esc(X.durFixed)+'</span></label>'
-    +'<div class="row"><select id="mFrom">'+timeOptions('17:00')+'</select><select id="mTo">'+timeOptions('21:00')+'</select></div>'
+    +'<div class="row"><select id="mFrom" onchange="selFrom=this.value">'+timeOptions(selFrom)+'</select>'
+    +'<select id="mTo" onchange="selTo=this.value">'+timeOptions(selTo)+'</select></div>'
     +'<div class="hint">'+esc(X.timeHint)+'</div>'
     +'<label>'+esc(X.court)+(selCourts.length?' <span class="pill">'+selCourts.length+'</span>':'')+'</label><div class="chips">'+courtChips+'</div>'
     +'<div class="hint">'+esc(X.hintRange)+'</div>'
-    +'<label>'+esc(X.comment)+'</label><textarea id="mComment" placeholder="'+esc(X.commentPh)+'"></textarea>'
+    +'<label>'+esc(X.comment)+'</label><textarea id="mComment" oninput="selComment=this.value" placeholder="'+esc(X.commentPh)+'">'+esc(selComment)+'</textarea>'
     +'<button class="primary" onclick="submitSlot(this)">'+esc(X.send)+'</button>'
     +'<div id="mRes" class="res"></div>'
     +'</div>';
   foldStrips();
 }
-function toggleDate(iso){var i=selDates.indexOf(iso);if(i>=0)selDates.splice(i,1);else selDates.push(iso);selDates.sort();renderNew()}
-function toggleCourt(name){var i=selCourts.indexOf(name);if(i>=0)selCourts.splice(i,1);else selCourts.push(name);renderNew()}
+// Перед перерисовкой карточки снимаем всё, что человек уже выбрал и набрал:
+// renderNew() пересоздаёт поля заново, и без этого время сбрасывалось на
+// 17:00–21:00, а комментарий стирался.
+function keepNewForm(){
+  if($('mFrom'))selFrom=$('mFrom').value;
+  if($('mTo'))selTo=$('mTo').value;
+  if($('mComment'))selComment=$('mComment').value;
+}
+function toggleDate(iso){keepNewForm();var i=selDates.indexOf(iso);if(i>=0)selDates.splice(i,1);else selDates.push(iso);selDates.sort();renderNew()}
+function toggleCourt(name){keepNewForm();var i=selCourts.indexOf(name);if(i>=0)selCourts.splice(i,1);else selCourts.push(name);renderNew()}
 var newMode='open',ownAlternative=false,opponentDay='';
-function setMode(m){newMode=m;ownAlternative=false;opponentDay="";renderNew()}
-function pickOpp(id){selOpp=id;ownAlternative=false;opponentDay="";renderNew()}
+function setMode(m){keepNewForm();newMode=m;ownAlternative=false;opponentDay="";renderNew()}
+function pickOpp(id){keepNewForm();selOpp=id;ownAlternative=false;opponentDay="";renderNew()}
 function openLink(u){if(/^https:\/\/t\.me\//.test(u)&&tg&&tg.openTelegramLink)tg.openTelegramLink(u);else if(/^tg:\/\//.test(u))location.href=u;else if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}
 
 function bookingHelper(id,btn){
@@ -1257,19 +1349,19 @@ function renderOpponentWindows(){
 function pickOpponentDay(day){opponentDay=day;renderOpponentWindows()}
 function submitSlot(btn){
   var res=$('mRes');res.className='res';
-  var from=$('mFrom').value,to=$('mTo').value,dur=matchDuration;
+  keepNewForm();var from=selFrom,to=selTo,dur=matchDuration;
   if(!selDates.length){res.className='res err';res.textContent=X.needDate;return}
   if(hm2min(to)-hm2min(from)<dur){res.className='res err';res.textContent=X.needRange;return}
   if(newMode==='direct'&&!selOpp){res.className='res err';res.textContent=X.needOpp;return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,match_type:newMode,dates:selDates,time_from:from,time_to:to,
-    courts:selCourts,comment:($('mComment').value||'').trim(),to_telegram_id:newMode==='direct'?selOpp:''
+    courts:selCourts,comment:String(selComment||'').trim(),to_telegram_id:newMode==='direct'?selOpp:''
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
     res.className='res ok';res.textContent=newMode==='direct'?X.okDirect:X.okOpen;
-    selOpp='';selDates=[];selCourts=[];load(true);
+    selOpp='';selDates=[];selCourts=[];selFrom='17:00';selTo='21:00';selComment='';load(true);
   }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 function cancelSlot(id,btn){
