@@ -245,9 +245,17 @@ const futureUnfinished={...unfinishedFixture,challenge_id:'unfinished-future',da
 await db.createSlot(futureUnfinished);
 check((await db.markMatchUnfinished('unfinished-future',{telegram_id:'1'})).reason==='match_not_ended','A future match cannot be marked unfinished');
 
+// Круговой турнир: окно уходит только тем, с кем ещё не играли.
+messages.length=0;
+await matches.publishOpenSlot({challenge_id:'private2',match_type:'open',status:'open',division:'Division W',
+  from_telegram_id:'7',from_name:'Wendy One',dates:'2099-09-14',time_from:'10:00',time_to:'14:00',duration_min:'120',courts:'Court A',season:'2',group:'1'});
+check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='8'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'Open slot reaches the same group with RU button');
+check(!messages.some(m=>m.method==='sendMessage'&&['1','2','3','4'].includes(String(m.args[0]))),'Open slot is not sent to other groups or divisions');
+messages.length=0;
+// У Алисы с Бобом матч уже есть — окно ему больше не уходит.
 await matches.publishOpenSlot({...slot,challenge_id:'private',season:'2',group:'1'});
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'Open slot reaches the same group with RU button');
-check(!messages.some(m=>m.method==='sendMessage'&&['3','4','7','8','9','10'].includes(String(m.args[0]))),'Open slot is not sent to other groups or divisions');
+check(!messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'С кем уже сыграли или договорились — окно не шлём');
+check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&/уже сыграли|already played/i.test(String(m.args[1]||''))),'Автору честно говорят, что рассылать некому');
 messages.length=0;
 await matches.broadcastResult({...result2,challenge_id:'broadcast',result_photo_file_id:'user-photo'});
 check(messages.some(m=>m.method==='sendPhotoBuffer'),'Result card generated despite user photo');
@@ -302,11 +310,16 @@ for(const [name,fixture] of Object.entries(scopes)) {
  check(!db.stuckItem(fixture,started+14*60000),name+' no reminder before 15 minutes');
  // «Внесите счёт» напоминаний больше не шлёт: приглашение уходит один раз, а
  // через 28 часов вопрос уходит организатору. Остальные ступени не тронуты.
- const stages=name==='score'?[[1680,'close']]:[[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']];
+ // Подтверждение чужого счёта дёргаем реже всех: две ступени вместо четырёх.
+ const stages=name==='score'?[[1680,'close']]
+   :name==='result'?[[240,'n2'],[1440,'d1'],[1680,'close']]
+   :[[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']];
  for(const [minutes,stage] of stages) {
    const item=db.stuckItem(fixture,started+minutes*60000);
    check(item?.stage===stage&&item.scope===(name==='initial'?'invite':name),name+' reaches '+stage);
  }
+ if(name==='result')for(const minutes of [15,120])
+   check(!db.stuckItem(fixture,started+minutes*60000),'Подтверждение счёта не дёргают через '+minutes+' мин');
  if(name==='score')for(const minutes of [15,120,240,1440])
    check(!db.stuckItem(fixture,started+minutes*60000),'Просьба внести счёт не повторяется через '+minutes+' мин');
 }
@@ -408,8 +421,8 @@ const actions=[
  ['deadline',()=>matches.notifyDeadline('1',{names:['Bob Two'],daysLeft:2,division:'C'})]
 ];
 for(const [label,action]of actions){messages.length=0;await action();const english=messages.filter(m=>String(m.args[0])==='1'&&['sendPhoto','sendMessage'].includes(m.method));check(english.length>0,label+' reaches English recipient');for(const m of english){const opts=m.method==='sendPhoto'?m.args[2]:m.args[2];const text=m.method==='sendPhoto'?opts.caption:m.args[1];check(!/[а-яё]/i.test(text+' '+JSON.stringify(opts?.reply_markup||{})),label+' body and buttons use EN');}}
-messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author',season:'2',group:'1',from_telegram_id:'2',from_name:'Bob Two'});
-check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
+messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author',division:'Division W',season:'2',group:'1',from_telegram_id:'8',from_name:'Wendy Two'});
+check(messages.some(m=>String(m.args[0])==='7'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
 messages.length=0;await matches.notifyMatchAgreed(languageSlot);
 for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);const buttons=m.args[2].reply_markup.inline_keyboard.flat();check(buttons.some(b=>b.url&&/t.me|tg:\/\//.test(b.url)),'Contact button on agreement for '+id);check(buttons.some(b=>b.callback_data?.startsWith('match_book:'))===(id==='1'),'Only creator gets booking button '+id);}
 for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);check(m.args[2].reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='match_cancel:language'),'Both players get a chat cancel button '+id);}
@@ -851,18 +864,56 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/sortableDate\(b\.date\)-sortableDate\(a\.date\)/.test(league),'Лента лиги сортируется по дате, а не по номеру матча');
  check(/function sortableDate/.test(league),'Дата приводится к числу: «01.09» не встаёт выше «12.08»');
 
+ // Окно уходит только тем, с кем ещё не играли.
+ const openSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/async function alreadyPairedNames/.test(openSrc),'Уже сыгранные соперники отсеиваются');
+ check(/String\(r\.completed \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'yes'/.test(openSrc),'Строка расписания без результата парой не считается');
+ check(/\['pending', 'confirmed', 'disputed', 'unfinished'\]\.includes\(result\)/.test(openSrc),'Согласованный матч тоже занимает пару');
+ check(/пропущено уже сыгранных/.test(openSrc),'Сколько пропустили — видно в журнале');
+
+ // Повторная подача счёта и цепочка подтверждения.
+ const idxSrc=await fs.readFile(path.join(root,'index.js'),'utf8');
+ const matchesSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/result_pending_confirm/.test(idxSrc),'Пока счёт ждёт подтверждения, второй игрок его не переписывает');
+ check(/notifyResultForVerification\(slot,\{only:String\(v\.user\.id\)\}\)/.test(idxSrc),'Не заметил уведомление — присылаем то же самое заново');
+ check(/String\(t\.id\) !== String\(slot\.result_by \|\| ''\)/.test(matchesSrc),'Автору счёта просьба подтвердить не уходит никогда');
+ check(/const RESEND_GAP_MS/.test(matchesSrc),'Повтор ограничен по времени — три нажатия не дадут трёх писем');
+ check(/app\.post\('\/api\/match\/result\/dispute'/.test(idxSrc),'«Не согласен» работает и из мини-приложения');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/Счёт по этому матчу уже внесён и ждёт вашего подтверждения/.test(botSrc),'Кнопка «Матч не доигран» при внесённом счёте отвечает подсказкой');
+ check(/function renderConfirmScreen/.test(match),'Вместо формы показывается экран подтверждения');
+ check(/pingConfirmation\(s\.challenge_id\)/.test(match),'Открыл экран — бот продублировал сообщение в чат');
+ const dbSrc=await fs.readFile(path.join(root,'matchesdb.js'),'utf8');
+ check(/const CONFIRM_STAGES = \[\['n2',4\],\['d1',24\]\]/.test(dbSrc),'У подтверждения своя лесенка: две ступени');
+
+ // Форма создания вызова: выбор корта не сбрасывает время и комментарий.
+ check(/function keepNewForm/.test(match),'Перед перерисовкой форма запоминает введённое');
+ check(/toggleCourt\(name\)\{keepNewForm\(\)/.test(match),'Клик по корту сохраняет время');
+ check(/toggleDate\(iso\)\{keepNewForm\(\)/.test(match),'Клик по дате сохраняет время');
+ check(/timeOptions\(selFrom\)/.test(match)&&/timeOptions\(selTo\)/.test(match),'Время рисуется из сохранённого, а не из 17:00');
+ check(/oninput="selComment=this\.value"/.test(match),'Комментарий тоже переживает перерисовку');
+
  // Поиск с выпадающим списком во всех трёх местах лиги.
  check(/function sugBox/.test(league),'Есть общий конструктор поля поиска');
  for(const [id,handler] of [['rq','race'],['pq','plr'],['fq','feed']]){
   check(new RegExp(`sugBox\\('${id}'`).test(league),'Поле '+id+' собрано через общий конструктор');
-  for(const suffix of ['Set','Pick','Focus','Blur'])
+  for(const suffix of ['Set','Pick','Blur'])
    check(new RegExp(`function ${handler}${suffix}\\(`).test(league),'Обработчик '+handler+suffix+' определён');
+  check(!new RegExp(`function ${handler}Focus\\(`).test(league),'По касанию поля список больше не открывается: '+handler);
  }
- check(/Focus\(\)\{[a-zA-Z]+SugOpen=true/.test(league),'Список открывается целиком по нажатию, а не только при вводе');
+ check(!/onfocus="/.test(league),'Обработчика onfocus у поиска нет вовсе');
+ check(/var hits=qq\?uniq\.filter/.test(league),'Подсказки появляются только после ввода символов');
+ check(/open&&qq&&rows/.test(league),'Пустой запрос списка не рисует');
+ check(/class="sugx"/.test(league),'У поля поиска есть крестик очистки');
+ check(/max-height:46vh/.test(league),'Список ограничен по высоте и не накрывает соседние поля');
+ check(/if\(document\.activeElement!==el\)el\.focus\(\)/.test(league),'Фокус возвращается после перерисовки — клавиатура не закрывается');
  check(!/function setPQuery|function pickPQ|function setRaceQuery|function setFQuery/.test(league),'Старые обработчики поиска убраны, двух путей к одному полю не осталось');
 
  // Игрок в ручном матче выбирается из списка или набирается руками.
- check(/list="mPlayerList"/.test(match)&&/<datalist id="mPlayerList">/.test(match),'Игрок в ручном матче выбирается из выпадающего списка');
+ check(!/datalist/.test(match),'Нативных выпадающих списков в ручном матче не осталось');
+ check(/function comboBox\(id,names,placeholder,onpick\)/.test(match),'Поля игрока и корта собраны своим поиском');
+ check(/if\(!v\)\{box\.style\.display='none'/.test(match),'Пустое поле списка не показывает');
+ check(/function comboClear/.test(match)&&/class="sugx"/.test(match),'Список можно закрыть и очистить');
  check(/function manualPerson\(value\)/.test(match),'Игрок ищется по тексту поля, а не по telegram_id');
  check(/manualPerson\(\$\('mOpp'\)\.value\)\.telegram_id/.test(match),'На сервер уходит найденный telegram_id, а не введённый текст');
  check(/sugMore/.test(league),'Подсказка «сколько ещё» переведена');
@@ -1239,12 +1290,28 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 
 
 // --- Постер старого матча: форма и место берутся по логике карточки ---------
+ // Форма: журналы дивизионов главнее витрины, сквозь сезоны, свежее слева.
+ const divForm=await fs.readFile(path.join(root,'division.js'),'utf8');
+ check(/export async function playerFormAcrossSeasons/.test(divForm),'Форма собирается по журналам дивизионов сквозь сезоны');
+ check(/if \(out\.length >= limit\) break;/.test(divForm),'Прошлый сезон добирается только пока не набрана пятёрка');
+ check(/if \(current && Number\(one\) > Number\(current\)\) continue;/.test(divForm),'Будущие сезоны в форму не попадают');
+ const res5=await fs.readFile(path.join(root,'results.js'),'utf8');
+ check(/const live = await playerFormAcrossSeasons\(name, \{ season, upTo, limit: 5 \}\)/.test(res5),'Карточка берёт форму из журналов, витрина — запасной вариант');
+ const card5=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
+ check(/const live = await playerFormAcrossSeasons\(name, \{ season, limit: 5 \}\)/.test(card5),'Постер старого матча берёт форму оттуда же');
+ check(/slice\(-5\)\.reverse\(\)/.test(card5),'На карточке свежий матч слева');
+ const post5=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
+ check(/\.filter\(x=>x==='W'\|\|x==='L'\)\.reverse\(\)/.test(post5),'На постере свежий матч слева');
+ const lg5=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(/form\.slice\(-5\)\.reverse\(\)/.test(lg5),'В мини-приложении свежий матч слева');
+
+
 {
  const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
  check(/async function metasFromSheets/.test(card),'Без контекста карточка не остаётся пустой');
  check(/if \(!ctx\) return metasFromSheets\(slot, winnerIsFrom, seasonHint\)/.test(card),'Запасной путь включается именно при отсутствии контекста');
- check(/getLeagueProfiles\(\)/.test(card),'Форма берётся из витрины профилей — по всей истории игрока');
- check(/return spreadsheetId \? recentFormBefore\(spreadsheetId, name, 0\)/.test(card),'Журнал дивизиона остаётся запасным источником формы, как в карточке');
+ check(/playerFormAcrossSeasons/.test(card),'Форма берётся из журналов дивизионов сквозь сезоны');
+ check(/getLeagueProfiles\(\)/.test(card),'Витрина профилей осталась запасным источником формы');
  check(/sameName\(x\.name, name\)\)\?\.place/.test(card),'Место читается из живой таблицы дивизиона');
  check(/position: \{ after: place\(p1\) \}/.test(card),'Место «до» задним числом не выдумываем — стрелки нет');
  check(/fp: null/.test(card),'Fantasy Points задним числом не выдумываем');
@@ -1252,7 +1319,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const results2=await fs.readFile(path.join(root,'results.js'),'utf8');
  check(/recent_form/.test(results2)||/cardFormsBefore/.test(results2),'Карточка по-прежнему снимает контекст при записи счёта');
  const div=await fs.readFile(path.join(root,'division.js'),'utf8');
- check(!/upTo = 0/.test(div),'Срезов таблицы в прошлое нет — считаем по живой таблице');
+ check(!/getDivisionTable\(letter, season = '', group = '', \{ upTo/.test(div),'Срезов таблицы в прошлое нет — место считаем по живой таблице');
 }
 
 
