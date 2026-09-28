@@ -48,10 +48,14 @@ assert.ok(invalid.errors.some(x=>x.includes('must differ')));
 assert.equal(SHEETS.fantasyTestTeams,'Fantasy Test Teams');
 assert.equal(SHEETS.fantasyTestTransfers,'Fantasy Test Transfers');
 assert.equal(SHEETS.fantasyTesters,'Fantasy Testers');
-assert.ok(MENU_VERSION>=7);
+assert.ok(MENU_VERSION>=9);
+// Отдельной кнопки Fantasy в клавиатуре чата больше нет ни при каком раскладе:
+// туда заходят через меню лиги или командой /fantasy.
 const hidden=persistentKeyboard('en','active','',null,0,false).keyboard.flat().map(x=>x.text);
 const shown=persistentKeyboard('en','active','',null,0,true).keyboard.flat().map(x=>x.text);
+const allowed=persistentKeyboard('en','active','',['matches','fantasy','league'],0,true).keyboard.flat().map(x=>x.text);
 assert.equal(hidden.includes('✨ Fantasy'),false);
-assert.equal(shown.includes('✨ Fantasy'),true);
+assert.equal(shown.includes('✨ Fantasy'),false);
+assert.equal(allowed.includes('✨ Fantasy'),false);
 
 console.log('fantasy tests passed');

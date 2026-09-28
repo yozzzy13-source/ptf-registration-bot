@@ -3,8 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
-import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart, prepareAnnouncementForAdmin } from './bot.js';
-import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
+import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart, prepareAnnouncementForAdmin, rememberLang } from './bot.js';
+import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, setUserLanguage, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe, escapeHtml } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin, getAdminChatId } from './admin.js';
@@ -45,19 +45,23 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/public', express.static(path.join(__dirname, 'public')));
 // Resolve the saved language before responding, including validation failures.
 app.use('/api', async (req,res,next) => {
-  let lang = 'en';
+  let lang = 'en', source = 'default';
   try {
     const who = webAppUser(req.body?.initData || req.query.initData || '', req.body?.t || req.query.t || '');
     if (who.ok) {
       const profile = await findApplicantByTelegramIdentity(who.user);
-      lang = ['ru','en'].includes(profile?.language) ? profile.language : (String(who.user.language_code || '').startsWith('ru') ? 'ru' : 'en');
+      // Откуда взят язык — экрану важно: выбор из анкеты главнее выбора на
+      // устройстве, а язык Telegram — только подсказка по умолчанию.
+      if (['ru','en'].includes(profile?.language)) { lang = profile.language; source = 'profile'; }
+      else { lang = String(who.user.language_code || '').startsWith('ru') ? 'ru' : 'en'; source = 'telegram'; }
     }
   } catch (e) { console.error('UI language:',e.message); }
   req.uiLang = lang;
+  req.uiLangSource = source;
   const json = res.json.bind(res);
   res.json = body => {
     if (body && typeof body === 'object' && !Array.isArray(body)) {
-      body = { ...body, lang:body.lang || lang };
+      body = { ...body, lang:body.lang || lang, lang_source:body.lang_source || (body.lang && body.lang !== lang ? 'server' : source) };
       if (body.error) {
         console.error('API error:',req.path,body.error);
         // Коды, на которые интерфейс отвечает своим экраном, а не текстом ошибки,
@@ -73,6 +77,22 @@ app.use('/api', async (req,res,next) => {
   next();
 });
 app.get('/api/ui-language', (req,res) => res.json({ok:true,lang:req.uiLang}));
+// Переключатель RU/EN в мини-приложениях. Пишем язык в анкету, только если она
+// уже есть: новую строку-лид из-за нажатия на кнопку создавать нельзя. У кого
+// анкеты нет, выбор живёт на устройстве.
+app.post('/api/ui-language', async (req,res) => {
+  try {
+    const lang = req.body?.lang === 'ru' ? 'ru' : (req.body?.lang === 'en' ? 'en' : '');
+    if (!lang) return res.status(400).json({ ok:false, error:'lang_required' });
+    const who = webAppUser(req.body?.initData || '', req.body?.t || '');
+    if (!who.ok) return res.json({ ok:true, lang, saved:false });
+    const profile = await findApplicantByTelegramIdentity(who.user);
+    if (!profile) return res.json({ ok:true, lang, saved:false });
+    if (profile.language !== lang) await setUserLanguage(who.user, lang);
+    rememberLang(who.user.id, lang);
+    res.json({ ok:true, lang, lang_source:'profile', saved:true });
+  } catch (e) { console.error('ui-language save failed:', e.message); res.status(500).json({ ok:false, error:e.message }); }
+});
 
 app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
 function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
@@ -600,7 +620,13 @@ app.post('/api/match/announce-poster', async (req, res) => {
     if(!p1||!p2)return res.status(404).json({ok:false,error:'player_not_found'});
     const player1={telegram_id:id1,name:String(p1.name||'').trim()};
     const player2={telegram_id:id2,name:String(p2.name||'').trim()};
-    const division=String(b.division||'').trim();
+    let division=String(b.division||'').trim();
+    // Дивизион не указали — берём из состава, если оба игрока из одного.
+    if(!division){
+      const roster=await getAllActiveLeaguePlayers().catch(()=>[]);
+      const d1=roster.find(p=>String(p.telegram_id)===id1)?.division||'',d2=roster.find(p=>String(p.telegram_id)===id2)?.division||'';
+      if(d1&&d1===d2)division=d1;
+    }
     const comment=String(b.comment||'').trim();
     const season=String(await getSetting('season_number').catch(()=>'')||'').trim();
     const chatId=await getAdminChatId().catch(()=>'');
@@ -1996,36 +2022,6 @@ app.listen(PORT, async () => {
     renew();
     setInterval(renew, 24 * 60 * 60 * 1000).unref?.();
   }
-  // Фото из Players_Master переносим в Telegram — туда же, где лежат
-  // собственные аватарки игроков. Через минуту после старта (чтобы не мешать
-  // прогреву таблиц) и дальше раз в сутки: так подхватываются и новые игроки.
-  // Организатору пишем только если что-то реально перенеслось.
-  // Если хост с фото притормозил нас, остаток досылаем через час, а не через
-  // сутки. Организатору пишем только когда что-то реально перенеслось, чтобы
-  // пустые повторные прогоны не шумели в чате.
-  let avatarRetry = null;
-  const avatarImport = async () => {
-    try {
-      const { getAdminChatId } = await import('./admin.js');
-      const { importMasterAvatars } = await import('./avatars.js');
-      const adminChatId = await getAdminChatId().catch(() => '');
-      const out = await importMasterAvatars({ adminChatId });
-      if (out.ok && out.retryable && !avatarRetry) {
-        avatarRetry = setTimeout(() => { avatarRetry = null; avatarImport(); }, 60 * 60 * 1000);
-        avatarRetry.unref?.();
-      }
-      if (!out.ok || !out.done?.length) return;
-      const broken = (out.failed || []).filter(f => !f.network);
-      const brokenText = broken.length
-        ? `\n\nБитые ссылки в Players_Master (${broken.length}) — поправь фото там:\n` + broken.map(f => `• ${escapeHtml(f.name)} — ${escapeHtml(f.error)}`).join('\n')
-        : '';
-      const later = out.retryable ? `\n\nЕщё ${out.retryable} — хост с фото притормозил, досылаю через час.` : '';
-      await sendMessage(adminChatId, `🖼 <b>Аватарки из Players_Master перенесены в Telegram: ${out.done.length}</b>\n\n`
-        + out.done.map(n => '• ' + escapeHtml(n)).join('\n') + brokenText + later, { disable_notification: true }).catch(() => {});
-    } catch (e) { console.error('avatar import failed:', e.message); }
-  };
-  setTimeout(avatarImport, 60 * 1000).unref?.();
-  setInterval(avatarImport, 24 * 60 * 60 * 1000).unref?.();
   // Time can create a result task without a player pressing a button.
   setInterval(async()=>{try{const rows=await allSlots();queueMatchAttention([...new Set(rows.filter(s=>s.status==='accepted').flatMap(s=>[s.from_telegram_id,s.to_telegram_id]).filter(Boolean))]);}catch(e){console.error('attention sweep:',e.message);}},5*60*1000).unref();
   console.log(`PTF Registration Bot listening on ${PORT}`);

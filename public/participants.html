@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PTF Participants</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/public/ptf-prefs.js"></script>
   <style>
     :root{--bg:#141414;--card:#202020;--card2:#292929;--text:#f6f4ef;--muted:#a9a49b;--accent:#ef5f00;--accent2:#ff8a2a;--border:#3a3a3a;--danger:#ff6b6b;--green:#19c37d;--green2:#0f7a4f;--yellow:#e8b93a;--yellow2:#7a5d10;--prime:#d9534f;--divA:#e08a6a;--divB:#f0b27a;--divC:#f5d78e;--divD:#8fd19e;--divW:#c9a7e6}
     *{box-sizing:border-box}
@@ -64,11 +65,48 @@
     button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#111;border:0}
     .hidden{display:none}
     .foot{color:var(--muted);font-size:11px;text-align:center;margin-top:10px}
+    /* Светлая тема «Court» — общий переключатель ☾/☀ (public/ptf-prefs.js). */
+    html[data-theme="light"]{--bg:#F2F5F1;--card:#FFFFFF;--card2:#EBF0EA;--text:#16211A;--muted:#7E8B82;--accent:#1F6B44;--accent2:#145236;
+      --border:#C7D3C5;--danger:#B04A2E;--green:#1F6B44;--green2:#2F8A5A;--yellow:#B08414;--yellow2:#F3E7C4;--line:#C7D3C5;
+      --accBg:#E1F0E7;--accLine:#A6D2BB}
+    html[data-theme="light"] body{background:#F2F5F1}
+    html[data-theme="light"] .note{background:#FBF3DC;border-color:#E3CD8A;color:#6B5310}
+    html[data-theme="light"] .ov-row{border-bottom-color:#DDE5DB}
+    html[data-theme="light"] .bar{background:#EBF0EA;border-color:#C7D3C5}
+    html[data-theme="light"] .bar span{color:#16211A;text-shadow:0 0 3px rgba(255,255,255,.9)}
+    html[data-theme="light"] .div-head{background:#F5F8F4}
+    html[data-theme="light"] .pill{background:#EBF0EA}
+    html[data-theme="light"] .pill.cap{color:#16211A;background:#EBF0EA}
+    html[data-theme="light"] .pill.cap.full{background:#E1F0E7;border-color:#A6D2BB;color:#1F6B44}
+    html[data-theme="light"] .pill.cap.over{background:#F6E1DB;border-color:#B04A2E;color:#B04A2E}
+    html[data-theme="light"] .pill.free{color:#1F6B44;border-color:#A6D2BB}
+    /* Счётчики в шапке дивизиона красятся прямо в разметке под тёмный фон. */
+    html[data-theme="light"] .div-meta .pill{color:#1F6B44!important}
+    html[data-theme="light"] td{border-top-color:#DDE5DB}
+    html[data-theme="light"] .av{background:#EBF0EA;border-color:#C7D3C5}
+    html[data-theme="light"] .av.ph{color:#4C5A50}
+    html[data-theme="light"] a.pname{border-bottom-color:rgba(31,107,68,.45)}
+    html[data-theme="light"] td.rating{color:#6E7A22}
+    html[data-theme="light"] .st.active{background:#E1F0E7;color:#1F6B44}
+    html[data-theme="light"] .st.waitlist{background:#F3E7C4;color:#7A5D10}
+    html[data-theme="light"] .st.other{background:#EBF0EA;color:#4C5A50}
+    html[data-theme="light"] .free-row td{background:rgba(31,107,68,.05)}
+    html[data-theme="light"] button{background:#FFFFFF}
+    html[data-theme="light"] button.primary{color:#FFFFFF;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+    .ttop{display:flex;align-items:flex-start;gap:10px}
+    .ttop h1{flex:1 1 auto;min-width:0}
+    /* Общая кнопка страницы — во всю ширину; в переключателе её сбрасываем. */
+    .thsw{display:flex;gap:3px;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--card);flex:0 0 auto;margin-top:4px}
+    .thsw button{width:27px;height:24px;margin:0;border:0;border-radius:999px;padding:0;font-size:13px;font-weight:400;
+      background:transparent;color:var(--muted);display:flex;align-items:center;justify-content:center}
+    .thsw button.on{background:rgba(239,95,0,.14);color:var(--accent2);box-shadow:0 0 0 1px rgba(239,95,0,.4) inset}
+    html[data-theme="light"] .thsw button{background:transparent}
+    html[data-theme="light"] .thsw button.on{background:var(--accBg);color:var(--accent);box-shadow:0 0 0 1px var(--accLine) inset}
   </style>
 </head>
 <body>
 <div class="wrap">
-  <h1 id="title">Participants</h1>
+  <div class="ttop"><h1 id="title">Participants</h1><div class="thsw" id="thSw"></div></div>
   <p class="sub" id="sub"></p>
   <div id="content"><div class="loading" id="loading">Loading…</div></div>
   <button id="applyBtn" class="primary hidden">Join event</button>
@@ -80,7 +118,8 @@ const tg=window.Telegram?.WebApp; if(tg){tg.expand();tg.ready();}
 const initData=tg?.initData||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
-let lang=(tg?.initDataUnsafe?.user?.language_code||'').toLowerCase().startsWith('ru')?'ru':'en';
+let lang=window.PTFPrefs?PTFPrefs.lang():((tg?.initDataUnsafe?.user?.language_code||'').toLowerCase().startsWith('ru')?'ru':'en');
+let lastData=null;
 const L={
   ru:{title:'Список участников',sub:'Актуальный состав дивизионов. Список обновляется организатором вручную.',loading:'Загружаем список…',empty:'Список участников пока пуст.',total:'Всего',active:'Active',waitlist:'Waitlist',overview:'Заполненность дивизионов',unassigned:'Без дивизиона',noPlayers:'Пока нет игроков',free:'Свободно мест:',full:'дивизион заполнен',over:'больше лимита',close:'Главное меню',back:'⬅️ Назад к событию',apply:'🏆 Участвовать в событии',updated:'Данные из таблицы участников PTF'},
   en:{title:'Participants List',sub:'Current division lineups. The list is maintained manually by the organizer.',loading:'Loading list…',empty:'The participants list is empty.',total:'Total',active:'Active',waitlist:'Waitlist',overview:'Division fill',unassigned:'No division yet',noPlayers:'No players yet',free:'Spots left:',full:'division is full',over:'over the limit',close:'Main menu',back:'⬅️ Back to event',apply:'🏆 Join event',updated:'Data from the PTF participants sheet'}
@@ -132,13 +171,15 @@ async function load(){
     const r=await fetch('/api/participants?initData='+encodeURIComponent(initData)+tokQ+(seasonQ?'&season='+encodeURIComponent(seasonQ):''),{cache:'no-store'});
     const j=await r.json();
     if(!j.ok) throw new Error(j.error||'Participants loading error');
-    if(j.lang==='ru'||j.lang==='en'){lang=j.lang;applyLang();}
-    render(j);
+    if(j.lang==='ru'||j.lang==='en'){lang=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;applyLang();}
+    lastData=j;render(j);
   }catch(e){$('content').innerHTML=`<p class="error">${esc(e.message)}</p>`}
 }
 document.addEventListener('click',e=>{const a=e.target.closest('a.pname');if(!a)return;e.preventDefault();const url=a.dataset.url;if(tg?.openLink)tg.openLink(url);else window.open(url,'_blank');});
 $('closeBtn').onclick=()=>{if(backTo==='event')goto('/apply?mode=event');else if(tg)tg.close();else location.href='/'};
 $('applyBtn').onclick=()=>{goto('/apply?mode=event')};
+// Тема и язык — общий переключатель; язык меняем на месте, без перезагрузки.
+if(window.PTFPrefs)PTFPrefs.mount($('thSw'),{onLang:v=>{lang=v;applyLang();if(lastData)render(lastData);}});
 load();
 </script>
 </body>

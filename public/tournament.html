@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>PTF Tournaments</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/public/ptf-prefs.js"></script>
 <style>
 /* Те же токены, что в мини-приложении лиги: админка не должна выглядеть
    чужой рядом с остальными экранами. */
@@ -183,6 +184,7 @@ textarea{min-height:64px;resize:vertical}
 <div class="top">
   <div class="topline">
     <div class="brand" id="brand">Турниры PTF</div>
+    <div class="thsw" id="thSw"></div>
     <button class="testsw" id="testsw" onclick="toggleTest()"><span class="dot"></span><span id="testlbl">Боевой</span></button>
   </div>
   <select class="pick" id="tpick" onchange="pickTournament(this.value)"></select>
@@ -894,6 +896,10 @@ function createMatch() {
 }
 
 boot();
+
+// Тема — общий переключатель всех мини-приложений (public/ptf-prefs.js).
+// Приложение турниров только на русском, поэтому кнопки языка здесь нет.
+if(window.PTFPrefs)PTFPrefs.mount(document.getElementById('thSw'),{lang:false});
 </script>
 </body>
 </html>

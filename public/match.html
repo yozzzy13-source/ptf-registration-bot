@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>PTF Matches</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/public/ptf-prefs.js"></script>
 <style>
 /* Палитра лиги: та же, что в витрине, чтобы экраны матчей не выглядели
    отдельным приложением. Старые имена переменных сохранены — так правка
@@ -153,10 +154,7 @@ try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
 <div class="grain"></div>
 <div class="wrap">
   <div class="ttop"><h1 id="title">Матчи</h1>
-    <div class="thsw" id="thSw">
-      <button type="button" data-th="dark" title="Тёмная тема">☾</button>
-      <button type="button" data-th="light" title="Светлая тема">☀</button>
-    </div>
+    <div class="thsw" id="thSw"></div>
   </div>
   <p class="sub" id="sub"></p>
   <div class="tabs">
@@ -178,12 +176,13 @@ var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
-var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+var L=window.PTFPrefs?PTFPrefs.lang()==='ru':((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
 var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selFrom='17:00',selTo='21:00',selComment='',selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120,resultAfterMin=90;
 var T={
   ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
+      annTitle:'📣 Афиша-анонс',annHint:'Выберите двух игроков — афиша уйдёт в чат админов, публикация в сторис оттуда же кнопкой.',annP1:'Игрок 1',annP2:'Игрок 2',annDivision:'Дивизион (необязательно — подставится сам, если оба игрока из одного)',annComment:'Комментарий (необязательно) — попадёт и в промпт, и на афишу как дата/место',annCommentPh:'Например: сб · 4 окт · 18:00 · The Dome',annSend:'✨ Сгенерировать афишу',annSending:'Отправляю…',annSent:'✅ Готово — картинки придут в чат админов через пару минут.',annNeedPlayers:'Выберите двух разных игроков',
       emptyOpen:'Сейчас нет открытых окон в твоей группе. Создай своё — бот отправит его соперникам лично.',
       emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
       modeOpen:'🔓 Открытое окно',modeDirect:'🎯 Конкретный соперник',
@@ -216,7 +215,7 @@ var T={
       sendRes:'📊 Отправить результат',resSent:'✅ Счёт отправлен сопернику на подтверждение.',
       manual:'➕ Матч вне бота',manualTitle:'Матч, о котором договорились сами',
       manualHint:'Выберите соперника, дату и корт — счёт так же уйдёт ему на подтверждение.',courtManual:'Например, Rawai — можно не указывать',
-      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',nudge:'🔔 Напомнить',nudgeSent:'✅ Напомнил',resultHalf:'✅ Ваше подтверждение принято. Ждём соперника — тогда счёт уйдёт в таблицу.',waitingOther:'Вы подтвердили, ждём соперника',byOrganiser:'Счёт внёс организатор',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',confirmTitle:'Подтвердите счёт',confirmBy:'внёс счёт матча',confirmHint:'Если счёт верный — подтвердите. Если нет — нажмите «Не согласен», и вы сможете внести свой вариант.',disagree:'❌ Не согласен',disagreeDone:'Счёт отклонён. Договоритесь с соперником и внесите согласованный счёт.',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
+      pendingRes:'ждёт подтверждения',yourRes:'подтвердите счёт',confirmResult:'✅ Подтвердить результат',resultConfirmed:'✅ Результат подтверждён.',resultReview:'✅ Результат подтверждён и отправлен организатору на проверку.',resendConfirmation:'🔔 Отправить ещё раз',nudge:'🔔 Напомнить',nudgeSent:'✅ Напомнил',resultHalf:'✅ Ваше подтверждение принято. Ждём соперника — тогда счёт уйдёт в таблицу.',waitingOther:'Вы подтвердили, ждём соперника',byOrganiser:'Счёт внёс организатор',confirmationResent:'✅ Запрос подтверждения отправлен сопернику.',pendingApproval:'Нужно ваше подтверждение',awaitingPlayer:'Ждёт подтверждения игрока',confirmForPlayer:'✅ Подтвердить за игрока',confirmTitle:'Подтвердите счёт',confirmBy:'внёс счёт матча',confirmHint:'Если счёт верный — подтвердите. Если нет — нажмите «Не согласен», и вы сможете внести свой вариант.',disagree:'❌ Не согласен',disagreeDone:'Счёт отклонён. Договоритесь с соперником и внесите согласованный счёт.',deleteMatch:'🗑 Удалить матч',deleteMatchAsk:'Удалить этот неподтверждённый матч? Он исчезнет у обоих игроков.',deleteMatchDone:'Матч удалён.',needWinner:'Выберите победителя',
       vs:'против',back:'⬅️ Назад',
       tBook:'Бронь корта',bookTitle:'Забронировать корт',
       bookHint:'Это отдельная бронь, не привязанная к матчу лиги. Отметьте площадки — бот подготовит по сообщению на каждую, а отправите вы сами из WhatsApp.',
@@ -227,6 +226,7 @@ var T={
       h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
   en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
       tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tAdmin:'Admin',adminTitle:'All active requests',adminSearch:'Search by name',adminAll:'All divisions',adminEmpty:'No active requests',adminOpen:'open slot',adminPending:'negotiating',adminAccepted:'match agreed',adminGroup:'Open to group',contact:'Message',cancelRequestAsk:'Cancel this request? Your opponent will be notified.',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
+      annTitle:'📣 Announcement poster',annHint:'Pick two players — the poster goes to the admin chat, publish to story from there with a button.',annP1:'Player 1',annP2:'Player 2',annDivision:'Division (optional — filled in automatically if both players share one)',annComment:'Comment (optional) — goes into the prompt and onto the poster as date/place',annCommentPh:'e.g. Sat · 4 Oct · 18:00 · The Dome',annSend:'✨ Generate poster',annSending:'Sending…',annSent:'✅ Done — images will arrive in the admin chat shortly.',annNeedPlayers:'Pick two different players',
       emptyOpen:'No open slots in your group. Create one — the bot will send it privately to your opponents.',
       emptyMine:'No scheduled matches or open slots yet.',
       modeOpen:'🔓 Open slot',modeDirect:'🎯 Specific opponent',
@@ -259,7 +259,7 @@ var T={
       sendRes:'📊 Send result',resSent:'✅ Score sent to your opponent for confirmation.',
       manual:'➕ Match outside the bot',manualTitle:'Match you arranged yourselves',
       manualHint:'Pick the opponent, date and court — the score goes to them for confirmation too.',courtManual:'For example, Rawai — optional',
-      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',nudge:'🔔 Remind',nudgeSent:'✅ Reminded',resultHalf:'✅ Your confirmation is recorded. Waiting for your opponent before the score goes into the table.',waitingOther:'You confirmed — waiting for your opponent',byOrganiser:'Score entered by the organiser',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',confirmTitle:'Confirm the score',confirmBy:'submitted the match score',confirmHint:'Confirm if the score is right. If not, tap “Disagree” and you will be able to submit your own version.',disagree:'❌ Disagree',disagreeDone:'Score rejected. Agree with your opponent and submit the corrected score.',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
+      pendingRes:'awaiting confirmation',yourRes:'confirm the score',confirmResult:'✅ Confirm result',resultConfirmed:'✅ Result confirmed.',resultReview:'✅ Result confirmed and sent to the organiser for review.',resendConfirmation:'🔔 Send again',nudge:'🔔 Remind',nudgeSent:'✅ Reminded',resultHalf:'✅ Your confirmation is recorded. Waiting for your opponent before the score goes into the table.',waitingOther:'You confirmed — waiting for your opponent',byOrganiser:'Score entered by the organiser',confirmationResent:'✅ Confirmation request sent to your opponent.',pendingApproval:'Your confirmation is required',awaitingPlayer:'Awaiting player confirmation',confirmForPlayer:'✅ Confirm for the player',confirmTitle:'Confirm the score',confirmBy:'submitted the match score',confirmHint:'Confirm if the score is right. If not, tap “Disagree” and you will be able to submit your own version.',disagree:'❌ Disagree',disagreeDone:'Score rejected. Agree with your opponent and submit the corrected score.',deleteMatch:'🗑 Delete match',deleteMatchAsk:'Delete this unconfirmed match? It will disappear for both players.',deleteMatchDone:'Match deleted.',needWinner:'Pick the winner',
       vs:'vs',back:'⬅️ Back',
       tBook:'Book a court',bookTitle:'Book a court',
       bookHint:'A standalone booking, not tied to a league match. Tick the venues — the bot prepares one message per venue, and you send them yourself from WhatsApp.',
@@ -285,26 +285,13 @@ function timeOptions(sel,minHM,maxHM){
 // Две недели видно всегда, третья — по свайпу вверх/вниз внутри календаря
 // или тапом по язычку. Высоту считаем по реальной ячейке, а не на глаз.
 // Тема: ключ общий с витриной лиги, поэтому выбор переносится между экранами.
-function applyTheme(name){
-  var th=name==='light'?'light':'dark';
-  document.documentElement.setAttribute('data-theme',th);
-  try{ localStorage.setItem('ptf_theme',th) }catch(e){}
-  var bg=th==='light'?'#F2F5F1':'#0A0A0B';
-  try{ if(tg&&tg.setHeaderColor)tg.setHeaderColor(bg) }catch(e){}
-  try{ if(tg&&tg.setBackgroundColor)tg.setBackgroundColor(bg) }catch(e){}
-  var box=document.getElementById('thSw');
-  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
-    b.classList.toggle('on',b.getAttribute('data-th')===th);
-  });
-}
+// Переключатель общий для всех мини-приложений (public/ptf-prefs.js): тема и
+// язык. После смены языка экран перезагружается — так все подписи, даты и
+// вкладки гарантированно перерисуются на новом языке.
 function initTheme(){
-  var box=document.getElementById('thSw');
-  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
-    b.onclick=function(){ applyTheme(b.getAttribute('data-th')) };
-  });
-  var cur='dark';
-  try{ var v=localStorage.getItem('ptf_theme'); if(v==='light'||v==='dark')cur=v }catch(e){}
-  applyTheme(cur);
+  if(window.PTFPrefs)PTFPrefs.mount(document.getElementById('thSw'),{onLang:function(lang,saved){
+    saved.then(function(){location.reload()});
+  }});
 }
 initTheme();
 
@@ -410,7 +397,9 @@ function renderOpen(){
   var top='<button class="mini primary" style="width:100%;padding:12px;margin-bottom:10px" onclick="showTab(\'new\')">'+esc(X.tCreate)+'</button>'
     +waitingBlock()+unplayedBlock();
   if(!openSlots.length){$('viewOpen').innerHTML=top+'<div class="empty">'+esc(X.emptyOpen)+'</div>';return}
-  $('viewOpen').innerHTML=top+openSlots.map(function(s){
+  $('viewOpen').innerHTML=top+openSlots.slice().sort(function(a,b){
+    return adminMatchTime(a)-adminMatchTime(b)||String(a.challenge_id||'').localeCompare(String(b.challenge_id||''));
+  }).map(function(s){
     var mine=String(s.from_telegram_id)===String(me&&me.id);
     return '<div class="slot'+(mine?' mine':'')+'" id="slot-'+esc(s.challenge_id)+'">'
       +'<div class="slot-head">'+avatar(s.from)+'<div><div class="who">'+esc(s.from_name)+(mine?' <span class="pill">'+esc(X.you)+'</span>':'')+'</div>'
@@ -539,7 +528,7 @@ function historyBlock(){
 // чтобы не приходилось привыкать заново на каждом экране.
 function byFreshest(list){
   return (Array.isArray(list)?list:[]).slice().sort(function(a,b){
-    return adminMatchTime(b)-adminMatchTime(a)||String(b.challenge_id||'').localeCompare(String(a.challenge_id||''));
+    return adminMatchTime(a)-adminMatchTime(b)||String(a.challenge_id||'').localeCompare(String(b.challenge_id||''));
   });
 }
 function adminMatchTime(s){
@@ -563,7 +552,7 @@ function renderAdmin(){
   var nameSugs=(adminSugOpen&&qSug)?adminPlayers.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qSug)>=0}).slice(0,6):[];
   var controls='<div class="card"><h3 style="margin:0 0 10px;font-size:17px">'+esc(X.adminTitle)+'</h3><div class="row"><select onchange="adminDiv=this.value;renderAdmin()"><option value="">'+esc(X.adminAll)+'</option>'+divisions.map(function(d){return '<option value="'+esc(d)+'"'+(adminDiv===d?' selected':'')+'>'+esc(d)+'</option>'}).join('')+'</select><div class="searchwrap"><input id="adminSearch" value="'+esc(adminQuery)+'" placeholder="'+esc(X.adminSearch)+'" autocomplete="off" oninput="adminQueryChanged(this)" onblur="adminSearchBlur()">'
     +(nameSugs.length?'<div class="psug">'+nameSugs.map(function(p){return '<button type="button" class="pi" onmousedown="event.preventDefault()" onclick="adminPickName(\''+esc(String(p.name||'').replace(/\'/g,"\\'"))+'\')">'+esc(p.name)+'</button>'}).join('')+'</div>':'')+'</div></div></div>';
-  var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){var rs=String(s.result_status||'').trim().toLowerCase();var done=rs==='confirmed'||Boolean(String(s.result_confirmed_at||'').trim());return !done&&(!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)}).sort(function(a,b){return adminMatchTime(b)-adminMatchTime(a)||String(b.challenge_id||'').localeCompare(String(a.challenge_id||''))});
+  var q=adminQuery.trim().toLowerCase();var list=adminItems.filter(function(s){var rs=String(s.result_status||'').trim().toLowerCase();var done=rs==='confirmed'||Boolean(String(s.result_confirmed_at||'').trim());return !done&&(!adminDiv||String(s.division||'')===adminDiv)&&(!q||(String(s.from_name||'')+' '+String(s.to_name||'')).toLowerCase().indexOf(q)>=0)}).sort(function(a,b){return adminMatchTime(a)-adminMatchTime(b)||String(a.challenge_id||'').localeCompare(String(b.challenge_id||''))});
   var cards=list.map(function(s){
     var status=String(s.status||'').toLowerCase(),resultStatus=String(s.result_status||'').toLowerCase();
     var label=status==='accepted'?X.adminAccepted:status==='pending'?X.adminPending:X.adminOpen;
@@ -572,7 +561,7 @@ function renderAdmin(){
     var acts='<div class="acts">';
     if(s.from_contact&&s.from_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.from_contact.url)+'\')">💬 '+esc(s.from_name||'1')+'</button>';
     if(s.to_contact&&s.to_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.to_contact.url)+'\')">💬 '+esc(s.to_name||'2')+'</button>';
-    if(resultStatus==='pending'){acts+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';acts+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';}
+    if(resultStatus==='pending'){acts+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(adminOnlyConfirm(s)?X.confirmForPlayer:X.confirmResult)+'</button>';acts+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';}
     if(resultStatus!=='pending')acts+=nudgeButton(s);
     if(resultStatus!=='confirmed')acts+='<button class="mini" onclick="deleteAdminMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.deleteMatch)+'</button>';
     acts+='</div>';
@@ -580,10 +569,38 @@ function renderAdmin(){
       +'<div class="meta"><span class="pill open">'+esc(label)+'</span> '+esc(s.division||'')+(s.group?' · '+esc(L?'Группа ':'Group ')+esc(s.group):'')+'</div>'
       +'<div class="when">📅 <b>'+dates.map(fmtDay).map(esc).join(' · ')+'</b>'+(time?' · 🕐 <b>'+esc(time)+'</b>':'')+'</div>'
       +(court?'<div class="meta">📍 '+esc(court)+'</div>':'')
-      +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
+      +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
       +acts+'</div>';
   }).join('');
-  view.innerHTML=controls+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
+  view.innerHTML=controls+renderAnnouncePanel()+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
+}
+// Афиша-анонс: выбираем двух игроков и необязательный комментарий, дальше
+// генерация и публикация — как у постера результата, просто без матча.
+function renderAnnouncePanel(){
+  var names=adminPlayers.map(function(p){return p.name}).filter(Boolean);
+  return '<div class="card"><h3 style="margin:0 0 6px;font-size:17px">'+esc(X.annTitle)+'</h3>'
+    +'<div class="hint" style="margin-bottom:10px">'+esc(X.annHint)+'</div>'
+    +'<label>'+esc(X.annP1)+'</label>'+comboBox('annP1',names,X.annP1,'')
+    +'<label>'+esc(X.annP2)+'</label>'+comboBox('annP2',names,X.annP2,'')
+    +'<label>'+esc(X.annDivision)+'</label><input id="annDivision" placeholder="A / B / C / D / W">'
+    +'<label>'+esc(X.annComment)+'</label><textarea id="annComment" placeholder="'+esc(X.annCommentPh)+'"></textarea>'
+    +'<button class="primary" style="margin-top:10px" onclick="submitAnnouncePoster(this)">'+esc(X.annSend)+'</button>'
+    +'<div id="annRes" class="res"></div></div>';
+}
+function announcePlayerByName(name){
+  return adminPlayers.filter(function(p){return String(p.name||'')===String(name||'')})[0]||null;
+}
+function submitAnnouncePoster(btn){
+  var res=$('annRes');res.className='res';
+  var p1=announcePlayerByName($('annP1')&&$('annP1').value);
+  var p2=announcePlayerByName($('annP2')&&$('annP2').value);
+  if(!p1||!p2||p1.telegram_id===p2.telegram_id){res.className='res err';res.textContent=X.annNeedPlayers;return}
+  btn.disabled=true;res.textContent=X.annSending;
+  fetch('/api/match/announce-poster',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    initData:initData,t:linkToken,player1_id:p1.telegram_id,player2_id:p2.telegram_id,
+    division:($('annDivision')&&$('annDivision').value||'').trim(),comment:($('annComment')&&$('annComment').value||'').trim()
+  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=X.annSent})
+  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 
 function renderMine(){
@@ -633,6 +650,13 @@ function alreadyConfirmed(s){
   return String(s.result_confirmed_by||'').split(',').map(function(x){return x.trim()})
     .indexOf(String(me&&me.id||''))>=0;
 }
+// Админ видит все матчи лиги. «Нужно ваше подтверждение» — только там, где он
+// сам играет; в чужом матче ждём соперника, а кнопка — ручное вмешательство.
+function amPlayer(s){
+  var id=String(me&&me.id||'');
+  return !!id&&(String(s.from_telegram_id)===id||String(s.to_telegram_id)===id);
+}
+function adminOnlyConfirm(s){return isAdmin&&!amPlayer(s)}
 function canConfirmResult(s){
   if(byOrganiser(s))return !alreadyConfirmed(s);
   return String(s.result_by)!==String(me&&me.id);
@@ -929,7 +953,7 @@ function renderRes(){
     var pending=s.result_status==='pending',unfinished=s.result_status==='unfinished';
     var mine=String(s.result_by)===String(me&&me.id);
     var actions='<div class="acts">';
-    if(pending&&(isAdmin||canConfirmResult(s)))actions+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
+    if(pending&&(isAdmin||canConfirmResult(s)))actions+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(adminOnlyConfirm(s)?X.confirmForPlayer:X.confirmResult)+'</button>';
     else if(pending&&byOrganiser(s))actions+='<span class="hint">'+esc(X.waitingOther)+'</span>';
     else if(unfinished)actions+='<button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(X.matchCompleted)+'</button>';
     else if(!pending)actions+='<button class="mini primary" onclick="openResult(\''+esc(s.challenge_id)+'\')">'+esc(s.result_status==='confirmed'&&isAdmin?X.editResult:X.resTitle)+'</button>';
@@ -941,7 +965,7 @@ function renderRes(){
     return '<div class="slot'+(pending?' agreed':'')+'">'
       +'<div class="who">'+esc(opp.n||'')+'</div>'
       +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
-      +(pending?'<div class="meta"><span class="pill open">'+esc(mine&&!isAdmin?X.pendingRes:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
+      +(pending?'<div class="meta"><span class="pill open">'+esc(mine&&!isAdmin?X.pendingRes:(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval))+'</span> <b>'+esc(s.result_score||'')+'</b></div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
       +actions+'</div>';
   }).join('');
   h+='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
@@ -1376,7 +1400,7 @@ function load(keepTab){
   var q=new URLSearchParams(location.search);var slotQ=q.get('slot')||'',cQ=q.get('counter')||'',rQ=q.get('result')||'';
   return fetch('/api/match/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(slotQ?'&slot='+encodeURIComponent(slotQ):'')+(cQ?'&counter='+encodeURIComponent(cQ):'')+(rQ?'&result='+encodeURIComponent(rQ):''),{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
-      if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
+      if(j.lang){var lg=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;L=lg==='ru';X=L?T.ru:T.en;document.documentElement.lang=lg}
       if(!j.ok)throw new Error(j.error||(L?'Ошибка':'Error'));
       me=j.user;division=j.division||'';canMatch=!!j.can_match;matchGroup=j.match_group||'';courts=j.courts||[];opponents=j.opponents||[];matchDuration=Number(j.duration_min||120);resultAfterMin=Number(j.result_after_min||90);isAdmin=!!j.is_admin;canBookCourt=!!j.can_book_court;
       attention=j.attention||{total:0,open:0,mine:0,res:0};

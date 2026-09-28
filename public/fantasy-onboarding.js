@@ -5,7 +5,7 @@ const tg=window.Telegram?.WebApp;
 try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
-let D, ru=(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
+let D, ru=window.PTFPrefs?window.PTFPrefs.lang()==='ru':(tg?.initDataUnsafe?.user?.language_code||'').startsWith('ru');
 let view='home', step=0, slot=1, homeTeamOpen=0, filter='slot', search='', transferOut='', busy=false, notice='', homeStatus='', review=null, priceOpen='', searchSugOpen=false;
 // Разовое приглашение при первом заходе в Fantasy — показываем один раз на
 // это устройство, дальше не мешаем.
@@ -418,7 +418,8 @@ async function handle(action,el={dataset:{}}) {
   if(busy)return;
   if(action==='intro-dismiss'){dismissIntro();return;}
   if(['dark','light'].includes(action)){setTheme(action);return;}
-  if(action==='language'){ru=!ru;render();if(view==='wizard'&&step===3)await validateReview();return;}
+  // Выбор языка общий для всех мини-приложений и сохраняется (public/ptf-prefs.js).
+  if(action==='language'){ru=!ru;window.PTFPrefs?.setLang(ru?'ru':'en');render();if(view==='wizard'&&step===3)await validateReview();return;}
   if(['home','players','table','rules'].includes(action)){await saveDraft();return navigate(action);}
   if(action==='start')return start(Number(el.dataset.slot));
   if(action==='confirm-home')return confirmFromHome(Number(el.dataset.slot));
@@ -483,6 +484,6 @@ app.addEventListener('focusout',event=>{
 app.addEventListener('error',event=>{if(event.target.tagName==='IMG'){const span=document.createElement('span');span.className='avatar';span.textContent='PTF';event.target.replaceWith(span);}},true);
 function setTheme(value) {document.documentElement.dataset.theme=value;try{localStorage.setItem('ptf_theme',value);tg?.setHeaderColor(value==='light'?'#f2f5f1':'#0a0a0b');}catch{}}
 try{setTheme(localStorage.getItem('ptf_theme')==='light'?'light':'dark');tg?.BackButton?.onClick(()=>back().catch(e=>{notice=e.message;render();}));}catch{}
-api('bootstrap').then(j=>{D=j;D.teams=D.teams||[];ru=j.lang==='ru';render();}).catch(e=>{D=null;app.innerHTML='<div class="card empty"><h2>'+tr('Нет доступа','Access denied')+'</h2><p>'+esc(e.message)+'</p></div>';});
+api('bootstrap').then(j=>{D=j;D.teams=D.teams||[];ru=(window.PTFPrefs?window.PTFPrefs.resolveLang(j):j.lang)==='ru';render();}).catch(e=>{D=null;app.innerHTML='<div class="card empty"><h2>'+tr('Нет доступа','Access denied')+'</h2><p>'+esc(e.message)+'</p></div>';});
 // A long-open Telegram view follows both campaign boundaries.
 setInterval(()=>{if(!D)return;const entryChanged=!D.locked&&deadlineReached(D),finishChanged=!D.season_finished&&seasonFinished(D);if(entryChanged||finishChanged){if(entryChanged){D.locked=true;D.entry_closed=true;D.entry_open=false;}if(finishChanged){D.season_finished=true;D.competition_open=false;D.transfers_open=false;}review=null;render();api('bootstrap').then(j=>{D=j;render();}).catch(()=>{});}},1000);

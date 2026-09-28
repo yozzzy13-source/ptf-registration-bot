@@ -1375,6 +1375,33 @@ function findConfirmedSlot(done, wanted) {
         return sendMessage(chatId,`⛔ ${escapeHtml(error?.message || error)}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
       }
     }
+    // Афиша-анонс командой — то же, что форма во вкладке «Контроль»:
+    // /announce Игрок 1 | Игрок 2 | комментарий (комментарий необязателен).
+    if (/^\/announce(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const opts=msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{};
+      try {
+        const raw=String(text.replace(/^\/announce(?:@\w+)?\s*/i,'')).trim();
+        const parts=raw.split('|').map(x=>x.trim());
+        if(parts.length<2||!parts[0]||!parts[1])return sendMessage(chatId,'<b>📣 Афиша-анонс</b>\n\nФормат: <code>/announce Игрок 1 | Игрок 2 | комментарий</code>\n\nКомментарий необязателен: он уходит в промпт картинки и строкой на афишу — например дата, время и корт. Дивизион подставится сам, если оба игрока из одного.\n\nТо же самое можно сделать формой во вкладке «Контроль» мини-приложения матчей.',opts);
+        const { getAllActiveLeaguePlayers } = await import('./sheets.js');
+        const roster=await getAllActiveLeaguePlayers();
+        const found=[findRosterPlayer(roster,parts[0]),findRosterPlayer(roster,parts[1])];
+        for(let i=0;i<2;i++){
+          const r=found[i];
+          if(r.many)return sendMessage(chatId,`На «${escapeHtml(parts[i])}» подходят несколько игроков, уточните:\n`+r.many.slice(0,10).map(p=>`• <code>${escapeHtml(p.name)}</code>`).join('\n'),opts);
+          if(!r.player)return sendMessage(chatId,`Игрок «${escapeHtml(parts[i])}» не найден среди игроков лиги.`,opts);
+        }
+        const [a,b]=found.map(r=>r.player);
+        if(String(a.telegram_id)===String(b.telegram_id))return sendMessage(chatId,'Нужны два разных игрока.',opts);
+        const division=a.division&&a.division===b.division?a.division:'';
+        const season=String(await getSetting('season_number').catch(()=>'')||a.season||'').trim();
+        return prepareAnnouncementForAdmin({chatId,threadId:msg.message_thread_id||'',
+          player1:{telegram_id:String(a.telegram_id),name:a.name},player2:{telegram_id:String(b.telegram_id),name:b.name},
+          division,season,comment:parts.slice(2).join(' | ')});
+      } catch(error) {
+        return sendMessage(chatId,`⛔ ${escapeHtml(error?.message || error)}`,opts);
+      }
+    }
     if (text.startsWith('/result_test')) {
       // Предпросмотр карточки результата на настоящем матче. Лента и подписчики
       // не трогаются — всё уходит только сюда.

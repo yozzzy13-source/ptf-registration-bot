@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>PTF League</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/public/ptf-prefs.js"></script>
 <style>
 /* Noir: тёплый чёрный, приглушённый янтарь, шампань для титулов.
    Слои разделяются светлотой и тонкой кромкой, а не жирными рамками. */
@@ -697,10 +698,7 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
   <div class="hdr" id="hdr">
     <div class="logo"><img src="/public/img/ptf.png" alt="PTF"></div>
     <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
-    <div class="thsw" id="thSw">
-      <button type="button" data-th="dark" title="Тёмная тема">☾</button>
-      <button type="button" data-th="light" title="Светлая тема">☀</button>
-    </div>
+    <div class="thsw" id="thSw"></div>
     <div id="walletChip" class="hidden"></div>
     <div id="mePlate"></div>
   </div>
@@ -729,7 +727,7 @@ var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
-var L=((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+var L=window.PTFPrefs?PTFPrefs.lang()==='ru':((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='',fantasyData=null,fRank='teams',fanTeamOpen='',fantasyAllowed=false;
 var mode='home',openId='',backTo='players';
@@ -1098,31 +1096,24 @@ function evOpenCount(){
 // Свой игрок в витрине ищется по id, а если витрина его не знает — по имени.
 // Тема. Тёмная Noir по умолчанию; выбор храним на устройстве игрока, поэтому
 // на другом телефоне он выберет заново — это удобство, а не настройка аккаунта.
-var THEME_KEY='ptf_theme';
-function currentTheme(){
-  try{ var v=localStorage.getItem(THEME_KEY); if(v==='light'||v==='dark')return v }catch(e){}
-  return 'dark';
-}
-function applyTheme(name){
-  var th=name==='light'?'light':'dark';
-  document.documentElement.setAttribute('data-theme',th);
-  try{ localStorage.setItem(THEME_KEY,th) }catch(e){}
-  // Шапку самого Telegram красим в тон, иначе сверху остаётся полоса чужого цвета.
-  var bg=th==='light'?'#F2F5F1':'#0A0A0B';
-  try{ if(tg&&tg.setHeaderColor)tg.setHeaderColor(bg) }catch(e){}
-  try{ if(tg&&tg.setBackgroundColor)tg.setBackgroundColor(bg) }catch(e){}
-  var box=$('thSw');
-  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
-    b.classList.toggle('on',b.getAttribute('data-th')===th);
-  });
-}
+// Тема и язык — общий переключатель всех мини-приложений (public/ptf-prefs.js).
+// Выбор темы хранится на устройстве, язык — ещё и в анкете игрока. После смены
+// языка экран перезагружается на той же вкладке: так все подписи, даты и
+// сезоны гарантированно перерисуются на новом языке.
 function initTheme(){
-  var box=$('thSw');
-  if(box)[].forEach.call(box.querySelectorAll('button'),function(b){
-    b.onclick=function(){ applyTheme(b.getAttribute('data-th')) };
-  });
-  applyTheme(currentTheme());
+  if(!window.PTFPrefs)return;
+  PTFPrefs.mount(document.getElementById('thSw'),{onLang:function(lang,saved){
+    try{
+      var q=new URLSearchParams(location.search);
+      if(typeof mode!=='undefined'&&mode)q.set('tab',mode);
+      history.replaceState(null,'',location.pathname+'?'+q.toString()+location.hash);
+    }catch(e){}
+    saved.then(function(){location.reload()});
+  }});
 }
+// Переключатель нужен и тогда, когда данные не загрузились (например, экран
+// «заполните анкету»), поэтому подключаем его сразу, не дожидаясь сервера.
+initTheme();
 
 function mePlayer(){
   if(!me)return null;
@@ -2924,7 +2915,7 @@ function loadFantasyLater(){
 }
 fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
-    if(j.lang){L=j.lang==='ru';X=L?T.ru:T.en;document.documentElement.lang=j.lang}
+    if(j.lang){var lg=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;L=lg==='ru';X=L?T.ru:T.en;document.documentElement.lang=lg}
     if(!j.ok)throw new Error(j.code||j.error||(L?'Ошибка':'Error'));
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];partners=j.partners||[];partnerTexts=j.partner_texts||{};fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy||j.fantasy_deferred);
     applyFantasyScores();

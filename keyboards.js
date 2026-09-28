@@ -147,7 +147,7 @@ const MENU_LAYOUTS = {
 // Значит после любой правки набора кнопок или адресов номер надо поднять —
 // иначе у старых игроков останется прежняя клавиатура (в том числе текстовая,
 // без мгновенного открытия мини-приложения).
-export const MENU_VERSION = 8;
+export const MENU_VERSION = 9;
 
 // allow — набор кнопок для группы игрока (настраивается в админке). Не задан —
 // берём прежнюю раскладку по состоянию. Кнопки раскладываем по две в ряд, а
@@ -168,13 +168,13 @@ export function persistentKeyboard(lang, kind='lead', telegramId='', allow=null,
   };
   let rows;
   if (Array.isArray(allow)) {
-    const keys = allow.filter(k => labels[k]);
-    if (showFantasy && !keys.includes('fantasy')) keys.push('fantasy');
+    // Fantasy отдельной кнопкой в клавиатуре больше не выводим: туда заходят
+    // через меню лиги (вкладка Fantasy) или командой /fantasy.
+    const keys = allow.filter(k => labels[k] && k !== 'fantasy');
     rows = [];
     for (let i = 0; i < keys.length; i += 2) rows.push(keys.slice(i, i + 2).map(make).filter(Boolean));
   } else {
     rows = (MENU_LAYOUTS[kind] || MENU_LAYOUTS.lead).map(row => row.map(make).filter(Boolean));
-    if (showFantasy) rows.splice(Math.max(0,rows.length-1),0,[make('fantasy')].filter(Boolean));
   }
   rows = rows.filter(r => r.length);
   return { keyboard: rows, resize_keyboard: true, is_persistent: true };

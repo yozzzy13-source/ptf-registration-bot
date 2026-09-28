@@ -857,10 +857,12 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/orderByWinner\(prefix\|\|'r',node\)/.test(match),'Перестановка вызывается из выбора победителя');
  check(/two\.insertBefore\(two\.children\[1\],first\)/.test(match),'Очки переставляются блоками, а не значениями');
 
- // Свежие матчи сверху во всех трёх списках.
+ // Ближайшая дата сверху во всех трёх списках — не нужно листать в конец,
+ // чтобы увидеть, что актуально прямо сейчас.
  check(/function byFreshest/.test(match),'Есть единая сортировка списков матчей');
- check(/byFreshest\(myMatches\)/.test(match)&&/byFreshest\(resultTasks\)/.test(match),'Мои матчи и результаты идут от свежего к старому');
- check(/adminMatchTime\(b\)-adminMatchTime\(a\)/.test(match),'Админская вкладка тоже развёрнута свежими вверх');
+ check(/byFreshest\(myMatches\)/.test(match)&&/byFreshest\(resultTasks\)/.test(match),'Мои матчи и результаты идут от ближней даты к дальней');
+ check(/adminMatchTime\(a\)-adminMatchTime\(b\)/.test(match),'Админская вкладка тоже развёрнута ближней датой вверх');
+ check(/openSlots\.slice\(\)\.sort\(function\(a,b\)\{[\s\S]{0,80}adminMatchTime\(a\)-adminMatchTime\(b\)/.test(match),'Открытые окна тоже сортируются по ближней дате');
  check(/sortableDate\(b\.date\)-sortableDate\(a\.date\)/.test(league),'Лента лиги сортируется по дате, а не по номеру матча');
  check(/function sortableDate/.test(league),'Дата приводится к числу: «01.09» не встаёт выше «12.08»');
 
@@ -1233,16 +1235,11 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const rSrc=await fs.readFile(path.join(root,'results.js'),'utf8');
  check(!/buildFantasyCatalog|scoreFantasyMatch/.test(rSrc),'Снимок для карточки больше не считает очки Fantasy');
  check(!/FANTASY POINTS/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Плашки Fantasy на карточке нет даже в коде');
- // Аватарки из Players_Master переезжают в Telegram.
+ // Перенос аватарок из Players_Master выполнен и больше не нужен: новые
+ // аватарки грузятся через Telegram, автопрогон удалён вместе с запуском.
  const avSrc=await fs.readFile(path.join(root,'avatars.js'),'utf8');
- check(/export async function importMasterAvatars/.test(avSrc),'Есть перенос фото из Players_Master');
- check(/if \(!telegramId \|\| String\(row\.avatar_file_id \|\| ''\)\.trim\(\)\) continue;/.test(avSrc),'Свои аватарки игроков не трогаем');
- check(!/sendMessage\(item\.telegramId/.test(avSrc),'Игрокам при переносе ничего не пишем');
- check(/avatarImport, 60 \* 1000/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'Перенос идёт сам после старта, без команды');
- check(/const BROWSER_HEADERS/.test(avSrc)&&/headers: BROWSER_HEADERS/.test(avSrc),'Фото качаются как из браузера — postimg за Cloudflare иначе рвёт соединение');
- check(/IMPORT_STOP_AFTER/.test(avSrc)&&/async function downloadWithRetry/.test(avSrc),'После обрыва — пауза и повтор, при серии обрывов прогон останавливается');
- check(/function networkReason/.test(avSrc),'Вместо «fetch failed» в отчёте настоящая причина');
- check(/60 \* 60 \* 1000\);\n\s*avatarRetry\.unref/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'Остаток досылается через час, а не через сутки');
+ check(!/importMasterAvatars/.test(avSrc),'Функции переноса из Players_Master больше нет');
+ check(!/avatarImport|importMasterAvatars/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'И её запуска после старта и раз в сутки тоже');
  check(/sameName\(n, wanted\)/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Фото на карточке ищется по имени терпимо');
 
  check(pub.CAROUSEL_HASHTAGS.join(' ')==='#phuket #tennis #phukettennis #phukettennisfamily','Хэштеги те, что просили');
@@ -1506,6 +1503,79 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(silent.allowed===true,'Матч двоих промолчавших публикуется');
  check(silent.handles.length===0,'Промолчавших просто не отмечаем');
  check(/Не ответите — ничего страшного/.test(await fs.readFile(path.join(root,'publicity.js'),'utf8')),'В опросе прямо сказано, что молчание — не отказ');
+}
+
+// --- Афиша-анонс: постер до результата -------------------------------------
+{
+ const posterSrc=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
+ check(/export async function prepareAnnouncementJob/.test(posterSrc),'Есть подготовка задания без слота матча');
+ check(/export async function composeAnnouncementPoster/.test(posterSrc),'Есть отдельная отрисовка панели анонса');
+ check(/export async function renderAnnouncementPoster/.test(posterSrc),'Есть оркестратор анонса');
+ check(/UPCOMING MATCH/.test(posterSrc),'На афише анонса нет счёта — вместо него метка анонса');
+ check(!/composeAnnouncementPoster[\s\S]{0,900}rankPlate/.test(posterSrc),'На афише анонса нет плашки места в дивизионе');
+ check(!/composeAnnouncementPoster[\s\S]{0,900}formSvg/.test(posterSrc),'На афише анонса нет формы W/L');
+ check(/\$\{note\?`<text[\s\S]{0,200}esc\(note\)/.test(posterSrc),'Комментарий, если задан, ложится строкой на афишу');
+
+ const botSrc2=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/export async function prepareAnnouncementForAdmin/.test(botSrc2),'Отправка анонса в чат админов вынесена отдельной функцией');
+ check(/rememberPosterVariant\(jobId,variant,\{fileId,buffer:finalBuffer,comment:job\.comment,createdAt:new Date\(\)\.toISOString\(\),player1,player2\}\)/.test(botSrc2),'Игроки анонса запоминаются в run — слот матча не нужен для публикации');
+ check(/data\.startsWith\('announce:ig:'\)/.test(botSrc2),'Публикация анонса в сторис — своя кнопка');
+ check(/pseudoSlot=\{from_telegram_id:saved\.player1\?\.telegram_id/.test(botSrc2),'Для отметок в Instagram собирается облегчённый слот из памяти');
+
+ const idxSrc2=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/app\.post\('\/api\/match\/announce-poster'/.test(idxSrc2),'Есть endpoint запуска афиши из мини-приложения');
+ check(/if\(!v\.isAdmin\)return res\.status\(403\)\.json\(\{ok:false,error:'admin_required'\}\)/.test(idxSrc2.slice(idxSrc2.indexOf("'/api/match/announce-poster'"))),'Запускать афишу может только админ');
+
+ const matchHtml2=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/function renderAnnouncePanel/.test(matchHtml2),'В админской вкладке есть блок создания афиши');
+ check(/function submitAnnouncePoster/.test(matchHtml2),'Отправка формы анонса реализована');
+ check(/\/api\/match\/announce-poster'/.test(matchHtml2),'Форма анонса стучится в новый endpoint');
+ check(/comboBox\('annP1'/.test(matchHtml2)&&/comboBox\('annP2'/.test(matchHtml2),'Игроки для анонса выбираются тем же комбобоксом, что и везде');
+}
+
+// --- Тема и язык во всех мини-приложениях -----------------------------------
+{
+ const pub=f=>fs.readFile(path.join(root,'public',f),'utf8');
+ const prefs=await pub('ptf-prefs.js');
+ check(/ptf_theme/.test(prefs)&&/ptf_lang/.test(prefs),'Тема и язык хранятся на устройстве под общими ключами');
+ check(/\/api\/ui-language',\{method:'POST'/.test(prefs),'Смена языка уходит на сервер, в анкету');
+ check(/j\.lang_source==='profile'/.test(prefs),'Язык из анкеты главнее выбора на устройстве');
+ check(/lang\?'EN':'RU'|lang==='ru'\?'EN':'RU'/.test(prefs),'На кнопке — язык, на который переключимся, как в Fantasy');
+ for(const f of ['league.html','match.html','apply.html','participants.html','tournament.html','admin.html','fantasy.html'])
+  check(/<script src="\/public\/ptf-prefs\.js"><\/script>/.test(await pub(f)),f+' подключает общий переключатель');
+ for(const f of ['league.html','match.html','apply.html','participants.html'])
+  check(/PTFPrefs\.mount\(/.test(await pub(f))&&/id="thSw"/.test(await pub(f)),f+': переключатель темы и языка в шапке');
+ check(/PTFPrefs\.mount\(document\.getElementById\('thSw'\),\{lang:false\}\)/.test(await pub('admin.html')),'В админке только тема — её не переводим');
+ check(/PTFPrefs\.mount\(document\.getElementById\('thSw'\),\{lang:false\}\)/.test(await pub('tournament.html')),'В турнирах только тема');
+ check(/html\[data-theme="light"\]/.test(await pub('apply.html'))&&/html\[data-theme="light"\]/.test(await pub('participants.html'))&&/html\[data-theme="light"\]/.test(await pub('admin.html')),'У анкеты, состава и админки есть светлая тема');
+ check(/PTFPrefs\.resolveLang\(j\)/.test(await pub('league.html'))&&/PTFPrefs\.resolveLang\(j\)/.test(await pub('match.html')),'Лига и матчи берут язык через общее правило');
+ check(/saved\.then\(function\(\)\{location\.reload\(\)\}\)/.test(await pub('league.html')),'Лига перезагружается только после записи языка в анкету');
+ check(/PTFPrefs\?\.setLang\(ru\?'ru':'en'\)/.test(await pub('fantasy-onboarding.js')),'Язык в Fantasy теперь запоминается');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/app\.post\('\/api\/ui-language'/.test(idx),'Есть запись языка из мини-приложения');
+ check(/if \(!profile\) return res\.json\(\{ ok:true, lang, saved:false \}\)/.test(idx),'Без анкеты новую строку не создаём');
+ check(/lang_source:body\.lang_source/.test(idx),'Сервер сообщает, откуда взят язык');
+ const r1=await request('post','/api/ui-language','1',{lang:'ru'});
+ check(r1.code===200&&r1.body.ok,'Смена языка отвечает без ошибок');
+}
+
+// --- «Контроль»: подтверждение за игрока, а не «нужно ваше» -----------------
+{
+ const match=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/function adminOnlyConfirm\(s\)\{return isAdmin&&!amPlayer\(s\)\}/.test(match),'Админ отличает свои матчи от чужих');
+ check(/adminOnlyConfirm\(s\)\?X\.awaitingPlayer:X\.pendingApproval/.test(match),'В чужом матче — «ждёт подтверждения игрока»');
+ check(/adminOnlyConfirm\(s\)\?X\.confirmForPlayer:X\.confirmResult/.test(match),'Кнопка подписана как ручное подтверждение за игрока');
+}
+
+// --- /announce и клавиатура без Fantasy --------------------------------------
+{
+ const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'announce'/.test(tg),'Команда /announce в едином списке — попадает и в /help, и в меню по слэшу');
+ const botSrc3=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/\/\^\\\/announce/.test(botSrc3),'Бот понимает /announce');
+ check(/findRosterPlayer\(roster,parts\[0\]\)/.test(botSrc3),'Игроки ищутся по составу лиги, как в /test_match');
+ const kbSrc=await fs.readFile(path.join(root,'keyboards.js'),'utf8');
+ check(/k !== 'fantasy'/.test(kbSrc)&&!/make\('fantasy'\)/.test(kbSrc),'Кнопки Fantasy в клавиатуре чата нет');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

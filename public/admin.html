@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PTF · панель организатора</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/public/ptf-prefs.js"></script>
   <style>
     /* Панель открывается с телефона (iPhone 16 Pro Max, 440 px в ширину), поэтому
        свёрстана мобильной: разделы — полосой у большого пальца внизу, таблицы на
@@ -185,12 +186,35 @@
     .psug .pi{padding:9px 12px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line)}
     .psug .pi:last-child{border-bottom:0}
     .psug .pi:hover,.psug .pi:active{background:var(--card)}
+    /* Светлая тема «Court» — общий переключатель ☾/☀ (public/ptf-prefs.js).
+       Панель не переводим, поэтому здесь только тема, без кнопки языка. */
+    html[data-theme="light"]{--bg:#F2F5F1;--card:#FFFFFF;--card2:#EBF0EA;--line:#C7D3C5;--text:#16211A;--muted:#7E8B82;
+      --accent:#1F6B44;--accent2:#2F8A5A;--danger:#B04A2E;--ok:#1F6B44;--accBg:#E1F0E7;--accLine:#A6D2BB}
+    html[data-theme="light"] .top{background:linear-gradient(180deg,var(--bg) 76%,rgba(242,245,241,0))}
+    html[data-theme="light"] label{color:#4C5A50}
+    html[data-theme="light"] .chip{color:#4C5A50}
+    html[data-theme="light"] .tableWrap,html[data-theme="light"] .rcp{background:#FFFFFF}
+    html[data-theme="light"] th{background:#EBF0EA;color:#4C5A50}
+    html[data-theme="light"] .msg{color:#4C5A50}
+    html[data-theme="light"] .logs{background:#F5F8F4}
+    html[data-theme="light"] .logs .fail td{color:#B04A2E}
+    html[data-theme="light"] .tabs{background:rgba(242,245,241,.94)}
+    html[data-theme="light"] .rcp .r.on{background:#E1F0E7}
+    html[data-theme="light"] .pick .sug{background:#FFFFFF;box-shadow:0 18px 40px rgba(0,0,0,.12)}
+    html[data-theme="light"] .prev .pbtn{background:#F5F8F4}
+    html[data-theme="light"] .psug{box-shadow:0 14px 30px rgba(0,0,0,.12)}
+    @media(min-width:900px){html[data-theme="light"] .tabs{background:var(--bg)}}
+    .topR{display:flex;align-items:center;gap:8px}
+    .thsw{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--card)}
+    .thsw button{width:30px;height:30px;border:0;border-radius:999px;background:transparent;color:var(--muted);
+      font-size:14px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
+    .thsw button.on{background:var(--card2);color:var(--accent2);box-shadow:0 0 0 1px var(--line) inset}
   </style>
 </head>
 <body><div class="wrap">
   <div class="top">
     <div><h1>PTF · панель</h1><div class="sub" id="status">Загружаю…</div></div>
-    <button class="ico" onclick="reload()" title="Обновить">⟳</button>
+    <div class="topR"><div class="thsw" id="thSw"></div><button class="ico" onclick="reload()" title="Обновить">⟳</button></div>
   </div>
   <details class="fold statFold" id="statFold"><summary>Сводка по базе</summary><div class="grid" id="stats"></div></details>
   <div class="tabs" id="tabBar"><button class="tab active" data-tab="players"><i>👥</i>Игроки</button><button class="tab" data-tab="events"><i>🎾</i>События</button><button class="tab" data-tab="balances"><i>💰</i>Касса</button><button class="tab" data-tab="broadcast"><i>📣</i>Рассылка</button><button class="tab" data-tab="direct"><i>💬</i>Личное</button><button class="tab" data-tab="refunds"><i>↩️</i>Возвраты</button><button class="tab" data-tab="menu"><i>🎛</i>Кнопки</button><button class="tab" data-tab="history"><i>🕔</i>История</button></div>
@@ -351,6 +375,8 @@
   
 </div>
 <script src="/public/admin-l10n.js"></script><script>
+// Тема — общий переключатель мини-приложений (public/ptf-prefs.js); без языка.
+if(window.PTFPrefs)PTFPrefs.mount(document.getElementById('thSw'),{lang:false});
 (async function(){
   var tg=window.Telegram&&window.Telegram.WebApp;
   var fallback=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code||'en';
