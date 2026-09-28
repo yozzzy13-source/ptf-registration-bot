@@ -160,6 +160,75 @@ async function preparePosterForAdmin({ chatId, threadId='', slot, comment='', on
   }
 }
 
+// Афиша-анонс: тот же процесс, что и постер результата, но без реального
+// матча — пара игроков выбирается в мини-приложении (админская вкладка), сюда
+// приходят уже готовые player1/player2. Публикация в сторис по-прежнему
+// кнопкой в этом топике — для неё запоминаем игроков прямо в run, отдельный
+// матч-слот не нужен.
+export async function prepareAnnouncementForAdmin({ chatId, threadId='', player1, player2, division='', season='', comment='', onlyVariant=0 }) {
+  const {
+    prepareAnnouncementJob,loadPosterSourcePhotos,generatePosterBackgrounds,composeAnnouncementPoster,posterEnabled
+  } = await import('./matchposter.js');
+  const opts=threadId?{message_thread_id:threadId}:{};
+  const jobId=`announce-${player1.telegram_id}-${player2.telegram_id}`;
+  const lockKey=`${jobId}:${onlyVariant || 'all'}`;
+  if(posterJobsInFlight.has(lockKey)) {
+    await sendMessage(chatId,'⏳ Эта афиша уже генерируется. Пришлю сюда после завершения.',opts);
+    return null;
+  }
+  posterJobsInFlight.add(lockKey);
+  try {
+    const job=await prepareAnnouncementJob({player1,player2,division,season,comment,variants:2});
+    if(onlyVariant) {
+      job.prompts=job.prompts.filter(x=>Number(x.variant)===Number(onlyVariant));
+      job.variants=job.variants.filter(x=>Number(x.variant)===Number(onlyVariant));
+    }
+    const consent=job.consent.map(x=>{
+      const value=x.value==='NO' ? 'NO' : (x.value==='NOT_ANSWERED' ? 'ответа нет — разрешено' : 'YES');
+      return `${x.allowed?'✅':'⛔'} ${escapeHtml(x.name)}: <b>${escapeHtml(value)}</b>`;
+    }).join('\n');
+    if(job.status==='blocked_consent') {
+      await sendMessage(chatId,`<b>📣 Афиша анонса</b>\n\n⛔ Генерация заблокирована: один из игроков явно ответил NO. Его фотография не передана в OpenAI.\n\n<b>Согласия</b>\n${consent}`,opts);
+      return job;
+    }
+    if(!posterEnabled()) {
+      await sendMessage(chatId,'⛔ OPENAI_API_KEY не задан. Добавьте переменную и перезапустите сервис.',opts);
+      return job;
+    }
+    const count=job.prompts.length;
+    await sendMessage(chatId,`⏳ <b>Генерирую афишу-анонс</b>\n\n${escapeHtml(job.match.winner)} — ${escapeHtml(job.match.loser)}${job.match.division?`\n${escapeHtml(job.match.division)}`:''}${job.comment?`\nКомментарий: <i>${escapeHtml(job.comment)}</i>`:''}\n\nОбычно это занимает несколько минут. Готовые PNG придут в этот топик.`,opts);
+    const photos=await loadPosterSourcePhotos(job);
+    const backgrounds=await generatePosterBackgrounds(job,photos);
+    const sent=[];
+    for(const item of backgrounds) {
+      const finalBuffer=await composeAnnouncementPoster(item.buffer,job.match,job.comment);
+      const variant=Number(item.variant || sent.length+1);
+      const caption=`<b>📣 Афиша-анонс · вариант ${variant}</b>\n\n${escapeHtml(job.match.winner)} — ${escapeHtml(job.match.loser)}${job.match.division?`\n${escapeHtml(job.match.division)}`:''}${job.comment?`\nКомментарий: <i>${escapeHtml(job.comment)}</i>`:''}\n\nФайл готов для сохранения из Telegram.`;
+      const result=await sendDocumentBuffer(chatId,finalBuffer,posterFileName(job.match,variant),{
+        ...opts,
+        caption,
+        reply_markup:{inline_keyboard:[
+          [{text:`📤 Опубликовать в сторис · ${variant}`,callback_data:`announce:ig:${variant}:${jobId}`}],
+          [{text:'🔄 Ещё вариант',callback_data:`announce:regen:${variant}:${jobId}`}]
+        ]}
+      });
+      const fileId=result?.document?.file_id || result?.result?.document?.file_id || '';
+      rememberPosterVariant(jobId,variant,{fileId,buffer:finalBuffer,comment:job.comment,createdAt:new Date().toISOString(),player1,player2});
+      sent.push({variant,fileId});
+    }
+    if(sent.length > 1) {
+      await sendMessage(chatId,'✅ Оба варианта готовы. Выберите нужный под изображением.',opts);
+    }
+    return {...job,status:'ready',sent};
+  } catch(error) {
+    console.error('announcement poster generation failed:',jobId,error);
+    await sendMessage(chatId,`⛔ <b>Афиша не создана</b>\n\n${escapeHtml(error?.message || error)}`,opts).catch(()=>{});
+    return {status:'failed',error:String(error?.message || error)};
+  } finally {
+    posterJobsInFlight.delete(lockKey);
+  }
+}
+
 async function sendLanguageChoice(chatId) {
   return sendMessage(chatId, t('en','choose_language'), { reply_markup: languageKeyboard() });
 }
@@ -2031,6 +2100,38 @@ export async function handleCallback(q) {
       } catch(error) {
         return sendMessage(chatId,`⛔ Не опубликовалось: ${escapeHtml(error.message)}`);
       }
+    }
+    // Афиша-анонс: та же публикация в сторис, но игроки берутся не из слота
+    // матча (его нет), а из памяти run — там они сохранены при генерации.
+    if (data.startsWith('announce:ig:')) {
+      const rest=data.slice('announce:ig:'.length);
+      const split=rest.indexOf(':');
+      const variant=Number(rest.slice(0,split));
+      const jobId=rest.slice(split+1);
+      const run=posterRuns.get(jobId) || {};
+      const saved=run[String(variant)];
+      if(!saved?.buffer)return sendMessage(chatId,'Картинка этого варианта уже не в памяти — сгенерируйте афишу заново.',msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      const pseudoSlot={from_telegram_id:saved.player1?.telegram_id,to_telegram_id:saved.player2?.telegram_id,from_name:saved.player1?.name,to_name:saved.player2?.name};
+      await answerCallbackQuery(q.id,'Публикую…').catch(()=>{});
+      try {
+        const out=await publishPosterToStory(saved.buffer,pseudoSlot);
+        const tagged=out.tagged?.length?`\n\nОтмечены: ${out.tagged.map(h=>'@'+escapeHtml(h)).join(', ')}`:'\n\nНикого не отметили: ни у кого из двоих нет инстаграма в анкете.';
+        const warn=out.tag_error?`\n\n⚠️ Отметки не прошли, афиша опубликована без них: ${escapeHtml(out.tag_error)}`:'';
+        return sendMessage(chatId,`📤 <b>Опубликовано в сторис</b>${tagged}${warn}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      } catch(error) {
+        return sendMessage(chatId,`⛔ Не опубликовалось: ${escapeHtml(error.message)}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      }
+    }
+    if (data.startsWith('announce:regen:')) {
+      const rest=data.slice('announce:regen:'.length);
+      const split=rest.indexOf(':');
+      const variant=Number(rest.slice(0,split));
+      const jobId=rest.slice(split+1);
+      const run=posterRuns.get(jobId) || {};
+      const saved=run[String(variant)]||Object.values(run)[0];
+      if(!saved?.player1)return sendMessage(chatId,'Данные афиши уже не в памяти — соберите её заново из мини-приложения.',msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
+      await answerCallbackQuery(q.id,'Запустил генерацию').catch(()=>{});
+      return prepareAnnouncementForAdmin({chatId,threadId:msg.message_thread_id||'',player1:saved.player1,player2:saved.player2,comment:saved.comment||'',onlyVariant:variant});
     }
     if (data.startsWith('poster:regen:')) {
       const rest=data.slice('poster:regen:'.length);

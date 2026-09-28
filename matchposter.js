@@ -401,6 +401,111 @@ export async function renderMatchPoster(slot={}, options={}) {
   return { ...job, status:'ready', buffers };
 }
 
+// ---------------------------------------------------- афиша-анонс (без счёта)
+// Та же самая цепочка — тот же AI-фон, та же панель, тот же логотип и лента
+// спонсоров, — но матча ещё не было: нет счёта, формы, места в дивизионе.
+// Вместо этого крупно имена и акцент на дивизионе. Дата/место на афише не
+// придумываем отдельным полем — если организатор написал что-то в комментарии
+// при создании (та же графа, что уже используется для промпта), эта же строка
+// ложится на афишу; пустой комментарий — просто нет этой строки.
+export async function prepareAnnouncementJob({
+  player1={}, player2={}, division='', season='', comment='', variants=VARIANTS
+}={}) {
+  const match={
+    winner:String(player1.name || ''), winnerId:String(player1.telegram_id || ''),
+    loser:String(player2.name || ''), loserId:String(player2.telegram_id || ''),
+    division:String(division || ''), season:String(season || '')
+  };
+  const players=await Promise.all([
+    findApplicantByTelegramId(match.winnerId).catch(() => null),
+    findApplicantByTelegramId(match.loserId).catch(() => null)
+  ]);
+  const consent=players.map((row,index) => ({
+    telegram_id:String((index ? match.loserId : match.winnerId) || ''),
+    name:String((index ? match.loser : match.winner) || ''),
+    value:consentValue(row) || 'NOT_ANSWERED',
+    allowed:posterConsentAllowed(consentValue(row))
+  }));
+  const count=Math.max(1, Math.min(2, Number(variants || VARIANTS)));
+  const prompts=Array.from({length:count},(_,i)=>({
+    variant:i + 1,
+    prompt:buildPosterPrompt(match,{comment,variant:i + 1})
+  }));
+  const allowed=consent.every(x => x.allowed);
+  return {
+    schema_version:1,
+    kind:'announcement',
+    job_id:`announce-${match.winnerId}-${match.loserId}-${Date.now()}`,
+    match_id:`announce-${match.winnerId}-${match.loserId}`,
+    created_at:new Date().toISOString(),
+    status:allowed ? (posterEnabled() ? 'ready_to_generate' : 'api_not_configured') : 'blocked_consent',
+    api_connected:posterEnabled(),
+    prompt_source:posterPromptSource(),
+    settings:posterSettings(),
+    comment:String(comment || '').trim(),
+    match,
+    consent,
+    prompts,
+    variants:prompts.map(p=>({ variant:p.variant, status:'ready_to_generate', telegram_file_id:'' }))
+  };
+}
+
+export async function composeAnnouncementPoster(backgroundBuffer, match={}, comment='') {
+  if (!backgroundBuffer) throw new Error('poster_background_missing');
+  const P=L.panel;
+  const left=nameFit(match.winner),right=nameFit(match.loser);
+  const divisionName=String(match.division || '').trim();
+  const division=[
+    divisionName&&!/^Division\b/i.test(divisionName)?`DIVISION ${divisionName}`:divisionName.toUpperCase(),
+    match.season?`SEASON ${match.season}`:''
+  ].filter(Boolean).join(' · ');
+  const note=String(comment || '').trim();
+  const sponsor=await posterSponsorStrip();
+  const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${C.bg1}" stop-opacity=".66"/>
+    <stop offset=".22" stop-color="${C.bg1}" stop-opacity=".14"/>
+    <stop offset=".5" stop-color="${C.bg1}" stop-opacity=".42"/>
+    <stop offset=".74" stop-color="${C.bg1}" stop-opacity=".9"/>
+    <stop offset="1" stop-color="${C.bg1}" stop-opacity=".98"/></linearGradient></defs>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
+  <text x="${WIDTH/2}" y="${L.titleY}" text-anchor="middle" font-family="${FONT}" font-size="28"
+    font-weight="700" letter-spacing="9" fill="${C.text}" opacity=".92">PHUKET TENNIS FAMILY</text>
+  <rect x="${P.x}" y="${P.y}" width="${P.w}" height="${P.h}" rx="${P.r}" fill="${C.bg2}" fill-opacity=".8" stroke="${C.plateLine}"/>
+  <text x="${WIDTH/2}" y="${P.y+48}" text-anchor="middle" font-family="${FONT}" font-size="19" font-weight="800"
+    letter-spacing="4" fill="${C.amber}">UPCOMING MATCH</text>
+  ${division?`<rect x="${WIDTH/2-160}" y="${P.y+66}" width="320" height="50" rx="25" fill="rgba(232,164,92,.12)" stroke="rgba(232,164,92,.4)"/>
+  <text x="${WIDTH/2}" y="${P.y+99}" text-anchor="middle" font-family="${FONT}" font-size="22"
+    font-weight="800" letter-spacing="3" fill="${C.amber}">${esc(division)}</text>`:''}
+  <text x="${L.cxL}" y="${P.y+206}" text-anchor="middle" font-family="${FONT}" font-size="${left.size}" font-weight="900"
+    fill="${C.gold}">${esc(left.text)}</text>
+  <text x="${L.cxR}" y="${P.y+206}" text-anchor="middle" font-family="${FONT}" font-size="${right.size}" font-weight="900"
+    fill="${C.silver}">${esc(right.text)}</text>
+  <rect x="${L.cxL-left.width/2}" y="${P.y+222}" width="${left.width}" height="3" rx="2" fill="${C.gold}" opacity=".8"/>
+  <rect x="${L.cxR-right.width/2}" y="${P.y+222}" width="${right.width}" height="3" rx="2" fill="${C.silver}" opacity=".6"/>
+  <text x="${WIDTH/2}" y="${P.y+206}" text-anchor="middle" font-family="${FONT}" font-size="42"
+    font-weight="900" fill="${C.text}" opacity=".55">VS</text>
+  ${note?`<text x="${WIDTH/2}" y="${P.y+296}" text-anchor="middle" font-family="${FONT}" font-size="21"
+    font-weight="700" letter-spacing="2" fill="${C.dim}">${esc(note)}</text>`:''}
+</svg>`);
+  const logos=await posterLogoLayers(sponsor);
+  return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})
+    .composite([{input:svg,left:0,top:0},...logos]).png({compressionLevel:6}).toBuffer();
+}
+
+// Тот же оркестратор, что renderMatchPoster, только без слота матча — просто
+// пара игроков. AI-фон, загрузка фото и лимиты — переиспользуются как есть.
+export async function renderAnnouncementPoster(options={}) {
+  const job=await prepareAnnouncementJob(options);
+  if (job.status === 'blocked_consent') return { ...job, buffers:[] };
+  const generated=await generatePosterBackgrounds(job);
+  const buffers=[];
+  for (const item of generated) {
+    buffers.push({ variant:item.variant, buffer:await composeAnnouncementPoster(item.buffer,job.match,job.comment) });
+  }
+  return { ...job, status:'ready', buffers };
+}
+
 async function imageReference(buffer) {
   if (!buffer?.length) throw new Error('poster_source_photo_missing');
   // Нормализуем EXIF и ограничиваем вес запроса. Финальный PNG всё равно

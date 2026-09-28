@@ -3,11 +3,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
-import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart } from './bot.js';
+import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart, prepareAnnouncementForAdmin } from './bot.js';
 import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe, escapeHtml } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
-import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin } from './admin.js';
+import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin, getAdminChatId } from './admin.js';
 import { registerAdminRoutes } from './adminPanel.js';
 import { registerFantasyRoutes, fantasyAccessFor, getFantasyBootstrap } from './fantasy.js';
 import { registerTournamentRoutes } from './tournamentsapi.js';
@@ -583,6 +583,31 @@ app.get('/api/match/admin-active', async (req, res) => {
       return ad.localeCompare(bd)||String(a.agreed_time||a.time_from||'').localeCompare(String(b.agreed_time||b.time_from||''))||String(a.created_at||'').localeCompare(String(b.created_at||''));
     });
     res.json({ok:true,items:items});
+  } catch(e){res.status(500).json({ok:false,error:e.message})}
+});
+
+// Афиша-анонс: пара игроков + комментарий из мини-приложения (админская
+// вкладка), запуск генерации — сюда; сама картинка и кнопка «В сторис»
+// по-прежнему приходят в чат админов, как и у постера результата.
+app.post('/api/match/announce-poster', async (req, res) => {
+  try {
+    const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
+    if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+    if(!v.isAdmin)return res.status(403).json({ok:false,error:'admin_required'});
+    const id1=String(b.player1_id||'').trim(),id2=String(b.player2_id||'').trim();
+    if(!id1||!id2||id1===id2)return res.status(400).json({ok:false,error:'players_required'});
+    const [p1,p2]=await Promise.all([findApplicantByTelegramId(id1),findApplicantByTelegramId(id2)]);
+    if(!p1||!p2)return res.status(404).json({ok:false,error:'player_not_found'});
+    const player1={telegram_id:id1,name:String(p1.name||'').trim()};
+    const player2={telegram_id:id2,name:String(p2.name||'').trim()};
+    const division=String(b.division||'').trim();
+    const comment=String(b.comment||'').trim();
+    const season=String(await getSetting('season_number').catch(()=>'')||'').trim();
+    const chatId=await getAdminChatId().catch(()=>'');
+    if(!chatId)return res.status(500).json({ok:false,error:'admin_chat_not_set'});
+    res.json({ok:true});
+    prepareAnnouncementForAdmin({chatId,player1,player2,division,season,comment})
+      .catch(e=>console.error('announce-poster failed:',e.message));
   } catch(e){res.status(500).json({ok:false,error:e.message})}
 });
 
