@@ -1,1604 +1,3146 @@
-import fs from 'node:fs/promises';
-import crypto from 'node:crypto';
-import path from 'node:path';
-import vm from 'node:vm';
-import assert from 'node:assert/strict';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PTF League</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/public/ptf-prefs.js"></script>
+<style>
+/* Noir: тёплый чёрный, приглушённый янтарь, шампань для титулов.
+   Слои разделяются светлотой и тонкой кромкой, а не жирными рамками. */
+/* Две темы на одном наборе токенов: тёмная Noir по умолчанию, светлая Court —
+   по атрибуту data-theme="light" на <html>. Ни одного цвета мимо переменной,
+   иначе при переключении часть экрана останется от другой темы. */
+:root{
+  --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#2A2521;--line2:#221F1B;
+  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;--mute3:#7A7164;
+  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--champ2:#A99167;--gold:#C9A76A;
+  --win:#8FBF9A;--goBtn2:#6FA57C;--goLine:#7FB18C;--onGo:#0E1710;--goGlow:rgba(143,191,154,.28);--link:#7FB6E8;--linkLine:rgba(127,182,232,.4);--lose:#C2695E;--silver:#9A948B;--upArrow:#8FBF9A;
+  --card2:#161514;--line3:#332D28;--line4:#262220;--line5:#1B1918;
+  --accBg:rgba(232,164,92,.12);--accBg2:rgba(232,164,92,.18);--accLine:rgba(232,164,92,.34);--accLine2:rgba(232,164,92,.22);
+  --onAcc:#12100E;--winBg:rgba(143,191,154,.14);--winLine:rgba(143,191,154,.34);--loseBg:rgba(194,105,94,.14);--loseLine:rgba(194,105,94,.34);
+  --tile:#141312;--tile2:#171514;--grain:rgba(255,255,255,.03);
+  --edge:rgba(255,255,255,.06);--edgeOn:rgba(232,164,92,.22);
+  --fadeTop:rgba(17,16,16,.55);--fadeMid:rgba(17,16,16,.92);--fadeNone:rgba(17,16,16,0);
+  --avBg:#1C1A18;--sheet:rgba(17,16,16,.96);--hair:rgba(255,255,255,.05);
+  /* Цвета дивизионов, зон и титулов были заведены только в светлой теме, а в
+     тёмной ссылались сами на себя — то есть не работали вовсе. Отсюда и
+     пропавшие цветные ярлыки. Здесь та же палитра, но по тёмному фону. */
+  --dA:#8FBF9A;--dABg:rgba(143,191,154,.15);--dALine:rgba(143,191,154,.34);
+  --dB:#7FB6E8;--dBBg:rgba(127,182,232,.15);--dBLine:rgba(127,182,232,.34);
+  --dC:#C6CE72;--dCBg:rgba(198,206,114,.14);--dCLine:rgba(198,206,114,.32);
+  --dD:#D9A0C4;--dDBg:rgba(217,160,196,.14);--dDLine:rgba(217,160,196,.32);
+  --dP:#E3C177;--dPBg:rgba(227,193,119,.15);--dPLine:rgba(227,193,119,.34);
+  --champBg:rgba(217,199,163,.10);--champGlow:rgba(201,167,106,.22);--finBg:rgba(201,167,106,.08);
+  --zStay:#3A3531;--zDown1:#C2695E;--zDown2:#8E463C;
+  --zUpTint:rgba(143,191,154,.08);--zDownTint:rgba(194,105,94,.07);
+  --goldLine:rgba(201,167,106,.38);--goldBg:rgba(201,167,106,.12);--onForm:#12100E;
+  --goldRing:#C9A76A;--goldGlow:rgba(201,167,106,.24);
+}
+/* Светлая тема Court: зелень корта как акцент, лимон на титулах. */
+html[data-theme="light"]{
+  --bg:#F2F5F1;--surf:#FFFFFF;--surf2:#EBF0EA;--line:#C7D3C5;--line2:#DDE5DB;
+  --text:#16211A;--dim:#4C5A50;--mute:#7E8B82;--mute2:#93A099;--mute3:#7E8B82;
+  --amber:#1F6B44;--amber2:#145236;--champ:#6E7A22;--champ2:#9AA45E;--gold:#8E9A2E;
+  --win:#1F6B44;--goBtn2:#175635;--goLine:#175635;--onGo:#FFFFFF;--goGlow:rgba(31,107,68,.25);--link:#1A5FB4;--linkLine:rgba(26,95,180,.35);--lose:#B04A2E;--silver:#9AA39C;--upArrow:#1F6B44;
+  --card2:#F5F8F4;--line3:#D5DED3;--line4:#E4EAE2;--line5:#EDF1EC;
+  --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--accLine2:#BFDECB;
+  --onAcc:#FFFFFF;--winBg:#E1F0E7;--winLine:#A6D2BB;--loseBg:#F9E7E0;--loseLine:#E5B7A4;
+  --tile:#F0F4EF;--tile2:#EFF4EE;--grain:rgba(0,0,0,.02);
+  --edge:rgba(22,33,26,.06);--edgeOn:rgba(31,107,68,.16);
+  --fadeTop:rgba(255,255,255,.55);--fadeMid:rgba(255,255,255,.92);--fadeNone:rgba(255,255,255,0);
+  --avBg:#E7EDE6;--sheet:rgba(242,245,241,.96);--hair:rgba(22,33,26,.05);
+  --dA:#1F6B44;--dABg:#E1F0E7;--dALine:#A6D2BB;
+  --dB:#2A5F94;--dBBg:#E2EAF5;--dBLine:#AAC3E1;
+  --dC:#6E7A22;--dCBg:#F0F2DC;--dCLine:#CBD495;
+  --dD:#93436F;--dDBg:#F6E3EF;--dDLine:#DFB2CE;
+  --dP:#B08414;--dPBg:#FAF0D9;--dPLine:#E5CE94;
+  --champBg:#EAF3EC;--champGlow:rgba(184,194,74,.22);--finBg:#F4F6E4;
+  --zStay:#C9D2C7;--zDown1:#D89A8B;--zDown2:#B4695C;
+  --zUpTint:rgba(184,194,74,.10);--zDownTint:rgba(176,74,46,.07);
+  --goldLine:#D5DB9A;--goldBg:#F4F6E4;--onForm:#FFFFFF;--goldRing:#B8C24A;--goldGlow:rgba(184,194,74,.22);
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;min-height:100vh;position:relative}
+.grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+background-image:radial-gradient(var(--grain) .5px,transparent .5px);background-size:3px 3px}
+.wrap{max-width:620px;margin:0 auto;padding:20px 16px 40px;position:relative;z-index:1}
+.hidden{display:none!important}
 
-// In-memory Sheets and Telegram. No credentials, network, bot startup or writes
-// to real spreadsheets are involved. Run: node --experimental-vm-modules tests/regression.mjs
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let telegramFailureId='';
-const tables = new Map(), writes = [], messages = [], routes = [], middleware = [], sheetEdits = [];
-const put = (id,title,rows) => tables.set(id+'|'+title,structuredClone(rows));
-put('crm','Applicants',[
- ['telegram_id','name','status','language','telegram_username','avatar_file_id'],
- ['1','Alice One','inactive','en','alice',''],['2','Bob Two','waitlist','ru','bob',''],
- ['3','Carol Three','active','en','carol',''],['4','Dan Four','active','ru','dan',''],
- ['5','No Division','inactive','en','nodiv',''],['6','Out Sider','active','en','out',''],
- ['7','Wendy One','inactive','en','wendy',''],['8','Wendy Two','waitlist','ru','wendy2',''],
- ['9','Wendy Three','active','en','wendy3',''],['10','Wendy Four','active','ru','wendy4','']
-]);
-put('crm','Settings',[['key','value'],['season_number','2'],['league_seasons','2:active']]);
-put('crm','Applications',[['application_id','telegram_id']]);
-put('master','Players_Master',[[],[],['Player ID','Player Name','Division','Photo URL'],
- ...['Alice One','Bob Two','Carol Three','Dan Four','No Division','Wendy One','Wendy Two','Wendy Three','Wendy Four'].map((n,i)=>[i+1,n,'','https://photos.test/'+i+'.png'])]);
-put('master','Divisions',[
- ['season','letter','title','title_en','sheet_url','status','order','group'],
- ['2','A','Division A','Division A','https://docs.google.com/spreadsheets/d/a-test','On',1,''],
- ...[['C','1','c1'],['C','2','c2'],['W','1','w1'],['W','2','w2']].map(([d,g,id])=>['2',d,'Division '+d,'Division '+d,'https://docs.google.com/spreadsheets/d/'+id,'On',d==='C'?4:6,g])
-]);
-put('master','Cross_Division_Match_Log',[['Match','Date']]);
-for(const [id,names] of Object.entries({c1:['Alice One','Bob Two'],c2:['Carol Three','Dan Four'],w1:['Wendy One','Wendy Two'],w2:['Wendy Three','Wendy Four']})){
- put(id,'Division_Tracker',[['Player'],...names.map(n=>[n])]);
- put(id,'Match_Log',[
-  ['match','p1_id','player_1','p2_id','player_2','s1p1','s1p2','s1tb1','s1tb2','s2p1','s2p2','s2tb1','s2tb2','s3p1','s3p2','s3tb1','s3tb2','set3_mode','played','competition','winner_id'],
-  ['1','1',names[0],'2',names[1]]
- ]);
-}
-put('matches','Match Slots',[['challenge_id','match_type','status','division','from_telegram_id','from_name']]);
-put('a-test','Division_Tracker',[['Player'],...Array.from({length:8},(_,i)=>['A Player '+(i+1)])]);
-put('a-test','Match_Log',[['match','id1','player1','id2','player2'],...Array.from({length:7},(_,i)=>[i+1,1,'A Player 1',i+2,'A Player '+(i+2)]),[1,1,'A Player 1',2,'A Player 2'],[29,1,'A Player 1',3,'A Player 3',6,0]]);
-put('matches','Courts',[['name','address','whatsapp'],['Court A','Phuket','661234']]);
-const col = letters => [...letters].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0)-1;
-function rangeInfo(id,range){
- const m=/^'?([^'!]+)'?!([A-Z]+)(\d*)?(?::([A-Z]+)(\d*)?)?$/.exec(range);
- if(!m)throw Error('Unsupported range '+range);
- return {key:id+'|'+m[1],title:m[1],c1:col(m[2]),r1:Number(m[3]||1)-1,c2:col(m[4]||m[2]),r2:m[5]?Number(m[5])-1:(m[4]?Infinity:Number(m[3]||1)-1)};
-}
-async function get({spreadsheetId,range}){
- const r=rangeInfo(spreadsheetId,range),rows=tables.get(r.key);
- if(!rows)throw Error('Missing test sheet '+r.key);
- return {data:{values:rows.slice(r.r1,Number.isFinite(r.r2)?r.r2+1:undefined).map(row=>row.slice(r.c1,r.c2+1))}};
-}
-async function update({spreadsheetId,range,requestBody}){
- writes.push({spreadsheetId,range,values:requestBody.values});
- const r=rangeInfo(spreadsheetId,range);const rows=tables.get(r.key)||[];
- requestBody.values.forEach((row,i)=>{rows[r.r1+i] ||= [];row.forEach((v,j)=>rows[r.r1+i][r.c1+j]=v)});
- tables.set(r.key,rows);return {data:{}};
-}
-const google={spreadsheets:{
- get:async({spreadsheetId})=>({data:{sheets:[...tables.keys()].filter(k=>k.startsWith(spreadsheetId+'|')).map((k,i)=>({properties:{title:k.split('|')[1],sheetId:i}}))}}),
- batchUpdate:async({spreadsheetId,requestBody})=>{sheetEdits.push(...(requestBody.requests||[]));for(const r of requestBody.requests||[])if(r.addSheet)put(spreadsheetId,r.addSheet.properties.title,[]);return {data:{}}},
- values:{get,update,batchGet:async({spreadsheetId,ranges})=>({data:{valueRanges:await Promise.all(ranges.map(range=>get({spreadsheetId,range}).then(r=>r.data)))}}),
-  batchUpdate:async({spreadsheetId,requestBody})=>{for(const d of requestBody.data)await update({spreadsheetId,...d,requestBody:d});return {data:{}}},
-  append:async({spreadsheetId,range,requestBody})=>{const r=rangeInfo(spreadsheetId,range);const rows=tables.get(r.key)||[];rows.push(...structuredClone(requestBody.values));tables.set(r.key,rows);return {data:{updates:{updatedRange:r.title+'!A'+rows.length}}}}
- }}};
-const context=vm.createContext({console,URL,URLSearchParams,Buffer,Date,Math,JSON,Intl,Set,Map,FormData,Blob,Uint8Array,
- process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',ADMIN_IDS:'99',NODE_ENV:'production'}},
- setTimeout:(fn)=>{queueMicrotask(fn);return 1},clearTimeout(){},setInterval:()=>({unref(){}}),
- fetch:()=>{throw Error('Unexpected network access')}
-});
-const modules=new Map();
-function synthetic(key,values){const m=new vm.SyntheticModule(Object.keys(values),function(){for(const[k,v]of Object.entries(values))this.setExport(k,v)},{context,identifier:key});modules.set(key,m);return m;}
-synthetic(path.join(root,'google.js'),{sheets:()=>google});
-const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
-const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
-synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
-synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
-const cardContexts=new Map();
-const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
-async function getModule(spec,ref){
- const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
- if(modules.has(key))return modules.get(key);
- if(!key.startsWith(root)){
-  const imported=await import(spec==='luxon'?pathToFileURL(path.join(root,'node_modules/luxon/build/node/luxon.js')).href:spec);
-  return synthetic(key,imported);
- }
- const source=await fs.readFile(key,'utf8');
- const m=new vm.SourceTextModule(source,{context,identifier:key,initializeImportMeta(meta){meta.url='file:///'+key.replaceAll('\\','/')},importModuleDynamically:async(spec,ref)=>{const d=await getModule(spec,ref);if(d.status==='unlinked')await d.link(getModule);if(d.status==='linked')await d.evaluate();return d;}});
- modules.set(key,m);return m;
-}
-async function load(name){const m=await getModule('./'+name,{identifier:path.join(root,'_test.js')});if(m.status==='unlinked')await m.link(getModule);if(m.status==='linked')await m.evaluate();return m.namespace;}
-const sheets=await load('sheets.js'),division=await load('division.js'),db=await load('matchesdb.js'),access=await load('access.js'),results=await load('results.js');
-let checks=0;const check=(value,message)=>{assert.ok(value,message);checks++};
-for(const id of ['1','2','5'])check((await sheets.getPlayerLeagueInfo({telegram_id:id})).member,'Membership ignores CRM status '+id);
-check(!(await sheets.getPlayerLeagueInfo({telegram_id:'6'})).member,'Active CRM outsider denied');
-check((await sheets.getPlayerLeagueInfo({telegram_id:'99'})).admin,'Admin bypasses membership');
-check(!(await sheets.getPlayerLeagueInfo({telegram_id:'5'})).found,'Unassigned member has no match scope');
-check((await sheets.findApplicantByTelegramIdentity({id:500,username:'alice'})).telegram_id==='1','Existing username fallback preserved');
-check(await sheets.playerGroup('1')==='active','Inactive master member receives member interface');
-check((await sheets.getDivisionOpponents('Division C','1','2','1')).map(p=>p.name).join()==='Bob Two','Group 1 opponents only, regardless status');
-check((await sheets.getDivisionOpponents('Division W','9','2','2')).map(p=>p.name).join()==='Wendy Four','Women group 2 isolated');
-check(await division.divisionSheetId('W','2','2')==='w2','Women group 2 table');
-check(await division.divisionSheetId('C','2','missing')==='','No fallback to group 1 for unknown group');
-const slot={challenge_id:'old',match_type:'open',status:'open',division:'Division C',from_telegram_id:'1',from_name:'Alice One',dates:'2099-09-14',time_from:'10:00',time_to:'14:00',duration_min:'120',courts:'Court A'};
-await db.createSlot(slot);
-check(sheetEdits.some(r=>r.updateSheetProperties?.fields==='gridProperties.columnCount'),'Existing Match Slots expands before appending service columns');
-check((await db.listOpenSlots('Division C','2','2','1')).length===1,'Old slot inferred as group 1');
-check((await db.listOpenSlots('Division C','3','2','2')).length===0,'Group 2 cannot see group 1 old slot');
-check(!(await db.claimSlot('old',{telegram_id:'3'},{date:'2099-09-14',time:'10:00',court:'Court A'})).ok,'Cross-group take rejected');
-check((await db.claimSlot('old',{telegram_id:'2'},{date:'2099-09-14',time:'10:00',court:'Court A'})).ok,'Same-group take accepted');
-check((await db.findSlot('old')).group==='1','Legacy scope persisted on interaction');
-check((await db.acceptProposal('old',{telegram_id:'1'})).ok,'Inactive master member confirms proposal');
-check(!(await db.confirmCourt('old',{telegram_id:'6'})).ok,'Outsider cannot confirm court');
-check(!(await db.confirmCourt('old',{telegram_id:'2'})).ok,'Opponent cannot confirm court');
-check((await db.confirmCourt('old',{telegram_id:'1'})).ok,'Creator confirms court');
-check((await db.submitResult('old',{telegram_id:'1'},{winner:'1',score:'6:4 6:3'})).ok,'Score accepted');
-check(!(await db.disputeResult('old',{telegram_id:'3'})).ok,'Unrelated player cannot dispute result');
-check(!(await db.confirmResult('old',{telegram_id:'1'})).ok,'Submitter cannot confirm own score');
-check((await db.confirmResult('old',{telegram_id:'2'})).ok,'Opponent confirms result');
-put('1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY','Frontend_Profile_All',[
- ['player_id','player_name','recent_form'],
- ['3','Carol Three','WIN LOST WIN'],['4','Dan Four','LOST WIN']
-]);
-const result2={challenge_id:'history-form',division:'Division C',season:'2',group:'2',from_name:'Carol Three',to_name:'Dan Four',from_telegram_id:'3',to_telegram_id:'4',agreed_date:'2099-09-14',result_score:'6:4 6:3',result_winner:'3'};
-const before=writes.length;const write=await results.writeConfirmedResult(result2);
-check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
-const allSeasonForm=cardContexts.get('history-form');
-check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='L,W,L','Card form uses the all-season profile history and includes this match once');
-check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
-// Заголовки Match_Log раньше не находились никогда (norm() съедает подчёркивание
-// в «p1_id»), и вместе с ними молча отваливалась запись сезона.
-check(write.division.columns>0,'Match_Log header row is located');
-check(write.division.season_write?.value==='Season 2','Season is written into the division Match_Log');
-check(String(tables.get('c2|Match_Log')[1][19]||'')==='Season 2','Competition cell holds the season of the match');
-const dup=await results.writeConfirmedResult(result2);check(dup.status==='duplicate','Repeat result does not append duplicate');
-const mixed=await results.writeConfirmedResult({...result2,group:'cross',to_name:'Alice One',to_telegram_id:'1'});check(mixed.status==='saved'&&mixed.division?.cross_group,'Same-division cross-group result is stored centrally');
-check(tables.has('master|Cross_Group_Match_Log'),'Cross-group journal is created in MatchLog');
-const womenCrossSlot={challenge_id:'women-cross-movement',division:'Division W',season:'2',group:'cross',from_name:'Wendy Two',to_name:'Wendy Three',from_telegram_id:'8',to_telegram_id:'9',agreed_date:'2099-09-22',result_score:'6:4 6:3',result_winner:'8'};
-const womenCrossWrite=await results.writeConfirmedResult(womenCrossSlot);
-const womenCtx=cardContexts.get('women-cross-movement');
-const womenAfter=await division.getDivisionTable('W','2','2');
-const wendyThreeAfter=womenAfter.players.find(p=>p.name==='Wendy Three');
-check(womenCrossWrite.division?.cross_group&&womenCtx?.cross_group,'Women cross-group result stores card context');
-check(womenCtx.p1.group==='1'&&womenCtx.p2.group==='2','Women cross-group context preserves each player group');
-check(womenCtx.p2.place===2&&wendyThreeAfter?.place===1,'Women cross-group result exposes ranking movement before and after');
-// Боевой тестовый прогон: журнал правок и полный откат в исходное состояние.
-const undoBefore=structuredClone(tables.get('w1|Match_Log'));
-const journal=[];
-const testRun=await results.writeConfirmedResult({division:'Division W',season:'2',group:'1',from_name:'Wendy One',to_name:'Wendy Two',from_telegram_id:'7',to_telegram_id:'8',agreed_date:'2099-10-01',result_score:'6:1 6:2',result_winner:'7'},{journal});
-check(testRun.division?.status==='saved'&&journal.length>0,'Test run records every written range in the journal');
-check(String(tables.get('w1|Match_Log')[1][5]||'')!=='','Test run really writes the score into the division table');
-const undo=await results.rollbackJournal(journal);
-check(undo.restored===undo.total&&!undo.failed.length,'Rollback restores every recorded range');
-check(JSON.stringify(tables.get('w1|Match_Log')[1].slice(0,20))===JSON.stringify([...undoBefore[1],...Array(20-undoBefore[1].length).fill('')].slice(0,20)),'Division row returns to its pre-test state');
-check((await results.getUnplayedOpponents('C','Alice One','2','1')).names.includes('Bob Two'),'Schedule uses group 1');
-check((await results.getUnplayedOpponents('C','Carol Three','2','2')).played===1,'Schedule uses group 2 result');
-const server=await load('index.js');
-const util=await load('util.js');
-// /test_match набирают с телефона как получится. Здесь — ровно те строки,
-// которыми команда не заводилась: без разделителей, одними фамилиями, в нижнем
-// регистре. Все они должны находить обоих игроков и счёт целиком.
-{
- const squad=[{name:'Ilia Izotov'},{name:'Viacheslav Poniiatovsky'},{name:'Yuriy B'}];
- const resolve=raw=>{
-  const p=util.parseTestMatchInput(raw);
-  if(!p||!p.head)return {empty:true};
-  let a=null,b=null;
-  if(p.parts.length>=2){a=util.findRosterPlayer(squad,p.parts[0]).player||null;b=util.findRosterPlayer(squad,p.parts[1]).player||null}
-  if(!a||!b){const pair=util.findRosterPair(squad,p.head);if(pair.length===2){a=pair[0];b=pair[1]}}
-  return {winner:a?.name,loser:b?.name,score:p.score};
- };
- const joined=resolve('/test_match Ilia izotov Viacheslav Poniiatovsky 6:4 6:7 (8:10) 4:6');
- check(joined.winner==='Ilia Izotov'&&joined.loser==='Viacheslav Poniiatovsky','Names without any separator still resolve in order');
- check(joined.score==='6:4 6:7 (8:10) 4:6','Score with a tie-break in brackets survives parsing');
- const surnames=resolve('/test_match izotov | poniiatovsky | 6:4 6:3');
- check(surnames.winner==='Ilia Izotov'&&surnames.loser==='Viacheslav Poniiatovsky','Lowercase surnames resolve to full roster names');
- const dashed=resolve('/test_match Izotov - Poniiatovsky 6:4 6:3');
- check(dashed.winner==='Ilia Izotov'&&dashed.score==='6:4 6:3','Dash separator works as well as a pipe');
- check(resolve('/test_match').empty,'Bare command asks for help instead of failing');
- check(!resolve('/test_match Победитель | Проигравший | 6:4 6:3').winner,'Placeholder names match nobody');
-}
-async function request(method,p,id,body={}){
- const route=routes.find(r=>r.method===method&&r.p===p);assert.ok(route,'route '+p);
- const req={body:{...body},query:{...(method==='get'?body:{}),t:util.signWebAppToken(id)},path:p};
- if(method==='post')req.body.t=req.query.t;
- const res={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this},set(){return this},send(v){this.body=v;return this}};
- const langMiddleware=middleware.find(x=>x[0]==='/api')[1];await langMiddleware(req,res,()=>{});
- await route.h(req,res);return res;
-}
-check((await request('get','/api/match/bootstrap','5')).body.can_match===false,'Unassigned member can open match interface without creating matches');
-check((await request('post','/api/match/create','5',{})).code===400,'Unassigned member cannot create slot');
-check((await request('get','/api/match/bootstrap','6')).code===403,'Nonmember API denied');
-check((await request('get','/api/match/bootstrap','99')).code===200,'Admin API access without roster');
-const techApi=await request('post','/api/match/manual','99',{from_telegram_id:'7',to_telegram_id:'9',date:'2099-09-18',court:'Court A',kind:'technical',winner:'7',points_from:'3',points_to:'0',note:'no show'});
-check(techApi.body.ok,'Admin can submit a technical result for a cross-group pair');
-const techSlot=await db.findSlot(techApi.body.challenge_id);
-check(techSlot.result_score==='W/L'&&techSlot.result_kind==='technical'&&String(techSlot.result_points_from)==='3'&&String(techSlot.result_points_to)==='0','Technical notation and manual points are stored');
-check((await db.confirmResult(techApi.body.challenge_id,{telegram_id:'9'})).ok,'Second player confirms admin-entered technical result');
-const techBefore=writes.length;const techWrite=await results.writeConfirmedResult({...techSlot,result_status:'confirmed'});
-check(techWrite.status==='saved'&&techWrite.division?.cross_group,'Confirmed technical cross-group result reaches central cross-group log');
-check(writes.slice(techBefore).some(w=>/!AB\d+$/.test(w.range)&&w.values[0][0]==='W/L')&&writes.slice(techBefore).some(w=>/!AN\d+:AO\d+$/.test(w.range)&&String(w.values[0])==='3,0'),'Technical marker and points are written to AB and AN:AO');
-const qfApi=await request('post','/api/match/manual','99',{from_telegram_id:'8',to_telegram_id:'10',date:'2099-09-19',court:'Court A',round:'QF',kind:'played',winner:'8',sets:[{a:6,b:2},{a:6,b:3}],points_from:'3',points_to:'1'});
-check(qfApi.body.ok,'Admin can mark a manual result as a quarterfinal');const qfSlot=await db.findSlot(qfApi.body.challenge_id);check(qfSlot.round==='QF','Playoff stage is stored in the match slot');check((await db.confirmResult(qfApi.body.challenge_id,{telegram_id:'10'})).ok,'Playoff result still requires the second player confirmation');const qfWrite=await results.writeConfirmedResult({...qfSlot,result_status:'confirmed'});check(qfWrite.division?.playoff&&tables.has('master|Playoff'),'Confirmed grouped quarterfinal is stored in the Playoff sheet');
-const retApi=await request('post','/api/match/manual','3',{to_telegram_id:'4',date:'2099-09-18',court:'Court A',kind:'retired',winner:'3',sets:[{a:6,b:4},{a:2,b:1}],note:'injury'});
-check(retApi.body.ok,'Player can submit a RET result');
-const retSlot=await db.findSlot(retApi.body.challenge_id);check(retSlot.result_kind==='retired'&&/RET$/.test(retSlot.result_score),'RET keeps the played score and label');
-check((await request('get','/api/league/division','1')).code!==403,'Inactive master member may view league');
-const errorRu=await request('post','/api/match/create','2',{});check(/[а-я]/i.test(errorRu.body.error),'RU validation error');
-const errorEn=await request('post','/api/match/create','1',{});check(!/[а-я]/i.test(errorEn.body.error),'EN validation error');
-check(routes.filter(r=>r.p==='/cal').length===1,'Only one calendar route');
-for(const letter of ['C','W']) {
- const view=await request('get','/api/league/division','1',{letter,season:'2'});
- check(view.body.groups?.length===2,letter+' API returns both groups');
- check(view.body.groups.every(g=>g.grouped&&!g.playoff.champion&&g.players.every(p=>p.zone==='playoff')),letter+' groups mark their top four as playoff seeds without declaring a champion');
- if(letter==='W')check((view.body.playoff?.qf||[]).length===1,'Grouped division API exposes the quarterfinal bracket');
-}
-const cross=await results.writeConfirmedResult({...result2,to_name:'Wendy Three',to_telegram_id:'9'});
-check(cross.status==='cross_division_blocked','Existing admin approval for cross-division results preserved');
-const matches=await load('matches.js');messages.length=0;
+/* шапка и меню */
+.hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;position:sticky;top:0;z-index:30;
+  padding:10px 0 9px;background:linear-gradient(180deg,var(--bg) 78%,var(--fadeNone))}
+.logo{width:40px;height:40px;border-radius:12px;flex:0 0 40px;background:linear-gradient(160deg,var(--line3),#171412);
+border:1px solid #322B24;color:var(--champ);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px}
+.eyebrow{font-size:9px;letter-spacing:2.6px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:3px}
+h1{font-size:22px;font-weight:800;letter-spacing:-.6px;line-height:1}
+.tabs{position:sticky;top:0;z-index:6;display:grid;grid-template-columns:repeat(4,1fr);gap:5px;
+padding:8px 0 10px;background:var(--bg);box-shadow:0 12px 14px -8px var(--bg);margin-bottom:14px}
+.tab{background:var(--card2);border:1px solid var(--line4);color:var(--mute);border-radius:10px;padding:9px 3px;
+text-align:center;font-size:10.5px;font-weight:700;cursor:pointer;user-select:none;
+overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab.on{background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber);border-color:var(--accLine)}
+.tab.off{opacity:.35;cursor:default}
 
-// Unfinished match: one durable state stops nudges without closing score entry.
-const unfinishedFixture={...slot,challenge_id:'unfinished',match_type:'open',status:'accepted',season:'2',group:'1',
- from_telegram_id:'1',from_name:'Alice One',from_username:'alice',to_telegram_id:'2',to_name:'Bob Two',to_username:'bob',
- dates:'2000-01-01',agreed_date:'2000-01-01',agreed_time:'10:00',duration_min:'120',court_confirmed_at:'2000-01-01T02:00:00.000Z',
- result_prompt_sent_at:'2000-01-01T05:00:00.000Z',score_nudge:'m20,n1'};
-await db.createSlot(unfinishedFixture);
-check(!(await db.markMatchUnfinished('unfinished',{telegram_id:'6'})).ok,'Nonparticipant cannot pause match reminders');
-const unfinishedSaved=await db.markMatchUnfinished('unfinished',{telegram_id:'1',name:'Alice One'},{note:'Rain stopped play',photoFileId:'proof-photo'});
-check(unfinishedSaved.ok&&unfinishedSaved.slot.result_status==='unfinished','Player can mark a completed-time match unfinished');
-check(!unfinishedSaved.slot.score_nudge&&unfinishedSaved.slot.unfinished_note==='Rain stopped play'&&unfinishedSaved.slot.unfinished_photo_file_id==='proof-photo','Unfinished evidence is stored and reminder marks are cleared');
-check(!db.stuckItem(unfinishedSaved.slot,Date.now()+48*3600000),'Unfinished match produces no staged reminder');
-check(db.pendingActionsFor('1',[unfinishedSaved.slot]).total===0&&db.pendingActionsFor('2',[unfinishedSaved.slot]).total===0,'Unfinished match clears both action badges');
-check((await db.listResultTasks('1')).some(s=>s.challenge_id==='unfinished'),'Unfinished match remains available for later score entry');
-check((await db.listMySlots('1')).some(s=>s.challenge_id==='unfinished'),'Past unfinished match remains visible in My matches');
-check(!(await db.listMatchesNeedingResultPrompt()).some(s=>s.challenge_id==='unfinished'),'Unfinished match cannot receive a new result prompt');
-const finishedLater=await db.submitResult('unfinished',{telegram_id:'2',name:'Bob Two'},{winner:'2',score:'3:6 6:4 6:2'});
-check(finishedLater.ok&&finishedLater.slot.result_status==='pending','Either player can submit the result after the match is completed');
+/* общее */
+.lab{font-size:9.5px;letter-spacing:2.2px;text-transform:uppercase;font-weight:800;color:var(--mute);
+margin:0 0 10px 2px;display:flex;align-items:center;gap:8px}
+.dot{width:3px;height:3px;border-radius:50%;background:var(--amber2);display:inline-block}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:15px;margin-bottom:12px;
+box-shadow:inset 0 1px 0 var(--hair)}
+.card h3{font-size:13.5px;font-weight:800;letter-spacing:.2px;margin-bottom:11px}
+.panel{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.invite{padding:18px 16px 32px;max-width:560px;margin:0 auto}
+.ivHead{padding:20px;border-radius:20px;border:1px solid var(--accLine);background:linear-gradient(160deg,var(--accBg2),transparent 70%),var(--surf)}
+.ivKicker{font-size:10px;letter-spacing:.22em;color:var(--mute);font-weight:800}
+.ivHead h2{margin:8px 0 8px;font-size:22px;line-height:1.2;color:var(--text)}
+.ivHead p{margin:0;font-size:14px;line-height:1.55;color:var(--dim)}
+.ivList{list-style:none;padding:0;margin:16px 0 0}
+.ivList li{position:relative;padding:9px 0 9px 22px;font-size:14px;color:var(--dim);border-bottom:1px solid var(--line2)}
+.ivList li:last-child{border-bottom:0}
+.ivList li:before{content:'';position:absolute;left:4px;top:16px;width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.ivBtn{display:block;width:100%;margin-top:18px;padding:16px;border:0;border-radius:16px;font-size:16px;font-weight:900;color:#1A1208;background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer}
+.ivNote{margin-top:10px;font-size:12px;color:var(--mute);text-align:center;line-height:1.5}
+.ivGrp{margin:22px 0 8px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--mute);font-weight:800}
+.ivEv{padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--surf);margin-bottom:10px}
+.ivEv.past{opacity:.55}
+.ivEvName{font-size:15px;font-weight:800;color:var(--text)}
+.ivEvRow{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
+.ivTag{display:inline-block;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:800;color:var(--mute);border:1px solid var(--line3);background:var(--card2)}
+.ivTag.live{color:var(--win);border-color:var(--goLine);background:rgba(143,191,154,.12)}
+.ivTag.wait{color:var(--amber);border-color:var(--accLine);background:var(--accBg)}
+.ivTag.past{color:var(--mute2)}
+.ivEvDesc{margin-top:8px;font-size:13px;line-height:1.5;color:var(--dim)}
+.ivStats{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ivStat{padding:10px 8px;border-radius:12px;background:var(--card2);border:1px solid var(--line4);text-align:center}
+.ivStatV{font-size:17px;font-weight:900;color:var(--champ)}
+.ivStatK{margin-top:2px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.ivLink{margin-top:12px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--accLine2);background:var(--accBg);color:var(--amber);font-size:13px;font-weight:800;cursor:pointer}
+.ivChamps{margin-top:10px;display:grid;gap:8px}
+.ivChamp{display:flex;align-items:center;gap:10px;padding:8px;border-radius:12px;background:var(--card2);border:1px solid var(--line4)}
+.ivChamp img{width:38px;height:38px;border-radius:50%;object-fit:cover;border:1px solid var(--champ2)}
+.ivChampNo{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--surf2);border:1px solid var(--line3)}
+.ivChampName{font-size:14px;font-weight:800;color:var(--text)}
+.ivChampTitle{font-size:11px;color:var(--mute)}
+.ivStat.tap{cursor:pointer}
+.ivStat.tap .qm{font-style:normal;color:var(--amber)}
+.ivGrp2{margin:16px 0 10px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--mute);font-weight:800}
+.ivRoster{margin-top:10px;border:1px solid var(--line4);border-radius:14px;overflow:hidden}
+.ivRow{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line2);background:var(--card2)}
+.ivRow:last-child{border-bottom:0}
+.ivRow .avr,.ivRow .avph{width:30px;height:30px;flex:0 0 30px;font-size:12px}
+.ivRowName{flex:1;font-size:13.5px;font-weight:700;color:var(--text)}
+.ivRowDiv{font-size:11px;color:var(--mute)}
+.ivHero{margin-top:16px;padding:14px;border-radius:18px;border:1px solid var(--line);background:var(--surf)}
+.ivHeroHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.ivHeroTitle{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--champ);font-weight:800}
+.ivFaces{display:flex;gap:-8px}
+.ivFace{text-align:center;flex:1;min-width:0}
+.ivFace .avr,.ivFace .avph{width:56px;height:56px;flex:0 0 56px;font-size:18px;margin:0 auto 6px;border:1px solid var(--champ2)}
+.ivFaceName{font-size:11.5px;font-weight:800;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ivFaceDiv{font-size:10px;color:var(--mute)}
+.ivEv.done{opacity:1}
 
-const unfinishedApiFixture={...unfinishedFixture,challenge_id:'unfinished-api',unfinished_note:'',unfinished_photo_file_id:'',result_status:'',score_nudge:''};
-await db.createSlot(unfinishedApiFixture);
-const unfinishedApi=await request('post','/api/match/unfinished','2',{challenge_id:'unfinished-api',note:'Court lights went out'});
-check(unfinishedApi.body.ok&&(await db.findSlot('unfinished-api')).result_status==='unfinished','Mini app API marks the match unfinished');
-const futureUnfinished={...unfinishedFixture,challenge_id:'unfinished-future',dates:'2099-01-01',agreed_date:'2099-01-01',result_prompt_sent_at:''};
-await db.createSlot(futureUnfinished);
-check((await db.markMatchUnfinished('unfinished-future',{telegram_id:'1'})).reason==='match_not_ended','A future match cannot be marked unfinished');
+.empty{color:var(--mute);font-size:13.5px;text-align:center;padding:26px 10px;line-height:1.55}
+.hint{color:var(--mute);font-size:11.5px;line-height:1.5}
+.cnt{color:var(--mute2);font-size:10.5px;margin:0 0 10px 2px;font-weight:600}
+.search{width:100%;padding:11px 13px;border-radius:11px;border:1px solid var(--line4);background:var(--surf);
+color:var(--text);font-size:14px;margin-bottom:10px}
+.searchwrap{position:relative}
+.psug{position:absolute;left:0;right:0;top:calc(100% - 6px);z-index:20;background:var(--card2);border:1px solid var(--line4);
+border-radius:12px;overflow-y:auto;max-height:46vh;-webkit-overflow-scrolling:touch;box-shadow:0 14px 30px rgba(0,0,0,.28);margin-bottom:10px}
+.sugx{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;
+display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:17px;cursor:pointer;z-index:21}
+.sugx:active{background:var(--card)}
+.searchwrap input.search{padding-right:38px}
+.psug .pi{padding:10px 13px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--line4)}
+.psug .pi:last-child{border-bottom:0}
+.psug .pi:hover,.psug .pi:active{background:var(--card)}
+.psug .pi.more{color:var(--mute);cursor:default;font-size:12px}
+.psug .pi.more:hover,.psug .pi.more:active{background:transparent}
+.fanmine{display:inline-block;margin-left:5px;font-size:11px;line-height:1;vertical-align:middle;font-weight:900}
+.fanmine.t1{color:var(--gold,#e8a45c)}
+.fanmine.t2{color:#7aa8d6}
+.fanhomebanner{display:flex;gap:13px;align-items:center;cursor:pointer}
+.fanhomebanner .fhb-ico{font-size:28px;flex:0 0 auto}
+/* Открытый набор — единственная плашка на главной, которая должна бросаться
+   в глаза: подсвеченная рамка, тёплая заливка и живая кнопка. */
+.fanhomebanner.live{display:block;position:relative;overflow:hidden;border-color:var(--accLine);
+  background:linear-gradient(145deg,var(--accBg2),var(--surf) 70%);box-shadow:0 0 0 1px var(--accLine) inset}
+.fanhomebanner.live:after{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:linear-gradient(180deg,var(--amber2,var(--amber)),var(--amber))}
+.fanhomebanner.live .fhb-top{display:flex;gap:12px;align-items:center}
+.fanhomebanner.live h3{margin:0;font-size:17px}
+.fanhomebanner.live .fhb-tag{display:inline-block;margin-top:4px;font-size:9.5px;font-weight:850;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--amber);border:1px solid var(--accLine);background:var(--accBg);padding:3px 8px;border-radius:999px}
+.fanhomebanner.live .fhb-text{margin-top:10px;color:var(--dim);font-size:12.5px;line-height:1.5}
+.fanhomebanner.live .fanopen{margin-top:12px;width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{padding:7px 12px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);font-size:11px;
+font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
+.chip.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
+.chips.sm .chip{padding:5px 9px;font-size:10px;border-radius:8px}
+/* Шапка блока внутри вкладки: название, счётчик и язычок фильтров одной
+   строкой — фильтры не висят развёрнутыми и не съедают экран. */
+.bhead{display:flex;align-items:center;gap:8px;margin:4px 0 8px}
+.bhead h3{margin:0;font-size:15px;letter-spacing:-.2px}
+.bcnt{font-size:11px;color:var(--mute2);font-weight:700}
+.bhead .chip.sm{margin-left:auto;padding:5px 10px;font-size:10.5px;border-radius:9px}
+.matchswitch{display:flex;gap:6px;margin:2px 0 14px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--card2)}
+.matchswitch button{flex:1;border:0;border-radius:8px;padding:9px 8px;background:transparent;color:var(--mute);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
+.matchswitch button.on{background:var(--surf);color:var(--amber);box-shadow:0 1px 5px rgba(0,0,0,.2)}
+.match-player-link,.nm3 b,.nm3 em{cursor:pointer}
+/* Временное скрытие внешних ссылок: разметка и обработчики сохранены для возврата. */
+.website-link-hidden{display:none!important}
+.sday{margin:15px 0 7px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.srow{display:grid;grid-template-columns:48px minmax(0,1fr);gap:2px 10px;padding:10px 12px;margin-bottom:6px;border:1px solid var(--line4);border-radius:12px;background:var(--card2)}
+.srow.me{border-color:var(--accLine);background:linear-gradient(180deg,#1C1712,#161310)}
+.srow.clash{border-color:var(--loseLine)}
+.stime{grid-row:1/3;font-size:13px;font-weight:700;color:var(--amber);align-self:center}
+.spair{font-size:13px;font-weight:600;line-height:1.3}
+.spair .vs{color:var(--dim);font-weight:400}
+.smeta{font-size:10px;color:var(--dim)}
+/* Шапка карточки: показываем около 80% квадратной аватарки и гасим края
+   градиентом, чтобы имя ложилось на затухание, а не на резкий срез. */
+.hero .vign{position:absolute;left:0;right:0;pointer-events:none;z-index:2;max-height:280px}
+.hero .vign.t{top:0;height:74px;background:linear-gradient(180deg,var(--fadeTop),var(--fadeNone))}
+.hero .vign.b{top:66vw;margin-top:-132px;height:132px;background:linear-gradient(0deg,var(--fadeMid),var(--fadeNone))}
+.avbtn{box-shadow:0 0 0 2px rgba(232,164,92,.55)}
+/* Полноэкранный просмотр аватарки. */
+.avfull{position:fixed;inset:0;z-index:60;background:var(--sheet);display:flex;
+  align-items:center;justify-content:center;padding:18px}
+.avfull img{max-width:100%;max-height:88vh;border-radius:18px;display:block}
+.avfull .x{position:absolute;top:16px;right:18px;font-size:26px;color:var(--text);cursor:pointer;line-height:1}
+/* Панель загрузки — заметная рамка, размер шрифта не трогаем. */
+#avCard{border-color:var(--accLine);box-shadow:0 0 0 1px rgba(232,164,92,.18) inset}
+#avCard h3{color:var(--amber)}
+.avwarn{color:var(--amber);font-weight:700}
+.avup{background:linear-gradient(180deg,var(--accBg2),var(--accBg));border-color:var(--accLine);color:var(--amber);font-weight:800}
+/* Спойлер «как это считается». */
+/* Событие: кнопка записи, состав под спойлером, подсветка вкладки */
+.evbtn{width:100%;margin-top:11px;padding:11px 12px;border-radius:12px;font-weight:800;
+  font-size:13px;letter-spacing:.2px;cursor:pointer;border:1px solid transparent}
+.evbtn.go{background:linear-gradient(180deg,var(--win),var(--goBtn2));color:var(--onGo);
+  border-color:var(--goLine);box-shadow:0 6px 16px var(--goGlow)}
+.evbtn.go:active{transform:translateY(1px)}
+.evbtn.off{background:var(--surf2);color:var(--dim);border-color:var(--line)}
+.evspo{margin-top:10px}
+.evwho{display:flex;flex-direction:column;gap:1px}
+.evp{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line4)}
+.evp:last-child{border-bottom:0}
+.evp.wait{opacity:.62}
+.evp .nm{font-weight:700;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evp .sub{font-weight:600;color:var(--mute)}
+.evp .st{margin-left:auto;font-size:10.5px;color:var(--mute);white-space:nowrap}
+.evp .rm{cursor:pointer;color:var(--lose);font-weight:800;padding:0 2px}
+.evadd{position:relative;margin-top:8px}
+.evadd input{width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--line);
+  background:var(--surf2);color:var(--text);font-size:12.5px}
+.evadd .sug{position:absolute;left:0;right:0;top:100%;z-index:9;background:var(--surf);
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:4px}
+.evadd .sug div{padding:9px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line4)}
+.evadd .sug div:last-child{border-bottom:0}
+.evadd .sug div:active{background:var(--surf2)}
+.evadd .sug .sub{color:var(--mute)}
+.lnk{color:var(--link);text-decoration:none;border-bottom:1px solid var(--linkLine)}
+.tab .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--win);
+  margin-left:4px;vertical-align:middle;animation:evpulse 1.6s ease-in-out infinite}
+@keyframes evpulse{0%,100%{opacity:1}50%{opacity:.25}}
+#toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%) translateY(12px);
+  background:var(--surf);color:var(--text);border:1px solid var(--line);border-radius:12px;
+  padding:10px 14px;font-size:12.5px;font-weight:700;opacity:0;pointer-events:none;
+  transition:opacity .18s,transform .18s;z-index:99;max-width:86vw;text-align:center}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Касса игрока: цифра в шапке между переключателем темы и карточкой игрока. */
+.wchip{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card2);cursor:pointer;white-space:nowrap;
+  font-weight:800;font-size:12px;color:var(--amber)}
+.wchip:active{transform:translateY(1px)}
+.wpanel{border:1px solid var(--line);border-radius:16px;background:var(--surf);
+  padding:12px;margin:0 0 10px}
+.wpanel .big{font-size:26px;font-weight:800;color:var(--amber);letter-spacing:-.5px}
+.wpanel .lab{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--mute);margin-bottom:2px}
+.wrow{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid var(--line4);font-size:12.5px}
+.wrow:last-child{border-bottom:0}
+.wrow .d{color:var(--mute);font-size:11px;white-space:nowrap}
+.wrow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wrow .a{margin-left:auto;font-weight:800;white-space:nowrap}
+.wrow .a.plus{color:var(--win)} .wrow .a.minus{color:var(--lose)}
+.wsum{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.wsum button{flex:1 1 auto;padding:9px 12px;border-radius:11px;border:1px solid var(--line);
+  background:var(--surf2);color:var(--text);font-weight:800;font-size:12.5px;cursor:pointer}
+.wsum button.go{background:linear-gradient(180deg,var(--win),var(--goBtn2));color:var(--onGo);
+  border-color:var(--goLine)}
+.wown{display:flex;gap:7px;margin-top:8px}
+.wown input{flex:1;padding:9px 10px;border-radius:11px;border:1px solid var(--line);
+  background:var(--surf2);color:var(--text);font-size:12.5px}
+.spo{margin:10px 0 0;border:1px solid var(--line2);border-radius:12px;background:var(--card2)}
+.spo summary{cursor:pointer;padding:10px 12px;font-size:11px;font-weight:700;color:var(--dim);list-style:none}
+.spo summary::-webkit-details-marker{display:none}
+.spo[open] summary{color:var(--amber)}
+.spo .in{padding:0 12px 12px;font-size:11.5px;line-height:1.55;color:var(--dim)}
+/* Блок игрока в шапке. */
+.hdr{position:relative}
+.hdr .meplate{margin-left:auto;display:flex;align-items:center;gap:9px;cursor:pointer;
+  padding:5px 9px 5px 5px;border:1px solid var(--line2);border-radius:999px;background:var(--card2)}
+.hdr .meplate .avr,.hdr .meplate .avph{width:30px;height:30px;flex:0 0 30px;font-size:11px}
+.hdr .meplate .t1{font-size:11.5px;font-weight:800;line-height:1.15;max-width:104px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr .meplate .t2{font-size:9.5px;color:var(--dim);margin-top:2px}
+/* Итоги сезона на главной. */
+.chline{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;
+  padding:9px 11px;border:1px solid var(--line2);border-radius:12px;background:var(--card2);margin-bottom:7px}
+.chline.small{grid-template-columns:28px minmax(0,1fr) auto;padding:6px 10px;opacity:.82}
+.chline.small .avr,.chline.small .avph{width:28px;height:28px;flex:0 0 28px;font-size:10px}
+.chline .avr,.chline .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px}
+.chline .nm2{font-size:13px;font-weight:800;line-height:1.2}
+.chline.small .nm2{font-size:11.5px;font-weight:700}
+.chline .sub{font-size:9.5px;color:var(--dim);margin-top:2px}
+/* Индикатор идущего сезона на чипе. */
+.chip .ball{font-weight:400;animation:ptfblink 1.4s ease-in-out infinite}
+/* Чемпион — золотая рамка, финалист под счётом — серебряная и мельче. */
+.chbig .avr,.chbig .avph{box-shadow:0 0 0 3px var(--goldRing),0 0 0 5px var(--goldGlow)}
+.chbig .chru{margin-top:10px;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer}
+.chbig .chru .avr,.chbig .chru .avph{width:34px!important;height:34px!important;flex:0 0 34px!important;
+  font-size:11px!important;margin:0!important;box-shadow:0 0 0 2px var(--silver)!important}
+.chbig .chru .nm3{font-size:12px;font-weight:700;color:var(--dim)}
+.chsc{margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;font-weight:800;color:var(--amber)}
+/* Логотип PTF в шапке вместо текстовой заглушки. */
+.hdr .logo img{width:100%;height:100%;object-fit:contain;display:block}
+.hdr .logo{overflow:hidden;background:transparent;border:0;padding:2px}
+/* Логотип площадки в блоке сезона. */
+.venue{display:flex;align-items:center;gap:11px;margin-top:11px}
+.venue img{width:46px;height:46px;border-radius:12px;object-fit:cover;flex:0 0 46px;border:1px solid var(--line2)}
+.venue .vt{font-size:12.5px;font-weight:800}
+.venue .vd{font-size:10px;color:var(--dim);margin-top:2px}
+/* Мигающая отметка идущего сезона. */
+@keyframes ptfblink{0%,100%{opacity:1}50%{opacity:.25}}
+.sr .live{animation:ptfblink 1.4s ease-in-out infinite}
+/* Ярлык дивизиона в карточке матча — справа, как WIN/LOST слева. */
+.mt{position:relative}
+.mt .mdiv{position:absolute;top:10px;right:11px;cursor:pointer;z-index:2}
+.mt .mdiv:active{filter:brightness(1.35)}
+.mt .mdiv+.mtop{padding-right:86px}
+/* Чемпионы сезона крупно. */
 
-// Круговой турнир: окно уходит только тем, с кем ещё не играли.
-messages.length=0;
-await matches.publishOpenSlot({challenge_id:'private2',match_type:'open',status:'open',division:'Division W',
-  from_telegram_id:'7',from_name:'Wendy One',dates:'2099-09-14',time_from:'10:00',time_to:'14:00',duration_min:'120',courts:'Court A',season:'2',group:'1'});
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='8'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'Open slot reaches the same group with RU button');
-check(!messages.some(m=>m.method==='sendMessage'&&['1','2','3','4'].includes(String(m.args[0]))),'Open slot is not sent to other groups or divisions');
-messages.length=0;
-// У Алисы с Бобом матч уже есть — окно ему больше не уходит.
-await matches.publishOpenSlot({...slot,challenge_id:'private',season:'2',group:'1'});
-check(!messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[2]?.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='🎾 Играю'),'С кем уже сыграли или договорились — окно не шлём');
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&/уже сыграли|already played/i.test(String(m.args[1]||''))),'Автору честно говорят, что рассылать некому');
-messages.length=0;
-await matches.broadcastResult({...result2,challenge_id:'broadcast',result_photo_file_id:'user-photo'});
-check(messages.some(m=>m.method==='sendPhotoBuffer'),'Result card generated despite user photo');
-check(messages.some(m=>m.method==='sendPhoto'&&m.args[1]==='user-photo'),'User photo delivered additionally');
-const resultCaptions=messages.filter(m=>/sendPhoto/.test(m.method)).map(m=>m.args[m.method==='sendPhotoBuffer'?3:2]?.caption||'').filter(Boolean);
-check(resultCaptions.length&&resultCaptions.every(c=>/Match Result/.test(c)&&!/[А-Яа-яЁё]/.test(c)),'Result captions are consistently English');
-check(resultCaptions.every(c=>!c.includes('tg://user?id=')&&!/<a href="https:\/\/t\.me\/[^\/"]+">/.test(c)),'Result captions never link to private chats');
-check(resultCaptions.some(c=>/🏆 <b>[^<]+<\/b>/.test(c)),'Result captions show player names in bold');
-check(!messages.some(m=>/sendPhoto/.test(m.method)&&m.args[m.method==='sendPhotoBuffer'?4:3]?.reply_markup?.inline_keyboard),'Result cards have no inline buttons');
-// Reminder lifecycle: fixed daytime clock, no live scheduler or external APIs.
-const started=Date.parse('2099-09-15T03:00:00Z');
-const iso=ms=>new Date(ms).toISOString();
-const hour=3600000;
-const base={...slot,challenge_id:'remind',season:'2',group:'1',created_at:iso(started),responded_at:iso(started),
- dates:'2099-09-20',agreed_date:'2099-09-20',agreed_time:'10:00',agreed_court:'Court A',
- to_telegram_id:'2',to_name:'Bob Two',to_username:'bob',court_pending_at:iso(started),result_status:'',nudge_sent:'',court_nudge:''};
-const directCancel={...base,challenge_id:'cancel-direct',status:'pending',match_type:'direct',pending_by:'1'};
-await db.createSlot(directCancel);
-check((await db.cancelMatchmaking('cancel-direct',{telegram_id:'2'})).ok,'Either participant can cancel a direct request');
-check((await db.findSlot('cancel-direct')).status==='cancelled','Cancelled direct request is closed');
-const openCancel={...base,challenge_id:'cancel-open',status:'pending',match_type:'open',pending_by:'2',dates:'2099-09-20,2099-09-21'};
-await db.createSlot(openCancel);
-const returned=await db.cancelMatchmaking('cancel-open',{telegram_id:'2'});
-check(returned.ok&&returned.backToOpen,'Claimant can cancel and return an open window');
-const returnedSlot=await db.findSlot('cancel-open');
-check(returnedSlot.status==='open'&&!returnedSlot.to_telegram_id&&returnedSlot.dates.includes('2099-09-20'),'Returned window preserves future availability and clears opponent');
-await db.updateSlot('cancel-direct',{status:'accepted',result_status:'pending'});
-check((await db.cancelMatchmaking('cancel-direct',{telegram_id:'1'})).reason==='result_started','A match with submitted result cannot be cancelled');
-const adminOld={...base,challenge_id:'admin-old',status:'accepted',agreed_date:'2099-09-18',agreed_time:'09:00',result_status:'',result_confirmed_at:''};
-const adminNew={...base,challenge_id:'admin-new',status:'accepted',agreed_date:'2099-09-22',agreed_time:'09:00',result_status:'',result_confirmed_at:''};
-const adminConfirmedStatus={...base,challenge_id:'admin-confirmed-status',status:'accepted',agreed_date:'2099-09-17',result_status:' Confirmed ',result_confirmed_at:''};
-const adminConfirmedAt={...base,challenge_id:'admin-confirmed-at',status:'accepted',agreed_date:'2099-09-16',result_status:'',result_confirmed_at:iso(started)};
-for(const fixture of [adminOld,adminNew,adminConfirmedStatus,adminConfirmedAt])await db.createSlot(fixture);
-check((await request('get','/api/match/admin-active','1')).code===403,'Admin active-request list rejects a player');
-const adminActive=await request('get','/api/match/admin-active','99');
-check(adminActive.body.ok&&adminActive.body.items.some(x=>x.challenge_id==='cancel-open'),'Admin sees active requests across divisions');
-check(!adminActive.body.items.some(x=>['admin-confirmed-status','admin-confirmed-at'].includes(x.challenge_id)),'Admin match list hides every confirmed result');
-const adminOrder=adminActive.body.items.filter(x=>['admin-old','admin-new'].includes(x.challenge_id)).map(x=>x.challenge_id).join(',');
-check(adminOrder==='admin-old,admin-new','Admin match list is sorted oldest to newest');
-const adminBootstrap=await request('get','/api/match/bootstrap','99');
-check(!adminBootstrap.body.result_tasks.some(x=>['admin-confirmed-status','admin-confirmed-at'].includes(x.challenge_id)),'Admin result entry hides confirmed matches too');
+/* Партнёры: карточка с обложкой, описанием и кнопками связи. Список приходит
+   из листа Partners — верстка не знает, сколько их и какие они. */
+.pt{border:1px solid var(--line2);border-radius:16px;background:var(--card2);overflow:hidden;margin-bottom:11px}
+/* Картинка партнёра — целиком, без обрезки: у логотипов важны края. Любая
+   пропорция вписывается по ширине карточки; слишком высокая упирается в
+   потолок и центрируется, по бокам остаются поля фона. */
+.pt .ptimg{width:100%;height:auto;max-height:260px;object-fit:contain;display:block;background:var(--surf2);border-bottom:1px solid var(--line2)}
+.pt .ptbody{padding:13px 13px 12px}
+.pt .ptcat{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;font-weight:800;color:var(--champ)}
+.pt .ptname{font-size:17px;font-weight:800;margin-top:3px}
+.pt .ptdesc{margin-top:6px;color:var(--dim);font-size:13px;line-height:1.5;white-space:pre-wrap}
+.pt .ptdesc b{color:var(--text)}
+.ptacts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.ptacts a{flex:1 1 110px;text-align:center;text-decoration:none;border-radius:12px;padding:11px 12px;
+  font-size:13.5px;font-weight:800;border:1px solid var(--line2);color:var(--txt);background:var(--surf2)}
+.ptacts a.wa{background:var(--goBg,rgba(143,191,154,.15));border-color:var(--goLine);color:var(--win)}
+.ptnote{margin-top:9px;font-size:11.5px;color:var(--mute)}
+.chbig{border:1px solid var(--line2);border-radius:16px;background:var(--card2);padding:15px 13px 13px;
+  margin-bottom:10px;text-align:center;cursor:pointer}
+.chbig .avr,.chbig .avph{width:96px;height:96px;flex:0 0 96px;font-size:30px;margin:0 auto 10px}
+.chbig .nm2{font-size:16px;font-weight:800}
+.chbig .sub{font-size:10.5px;color:var(--champ);margin-top:4px;letter-spacing:.6px;text-transform:uppercase;font-weight:800}
+.chfin{margin-top:11px;border-top:1px solid var(--line2);padding-top:10px;
+  display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center}
+.chfin .sd{font-size:11.5px;font-weight:700;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chfin .sd.w{color:var(--text);font-weight:800}
+.chfin .sc2{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;font-weight:800;color:var(--amber)}
+/* Переходы между дивизионами. */
+.mv{display:grid;grid-template-columns:52px minmax(0,1fr);gap:11px;align-items:center;
+  padding:9px 11px;border:1px solid var(--line2);border-radius:14px;background:var(--card2);margin-bottom:8px;cursor:pointer}
+.mv .avr,.mv .avph{width:52px;height:52px;flex:0 0 52px;font-size:16px}
+.mv .nm2{font-size:13.5px;font-weight:800}
+.mv .path{font-size:10.5px;margin-top:3px;color:var(--dim);font-weight:700}
+.mv .path i{font-style:normal;font-weight:900;font-size:13px;vertical-align:-1px;padding:0 2px}
+.mv.up .path i{color:var(--upArrow)}
+.mv.down .path i{color:var(--lose)}
+.mv .wc{margin-left:6px;font-size:9px;padding:2px 6px;border-radius:999px;
+  border:1px solid var(--accLine);color:var(--amber);text-transform:uppercase;letter-spacing:.5px}
+/* Правила под спойлером. */
+.spo .in ul{margin:7px 0 0;padding-left:17px}
+.spo .in li{margin-bottom:4px}
+.spo .in h4{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mute);margin:12px 0 4px}
+.spo .in h4:first-child{margin-top:0}
+.spo .in table{width:100%;border-collapse:collapse;margin-top:7px;font-size:10.5px}
+.spo .in th,.spo .in td{border-bottom:1px solid var(--line2);padding:4px 3px;text-align:center}
+.spo .in th{color:var(--mute);font-weight:800;font-size:9px;text-transform:uppercase}
+.spo .in td:first-child,.spo .in th:first-child{text-align:left}
+.sr .live{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--amber);font-weight:800}
+.avbtn{position:absolute;top:12px;right:12px;z-index:3;width:38px;height:38px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;
+  background:rgba(12,11,10,.62);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(6px)}
+.avbtn:active{transform:scale(.93)}
+.avbtn.on{background:linear-gradient(180deg,var(--accBg2),var(--accBg));border-color:var(--accLine)}
+button{width:100%;border:1px solid var(--line);border-radius:13px;padding:13px;font-size:14px;font-weight:800;
+margin-top:12px;cursor:pointer;background:var(--card2);color:var(--text)}
+.more{width:100%;border:1px dashed var(--line3);background:transparent;color:var(--mute);border-radius:11px;
+padding:11px;font-size:11.5px;font-weight:700;margin-top:4px;cursor:pointer}
 
-const scopes={
- initial:{...base,status:'open',match_type:'direct'},
- negotiation:{...base,status:'pending',pending_by:'2'},
- court:{...base,status:'accepted'},
- time:{...base,status:'accepted',time_change:'12:00|1|'+iso(started)},
- result:{...base,status:'accepted',result_status:'pending',result_by:'1',result_submitted_at:iso(started)},
- score:{...base,status:'accepted',court_confirmed_at:iso(started),result_prompt_sent_at:iso(started)}
+/* бейджи */
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:800;
+border:1px solid var(--line3);background:var(--tile2);color:var(--mute);letter-spacing:.3px;white-space:nowrap}
+.badge.g{border-color:var(--goldLine);background:var(--goldBg);color:var(--gold)}
+.badge.ok{border-color:var(--winLine);background:var(--winBg);color:var(--win)}
+/* цвета дивизионов */
+.dv{display:inline-block;padding:3px 9px;border-radius:999px;font-size:9.5px;font-weight:800;white-space:nowrap}
+.dv.d-a{background:var(--dABg);border:1px solid var(--dALine);color:var(--dA)}
+.dv.d-b{background:var(--dBBg);border:1px solid var(--dBLine);color:var(--dB)}
+.dv.d-c{background:var(--dCBg);border:1px solid var(--dCLine);color:var(--dC)}
+.dv.d-d{background:var(--dDBg);border:1px solid var(--dDLine);color:var(--dD)}
+.dv.d-p{background:var(--dPBg);border:1px solid var(--dPLine);color:var(--dP)}
+.dv.d-x{background:var(--tile2);border:1px solid var(--line3);color:var(--mute)}
+
+/* форма W/L */
+.form{display:flex;gap:3px}
+.fm{width:16px;height:16px;border-radius:5px;font-size:9px;font-weight:800;display:flex;
+align-items:center;justify-content:center;color:var(--onForm)}
+.fm.w{background:var(--win)}.fm.l{background:var(--lose)}
+
+/* аватарки */
+.avr{border-radius:50%;object-fit:cover;object-position:50% 32%;background:var(--avBg);border:1px solid var(--line3);display:block}
+.avph{border-radius:50%;background:linear-gradient(160deg,var(--surf2),var(--avBg));border:1px solid var(--line3);
+display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--mute3)}
+
+/* --- гонка --- */
+.kpi{display:flex;gap:14px;margin:0 2px 13px;font-size:10px;color:var(--mute2);font-weight:600;flex-wrap:wrap}
+.kpi b{color:var(--dim);font-weight:800;font-size:12px}
+.kpi .a b{color:var(--amber)}
+.fbar{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:10px}
+.fbtn{display:flex;align-items:center;gap:6px;padding:11px 13px;border-radius:11px;background:var(--card2);
+border:1px solid var(--line4);font-size:11px;font-weight:700;color:var(--mute);white-space:nowrap;cursor:pointer;user-select:none}
+.fbtn.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
+.fbtn .n{background:var(--accLine);color:var(--amber);border-radius:6px;padding:1px 5px;font-size:9px}
+.fpanel{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px}
+.flab{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin:0 0 7px 2px}
+.tb{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.thd,.trw{display:grid;grid-template-columns:20px 34px minmax(0,1fr) 26px 44px 48px;gap:6px;align-items:center;padding:0 11px}
+/* В гонке между матчами и процентом добавилась колонка побед. */
+.tb.race .thd,.tb.race .trw{grid-template-columns:18px 40px minmax(0,1fr) 22px 22px 38px 42px;gap:5px;padding:0 8px}.tb.fantasy-race .thd,.tb.fantasy-race .trw{grid-template-columns:18px 40px minmax(0,1fr) 50px 45px;gap:5px;padding:0 8px}.tb.fantasy-race .trw{cursor:pointer}.tb.fantasy-race .trw .n{min-width:0}.tb.fantasy-race .team-count{text-align:center;color:var(--dim);font-size:11px}.tb.fantasy-race .pt{text-align:right}
+.tb.race .trw .avr,.tb.race .trw .avph{width:40px;height:40px;flex:0 0 40px;font-size:12px;object-position:50% 26%}
+.thd{height:36px;background:var(--surf2);font-size:8px;letter-spacing:1.3px;text-transform:uppercase;
+color:var(--mute2);font-weight:800}
+.thd span,.trw span:not(.n){text-align:center}
+.thd .n,.trw .n{text-align:left;min-width:0;overflow:hidden}
+.thd span{cursor:pointer;user-select:none}
+.thd .s{color:var(--amber)}
+.trw{height:54px;border-top:1px solid var(--line2);font-size:12.5px;color:var(--dim);position:relative;cursor:pointer}
+.trw:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.trw.top:before{background:linear-gradient(180deg,var(--champ),var(--champ2))}
+.trw .p{font-weight:800;color:var(--mute3);font-size:12px}
+.trw.top .p{color:var(--champ)}
+.trw .avr,.trw .avph{width:34px;height:34px;flex:0 0 34px;font-size:11px}
+.trw.top .avr,.trw.top .avph{border-color:rgba(217,199,163,.45)}
+.trw .nm{font-size:12.5px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:3px;border-radius:2px;background:var(--line5);overflow:hidden;width:100%;max-width:44px;margin:4px auto 0}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
+.trw .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.4px}
+.tip{font-size:9.5px;color:var(--mute2);font-weight:600;margin:9px 2px 0}
+
+/* --- игроки --- */
+.view{display:flex;gap:6px;margin-bottom:12px}
+.vb{flex:1;padding:8px;border-radius:9px;background:var(--card2);border:1px solid var(--line4);text-align:center;
+font-size:10.5px;font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
+.vb.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber)}
+.pr{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:13px;margin-bottom:10px;
+box-shadow:inset 0 1px 0 var(--hair);cursor:pointer}
+.pr .top{display:grid;grid-template-columns:84px minmax(0,1fr);gap:13px}
+.pr .ph{position:relative}
+.pr .ph .avr,.pr .ph .avph{width:84px;height:104px;border-radius:12px;font-size:24px}
+.rankb{position:absolute;top:6px;left:6px;background:rgba(10,10,11,.8);border:1px solid var(--accLine2);
+color:var(--champ);border-radius:7px;padding:2px 7px;font-size:9.5px;font-weight:800}
+.ach{display:flex;gap:4px;margin-top:7px;justify-content:center;flex-wrap:wrap}
+.ach span{width:22px;height:22px;border-radius:7px;background:var(--loseBg);border:1px solid var(--accLine2);
+display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer}
+.note{margin-top:10px;padding:8px 10px;border-radius:9px;background:var(--surf2);border:1px solid #241E16;
+font-size:10.5px;color:var(--gold);font-weight:700;display:flex;gap:8px;align-items:flex-start}
+.note b{color:var(--mute);font-weight:600;display:block;margin-top:2px}
+.pr .nm{font-size:15px;font-weight:800;letter-spacing:-.3px;line-height:1.2}
+.pr .rw{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px;align-items:center}
+.meta{display:flex;gap:11px;flex-wrap:wrap;margin-top:9px;font-size:10.5px;color:var(--mute);font-weight:600}
+.meta b{color:var(--dim);font-weight:800}
+.wrbar{margin-top:9px}
+.wrbar .t2{display:flex;justify-content:space-between;font-size:9px;letter-spacing:1.2px;
+text-transform:uppercase;color:var(--mute2);font-weight:800;margin-bottom:4px}
+.wrbar .bg{height:4px;border-radius:3px;background:var(--line5);overflow:hidden}
+.wrbar .bg i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
+.nums{display:flex;margin-top:11px;border-top:1px solid var(--line2);padding-top:9px}
+.nums>div{flex:1;text-align:center;border-right:1px solid var(--line2)}
+.nums>div:last-child{border-right:0}
+.nums .k{font-size:7.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute2);font-weight:800}
+.nums .v{font-size:14px;font-weight:800;margin-top:2px}
+.nums .v.a{color:var(--amber)}
+/* плитка */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pc{background:var(--surf);border:1px solid var(--line);border-radius:16px;overflow:hidden;position:relative;
+box-shadow:inset 0 1px 0 var(--hair);cursor:pointer}
+.pc .avr,.pc .avph{width:100%;aspect-ratio:4/5;border-radius:0;border:0;border-bottom:1px solid var(--line);font-size:30px}
+.pc .ach2{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:4px}
+.pc .ach2 span{width:22px;height:22px;border-radius:7px;background:rgba(10,10,11,.78);border:1px solid var(--accLine2);
+display:flex;align-items:center;justify-content:center;font-size:11px}
+.pc .bd{padding:10px 11px 12px}
+.pc .nm{font-size:13px;font-weight:800;letter-spacing:-.2px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc .rw{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.pc .mt2{font-size:10px;color:var(--mute);font-weight:600;margin-top:7px}
+.pc .mt2 b{color:var(--dim)}
+.pc .bg{height:3px;border-radius:2px;background:var(--line5);overflow:hidden;margin-top:8px}
+.pc .bg i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
+.pc .st{display:flex;margin-top:9px;padding-top:8px;border-top:1px solid var(--line2)}
+.pc .st>div{flex:1;text-align:center;border-right:1px solid var(--line2)}
+.pc .st>div:last-child{border-right:0}
+.pc .st .k{font-size:7px;letter-spacing:1.1px;text-transform:uppercase;color:var(--mute2);font-weight:800}
+.pc .st .v{font-size:12.5px;font-weight:800;margin-top:2px}
+.pc .st .v.a{color:var(--amber)}
+
+/* --- дивизион --- */
+.champ{border-radius:18px;padding:22px 18px 20px;text-align:center;margin-bottom:20px;
+background:linear-gradient(180deg,var(--champBg),var(--surf));border:1px solid var(--accLine2);position:relative;overflow:hidden;cursor:pointer}
+.champ:before{content:"";position:absolute;inset:-40% -20% auto;height:70%;
+background:radial-gradient(50% 60% at 50% 0%,var(--champGlow),transparent 70%)}
+.champ .in{position:relative}
+.cl{font-size:9px;letter-spacing:2.8px;text-transform:uppercase;font-weight:800;color:var(--gold)}
+.champ .avr,.champ .avph{width:88px;height:88px;margin:13px auto 0;font-size:26px;
+border:2px solid rgba(217,199,163,.55);box-shadow:0 0 0 6px rgba(217,199,163,.07),0 12px 30px rgba(0,0,0,.5)}
+.cn{font-size:23px;font-weight:800;letter-spacing:-.5px;margin-top:11px}
+.cd{font-size:11.5px;color:var(--mute);margin-top:4px}
+.drow{display:grid;grid-template-columns:22px minmax(0,1fr) 24px 24px 40px 16px;gap:8px;align-items:center;
+padding:0 13px;height:50px;font-size:13px;color:var(--dim);border-top:1px solid var(--line2);position:relative;cursor:pointer}
+.drow span:not(.n){text-align:center}
+.drow .n{text-align:left;display:flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap}
+.drow .avr,.drow .avph{width:38px;height:38px;flex:0 0 38px;font-size:12px}
+/* Обойма для аватарки в таблице: круг режет края, а само фото внутри увеличено,
+   поэтому лицо занимает кадр целиком, а не тонет в пейзаже. */
+.drow .avz{width:38px;height:38px;flex:0 0 38px;border-radius:50%;overflow:hidden;
+  display:block;background:var(--avBg);border:1px solid var(--line3)}
+.drow .avz .avr{width:100%;height:100%;border-radius:0;border:0;transform:scale(1.22);
+  transform-origin:50% 32%}
+.drow .avz .avph{width:100%;height:100%;border-radius:0;border:0}
+.drow .n em{font-style:normal;font-weight:700;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.drow .p{font-weight:800;font-size:12.5px;color:var(--mute3)}
+.drow .pt{font-weight:800;font-size:15px;color:var(--amber);letter-spacing:-.3px}
+.drow .mk{font-size:9px;color:var(--mute2)}
+.drow.hd{height:32px;font-size:8.5px;letter-spacing:1.5px;text-transform:uppercase;font-weight:800;
+color:var(--mute2);border-top:0;background:var(--surf2);cursor:default}
+.drow.hd .n em{font-size:8.5px;letter-spacing:1.5px;font-weight:800;color:var(--mute2)}
+.drow:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+.drow.hd:before{display:none}
+.z-up:before{background:linear-gradient(180deg,var(--champ),var(--champ2))}
+.z-up{background:linear-gradient(90deg,var(--zUpTint),transparent 60%)}
+.z-up .p{color:var(--champ)}
+.z-up.promo .mk{color:var(--gold)}
+.z-stay:before{background:var(--zStay)}
+.z-down:before{background:linear-gradient(180deg,var(--zDown1),var(--zDown2))}
+.z-down{background:linear-gradient(90deg,var(--zDownTint),transparent 60%)}
+.z-down .n em{color:var(--dim)}.z-down .mk{color:var(--lose)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin:11px 2px 0;font-size:9.5px;color:var(--mute2);font-weight:600}
+.legend i{font-style:normal;font-weight:800}
+.legend .u i{color:var(--gold)}.legend .d i{color:var(--lose)}
+.legend .zn{display:inline-block;width:3px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:4px;
+background:linear-gradient(180deg,var(--champ),var(--champ2))}
+/* сетка плей-офф */
+.tree{display:grid;grid-template-columns:1fr 26px 1fr;align-items:center;margin-bottom:22px}
+.col{display:flex;flex-direction:column;gap:14px}
+.mbox{background:var(--surf);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mbox.fin{border-color:var(--accLine2)}
+.mtitle{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800;
+padding:7px 10px 5px;background:var(--surf2)}
+.mbox.fin .mtitle{color:var(--gold);background:var(--finBg)}
+.sl{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px 10px;
+font-size:11.5px;color:var(--mute);border-top:1px solid var(--tile);cursor:pointer}
+.sl .avr,.sl .avph{width:22px;height:22px;flex:0 0 22px;font-size:8px}
+.sl span.nm2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.sl b{font-size:10.5px;font-weight:800;color:var(--mute2)}
+.sl.win{color:var(--text);background:linear-gradient(90deg,rgba(217,199,163,.06),transparent)}
+.sl.win b{color:var(--amber)}
+.sl.win .avr,.sl.win .avph{border-color:rgba(217,199,163,.5)}
+.conn{position:relative;height:100%;min-height:120px}
+.conn:before{content:"";position:absolute;left:0;right:50%;top:25%;height:1px;background:var(--line3)}
+.conn:after{content:"";position:absolute;left:0;right:50%;bottom:25%;height:1px;background:var(--line3)}
+.conn i{position:absolute;left:50%;top:25%;bottom:25%;width:1px;background:var(--line3)}
+.conn u{position:absolute;left:50%;right:0;top:50%;height:1px;background:var(--line3)}
+/* расширенная и матрица */
+.ext{margin-top:6px}
+.ext .er{display:grid;grid-template-columns:18px minmax(0,1fr) 22px 22px 22px 30px 32px 32px 36px;gap:5px;
+align-items:center;padding:9px 2px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--dim)}
+.ext .er span:not(.n){text-align:center}
+.ext .er .n{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;color:var(--text)}
+.ext .er.hd{font-size:7.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--mute2);font-weight:800;padding:0 2px 7px}
+.ext .er .b{font-weight:800;color:var(--amber)}
+.mx{overflow-x:auto;margin-top:8px;-webkit-overflow-scrolling:touch}
+.mx table{border-collapse:collapse;font-size:10px;white-space:nowrap}
+.mx th,.mx td{border:1px solid var(--line);padding:5px 7px;text-align:center;color:var(--mute)}
+.mx th{background:var(--surf2);color:var(--text);font-weight:800}
+.mx td.rowh,.mx th:first-child{background:var(--surf2);color:var(--text);font-weight:800;text-align:left;
+position:sticky;left:0;z-index:1}
+.mx td.self{background:#151312}
+
+/* --- матчи --- */
+.mt{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:11px;margin-bottom:8px;
+box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.mtop{text-align:center;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute2);
+font-weight:800;margin-bottom:9px}
+.fm2{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:9px;align-items:center}
+.fm2 .avr,.fm2 .avph{width:44px;height:44px;flex:0 0 44px;font-size:13px;cursor:pointer}
+.fm2 .avr.w,.fm2 .avph.w{border-color:rgba(217,199,163,.5);box-shadow:0 0 0 3px rgba(217,199,163,.07)}
+.fm2 .mid{text-align:center;min-width:0}
+.fm2 .nm3{font-size:12.5px;font-weight:700;line-height:1.35}
+.fm2 .nm3 b{color:var(--text);font-weight:800}
+.fm2 .nm3 s{text-decoration:none;color:var(--mute3);font-weight:600}
+.fm2 .nm3 em{font-style:normal;color:#9A9186;font-weight:600}
+/* Имена в ленте открывают карточку игрока — палец должен понимать, что тут жмут. */
+.fm2 .nm3 b,.fm2 .nm3 em{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.fm2 .nm3 b:active,.fm2 .nm3 em:active{opacity:.6}
+.sc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;font-weight:800;color:var(--amber);margin-top:3px}
+/* строка матча в карточке игрока */
+.mrow{display:grid;grid-template-columns:46px 46px minmax(0,1fr);gap:10px;align-items:center}
+.mrow .avr,.mrow .avph{width:46px;height:46px;flex:0 0 46px;font-size:13px;cursor:pointer}
+.mrow .who{font-size:13px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res{font-size:9px;font-weight:800;padding:4px 6px;border-radius:8px;letter-spacing:.4px;text-align:center}
+.res.w{background:var(--winBg);border:1px solid var(--winLine);color:var(--win)}
+.res.l{background:var(--loseBg);border:1px solid var(--loseLine);color:var(--lose)}
+
+/* --- страница игрока --- */
+.back{display:flex;align-items:center;gap:9px;margin-bottom:16px;color:var(--mute);font-size:12px;
+font-weight:700;cursor:pointer}
+.back i{width:30px;height:30px;border-radius:10px;background:var(--card2);border:1px solid var(--line4);
+display:flex;align-items:center;justify-content:center;font-style:normal;font-size:15px;color:var(--champ)}
+.hero{border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--surf);margin-bottom:12px;position:relative}
+.hero .avr,.hero .avph{width:100%;height:66vw;max-height:280px;border-radius:0;border:0;object-fit:cover;font-size:56px;object-position:50% 30%}
+.hero .fade{pointer-events:none;position:absolute;left:0;right:0;top:66vw;margin-top:-150px;height:150px;
+background:linear-gradient(180deg,transparent,rgba(17,16,16,.75) 58%,var(--surf))}
+.hero .info{padding:0 16px 17px;position:relative;z-index:3;margin-top:-46px}
+.hero h2{font-size:24px;font-weight:800;letter-spacing:-.7px;line-height:1.15}
+.hero .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.fline{display:flex;gap:4px;align-items:center;margin-top:11px}
+.fline .lb{font-size:8.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--mute2);font-weight:800;margin-right:5px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}.stt.tap{cursor:pointer}.stt.on{border-color:var(--accLine);background:var(--accBg)}.stt .qm{font-style:normal;font-size:8.5px;opacity:.5;border:1px solid currentColor;border-radius:999px;padding:0 3px;vertical-align:top}.stnote{margin-top:9px;font-size:11.5px;line-height:1.55;color:var(--dim);background:var(--tile2);border:1px solid var(--line2);border-radius:11px;padding:9px 11px}
+.stt{background:var(--surf2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stt .k{font-size:8.5px;letter-spacing:1.6px;text-transform:uppercase;color:var(--mute2);font-weight:800}
+.stt .v{font-size:18px;font-weight:800;margin-top:3px;letter-spacing:-.5px}
+.stt .v.a{color:var(--amber)}
+.sr{display:grid;grid-template-columns:minmax(0,1fr) 30px 30px 46px 52px;gap:7px;align-items:center;
+padding:11px 0;border-bottom:1px solid var(--tile);font-size:12.5px;color:var(--dim)}
+.sr span:not(.sn){text-align:center}
+.sr:last-of-type{border-bottom:0}
+.sr.hd{padding:0 0 8px;font-size:8px;letter-spacing:1.4px;text-transform:uppercase;color:var(--mute2);
+font-weight:800;border-bottom:1px solid var(--line5)}
+.sr .sn{font-size:13.5px;font-weight:800;color:var(--text);overflow:hidden}
+.sr .sd{font-size:10px;color:var(--mute3);font-weight:600;margin-top:3px}
+.sr .pl{font-weight:800;color:var(--champ)}
+.sr .ptt{font-weight:800;color:var(--amber)}
+.sr.hd .sn{font-size:8px;font-weight:800;color:var(--mute2);letter-spacing:1.4px}
+
+/* Навигация по разделам вместо свайпа: еле заметные полоски у краёв экрана
+   и дубль внизу страницы, чтобы не тянуться к кнопке «назад» самого Telegram. */
+.edge{position:fixed;top:0;bottom:0;transform:none;z-index:5;width:26px;
+display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;
+background:var(--edge);border:1px solid var(--line4);color:var(--mute2);
+opacity:.34;transition:opacity .18s ease,background .18s ease,color .18s ease;
+-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.edge i{font-style:normal;font-size:19px;line-height:1;font-weight:700;margin-top:-2px}
+.edge.l{left:0;border-left:0;border-radius:0}
+.edge.r{right:0;border-right:0;border-radius:0}
+.edge:active{opacity:1;background:var(--edgeOn);color:var(--amber)}
+@media (hover:hover){.edge:hover{opacity:.85;color:var(--amber)}}
+.edge.off{display:none}
+
+.navbot{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:22px 0 6px}
+.navbot.one{grid-template-columns:1fr}
+.navbot button{background:var(--surf);border:1px solid var(--line);border-radius:12px;
+padding:13px 10px;color:var(--dim);font-size:11.5px;font-weight:700;cursor:pointer;
+font-family:inherit;display:flex;align-items:center;justify-content:center;gap:7px;
+min-width:0;transition:border-color .18s ease,color .18s ease}
+.navbot button:active{border-color:#3A2E1F;color:var(--amber)}
+.navbot button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.navbot button i{font-style:normal;color:var(--mute2);font-size:15px;line-height:1;flex:none}
+.navbot button:active i{color:var(--amber)}
+
+.soon{background:var(--surf);border:1px solid var(--line);border-radius:18px;
+padding:34px 22px;text-align:center;margin-top:4px}
+.soon .ic{font-size:26px;opacity:.55;margin-bottom:12px}
+.soon .t{font-size:15px;font-weight:800;color:var(--text);letter-spacing:-.2px}
+.soon .d{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.6;max-width:280px;
+margin-left:auto;margin-right:auto}
+.aline{display:flex;align-items:flex-start;gap:11px;padding:11px 0;border-bottom:1px solid var(--tile)}
+.aline:last-child{border-bottom:0}
+.aline .ic{width:30px;height:30px;border-radius:9px;background:linear-gradient(160deg,#2A2116,var(--loseBg));
+border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 30px}
+.aline .tx{font-size:13px;font-weight:700;line-height:1.35}
+.aline .dt{font-size:10px;color:var(--mute3);font-weight:600;margin-top:3px}
+
+/* Переключатель темы: два ярлычка в шапке, выбор запоминается на устройстве. */
+.thsw{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:999px;
+  background:var(--surf);flex:0 0 auto}
+.thsw button{width:27px;height:24px;border:0;border-radius:999px;background:transparent;
+  color:var(--mute);font-size:13px;line-height:1;cursor:pointer;padding:0;display:flex;
+  align-items:center;justify-content:center;font-family:inherit}
+.thsw button.on{background:var(--accBg);color:var(--amber);box-shadow:0 0 0 1px var(--accLine) inset}
+.hdr .meplate .t1{max-width:88px}
+
+html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturate(.6)}
+.fanmeta{display:inline-block;margin-top:7px;font-size:10.5px;color:var(--mute);font-weight:600;border:1px solid var(--line2);border-radius:8px;padding:4px 8px}.fanhero{position:relative;overflow:hidden;padding:18px;background:linear-gradient(145deg,var(--accBg2),var(--surf) 62%)}.fanhero:after{content:'PTF';position:absolute;right:-7px;bottom:-28px;font-size:82px;font-weight:950;color:rgba(222,154,74,.06)}.fanhero h3{font-size:23px;margin:0 0 7px}.fanhero p{max-width:420px;color:var(--dim);line-height:1.5;margin:0;position:relative;z-index:1}.fanmark{width:50px;height:50px;border-radius:16px;background:linear-gradient(145deg,var(--amber2),var(--amber));display:flex;align-items:center;justify-content:center;color:#17110a;font-size:24px;margin-bottom:13px}.fanseg{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.fanseg button{margin:0;padding:10px}.fanseg button.on{border-color:var(--accLine);background:var(--accBg);color:var(--amber)}.fanrank{display:grid;grid-template-columns:28px 40px minmax(0,1fr) auto;gap:9px;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line2);cursor:pointer}.fanrank:last-child{border-bottom:0}.fanrank .avr,.fanrank .avph{width:40px;height:40px;font-size:11px}.fanplace{text-align:center;font-size:15px;font-weight:900}.fanpts{font-size:15px;font-weight:900;color:var(--amber)}.fanopen{position:relative;z-index:1;margin-top:14px}.fanpreview{margin-top:12px;color:var(--amber);font-size:11px;font-weight:750}
+.fanhero.compact{padding:13px 15px}.fanhero.compact:after{font-size:60px;bottom:-18px}.fanhero-top{display:flex;align-items:center;gap:11px;position:relative;z-index:1}.fanhero-top .fanmark{width:38px;height:38px;border-radius:12px;font-size:18px;margin-bottom:0;flex:0 0 auto}.fanhero-title h3{font-size:17px;margin:0}.fanhero-title .sub{color:var(--dim);font-size:11.5px;margin-top:2px}.fanhero-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--dim);font-size:10.5px;margin-top:9px;position:relative;z-index:1}.fanpreview-tag{color:var(--amber);font-weight:750;border:1px solid var(--accLine);background:var(--accBg);padding:2px 7px;border-radius:999px}
+.fanmine{cursor:pointer}
+.fanrank-wrap{border-bottom:1px solid var(--line2)}.fanrank-wrap:last-child{border-bottom:0}.fanrank-wrap .fanrank{border-bottom:0}.fanrank-wrap.open .fanrank{background:var(--accBg)}.fanrank{grid-template-columns:28px 40px minmax(0,1fr) auto auto}.fanchev{font-size:9px;color:var(--dim)}
+.fansquad{padding:2px 2px 11px 40px}.fansquad-row{display:flex;justify-content:space-between;gap:9px;padding:6px 0;border-top:1px dashed var(--line2);font-size:12.5px;cursor:pointer}.fansquad-row:first-child{border-top:0}.fansquad-row .cap{color:var(--amber);font-size:9.5px;border:1px solid var(--accLine);background:var(--accBg);border-radius:5px;padding:0 4px;margin-left:3px}.fansquad-row .cap.vc{color:var(--dim);border-color:var(--line2);background:transparent}.fansquad-row .pt{color:var(--amber)}
+.badge.fanpos{border-color:var(--accLine);background:var(--accBg);color:var(--amber);cursor:pointer}
+.fanblock-hd{display:flex;align-items:center;justify-content:space-between;cursor:pointer}.fanblock-hd h3{margin:0}
+.event-past{opacity:.7;border-style:dashed}.event-past h3{color:var(--dim)}
+
+.crosslist{display:grid;gap:8px;margin:0 0 18px}.crosscard{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:13px 14px}.crosspair{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:850}.crosspair span:nth-child(2){color:var(--gold);font-weight:950}.crossmeta{color:var(--muted);font-size:11px;margin-top:6px}.playgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:18px}.playstage{display:grid;gap:8px}.playtitle{color:var(--muted);font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.08em}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="wrap">
+  <div class="hdr" id="hdr">
+    <div class="logo"><img src="/public/img/ptf.png" alt="PTF"></div>
+    <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
+    <div class="thsw" id="thSw"></div>
+    <div id="walletChip" class="hidden"></div>
+    <div id="mePlate"></div>
+  </div>
+  <div id="walletPanel" class="hidden"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="viewHome"></div>
+  <div id="viewDiv" class="hidden"></div>
+  <div id="viewRace" class="hidden"></div>
+  <div id="viewPlayers" class="hidden"></div>
+  <div id="viewMatches" class="hidden"></div>
+  <div id="viewEvents" class="hidden"></div>
+  <div id="viewFantasy" class="hidden"></div>
+  <div id="viewPartners" class="hidden"></div>
+  <div id="viewAbout" class="hidden"></div>
+  <div id="viewCard" class="hidden"></div>
+  <div class="navbot" id="navBot"></div>
+</div>
+<div class="edge l off" id="edgeL" onclick="navStep(-1)"><i>‹</i></div>
+<div class="edge r off" id="edgeR" onclick="navStep(1)"><i>›</i></div>
+<script>
+// Тему ставим первой строкой: если ждать загрузки данных, светлый экран успеет
+// мигнуть тёмным, и наоборот.
+try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
+  document.documentElement.setAttribute('data-theme',_th); }catch(e){}
+var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
+var initData=(tg&&tg.initData)||'';
+var linkToken=new URLSearchParams(location.search).get('t')||'';
+var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
+var L=window.PTFPrefs?PTFPrefs.lang()==='ru':((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
+
+var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='',fantasyData=null,fRank='teams',fanTeamOpen='',fantasyAllowed=false;
+var mode='home',openId='',backTo='players';
+var pQuery='',pDiv='',pSeason='',pSeasonTouched=false,pView='tile',pOrder=[],openAch='',pFiltersOpen=false,pSugOpen=false;
+var rQuery='',rFilter='',rSort='points',rDesc=true,rFiltersOpen=false,rSugOpen=false;
+var fQuery='',fDiv='',fLimit=20,fSugOpen=false;
+var divLetter='',divData=null,divLoading=false,divErr='',showExt=false,showMx=false;
+var seasons=[],divSeason='';
+var allMatches=false;
+
+var T={
+ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годовая гонка PTF.',
+  evSignUp:'Записаться',evOpenBot:'Записаться в боте',evFull:'Мест нет',evSpots:'Свободно мест',
+  evPrice:'Участие',evGuest:'Гость',evYouIn:'Ты записан',evWait:'Лист ожидания',
+  evPay:'Ждём оплату',evPaid:'Оплачено',evDeposit:'Депозит',evPast:'Событие прошло',
+  evOk:'Участвует',evPending:'Записался',
+  evCancel:'Отменить участие',evWho:'Участники',evNobody:'Пока никто не записался',
+  evInviteOnly:'Только по приглашению',evAdd:'Добавить игрока',evRemove:'убрать',
+  evClosed:'Запись закрыта',evSending:'Секунду…',evJoined:'Готово — счёт и детали в боте',
+  evToTopic:'Вопрос ушёл в тему игрока в админ-группе',
+  evCancelAsk:'Отменить участие? Деньги вернутся по правилу отмены.',evGuestsN:'гостей',evUntil:'Запись до',
+  wBalance:'Депозит',wEmpty:'Операций пока нет',wTopup:'Пополнить',wOwn:'Своя сумма',wGo:'Пополнить',
+  wSent:'Счёт на пополнение отправлен в бот',wMin:'Минимум {n} ฿',
+  wNote:'После перевода пришли скриншот в бот — организатор подтвердит, и деньги появятся здесь.',
+  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Собери команду из игроков всех дивизионов и следи за всей лигой. Здесь будут отдельные рейтинги Fantasy-команд и игроков.',fantasyTeams:'Команд выбрали',fantasyPoints:'FP',fantasyTeamRank:'Команды Fantasy',fantasyPlayerRank:'Игроки Fantasy',fantasyOpen:'Открыть Fantasy',fantasyPreview:'Предпросмотр: участие и сохранение составов пока закрыты.',fantasyEmpty:'Данных Fantasy пока нет.',fantasyOwner:'Автор',
+  search:'Поиск по имени…',searchP:'Поиск по игроку…',sugMore:'ещё',sugNone:'Никого не нашли',all:'Все',found:'Найдено: ',random:' · порядок случайный',
+  nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
+  filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Сезон',
+  schToday:'Сегодня',schTomorrow:'Завтра',schMine:'Только мои',schUpcoming:'Ближайшие матчи',histTitle:'История матчей',matchesUpcoming:'Предстоящие',matchesHistory:'История',resultPending:'Ожидается результат',matchSoon:'Скоро',matchAgreed:'Матч назначен',
+  schEmpty:'Согласованных матчей впереди пока нет.',schCourtTbd:'корт не выбран',schCourts:'Корты',
+  schTotal:'Матчей',schNoCourt:'Без подтверждённого корта',schClash:'Накладки',schWithScore:'со счётом',
+  avTitle:'Аватарка',avSend:'📸 Загрузить селфи',avRedo:'📸 Заменить селфи',avSending:'Отправляю…',
+  avAccepted:'Селфи принято — пришлю результат в чат.',avQueued:'Селфи в очереди на обработку.',
+  avWorking:'Делаю аватарку — это занимает до минуты.',avReady:'Варианты готовы — выбери нужный кнопками в чате с ботом.',
+  avPublished:'Аватарка опубликована.',
+  avFailed:'Не получилось обработать фото',avStub:'Генерация ИИ ещё не подключена — пока возвращается исходное фото.',
+  avRules:'Лицо крупно, дневной свет, без кепки и тёмных очков, один человек в кадре.',
+  avLeft:'Осталось попыток',avNoTries:'Попытки закончились — напиши организатору.',
+  avTooBig:'Фото больше 8 МБ — сними заново или сожми.',
+  avPrivacy:'Фото используется только для аватарки в лиге. Напиши организатору, если хочешь его удалить.',
+  avNotChat:'Не отправляй фото в чат — загрузи его здесь.',avFull:'Открыть аватарку',
+  cWins:'Победы',divPts:'Очки в дивизионе',racePts:'Очки в гонке',divPlace:'Место',
+  promoted:'Повышения',relegated:'Понижения',achHolders:'Награды сезона',myCard:'Моя карточка',
+  finalLab:'Финал',champTag:'champion',howDivT:'Как работает дивизион',
+  howRaceT:'Как начисляются очки гонки',
+  openDiv:'Открыть таблицу дивизиона',lastSeason:'Итоги прошлого сезона',runnerUp:'Финалист',
+  howPoints:'Как начисляются очки',
+  howRace:'Годовая гонка складывается из очков за все сезоны. Очки начисляются за место в дивизионе по итогам регулярной части и за результат в плей-офф. Чем выше дивизион, тем дороже каждое место.',
+  howDiv:'В дивизионе играют круговой турнир: каждый с каждым. За победу даются очки, места распределяются по очкам, при равенстве — по разнице сетов и геймов. Первые места выходят в плей-офф, последние опускаются дивизионом ниже.',
+  players:'Игроков',matchesN:'Матчей',leader:'Лидер',
+  colNo:'#',colPlayer:'Игрок',colM:'И',colW:'П',colWR:'WR',colPts:'ОЧК',
+  sMatches:'Матчи',sWins:'Победы',sPoints:'YRP',sPointsFull:'Очки гонки (YRP)',sWL:'Победы — поражения',sWR:'Процент побед',
+  sDivPos:'в дивизионе',sSeasonNow:'LIVE',avOpen:'Изменить аватарку',
+  sortTip:'Нажмите на заголовок столбца, чтобы отсортировать',
+  detail:'Подробно',tile:'Плитка',ntrp:'NTRP',exp:'Опыт',
+  standings:'Турнирная таблица',playoff:'Плей-офф',champion:'Чемпион дивизиона',
+  final:'Финал',sf:'Полуфинал',ext:'Расширенная статистика',mx:'Все против всех',
+  zPlayoff:'плей-офф',zPromo:'повышение',zStay:'остаётся в дивизионе',zDown:'вылет',
+  noDiv:'Дивизион пока не сформирован.',
+  seasonSoon:'Составы дивизионов ещё формируются. Таблица появится здесь, как только сезон стартует.',
+  seasons:'Сезоны',ach:'Достижения',history:'История матчей',
+  cSeason:'Сезон',cG:'M',cW:'W',cPlace:'Ранг',cPts:'YRP',
+  showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
+  sInfo:'Сезон 2',sDates:'Матчи регулярной части',sDatesV:'14 сентября — 5 ноября',
+  sSemi:'Полуфиналы и финал',sSemiV:'7–8 ноября',sVenue:'Площадка',sVenueV:'The Peak Racket Park',
+  yourSeason:'Твой сезон',notInLeague:'Ты пока не в составе дивизиона. Подай заявку — и раздел оживёт.',
+  champions:'Чемпионы сезона',rules:'Как считается таблица',site:'Открыть сайт',
+  noEvents:'Турниров пока нет. Появятся здесь, как только заведём первый.',
+  back:'Назад',showMore:'Показать ещё',matchesLeague:'Все матчи лиги',
+  active:'Active',inactive:'Inactive'},
+en:{title:'League',sub:'Standings, matches, players and the yearly race.',
+  evSignUp:'Sign up',evOpenBot:'Sign up in the bot',evFull:'No spots left',evSpots:'Spots left',
+  evPrice:'Entry',evGuest:'Guest',evYouIn:'You are in',evWait:'Waitlist',
+  evPay:'Awaiting payment',evPaid:'Paid',evDeposit:'Deposit',evPast:'Event has passed',
+  evOk:'In',evPending:'Signed up',
+  evCancel:'Cancel my spot',evWho:'Participants',evNobody:'Nobody has signed up yet',
+  evInviteOnly:'By invitation only',evAdd:'Add player',evRemove:'remove',
+  evClosed:'Sign-up closed',evSending:'One moment…',evJoined:'Done — invoice and details are in the bot',
+  evToTopic:'Sent to the player’s topic in the admin group',
+  evCancelAsk:'Cancel your spot? Refund follows the cancellation rule.',evGuestsN:'guests',evUntil:'Sign-up until',
+  wBalance:'Deposit',wEmpty:'No operations yet',wTopup:'Top up',wOwn:'Custom amount',wGo:'Top up',
+  wSent:'Top-up invoice sent to the bot',wMin:'Minimum {n} ฿',
+  wNote:'After the transfer send the screenshot to the bot — once confirmed the money appears here.',
+  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Build a squad across every division and follow the whole league. Fantasy teams and players have their own standings here.',fantasyTeams:'Selected by teams',fantasyPoints:'FP',fantasyTeamRank:'Fantasy teams',fantasyPlayerRank:'Fantasy players',fantasyOpen:'Open Fantasy',fantasyPreview:'Preview: squad entry and saving are still closed.',fantasyEmpty:'No Fantasy data yet.',fantasyOwner:'Owner',
+  search:'Search by name…',searchP:'Search by player…',sugMore:'more',sugNone:'Nobody found',all:'All',found:'Found: ',random:' · random order',
+  nobody:'Nobody matched — try another name.',noData:'No data yet.',
+  filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Season',
+  schToday:'Today',schTomorrow:'Tomorrow',schMine:'Mine only',schUpcoming:'Upcoming matches',histTitle:'Match history',matchesUpcoming:'Upcoming',matchesHistory:'History',resultPending:'Result pending',matchSoon:'Soon',matchAgreed:'Match agreed',
+  schEmpty:'No agreed matches coming up yet.',schCourtTbd:'court not set',schCourts:'Courts',
+  schTotal:'Matches',schNoCourt:'Court not confirmed',schClash:'Clashes',schWithScore:'with score',
+  avTitle:'Avatar',avSend:'📸 Upload a selfie',avRedo:'📸 Replace the selfie',avSending:'Sending…',
+  avAccepted:'Selfie received — I will send the result in chat.',avQueued:'Your selfie is queued.',
+  avWorking:'Creating your avatar — this takes up to a minute.',avReady:'Your versions are ready — pick one with the buttons in the bot chat.',
+  avPublished:'Your avatar is published.',
+  avFailed:'Could not process the photo',avStub:'AI generation is not connected yet — your original photo comes back for now.',
+  avRules:'Face close up, daylight, no cap or sunglasses, one person in the frame.',
+  avLeft:'Attempts left',avNoTries:'No attempts left — message the organizer.',
+  avTooBig:'The photo is over 8 MB — retake or compress it.',
+  avPrivacy:'The photo is used only for your league avatar. Message the organizer if you want it deleted.',
+  avNotChat:'Do not send the photo to the chat — upload it here.',avFull:'Open the avatar',
+  cWins:'Wins',divPts:'Division points',racePts:'Race points',divPlace:'Place',
+  promoted:'Promotions',relegated:'Relegations',achHolders:'Season awards',myCard:'My profile',
+  finalLab:'Final',champTag:'champion',howDivT:'How the division works',
+  howRaceT:'How race points are awarded',
+  openDiv:'Open the division table',lastSeason:'Last season results',runnerUp:'Runner-up',
+  howPoints:'How points are awarded',
+  howRace:'The Yearly Race adds up points from every season. Points come from your place in the division after the regular stage and from your play-off result. The higher the division, the more each place is worth.',
+  howDiv:'A division plays a round robin: everyone against everyone. Wins bring points, places are decided by points and then by set and game difference. The top places go to the play-offs, the bottom ones drop a division.',
+  players:'Players',matchesN:'Matches',leader:'Leader',
+  colNo:'#',colPlayer:'Player',colM:'G',colW:'W',colWR:'WR',colPts:'PTS',
+  sMatches:'Matches',sWins:'Wins',sPoints:'YRP',sPointsFull:'Yearly Race points (YRP)',sWL:'Wins — losses',sWR:'Win rate',
+  sDivPos:'in division',sSeasonNow:'live',avOpen:'Change avatar',
+  sortTip:'Tap a column header to sort',
+  detail:'Detailed',tile:'Tiles',ntrp:'NTRP',exp:'Experience',
+  standings:'Standings',playoff:'Playoffs',champion:'Division champion',
+  final:'Final',sf:'Semifinal',ext:'Extended standings',mx:'Head-to-head',
+  zPlayoff:'playoff',zPromo:'promotion',zStay:'stays in division',zDown:'relegation',
+  noDiv:'This division is not formed yet.',
+  seasonSoon:'Division line-ups are still being formed. The table will appear here once the season starts.',
+  seasons:'Seasons',ach:'Achievements',history:'Match history',
+  cSeason:'Season',cG:'M',cW:'W',cPlace:'Rank',cPts:'YRP',
+  showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
+  sInfo:'Season 2',sDates:'Regular season matches',sDatesV:'14 September — 5 November',
+  sSemi:'Semifinals and final',sSemiV:'7–8 November',sVenue:'Venue',sVenueV:'The Peak Racket Park',
+  yourSeason:'Your season',notInLeague:'You are not in a division yet. Apply and this section comes alive.',
+  champions:'Season champions',rules:'How the table works',site:'Open the website',
+  noEvents:'No tournaments yet. They will appear here once we add the first one.',
+  back:'Back',showMore:'Show more',matchesLeague:'All league matches',
+  active:'Active',inactive:'Inactive'}
 };
-for(const [name,fixture] of Object.entries(scopes)) {
- check(!db.stuckItem(fixture,started+14*60000),name+' no reminder before 15 minutes');
- // «Внесите счёт» напоминаний больше не шлёт: приглашение уходит один раз, а
- // через 28 часов вопрос уходит организатору. Остальные ступени не тронуты.
- // Подтверждение чужого счёта дёргаем реже всех: две ступени вместо четырёх.
- const stages=name==='score'?[[1680,'close']]
-   :name==='result'?[[240,'n2'],[1440,'d1'],[1680,'close']]
-   :[[15,'m20'],[120,'n1'],[240,'n2'],[1440,'d1'],[1680,'close']];
- for(const [minutes,stage] of stages) {
-   const item=db.stuckItem(fixture,started+minutes*60000);
-   check(item?.stage===stage&&item.scope===(name==='initial'?'invite':name),name+' reaches '+stage);
- }
- if(name==='result')for(const minutes of [15,120])
-   check(!db.stuckItem(fixture,started+minutes*60000),'Подтверждение счёта не дёргают через '+minutes+' мин');
- if(name==='score')for(const minutes of [15,120,240,1440])
-   check(!db.stuckItem(fixture,started+minutes*60000),'Просьба внести счёт не повторяется через '+minutes+' мин');
+var X=L?T.ru:T.en;
+var $=function(id){return document.getElementById(id)};
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(m){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]})}
+function q(s){return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+function initials(n){return String(n||'?').trim().split(/\s+/).slice(0,2).map(function(w){return w[0]||''}).join('').toUpperCase()}
+function openLink(u){if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}
+
+// Аватарка: если фото нет или не загрузилось — инициалы в том же круге.
+function av(p,cls,extra){
+  var c=(cls||'')+(extra?' '+extra:'');
+  return p&&p.photo
+    ? '<img class="avr '+c+'" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="fallbackAv(this,\''+q(initials(p.name))+'\')">'
+    : '<div class="avph '+c+'">'+esc(initials(p&&p.name))+'</div>';
 }
-check(db.stuckItem(scopes.initial,started+15*60000).waiting.id==='2','Initial direct challenge reminds recipient');
-check(db.stuckItem(scopes.negotiation,started+15*60000).waiting.id==='1','Counter-proposal reminds other side');
-check(!db.stuckItem({...base,status:'open',to_telegram_id:''},started+28*hour),'Unclaimed open window does not spam every opponent');
-check(!db.stuckItem({...scopes.court,court_confirmed_at:iso(started)},started+2*hour),'Confirmed court stops booking reminders');
-check(!db.stuckItem({...scopes.result,result_status:'confirmed'},started+2*hour),'Confirmed score stops reminders');
-check(!db.stuckItem({...scopes.result,result_status:'disputed'},started+2*hour),'Disputed score does not trigger court expiration');
-check(db.stuckItem({...scopes.court,time_change:scopes.time.time_change},started+2*hour).scope==='time','Court reminders pause during rescheduling');
-check(db.stageFor(2,['m20','n1'])==='','Do not replay earlier reminder stages');
-await db.createSlot(scopes.initial);
-check((await db.listStuck(started+14*hour)).length===0,'Night hold suppresses staged reminders');
-let item=db.stuckItem(scopes.initial,started+4*hour);
-await db.markStuckNudge('remind','invite','n2',item);
-check((await db.findSlot('remind')).nudge_sent==='m20,n1,n2','Night catch-up marks earlier stages instead of sending a burst');
-await db.updateSlot('remind',{nudge_sent:''});
-messages.length=0;
-await server.runStuckNudges(started+15*60000);
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Вас вызвали на матч')),'Непринятый вызов получает приглашение, а не укор про незавершённое согласование');
-const sentAt15=messages.length;
-await server.runStuckNudges(started+20*60000);
-check(messages.length===sentAt15,'Next scheduler tick does not repeat delivered reminder');
-await server.runStuckNudges(started+24*hour);
-check((await db.findSlot('remind')).nudge_sent.includes('d1'),'24-hour final reminder recorded');
-await server.runStuckNudges(started+28*hour);
-check((await db.findSlot('remind')).status==='expired','Unanswered initial direct challenge expires after 28 hours');
-await db.updateSlot('remind',{...scopes.negotiation,nudge_sent:'m20,n1,n2,d1'});
-const stale=db.stuckItem(await db.findSlot('remind'),started+28*hour);
-check((await db.counterSlot('remind',{telegram_id:'1'},{date:'2099-09-20',time:'11:00',court:'Court A'})).ok,'Counter-proposal accepted');
-check((await db.findSlot('remind')).nudge_sent==='','Counter-proposal resets all reminders');
-check(!await db.isStuckCurrent(stale),'Old sweep item invalidated by new proposal');
-await db.markStuckNudge('remind','negotiation','d1',stale);
-check((await db.findSlot('remind')).nudge_sent==='','Stale delivery cannot mark the next stage as notified');
-check(!(await db.closeStuckSlot('remind',{expected:stale,now:started+28*hour})).ok,'Stale sweep cannot expire new proposal');
-check((await db.acceptProposal('remind',{telegram_id:'2'})).ok,'Agree match after counter-proposal');
-check(Boolean((await db.findSlot('remind')).court_pending_at),'Court stage starts on agreement');
-await db.updateSlot('remind',{...scopes.court,court_nudge:'m20,n1,n2'});
-check((await db.proposeTimeChange('remind',{telegram_id:'1'},'12:00')).ok,'Rescheduling creates independent stage');
-check((await db.acceptTimeChange('remind',{telegram_id:'2'},'12:00')).ok,'New time confirmed');
-check((await db.findSlot('remind')).court_nudge==='','Court reminders restart after new time agreement');
-await db.updateSlot('remind',{...scopes.court,time_change:'',court_nudge:''});
-messages.length=0;
-await server.runStuckNudges(started+15*60000);
-check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&m.args[1].includes('booking is incomplete')),'Court reminder sent in EN to first player');
-check(!messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='2'&&m.args[1].includes('Бронирование матча не завершено')),'No court reminder sent to responding player');
-item=db.stuckItem(await db.findSlot('remind'),started+28*hour);
-check((await db.confirmCourt('remind',{telegram_id:'1'})).ok,'Court confirmation remains available');
-check(!(await db.closeStuckSlot('remind',{scope:'court',expected:item,now:started+28*hour})).ok,'Sweep cannot cancel a court confirmed in the meantime');
-await db.updateSlot('remind',{...scopes.court,court_confirmed_at:'',court_confirmed_by:'',time_change:'',dates:'2099-09-14,2099-09-20'});
-await server.runStuckNudges(started+28*hour);
-const reopened=await db.findSlot('remind');
-check(reopened.status==='open'&&!reopened.to_telegram_id&&!reopened.agreed_time,'Unconfirmed court releases original open window');
-check(reopened.dates==='2099-09-20','Only future dates return to available windows');
-check(!reopened.reminder_sent&&!reopened.court_nudge&&!reopened.result_prompt_sent_at,'Reopened window has clean next-stage flags');
-await db.updateSlot('remind',{...scopes.court,dates:'2099-09-14',time_change:''});
-check(!(await db.closeStuckSlot('remind',{scope:'court',now:started+28*hour})).backToOpen,'Past windows are never reopened');
-await db.updateSlot('remind',{...scopes.result,time_change:''});
-await server.runStuckNudges(started+28*hour);
-check((await db.findSlot('remind')).result_nudge.includes('close')&&(await db.findSlot('remind')).status==='accepted','Unconfirmed result escalates once without cancelling match');
-await db.updateSlot('remind',{...scopes.court,agreed_date:'2000-01-01',time_change:''});
-check(!(await db.listMatchesNeedingResultPrompt()).some(s=>s.challenge_id==='remind'),'Unconfirmed booking does not trigger a misleading result request');
-await db.updateSlot('remind',{court_confirmed_at:iso(started)});
-check((await db.listMatchesNeedingResultPrompt()).some(s=>s.challenge_id==='remind'),'Confirmed court can trigger post-match score request');
-await db.updateSlot('remind',{...scopes.time,court_confirmed_at:'',result_prompt_sent_at:'',court_nudge:'m20,n1,n2,d1'});
-await server.runStuckNudges(started+28*hour);
-check(!(await db.findSlot('remind')).time_change&&(await db.findSlot('remind')).agreed_time==='10:00','Expired time proposal preserves original match time');
-check(!(await db.findSlot('remind')).court_nudge&&(await db.findSlot('remind')).court_pending_at!==iso(started),'Court stage restarts after expired time proposal');
-await db.updateSlot('remind',{...scopes.negotiation,nudge_sent:'',court_confirmed_at:'',result_prompt_sent_at:'',time_change:'',cancelled_at:''});
-await server.runStuckNudges(started+28*hour);
-check((await db.findSlot('remind')).status==='open','Expired negotiation returns the original available window');
-await db.updateSlot('remind',{...scopes.result,result_nudge:'m20,n1,n2,d1',result_prompt_sent_at:'',time_change:''});
-check((await db.submitResult('remind',{telegram_id:'1'},{winner:'1',score:'6:3 6:4'})).ok,'Revised result can be submitted');
-check(!(await db.findSlot('remind')).result_nudge,'Revised result gets its own reminder sequence');
-await db.updateSlot('remind',{...scopes.score,result_nudge:'',score_nudge:'',time_change:''});
-await server.runStuckNudges(started+28*hour);
-check((await db.findSlot('remind')).score_nudge.includes('close')&&(await db.findSlot('remind')).status==='accepted','Missing result is escalated without deleting the match');
-
-// Recipient language and booking ownership across the complete match lifecycle.
-const languageSlot={...base,challenge_id:'language',status:'accepted',comment:'',result_winner:'1',result_by:'2',result_score:'6:4 6:3',result_set3_mode:'Match TB',pending_by:'2',from_username:'outdated',to_username:'bob'};
-const actions=[
- ['agreed',()=>matches.notifyMatchAgreed(languageSlot)],
- ['court',()=>matches.notifyCourtConfirmed(languageSlot)],
- ['reminder',()=>matches.notifyMatchReminder(languageSlot)],
- ['proposal',()=>matches.notifyProposal(languageSlot)],
- ['counter',()=>matches.notifyProposal(languageSlot,{isCounter:true})],
- ['direct',()=>matches.sendDirectChallenge({...languageSlot,from_telegram_id:'2',to_telegram_id:'1'})],
- ['cancel',()=>matches.notifyMatchCancelled(languageSlot,{telegram_id:'2'})],
- ['proposal declined',()=>matches.notifyProposalRejected({...languageSlot,status:'open'},{...languageSlot,pending_by:'1'})],
- ['new time',()=>matches.notifyTimeChange(languageSlot,'12:00','2')],
- ['time accepted',()=>matches.notifyTimeChangeAccepted(languageSlot,'11:00')],
- ['time rejected',()=>matches.notifyTimeChangeRejected(languageSlot,'12:00','1')],
- ['time expired',()=>matches.notifyTimeChangeExpired(languageSlot,{by:'1',time:'12:00'})],
- ['result prompt',()=>matches.notifyResultPrompt(languageSlot)],
- ['verify photo',()=>matches.notifyResultForVerification({...languageSlot,result_photo_file_id:'photo'})],
- ['result rejected',()=>matches.notifyResultRejected(languageSlot)],
- ['result recorded',()=>matches.notifyResultConfirmed(languageSlot)],
- ['result disputed',()=>matches.notifyResultDisputed({...languageSlot,result_by:'1'})],
- ['deadline',()=>matches.notifyDeadline('1',{names:['Bob Two'],daysLeft:2,division:'C'})]
-];
-for(const [label,action]of actions){messages.length=0;await action();const english=messages.filter(m=>String(m.args[0])==='1'&&['sendPhoto','sendMessage'].includes(m.method));check(english.length>0,label+' reaches English recipient');for(const m of english){const opts=m.method==='sendPhoto'?m.args[2]:m.args[2];const text=m.method==='sendPhoto'?opts.caption:m.args[1];check(!/[а-яё]/i.test(text+' '+JSON.stringify(opts?.reply_markup||{})),label+' body and buttons use EN');}}
-messages.length=0;await matches.publishOpenSlot({...slot,challenge_id:'ru-author',division:'Division W',season:'2',group:'1',from_telegram_id:'8',from_name:'Wendy Two'});
-check(messages.some(m=>String(m.args[0])==='7'&&m.args[1].includes('Looking for a match')&&!/[а-яё]/i.test(m.args[1])),'Russian author window has English body and dates for English recipient');
-messages.length=0;await matches.notifyMatchAgreed(languageSlot);
-for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);const buttons=m.args[2].reply_markup.inline_keyboard.flat();check(buttons.some(b=>b.url&&/t.me|tg:\/\//.test(b.url)),'Contact button on agreement for '+id);check(buttons.some(b=>b.callback_data?.startsWith('match_book:'))===(id==='1'),'Only creator gets booking button '+id);}
-for(const id of ['1','2']){const m=messages.find(m=>String(m.args[0])===id);check(m.args[2].reply_markup.inline_keyboard.flat().some(b=>b.callback_data==='match_cancel:language'),'Both players get a chat cancel button '+id);}
-messages.length=0;telegramFailureId='1';await matches.notifyMatchAgreed(languageSlot);telegramFailureId='';check(messages.some(m=>String(m.args[0])==='2'),'Blocked creator does not prevent notifying second player');
-check((await matches.matchContact(languageSlot,'2')).url==='https://t.me/alice','Contact refreshes Applicants username before stale slot value');
-check((await matches.matchContact({...languageSlot,to_telegram_id:'12345',to_username:''},'1')).url==='tg://user?id=12345','No username falls back to Telegram user link');
-messages.length=0;await matches.sendBookingHelper('2',languageSlot);
-check(!messages.some(m=>m.args[2]?.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data?.includes('court_ok'))),'Noncreator cannot use old booking helper');
-await db.updateSlot('remind',{...base,status:'accepted',court_confirmed_at:'',court_confirmed_by:'',time_change:'',result_status:''});
-check((await request('post','/api/match/booking','2',{challenge_id:'remind'})).code===403,'Booking API blocks noncreator');
-check((await request('post','/api/match/booking','1',{challenge_id:'remind'})).body.ok,'Booking API permits creator');
-check(!(await db.proposeTimeChange('remind',{telegram_id:'2'},'12:00')).ok,'Noncreator cannot reschedule court');
-const count=(id,s)=>db.pendingActionsFor(id,[{...base,...s}],started).total;
-check(count('2',{status:'open',match_type:'direct'})===1&&count('1',{status:'open',match_type:'direct'})===0,'Only recipient owes initial challenge response');
-check(count('1',{status:'pending',pending_by:'2'})===1&&count('2',{status:'pending',pending_by:'2'})===0,'Only waiting party owes proposal response');
-check(count('1',{status:'accepted'})===1&&count('2',{status:'accepted'})===0,'Only creator owes court confirmation');
-check(count('1',{status:'accepted',court_confirmed_at:iso(started)})===0,'Future confirmed court clears action count');
-check(count('2',{status:'accepted',time_change:'12:00|1|'+iso(started)})===1&&count('1',{status:'accepted',time_change:'12:00|1|'+iso(started)})===0,'Time change pauses booking and awaits other player only');
-check(count('1',{status:'accepted',result_status:'pending',result_by:'2'})===1&&count('2',{status:'accepted',result_status:'pending',result_by:'2'})===0,'Result badge counts verifier only');
-check(count('1',{status:'accepted',result_status:'confirmed'})===0&&count('1',{status:'cancelled'})===0,'Completed and cancelled matches clear badge');
-const attention=(await request('get','/api/match/attention','1')).body.attention;check(Number.isInteger(attention.total)&&Array.isArray(attention.items),'Attention API returns shared action projection');
-const kb=await load('keyboards.js');const decorated=kb.persistentKeyboard('en','active','1',['matches','events'],2);
-check(decorated.keyboard.flat()[0].text==='🔴 My matches · 2','Telegram badge shows pending total');
-check(kb.menuAction(decorated.keyboard.flat()[0].text)==='matches','Decorated text button still routes');
-check(decorated.keyboard.flat()[1].web_app.url.includes('/league?tab=events'),'Standalone Events opens events, not season application');
-check(sheets.BOT_MENU_BUTTONS.includes('events')&&sheets.KEYBOARD_BUTTONS.includes('events'),'Events configurable in both admin menus');
-const changed=[];db.setMatchChangeHandler(ids=>changed.push(...ids));await db.updateSlot('remind',{court_confirmed_at:iso(started)});check(changed.includes('1'),'Court confirmation refreshes creator keyboard');changed.length=0;await db.updateSlot('remind',{court_nudge:'m20'});check(!changed.length,'Nudge metadata does not refresh keyboard');db.setMatchChangeHandler(null);
-// Repeated schedule rows must not inflate round-robin totals or count playoff scores.
-const wlog=tables.get('w1|Match_Log');wlog.push(['1','2','Wendy Two','1','Wendy One']);wlog.push(['2','1','Wendy One','2','Wendy Two',6,0]);
-const unique=await results.getUnplayedOpponents('W','Wendy One','2','1');check(unique.total===1&&unique.names.length===1&&unique.played===0,'Repeated and playoff rows do not inflate or complete regular opponent');
-const eight=await results.getUnplayedOpponents('A','A Player 1','2','');check(eight.total===7&&eight.names.length===7,'Eight-player division with nine schedule entries yields seven opponents');
-const ev=await load('events.js'),flow=await load('eventflow.js');
-const event={event_id:'past',status:'published',date:'14.09.2099',time:'10:00',signup_deadline:'30.09.2099'};
-const start=Date.parse('2099-09-14T03:00:00Z');
-check(ev.eventStartMs(event)===start&&ev.eventStartMs({...event,date:'2099-09-14'})===start,'Event dates accept table and ISO formats in Phuket time');
-check(!ev.eventHasEnded(event,start-1)&&ev.eventHasEnded(event,start),'Without end time Past starts at exact start time');
-check(!flow.isSignupOpen(event,start),'Future deadline cannot keep started event signup active');
-check(!ev.eventHasEnded({...event,end_time:'12:00'},start+3600000)&&ev.eventHasEnded({...event,end_time:'12:00'},start+7200000),'Optional end time controls Past label');
-check(ev.eventEndMs({...event,time:'23:00',end_time:'01:00'})===Date.parse('2099-09-14T18:00:00Z'),'Overnight event end rolls to next local date');
-put('crm','Event_Registry',[ev.REGISTRY_HEADERS,ev.REGISTRY_HEADERS.map(h=>({...event,date:'01.01.2000',audience:'all'})[h]||'')]);
-check(!(await flow.joinEvent({telegramId:'1',name:'Alice One',lang:'en',eventId:'past',group:'active'})).ok,'Old event signup callback cannot join past event');
-put('crm','Event_Signups',[['signup_id','event_id','telegram_id','status','amount_thb'],['past-signup','past','1','invoiced',100]]);
-check(!(await flow.payFromDeposit({signupId:'past-signup',telegramId:'1',lang:'en'})).ok,'Past event cannot charge a new deposit payment');
-check(!(await flow.cancelSignup({signupId:'past-signup',telegramId:'1',lang:'en'})).ok,'Past event cannot cancel attendance using an old button');
-
-const links=await load('links.js');
-const two=links.parseTemplate(links.panelBroadcastText({message_ru:'Привет! {matches}',message_en:'Hello! {matches}'}));
-check(links.renderText(two,'en')==='Hello!'&&links.renderText(two,'ru')==='Привет!','Broadcast selects complete text by recipient language');
-check(links.renderButtons(two,'en').inline_keyboard[0][0].text.includes('Matches'),'Broadcast buttons use same language as text');
-links.validateBroadcastLanguages(two,[{language:'ru'},{language:'en'}]);
-for(const body of [{message_ru:'Только русский',message_en:''},{message_ru:'',message_en:'English only'}]){
- let rejected=false;try{links.validateBroadcastLanguages(links.parseTemplate(links.panelBroadcastText(body)),[{language:'ru'},{language:'en'}])}catch{rejected=true}check(rejected,'Missing translation stops mixed broadcast before delivery');
+// Фото игрока во всём приложении одно и то же: берём из общего списка игроков,
+// где уже учтена утверждённая организатором аватарка. В таблицах дивизионов
+// лежит старый снимок с момента сборки состава — он идёт запасным вариантом,
+// а у новичков его нет вовсе, отсюда и брались инициалы.
+// Сопоставляем ТОЛЬКО по имени. В таблицах дивизионов у игроков свои номера,
+// сквозные внутри одного дивизиона (1, 2, 3…), и с общими id игроков они не
+// совпадают — по ним фото вставали чужим людям.
+var photoIdx=null,photoMap={};
+function nameKey(v){
+  return String(v||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 }
-let legacyBlocked=false;try{links.validateBroadcastLanguages(links.parseTemplate('Привет всем {matches}'),[{language:'en'}])}catch{legacyBlocked=true}check(legacyBlocked,'Legacy Russian-only broadcast cannot reach EN recipient');
-const params=new URLSearchParams({auth_date:String(Math.floor(Date.now()/1000)),user:JSON.stringify({id:99,first_name:'Admin'})});
-const secret=crypto.createHmac('sha256','WebAppData').update('test-token').digest();params.set('hash',crypto.createHmac('sha256',secret).update([...params.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>k+'='+v).join('\n')).digest('hex'));
-const adminInit=params.toString();
-const preview=await request('post','/api/admin/broadcast-preview','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',lang:'en'});
-check(preview.body.ok&&preview.body.text==='Hello'&&preview.body.buttons[0].includes('Matches'),'Panel preview renders EN body and EN buttons');
-messages.length=0;const missing=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'',filters:{selected_ids:['1','2']}});
-check(!missing.body.ok&&!messages.some(m=>m.method==='sendMessage'&&['1','2'].includes(String(m.args[0]))),'Panel refuses all delivery if one recipient language is missing');
-put('crm','Broadcasts',[['broadcast_id','message_text','sent_count']]);put('crm','Broadcast Logs',[['broadcast_id','telegram_id','status','language']]);
-messages.length=0;const delivered=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',filters:{selected_ids:['1','2']}});
-check(delivered.body.ok&&delivered.body.sent===2,'Bilingual panel broadcast reaches both language groups');
-check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&messages.some(m=>String(m.args[0])==='2'&&m.args[1]==='Привет'),'Recipients receive only selected text, not both variants');
-messages.length=0;
-messages.length=0;await flow.reviewTopup({telegramId:'1',approve:false});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Top-up not confirmed')),'Top-up rejection follows player language');
-const futureEvent={...event,date:'16.09.2099',title_ru:'Турнир',title_en:'Tournament',audience:'all'};
-put('crm','Event_Registry',[ev.REGISTRY_HEADERS,ev.REGISTRY_HEADERS.map(h=>futureEvent[h]||'')]);
-put('crm','Event_Signups',[['signup_id','event_id','telegram_id','status','amount_thb'],['en-event','past','1','confirmed',0],['ru-event','past','2','confirmed',0]]);
-messages.length=0;await flow.runEventReminders(started);
-check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Tomorrow')&&!/[а-яё]/i.test(m.args[1])),'Scheduled event reminder uses EN body');
-check(messages.some(m=>String(m.args[0])==='2'&&m.args[1].includes('Завтра')),'Scheduled event reminder uses RU body');
-messages.length=0;await flow.notifyEventChanged(futureEvent,['Время: 09:00 → 10:00']);check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Time:')&&!/[а-яё]/i.test(m.args[1])),'Event change translates field labels and title');
-messages.length=0;await flow.reviewEventProof({signupId:'en-event',approve:true});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Payment for')&&!/[а-яё]/i.test(m.args[1])),'Event payment approval uses recipient language');
-const matchHtml=await fs.readFile(path.join(root,'public/match.html'),'utf8');
-check(matchHtml.includes('function renderAdmin()')&&matchHtml.includes("'/api/match/admin-active"),'Match miniapp includes protected admin list UI');
-check(matchHtml.includes("esc(opp.name||X.waiting)")&&matchHtml.includes('function requestActions'),'Schedule displays named opponents with contact and cancel actions');
-// The League bootstrap must not leak Fantasy data around the dedicated API gate.
-put('1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY','Frontend_Profile_All',[['player_id','player_name'],['1','Alice One']]);
-await sheets.setSetting('FANTASY_MODE','LIVE');
-for(const id of ['6','99']){
- const result=await request('get','/api/league/bootstrap',id);
- check(result.code===403||(result.body?.fantasy===null&&!result.body.tabs.includes('fantasy')),'League hides Fantasy for nonmember '+id);
+function buildPhotoIdx(){
+  // Основа — список фото по именам с сервера (Players_Master, поверх него уже
+  // наложены утверждённые аватарки). Витрина игроков идёт следом.
+  photoIdx={};
+  Object.keys(photoMap||{}).forEach(function(k){ if(photoMap[k])photoIdx[k]=photoMap[k] });
+  (players||[]).forEach(function(p){
+    if(!p||!p.photo)return;
+    var nm=nameKey(p.name);
+    if(nm)photoIdx[nm]=p.photo;
+  });
 }
-await sheets.setSetting('FANTASY_MODE','TEST');
-await sheets.setSetting('FANTASY_TEST_GROUP','');
-const noTest=await request('get','/api/league/bootstrap','1');
-check(noTest.body?.fantasy===null&&!noTest.body.tabs.includes('fantasy'),'League hides Fantasy from non-testers');
-// Скорость: Fantasy в первый ответ не кладётся, приложение рисуется сразу, а
-// очки догружаются вторым запросом. Доступ при этом решается как раньше.
-{
- await sheets.setSetting('FANTASY_MODE','LIVE');
- const fast=await request('get','/api/league/bootstrap','1');
- check(fast.body?.fantasy===null&&fast.body?.fantasy_deferred===true,'Fantasy is deferred out of the first league payload');
- check(fast.body?.fantasy_allowed===true,'Deferred Fantasy still reports access in the first payload');
- const full=await request('get','/api/league/bootstrap','1',{with_fantasy:'1'});
- check(full.body?.fantasy&&full.body?.fantasy_deferred===false,'Asking for Fantasy explicitly returns it in one request');
- const leagueHtml=await fs.readFile(path.join(root,'public/league.html'),'utf8');
- check(leagueHtml.includes('loadFantasyLater')&&leagueHtml.includes('fantasy_deferred'),'Мини-приложение догружает Fantasy после первой отрисовки');
- await sheets.setSetting('FANTASY_MODE','TEST');
+function livePhoto(p){
+  if(!photoIdx)buildPhotoIdx();
+  return photoIdx[nameKey(p&&p.name)]||(p&&p.photo)||'';
 }
-// Опросы и рассылка по рейтингу удалены целиком — ни команд, ни обработчиков.
-{
- const botSource=await fs.readFile(path.join(root,'bot.js'),'utf8');
- const adminSource=await fs.readFile(path.join(root,'admin.js'),'utf8');
- const tgSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(!/poll/i.test(botSource)&&!/poll/i.test(adminSource),'Опросы убраны из бота и админки');
- check(!botSource.includes('/rating_broadcast')&&!botSource.includes('startMissingRatingBroadcast'),'Рассылка по рейтингу убрана');
- check(!tgSource.includes("cmd:'overview'")&&tgSource.includes("cmd:'matches'"),'Осталась одна команда матчей вместо двух');
- check(tgSource.includes('help_en'),'У команд есть английские описания для двуязычного /help');
- check(botSource.includes('adminHelpText(l)')&&botSource.includes('ADMIN_HELP_ICON'),'Админский /help двуязычный и с эмодзи по разделам');
- // «<id сообщения>» без экранирования Telegram считает HTML-тегом и молча съедает.
- check(botSource.includes('escapeHtml(args)'),'Подсказка по аргументам в /help экранируется');
- const { ADMIN_COMMAND_LIST } = await load('telegram.js');
- const noEnglish = ADMIN_COMMAND_LIST.filter(c => !c.help_en && !c.short_en).map(c => c.cmd);
- check(!noEnglish.length,'У каждой админской команды есть английское описание: '+noEnglish.join(', '));
- const badArgs = ADMIN_COMMAND_LIST.filter(c => c.args && !c.args_en && /[а-яё]/i.test(c.args)).map(c => c.cmd);
- check(!badArgs.length,'Русские подсказки аргументов переведены: '+badArgs.join(', '));
+// Та же аватарка обычным размером — для чемпионов, плей-офф и повышений:
+// они тоже собраны из таблиц дивизионов и несут старое фото.
+function avL(p,cls,extra){
+  return av({name:p&&p.name,photo:livePhoto(p)},cls,extra);
 }
-// --- словарь статусов -------------------------------------------------------
-// Статусы решают, кого пускать в лигу и кому уходят рассылки, поэтому словарь
-// закрываем тестами: старые значения из таблицы должны читаться как раньше.
-check(sheets.canonicalStatus('lead')===''&&sheets.canonicalStatus('')==='','Новичок и старый lead читаются как пустой статус');
-check(sheets.canonicalStatus(' Active ')==='active'&&sheets.canonicalStatus('WAITLIST')==='waitlist','Статус не зависит от регистра и пробелов');
-check(sheets.canonicalStatus('waiting_payment')==='payment'&&sheets.canonicalStatus('proof_received')==='payment','Оба платёжных статуса сводятся к payment');
-check(['rejected','declined','banned','blocked','left','unsubscribed','refunded'].every(v=>sheets.isInactiveStatus(v)),'Все отказные статусы сведены к одному выключателю');
-check(sheets.canonicalStatus('confirmed')==='active'&&sheets.canonicalStatus('payment_approved')==='active','Подтверждённые и оплаченные читаются как активные');
-check(!sheets.isProfileCompleted({telegram_id:'1',name:'A',gender:'male',country_of_origin:'TH',experience:'5',whatsapp:'+1',ntrp:'3.5',status:'rejected'}),'Отклонённый больше не проходит в мини-приложение лиги');
-check(sheets.isProfileCompleted({telegram_id:'1',name:'A',gender:'male',country_of_origin:'TH',experience:'5',whatsapp:'+1',ntrp:'3.5',status:'waitlist'}),'Игрок из листа ожидания по-прежнему проходит');
-// «Лига» не должна теряться, даже если в настройках группы её забыли.
-await sheets.setSetting('btns_applied','events,contact');
-check((await sheets.getGroupButtons('applied')).includes('league'),'Кнопка лиги добавляется в меню группы, даже если её нет в настройках');
-await sheets.setSetting('kb_applied','pay,contact');
-check((await sheets.getGroupKeyboard('applied')).includes('league'),'Кнопка лиги добавляется и в нижнюю клавиатуру');
-await sheets.setSetting('btns_applied','none');
-check((await sheets.getGroupButtons('applied')).length===0,'Слово none по-прежнему выключает все кнопки группы');
-await sheets.setSetting('btns_applied','');
-await sheets.setSetting('kb_applied','');
-
-// Статусы событий: витрина новичка показывает всё, заявку принимаем не везде.
-check(sheets.canonicalEventStatus('open')==='open'&&sheets.canonicalEventStatus('registration_open')==='open','Открытый набор читается одинаково при любом написании');
-check(sheets.canonicalEventStatus('Live')==='live'&&sheets.canonicalEventStatus('active')==='live','Идущий сезон (active) читается как live: играем, набор закрыт');
-check(sheets.canonicalEventStatus('next_season')==='waitlist'&&sheets.canonicalEventStatus('лист ожидания')==='waitlist','Набор в следующий сезон читается как лист ожидания');
-check(sheets.canonicalEventStatus('finished')==='archived'&&sheets.canonicalEventStatus('что-то своё')==='archived','Завершённое и незнакомое читаются как архив');
-check(sheets.eventJoinable('open')&&sheets.eventJoinable('waitlist')&&!sheets.eventJoinable('live')&&!sheets.eventJoinable('closed'),'Заявку принимаем только в открытый набор и в лист ожидания');
-// Новичку без анкеты интерфейс лиги отвечает кодом, а не общей ошибкой:
-// по коду он показывает приглашение заполнить анкету.
-const invite = await request('get','/api/league/bootstrap','777');
-check(invite.code===403&&(invite.body?.code==='profile_required'||invite.body?.error==='profile_required'),'Без анкеты лига отдаёт код profile_required, а не переведённый текст');
-const leagueHtml = await fs.readFile(path.join(root,'public/league.html'),'utf8');
-check(leagueHtml.includes('function renderInvite()')&&!/renderInvite[\s\S]{0,1200}Fantasy/.test(leagueHtml.split('function renderInvite()')[1]?.slice(0,1200)||''),'Экран приглашения есть и не рассказывает про Fantasy');
-const applyHtml = await fs.readFile(path.join(root,'public/apply.html'),'utf8');
-check(applyHtml.includes('function renderIntro()')&&applyHtml.includes('introEvents'),'Стартовый экран анкеты показывает витрину событий');
-
-check(applyHtml.includes("id=\"instagram\"")&&applyHtml.includes('instagramHint')&&!/instagram[\s\S]{0,80}missing\.push/.test(applyHtml),'Instagram есть в анкете и остаётся необязательным');
-check(applyHtml.includes('function fillProfile(')&&applyHtml.includes("set('instagram'"),'Анкета подставляет сохранённые данные, включая Instagram');
-check(applyHtml.includes('loadSeasonInfo')&&applyHtml.includes('/api/public/seasons'),'Стартовый экран подтягивает цифры сезонов');
-check(applyHtml.includes('fillAgeOptions')&&applyHtml.includes('COUNTRIES_RU')&&applyHtml.includes('countryList'),'Возраст выбирается списком, страна — списком с вводом');
-check(applyHtml.includes('nameHint')&&applyHtml.includes('experienceHint'),'У имени и опыта есть поясняющие подписи');
-check(applyHtml.includes('function finalCard(')&&applyHtml.includes('toggleRoster'),'Прошедший сезон показывает финалы, а число игроков раскрывает состав');
-check(leagueHtml.includes('inviteHeroHtml')&&leagueHtml.includes('toggleInvitePlayers')&&leagueHtml.includes('function inviteFinal('),'Экран приглашения: чемпионы сверху, финалы в карточке, состав по клику');
-check(leagueHtml.includes('inviteEventsHtml')&&!leagueHtml.includes('ivPast\">'),'Прошлые сезоны на экране приглашения показаны развёрнутыми');
-const pub = await request('get','/api/public/seasons','777');
-check(pub.code===200&&Array.isArray(pub.body?.seasons),'Витрина сезонов открыта без анкеты');
-
-check(applyHtml.includes('fillAgeOptions')&&applyHtml.includes('<select id="age"')&&applyHtml.includes('countryList'),'Возраст выбирается списком, страна — с подсказками ввода');
-check(applyHtml.includes('nameHint')&&applyHtml.includes('experienceHint'),'У имени и опыта есть поясняющие подписи');
-check(leagueHtml.includes('inviteHeroHtml')&&leagueHtml.includes('toggleInvitePlayers')&&leagueHtml.includes('inviteFinal'),'Приглашение: чемпионы сверху, состав раскрывается, финалы показаны сразу');
-
-check(applyHtml.includes("id=\"startBtn2\"")&&applyHtml.indexOf("id=\"startBtn\"")<applyHtml.indexOf('id="introEvents"'),'Кнопка продолжения стоит над витриной событий');
-check(applyHtml.includes("openParticipantsPage(ev)")&&applyHtml.includes("'&season='"),'Список участников открывается для сезона своего события');
-const partsHtml = await fs.readFile(path.join(root,'public/participants.html'),'utf8');
-check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Страница состава читает вкладку своего сезона и объясняет пустой список');
-
-// Каждый импорт между файлами проекта должен иметь свой экспорт. Проверка
-// появилась после падения на деплое: results.js звал новую функцию из
-// division.js, а в архив попали не все файлы — бот не поднялся с SyntaxError.
-// Ловим это здесь, а не на Railway.
-{
- const jsFiles=(await fs.readdir(root)).filter(f=>f.endsWith('.js')&&!f.includes('.test.'));
- const exportsOf=src=>{
-  const out=new Set();
-  for(const m of src.matchAll(/export\s+(?:async\s+)?(?:function|class)\s+([A-Za-z0-9_$]+)/g))out.add(m[1]);
-  for(const m of src.matchAll(/export\s+(?:const|let|var)\s+([A-Za-z0-9_$]+)/g))out.add(m[1]);
-  for(const m of src.matchAll(/export\s*\{([^}]+)\}/g))
-   for(const part of m[1].split(','))
-    {const n=part.trim().split(/\s+as\s+/).pop().trim();if(n)out.add(n)}
-  return out;
- };
- const cache=new Map();
- const exportsFor=async file=>{
-  if(!cache.has(file))cache.set(file,exportsOf(await fs.readFile(path.join(root,file),'utf8')));
-  return cache.get(file);
- };
- const broken=[];
- for(const file of jsFiles){
-  const src=await fs.readFile(path.join(root,file),'utf8');
-  const uses=[...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*'(\.\/[^']+)'/g)]
-   // Динамический импорт считаем только «чистый»: с .then() модуль могут
-   // домешать из другого файла, и такая строка не про этот модуль.
-   .concat([...src.matchAll(/(?:const|let)\s*\{([^}]+)\}\s*=\s*await\s+import\(\s*'(\.\/[^']+)'\s*\)(?!\s*\n?\s*\.then)/g)]);
-  for(const use of uses){
-   const target=use[2].replace('./','');
-   if(!jsFiles.includes(target))continue;
-   const have=await exportsFor(target);
-   for(const raw of use[1].split(',')){
-    const name=raw.trim().split(/\s+as\s+/)[0].trim();
-    if(name&&!have.has(name))broken.push(`${file} → ${target}: нет экспорта «${name}»`);
-   }
+// Аватарка в обойме: крупнее и с более плотным кадром.
+function avZoom(p){
+  return '<span class="avz">'+av({name:p&&p.name,photo:livePhoto(p)})+'</span>';
+}
+function fallbackAv(img,ini){
+  var d=document.createElement('div');
+  d.className=img.className.replace('avr','avph');
+  d.textContent=ini;
+  img.replaceWith(d);
+}
+// Дивизион всегда полным именем и своим цветом.
+function divLabel(d){
+  var v=String(d||'').trim();
+  if(!v)return '';
+  // Prime — имя собственное, «Division Prime» звучит нелепо.
+  if(/^prime$/i.test(v))return 'Prime';
+  return /^(division|дивизион)/i.test(v)?v:('Division '+v);
+}
+function divClass(d){
+  var k=String(d||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+  if(k==='A')return 'd-a';if(k==='B')return 'd-b';if(k==='C')return 'd-c';if(k==='D')return 'd-d';
+  if(k==='PRIME'||k==='P')return 'd-p';return 'd-x';
+}
+// Второй аргумент — место в дивизионе. Отдельной плашкой «#1» было непонятно,
+// про что она: про гонку, про дивизион или про что-то ещё.
+function divChip(d,pos){
+  if(!d)return '';
+  var tail=pos?' <b>#'+esc(pos)+'</b>':'';
+  return '<span class="dv '+divClass(d)+'">'+esc(divLabel(d))+tail+'</span>';
+}
+// На фронт идут только два статуса: активен или нет.
+function isActive(p){ return String(p.status||'').trim().toLowerCase()==='active' }
+function statusBadge(p){
+  return isActive(p)?'<span class="badge ok">'+esc(X.active)+'</span>':'<span class="badge">'+esc(X.inactive)+'</span>';
+}
+function fantasyPlayer(p){
+  // Only Players_Master members are included in the server-side Fantasy catalog.
+  // Do not show zero-value Fantasy UI for any other league profile or tester.
+  var source=(fantasyData&&fantasyData.players||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0];
+  if(source){
+    var row=(fantasyData&&fantasyData.player_leaderboard||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0]||{};
+    return {points:Number(source.score&&source.score.total||row.points||0),teams:Number(source.selected_by||row.selected_by||0),place:row.place||'—',details:(source.score&&source.score.details)||[]};
   }
- }
- check(!broken.length,'Каждый импорт находит свой экспорт:\n'+broken.join('\n'));
+  // Костас: игрок вне текущего состава Fantasy (не задрафтован ни в чей
+  // каталог сезона), но его реальные матчи всё равно должны показывать очки —
+  // без ранга и без числа команд, которых у него по определению нет.
+  var extra=(fantasyData&&fantasyData.all_scores||[]).filter(function(x){return nameKey(x.name)===nameKey(p.name)})[0];
+  if(!extra||!extra.matches)return null;
+  return {points:Number(extra.total||0),teams:0,place:'—',details:extra.details||[]};
+}
+// Подсветка игроков из собственных Fantasy-команд — везде, где встречается их
+// имя (Игроки, Дивизион, Race, Матчи). Разные иконки для команды 1 и команды 2.
+function myFantasyMarks(name){
+  if(!fantasyData||!(fantasyData.teams||[]).length)return '';
+  var key=nameKey(name),out='';
+  (fantasyData.teams||[]).forEach(function(t){
+    var slot=Number(t.team_slot||1);
+    if((t.picks||[]).some(function(pk){return nameKey(pk.name)===key})){
+      out+='<span class="fanmine t'+slot+'" onclick="event.stopPropagation();toast(\''+q((L?'В вашей Fantasy-команде '+slot:'In your Fantasy team '+slot))+'\')" title="'+esc((L?'Моя Fantasy-команда ':'My Fantasy team ')+slot)+'">'+(slot===1?'①':'②')+'</span>';
+    }
+  });
+  return out;
+}
+// Костас: не ярлычки-«пилюли», а тем же шрифтом, что и остальная мета-инфа
+// карточки — просто в отдельной рамке, чтобы не сливалось, но и не бросалось
+// в глаза.
+function fantasyBadges(p){
+  var f=fantasyPlayer(p);if(!f)return '';
+  return '<div class="fanmeta">✨ '+esc(f.points)+' FP · '+esc(L?'команд':'teams')+' '+esc(f.teams)+' · '+esc(L?'место':'rank')+' #'+esc(f.place)+'</div>';
+}
+var fanBlockOpen=false;
+var PT_LABELS_LEAGUE={appearance:['Участие','Appearance'],win:['Победа','Win'],sets:['Сеты','Sets'],games:['Геймы','Games'],straight:['Победа 2:0','Straight win'],bagels:['«Сухие» сеты','Bagel sets'],upset:['Апсет','Upset'],technical:['Техническая победа','Walkover']};
+function toggleFanBlock(){fanBlockOpen=!fanBlockOpen;renderPlayer(byId(openId))}
+// Костас: хочет видеть прямо на странице игрока, за какие матчи и почему
+// начислены его Fantasy Points — не только уходить в приложение Fantasy.
+function fanMatchBreakdown(details){
+  if(!details||!details.length)return '<div class="hint">'+esc(L?'Пока нет сыгранных матчей в этом сезоне.':'No matches played this season yet.')+'</div>';
+  return '<div class="price-breakdown">'+details.map(function(m){
+    var pts=m.points||{};
+    var parts=Object.keys(PT_LABELS_LEAGUE).filter(function(k){return pts[k]}).map(function(k){var l=PT_LABELS_LEAGUE[k];return esc(L?l[0]:l[1])+' +'+pts[k]}).join(' · ');
+    return '<div class="pbd-row" style="display:block"><div style="display:flex;justify-content:space-between;gap:8px"><span>'+esc((m.opponent||'')+(m.score?' · '+m.score:''))+'</span><b>'+(pts.total||0)+'</b></div>'
+      +(parts?'<div style="color:var(--muted);font-size:11px;margin-top:2px">'+parts+'</div>':'')+'</div>';
+  }).join('')+'</div>';
+}
+function fantasyBlock(p){
+  var f=fantasyPlayer(p);if(!f)return '';
+  return '<div class="card fantasy-player-card"><div class="fanblock-hd" onclick="toggleFanBlock()" aria-expanded="'+fanBlockOpen+'"><h3>✨ '+esc(X.tFantasy)+'</h3><span class="fanchev">'+(fanBlockOpen?'▲':'▼')+'</span></div>'
+    +'<div class="fantasy-stats-head"><span>FP</span><span>'+esc(L?'Команд':'Teams')+'</span><span>'+esc(L?'Место':'Rank')+'</span></div>'
+    +'<div class="fantasy-stats-row"><b>'+esc(f.points)+'</b><b>'+esc(f.teams)+'</b><b>#'+esc(f.place)+'</b></div>'
+    +(fanBlockOpen?fanMatchBreakdown(f.details):'')
+    +'<button class="website-link-hidden" onclick="event.stopPropagation();showTab(\'fantasy\')">'+esc(L?'Открыть Fantasy':'Open Fantasy')+'</button></div>';
+}
+function formRow(form){
+  if(!form||!form.length)return '';
+  // Свежий матч слева: тот же порядок, что на карточке и постере.
+  return '<span class="form">'+form.slice(-5).reverse().map(function(f){return '<span class="fm '+(f==='W'?'w':'l')+'">'+f+'</span>'}).join('')+'</span>';
+}
+// Флаг страны. Раньше был короткий список вручную, и любая страна вне его —
+// например Грузия — показывалась глобусом. Теперь храним только пары
+// «название → код», а сам флаг собирается из кода: список дешёвый и покрывает
+// английские и русские написания, а также готовый код вроде «GE».
+var COUNTRY_CODES=('afghanistan:AF,albania:AL,algeria:DZ,andorra:AD,argentina:AR,armenia:AM,australia:AU,'
++'austria:AT,azerbaijan:AZ,bahrain:BH,bangladesh:BD,belarus:BY,belgium:BE,bolivia:BO,bosnia:BA,brazil:BR,bulgaria:BG,'
++'cambodia:KH,cameroon:CM,canada:CA,chile:CL,china:CN,colombia:CO,costa rica:CR,croatia:HR,cuba:CU,cyprus:CY,'
++'czechia:CZ,czech republic:CZ,denmark:DK,dominican republic:DO,ecuador:EC,egypt:EG,estonia:EE,ethiopia:ET,'
++'finland:FI,france:FR,georgia:GE,germany:DE,ghana:GH,greece:GR,hong kong:HK,hungary:HU,iceland:IS,india:IN,'
++'indonesia:ID,iran:IR,iraq:IQ,ireland:IE,israel:IL,italy:IT,japan:JP,jordan:JO,kazakhstan:KZ,kenya:KE,kuwait:KW,'
++'kyrgyzstan:KG,latvia:LV,lebanon:LB,libya:LY,lithuania:LT,luxembourg:LU,macau:MO,malaysia:MY,maldives:MV,malta:MT,'
++'mexico:MX,moldova:MD,monaco:MC,mongolia:MN,montenegro:ME,morocco:MA,myanmar:MM,nepal:NP,netherlands:NL,holland:NL,'
++'new zealand:NZ,nigeria:NG,north macedonia:MK,macedonia:MK,norway:NO,oman:OM,pakistan:PK,panama:PA,paraguay:PY,'
++'peru:PE,philippines:PH,poland:PL,portugal:PT,qatar:QA,romania:RO,russia:RU,russian federation:RU,saudi arabia:SA,'
++'senegal:SN,serbia:RS,singapore:SG,slovakia:SK,slovenia:SI,south africa:ZA,korea:KR,south korea:KR,'
++'republic of korea:KR,spain:ES,sri lanka:LK,sweden:SE,switzerland:CH,syria:SY,taiwan:TW,tajikistan:TJ,tanzania:TZ,'
++'thailand:TH,tunisia:TN,turkey:TR,turkiye:TR,turkmenistan:TM,uae:AE,united arab emirates:AE,uganda:UG,ukraine:UA,'
++'uk:GB,great britain:GB,united kingdom:GB,britain:GB,england:GB,scotland:GB,wales:GB,usa:US,us:US,'
++'united states:US,united states of america:US,america:US,uruguay:UY,uzbekistan:UZ,venezuela:VE,vietnam:VN,'
++'zimbabwe:ZW,'
++'австралия:AU,австрия:AT,азербайджан:AZ,англия:GB,аргентина:AR,армения:AM,беларусь:BY,белоруссия:BY,бельгия:BE,'
++'болгария:BG,бразилия:BR,великобритания:GB,венгрия:HU,вьетнам:VN,германия:DE,голландия:NL,греция:GR,грузия:GE,'
++'дания:DK,египет:EG,израиль:IL,индия:IN,индонезия:ID,ирландия:IE,испания:ES,италия:IT,казахстан:KZ,канада:CA,'
++'кипр:CY,киргизия:KG,китай:CN,колумбия:CO,корея:KR,латвия:LV,литва:LT,малайзия:MY,мексика:MX,молдова:MD,'
++'нидерланды:NL,новая зеландия:NZ,норвегия:NO,оаэ:AE,перу:PE,польша:PL,португалия:PT,россия:RU,румыния:RO,'
++'сербия:RS,сингапур:SG,сша:US,таджикистан:TJ,таиланд:TH,тайланд:TH,тайвань:TW,турция:TR,узбекистан:UZ,'
++'украина:UA,филиппины:PH,финляндия:FI,франция:FR,хорватия:HR,черногория:ME,чехия:CZ,чили:CL,швейцария:CH,'
++'швеция:SE,шотландия:GB,эстония:EE,юар:ZA,япония:JP').split(',').reduce(function(acc,pair){
+  var i=pair.lastIndexOf(':');
+  if(i>0)acc[pair.slice(0,i).trim()]=pair.slice(i+1).trim().toUpperCase();
+  return acc;
+},{});
+function flagOfCode(code){
+  var c=String(code||'').trim().toUpperCase();
+  if(!/^[A-Z]{2}$/.test(c))return '';
+  return String.fromCodePoint(0x1F1E6+c.charCodeAt(0)-65,0x1F1E6+c.charCodeAt(1)-65);
+}
+function flag(c){
+  var v=String(c||'').trim().toLowerCase();
+  if(!v)return '🌍';
+  var code=COUNTRY_CODES[v];
+  // Хвосты вроде «Russia (Moscow)» или «Thailand / Phuket» — берём первую часть.
+  if(!code){
+    var head=v.split(/[(\/,|–—]/)[0].trim();
+    if(head&&head!==v)code=COUNTRY_CODES[head];
+  }
+  return flagOfCode(code||v)||'🌍';
+}
+// Иконка достижения по его типу.
+function achIcon(a){
+  var t=String((a&&(a.type||a.title))||'').toLowerCase();
+  if(/champion|чемпион|winner/.test(t))return '🏆';
+  if(/runner|second|финал|2nd/.test(t))return '🥈';
+  if(/promotion|повышен|up/.test(t))return '⬆️';
+  if(/relegation|вылет|down/.test(t))return '⬇️';
+  if(/undefeated|streak|серия/.test(t))return '🔥';
+  if(/wild ?card/.test(t))return '🎟️';
+  if(/leader|лидер|race/.test(t))return '⭐';
+  return '🎖️';
+}
+function byId(id){ return players.filter(function(x){return String(x.id)===String(id)})[0]||null }
+function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('%',''));
+  if(Number.isFinite(n)&&n>0)return Math.round(n);
+  return p.matches?Math.round(p.wins/p.matches*100):0; }
+
+// ---------------------------------------------------------------- меню
+// Все экраны приложения. VIEWS — те, что реально показаны в нижнем меню:
+// набор приходит с сервера и зависит от группы игрока (активный, лист
+// ожидания, заявка без оплаты, остальные). Главная есть всегда.
+// «Расписание» больше не отдельный экран: согласованные матчи живут сверху
+// вкладки «Матчи», прямо над историей.
+var ALL_VIEWS=['home','div','race','players','matches','events','fantasy','partners'];
+var VIEWS=ALL_VIEWS.slice();
+var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
+matches:'viewMatches',events:'viewEvents',fantasy:'viewFantasy',partners:'viewPartners',about:'viewAbout'};
+function buildTabs(){
+  var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
+              matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
+  var labels=VIEWS.map(function(k){return [k,byCode[k]||k]});
+  $('tabs').innerHTML=labels.map(function(x){
+    // У «Событий» — зелёная точка, когда есть открытая регистрация: иначе про
+    // новое событие узнают только те, кто зашёл во вкладку сам.
+    var dot=(x[0]==='events'&&evOpenCount()>0)?'<span class="dot"></span>':'';
+    return '<div class="tab" data-t="'+x[0]+'" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+dot+'</div>';
+  }).join('');
+  // Активную вкладку заново подсвечивает showTab — вызываем её текущим режимом.
+  var cur=document.querySelector('.tab[data-t="'+mode+'"]');
+  if(cur)cur.classList.add('on');
+}
+// Сколько событий прямо сейчас ждут записи именно этого игрока.
+function evOpenCount(){
+  return (evList||[]).filter(function(e){return e.open_now}).length;
+}
+// Свой игрок в витрине ищется по id, а если витрина его не знает — по имени.
+// Тема. Тёмная Noir по умолчанию; выбор храним на устройстве игрока, поэтому
+// на другом телефоне он выберет заново — это удобство, а не настройка аккаунта.
+// Тема и язык — общий переключатель всех мини-приложений (public/ptf-prefs.js).
+// Выбор темы хранится на устройстве, язык — ещё и в анкете игрока. После смены
+// языка экран перезагружается на той же вкладке: так все подписи, даты и
+// сезоны гарантированно перерисуются на новом языке.
+function initTheme(){
+  if(!window.PTFPrefs)return;
+  PTFPrefs.mount(document.getElementById('thSw'),{onLang:function(lang,saved){
+    try{
+      var q=new URLSearchParams(location.search);
+      if(typeof mode!=='undefined'&&mode)q.set('tab',mode);
+      history.replaceState(null,'',location.pathname+'?'+q.toString()+location.hash);
+    }catch(e){}
+    saved.then(function(){location.reload()});
+  }});
+}
+// Переключатель нужен и тогда, когда данные не загрузились (например, экран
+// «заполните анкету»), поэтому подключаем его сразу, не дожидаясь сервера.
+initTheme();
+
+function mePlayer(){
+  if(!me)return null;
+  return byId(me.id)||players.filter(function(x){
+    return String(x.name||'').trim().toLowerCase()===String(me.name||'').trim().toLowerCase();
+  })[0]||null;
+}
+// Плашка «это я» в шапке: аватарка, имя и дивизион с местом. Клик — своя карточка.
+function renderMePlate(){
+  var el=$('mePlate');if(!el)return;
+  var p=mePlayer();
+  if(!p){el.innerHTML='';return}
+  var sub=[divLabel(p.division),p.division_position?('#'+p.division_position):'']
+    .filter(Boolean).join(' · ');
+  el.innerHTML='<div class="meplate" onclick="openPlayer(\''+q(p.id)+'\',mode)">'
+    +av(p)+'<div><div class="t1">'+esc(p.name)+'</div>'
+    +(sub?'<div class="t2">'+esc(sub)+'</div>':'')+'</div></div>';
+}
+// Переход из карточки/главной сразу в нужную таблицу дивизиона.
+function openDivFrom(n,d){
+  if(n)divSeason=String(n);
+  var letter=String(d||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+  if(letter)divLetter=letter;
+  divData=null;divErr='';
+  showTab('div');
+}
+function showTab(t){
+  if(ALL_VIEWS.indexOf(t)<0)return;
+  mode=t;openId='';allMatches=false;openAch='';
+  syncBack();
+  ALL_VIEWS.forEach(function(k){
+    var tab=document.querySelector('.tab[data-t="'+k+'"]');if(tab)tab.classList.toggle('on',k===t);
+    $(VIEW_ID[k]).classList.toggle('hidden',k!==t);
+  });
+  $('tabs').classList.remove('hidden');
+  $('hdr').classList.remove('hidden');
+  $('viewCard').classList.add('hidden');
+  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
+  $('title').textContent=titles[t]||X.title;
+  if(t==='home')renderHome();
+  else if(t==='div')renderDiv();
+  else if(t==='race')renderRace();
+  else if(t==='players')renderPlayers();
+  else if(t==='matches')renderFeed();
+  else if(t==='events')renderEvents();
+  else if(t==='fantasy')renderFantasy();
+  else if(t==='partners')renderPartners();
+  else renderAbout();
+  renderNav();
+  window.scrollTo(0,0);
+}
+
+// -------------------------------------------------------- расписание
+// Только согласованные матчи и только те, что впереди: сыгранное живёт во
+// вкладке «Матчи». Игрок открывает раздел сразу на своём дивизионе — остальные
+// рядом, одним касанием. Метрика по кортам приходит только организатору.
+var schData=null,schLoading=false,schErr='';
+var schDiv='',schMine=false;
+var matchesView='upcoming';
+function loadSched(){
+  if(schLoading)return;
+  schLoading=true;schErr='';
+  fetch('/api/league/schedule?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      schLoading=false;
+      if(!j.ok){schErr=j.error||'Error';schData=null}
+      else{
+        schData=j;
+        // Первый вход: показываем свой дивизион, если в нём вообще есть матчи.
+        if(schDiv===null){
+          schDiv=(j.me_division&&j.divisions.indexOf(j.me_division)>=0)?j.me_division:'';
+        }
+      }
+      if(openId){var p=byId(openId);if(p)renderPlayer(p)}
+      else if(mode==='matches')renderFeed();
+    }).catch(function(e){schLoading=false;schErr=e.message;
+      if(openId){var p=byId(openId);if(p)renderPlayer(p)}
+      else if(mode==='matches')renderFeed();
+    });
+}
+function setSchDiv(v){schDiv=v;renderFeed()}
+function toggleSchMine(){schMine=!schMine;renderFeed()}
+function schVisible(){
+  if(!schData)return [];
+  return schData.items.filter(function(i){
+    if(schDiv&&i.division!==schDiv)return false;
+    if(schMine&&String(i.p1.id)!==schData.me&&String(i.p2.id)!==schData.me)return false;
+    return true;
+  });
+}
+// История показывает только матчи, которые ещё впереди. Согласованные матчи
+// без результата после своей даты остаются в расписании для внесения счёта,
+// но не должны выглядеть будущими в карточке игрока.
+function futureSchedule(){
+  return schData&&schData.items?schData.items.filter(function(i){
+    return Number(i.start)>Date.now()&&!i.result_pending;
+  }):[];
+}
+function futureForPlayer(p){
+  var key=nameKey(p&&p.name);
+  return key?futureSchedule().filter(function(i){
+    return nameKey(i.p1&&i.p1.name)===key||nameKey(i.p2&&i.p2.name)===key;
+  }):[];
+}
+// Заголовок дня: сегодня и завтра называем словами — так быстрее считывается.
+function schDayLabel(dateStr,nowMs){
+  var d=new Date(dateStr+'T00:00:00+07:00');
+  if(isNaN(d.getTime()))return dateStr;
+  var today=new Date(nowMs);
+  var t=new Date(today.toLocaleString('en-US',{timeZone:'Asia/Bangkok'}));
+  var base=new Date(t.getFullYear(),t.getMonth(),t.getDate());
+  var diff=Math.round((d-new Date(base.getTime()-base.getTimezoneOffset()*60000))/86400000);
+  if(diff===0)return X.schToday;
+  if(diff===1)return X.schTomorrow;
+  return d.toLocaleDateString(L?'ru-RU':'en-GB',{weekday:'short',day:'numeric',month:'short'});
+}
+function schName(p){return p.name||'—'}
+// Ближайшие матчи — верхний блок вкладки «Матчи». Только то, о чём игроки уже
+// договорились: кто, когда и где. Договорённости в работе живут в «Моих матчах»,
+// сюда они не попадают. Фильтры спрятаны под язычок, чтобы не занимать экран.
+var schFOpen=false;
+function toggleSchF(){schFOpen=!schFOpen;renderFeed()}
+function upcomingBlock(){
+  if(schErr)return '<div class="empty" style="color:#C2695E">'+esc(schErr)+'</div>';
+  if(!schData){loadSched();return '<div class="empty">…</div>'}
+
+  var items=schVisible();
+  var h='<div class="bhead"><h3>'+esc(X.schUpcoming)+'</h3>'
+    +'<div class="bcnt">'+items.length+'</div>'
+    +'<div class="chip sm'+(schFOpen?' on':'')+'" onclick="toggleSchF()">'+esc(X.filters)+'</div></div>';
+
+  if(schFOpen){
+    var divChips='<div class="chip'+(schDiv===''?' on':'')+'" onclick="setSchDiv(\'\')">'+esc(X.all)+'</div>'
+      +(schData.divisions||[]).map(function(d){
+        return '<div class="chip'+(schDiv===d?' on':'')+'" onclick="setSchDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
+      }).join('')
+      +'<div class="chip'+(schMine?' on':'')+'" onclick="toggleSchMine()">'+esc(X.schMine)+'</div>';
+    h+='<div class="chips sm">'+divChips+'</div>';
+  }
+
+  if(!items.length)return h+'<div class="empty">'+esc(X.schEmpty)+'</div>';
+
+  var day='';
+  items.forEach(function(i){
+    if(i.date!==day){
+      day=i.date;
+      h+='<div class="sday">'+esc(schDayLabel(i.date,schData.now))+'</div>';
+    }
+    h+=upcomingCard(i);
+  });
+  return h;
+}
+// Предстоящий матч использует ту же карточку, что и сыгранный: сразу видны
+// оба игрока, аватары, дивизион, время и корт.
+function scheduledPlayer(p,from){
+  // ID расписания может быть Telegram ID или номером в дивизионе, поэтому
+  // сначала ищем игрока по имени, как и фото в остальных списках.
+  var hit=players.filter(function(x){return nameKey(x.name)===nameKey((p||{}).name)})[0];
+  if(hit){openPlayer(hit.id,from);return}
+  hit=byId((p||{}).id);
+  if(hit)openPlayer(hit.id,from);
+}
+function upcomingCard(i){
+  var mine=String(i.p1.id)===schData.me||String(i.p2.id)===schData.me;
+  var top=[matchDate(i.date),i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+  var p1=byId((i.p1||{}).id)||i.p1||{},p2=byId((i.p2||{}).id)||i.p2||{};
+  var p1Call="scheduledPlayer({id:'"+q(p1.id)+"',name:'"+q(schName(p1))+"'},'matches')";
+  var p2Call="scheduledPlayer({id:'"+q(p2.id)+"',name:'"+q(schName(p2))+"'},'matches')";
+  return '<div class="mt upcoming'+(mine?' me':'')+'">'
+    +(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="fm2">'
+    +'<div class="match-player-link" onclick="'+p1Call+'">'+av({name:schName(p1),photo:livePhoto(p1)},'','w')+'</div>'
+    +'<div class="mid"><div class="nm3">'
+      +'<b onclick="event.stopPropagation();'+p1Call+'">'+esc(schName(p1))+'</b>'
+      +' <s>vs</s> '
+      +'<em onclick="event.stopPropagation();'+p2Call+'">'+esc(schName(p2))+'</em></div>'
+      +(i.result_pending?'<div class="res l" style="display:inline-block;margin-top:7px">'+esc(X.resultPending)+'</div>':'')
+      +(i.division?'<div style="margin-top:7px" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(i.division)+'\')">'+divChip(i.division)+'</div>':'')
+    +'</div>'
+    +'<div class="match-player-link" onclick="'+p2Call+'">'+av({name:schName(p2),photo:livePhoto(p2)})+'</div>'
+    +'</div></div>';
+}
+
+// ------------------------------------------------------------- аватарка
+// Блок появляется ТОЛЬКО в собственной карточке игрока: чужую аватарку менять
+// нельзя, и лишняя кнопка в чужом профиле только путает.
+var avState=null,avBusy=false,avPoll=null;
+function isMyCard(p){ return me && String(p.id)===String(me.id) || (me&&me.name&&String(p.name||'').trim().toLowerCase()===String(me.name).trim().toLowerCase()) }
+function loadAvatar(){
+  fetch('/api/avatar/status?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j.ok)return;
+      avState=j;
+      var box=$('avBox');if(box)box.innerHTML=avatarInner();
+      // Пока картинка в работе, тихо переспрашиваем: генерация идёт десятки секунд.
+      if(j.status==='queued'||j.status==='generating'){
+        clearTimeout(avPoll);avPoll=setTimeout(loadAvatar,4000);
+      }
+    }).catch(function(){});
+}
+// Кнопка с камерой в углу самой фотографии. Панель под аватаркой раскрывается
+// по нажатию: нужна она раз в сезон, а место на экране занимала всегда.
+var avOpen=false;
+function avatarButton(p){
+  if(!isMyCard(p))return '';
+  if(!avState)loadAvatar();
+  return '<div class="avbtn'+(avOpen?' on':'')+'" title="'+esc(X.avOpen)+'" onclick="toggleAvatar(event)">📸</div>';
+}
+function toggleAvatar(e){
+  if(e&&e.stopPropagation)e.stopPropagation();
+  avOpen=!avOpen;
+  var p=byId(openId);
+  if(p)renderPlayer(p);
+  if(avOpen){
+    var card=$('avCard');
+    if(card&&card.scrollIntoView)card.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+}
+function avatarBlock(p){
+  if(!isMyCard(p)||!avOpen)return '';
+  if(!avState)loadAvatar();
+  return '<div class="card" id="avCard"><h3>'+esc(X.avTitle)+'</h3><div id="avBox">'+avatarInner()+'</div></div>';
+}
+function avatarInner(){
+  if(!avState)return '<div class="hint">…</div>';
+  var s=avState.status||'';
+  var h='';
+  if(s==='queued'||s==='generating'){
+    h+='<div class="hint">'+esc(s==='queued'?X.avQueued:X.avWorking)+'</div>';
+    return h;
+  }
+  if(s==='ready')h+='<div class="hint">'+esc(X.avReady)+'</div>';
+  if(s==='published')h+='<div class="hint">'+esc(X.avPublished)+'</div>';
+    if(s==='failed')h+='<div class="hint" style="color:#C2695E">'+esc(X.avFailed+(avState.error?': '+avState.error:''))+'</div>';
+  if(avState.stub)h+='<div class="hint" style="color:#C2695E">'+esc(X.avStub)+'</div>';
+  h+='<div class="hint avwarn">'+esc(X.avNotChat)+'</div>';
+  h+='<div class="hint">'+esc(X.avRules)+'</div>';
+  if(avState.attempts_left>0){
+    h+='<input type="file" accept="image/*" id="avFile" style="display:none" onchange="avPick(this)">'
+      +'<button class="chip avup" style="width:100%;margin-top:9px" onclick="document.getElementById(\'avFile\').click()">'
+      +esc(avBusy?X.avSending:(s==='published'||s==='ready'?X.avRedo:X.avSend))+'</button>'
+      +'<div class="hint" style="margin-top:6px">'+esc(X.avLeft)+': '+avState.attempts_left+'</div>';
+  } else {
+    h+='<div class="hint" style="margin-top:9px">'+esc(X.avNoTries)+'</div>';
+  }
+  h+='<div class="hint" style="margin-top:6px">'+esc(X.avPrivacy)+'</div>';
+  h+='<div id="avMsg" class="hint"></div>';
+  return h;
+}
+function avPick(input){
+  var f=input.files&&input.files[0];
+  input.value='';
+  if(!f)return;
+  // 8 МБ — предел, дальше Telegram и сервер начнут ругаться, лучше сказать сразу.
+  if(f.size>8*1024*1024){ avSay(X.avTooBig,true); return }
+  var fr=new FileReader();
+  fr.onload=function(){ avSend(String(fr.result)) };
+  fr.readAsDataURL(f);
+}
+function avSay(text,bad){
+  var m=$('avMsg');if(!m)return;
+  m.style.color=bad?'#C2695E':'';
+  m.textContent=text;
+}
+function avSend(dataUrl){
+  if(avBusy)return;
+  avBusy=true;avSay(X.avSending);
+  fetch('/api/avatar/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({initData:initData,t:linkToken,photo:dataUrl})})
+    .then(function(r){return r.json()}).then(function(j){
+      avBusy=false;
+      if(!j.ok)throw new Error(j.error||'Error');
+      avSay(X.avAccepted);
+      loadAvatar();
+    }).catch(function(e){avBusy=false;avSay('⛔ '+e.message,true)});
+}
+
+// Полноэкранный просмотр аватарки: в шапке она обрезана, а посмотреть целиком
+// иногда хочется — особенно свою, только что сгенерированную.
+function openAvatarFull(src){
+  if(!src)return;
+  var w=document.createElement('div');
+  w.className='avfull';
+  w.innerHTML='<div class="x">✕</div><img src="'+esc(src)+'" alt="">';
+  w.onclick=function(){ document.body.removeChild(w) };
+  document.body.appendChild(w);
+}
+
+// ------------------------------------------------- навигация по разделам
+// Разделы идут по кругу в порядке верхнего меню. На странице игрока стрелки
+// работают как «назад к разделу», вперёд там некуда.
+function tabTitle(t){
+  var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
+              matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,about:X.tAbout};
+  return titles[t]||X.title;
+}
+function neighbour(step){
+  var i=VIEWS.indexOf(mode);
+  if(i<0)i=0;
+  return VIEWS[(i+step+VIEWS.length)%VIEWS.length];
+}
+function navStep(step){
+  if(openId){ showTab(backTo); return; }
+  showTab(neighbour(step));
+}
+function renderNav(){
+  var bot=$('navBot');
+  if(openId){
+    $('edgeL').classList.remove('off');
+    $('edgeR').classList.add('off');
+    bot.className='navbot one';
+    bot.innerHTML='<button onclick="showTab(\''+backTo+'\')"><i>‹</i><span>'+esc(tabTitle(backTo))+'</span></button>';
+    return;
+  }
+  $('edgeL').classList.remove('off');
+  $('edgeR').classList.remove('off');
+  bot.className='navbot';
+  bot.innerHTML='<button onclick="navStep(-1)"><i>‹</i><span>'+esc(tabTitle(neighbour(-1)))+'</span></button>'
+    +'<button onclick="navStep(1)"><span>'+esc(tabTitle(neighbour(1)))+'</span><i>›</i></button>';
+}
+function syncBack(){
+  if(!tg||!tg.BackButton)return;
+  if(openId)tg.BackButton.show();else tg.BackButton.hide();
+}
+if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(backTo) });
+
+// ---------------------------------------------------------------- касса
+// Цифра баланса живёт в шапке и появляется только тогда, когда деньги на
+// депозите действительно есть или были операции: остальным она ни о чём не
+// говорит и только занимает место.
+var wallet=null,walletOpen=false,walletLoaded=false;
+function loadWallet(){
+  if(walletLoaded)return;walletLoaded=true;
+  fetch('/api/league/wallet?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j||!j.ok)return;
+      wallet=j;renderWallet();
+    }).catch(function(){});
+}
+function walletVisible(){
+  return wallet&&((wallet.balance||0)>0||(wallet.history||[]).length>0);
+}
+function renderWallet(){
+  var chip=$('walletChip'),panel=$('walletPanel');
+  if(!walletVisible()){
+    chip.classList.add('hidden');panel.classList.add('hidden');
+    chip.innerHTML='';panel.innerHTML='';return;
+  }
+  chip.classList.remove('hidden');
+  chip.innerHTML='<div class="wchip" onclick="toggleWallet()">💳 '+esc(String(wallet.balance))+' ฿</div>';
+  if(!walletOpen){panel.classList.add('hidden');panel.innerHTML='';return}
+  panel.classList.remove('hidden');
+  var rows=(wallet.history||[]).map(function(h){
+    var plus=(h.amount||0)>0;
+    return '<div class="wrow"><span class="d">'+esc(shortDate(h.date))+'</span>'
+      +'<span class="t">'+esc(h.description||h.type||'')+'</span>'
+      +'<span class="a '+(plus?'plus':'minus')+'">'+(plus?'+':'')+esc(String(h.amount))+' ฿</span></div>';
+  }).join('');
+  var presets=(wallet.presets||[1000,3000,5000]).map(function(v){
+    return '<button onclick="topup('+v+')">'+v+' ฿</button>';
+  }).join('');
+  panel.innerHTML='<div class="wpanel">'
+    +'<div class="lab">'+esc(X.wBalance)+'</div><div class="big">'+esc(String(wallet.balance))+' ฿</div>'
+    +(rows?'<div style="margin-top:10px">'+rows+'</div>':'<div class="hint" style="margin-top:8px">'+esc(X.wEmpty)+'</div>')
+    +'<div class="lab" style="margin-top:12px">'+esc(X.wTopup)+'</div>'
+    +'<div class="wsum">'+presets+'</div>'
+    +'<div class="wown"><input id="wOwn" inputmode="numeric" placeholder="'+esc(X.wOwn)+'">'
+    +'<button class="go" onclick="topupOwn()">'+esc(X.wGo)+'</button></div>'
+    +'<div class="hint" style="margin-top:8px">'+esc(X.wNote)+'</div>'
+    +'</div>';
+}
+function shortDate(v){
+  var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(v||''));
+  return m?(m[3]+'.'+m[2]):String(v||'').slice(0,10);
+}
+// Единый вид даты матча: число и месяц, без года. Раньше в предстоящих и
+// сыгранных дата выглядела по-разному, потому что в таблицы её пишут кто во что
+// горазд — где-то ISO, где-то с точками. Разбираем оба вида, остальное
+// показываем как есть, чтобы не потерять данные.
+var MONTHS_SHORT={ru:['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'],
+                  en:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']};
+// Поиск по имени: в поле можно и выбрать глазами из списка, и дописать
+// несколько букв — список сузится. По нажатию открывается целиком, поэтому
+// человеку не нужно угадывать, с чего начинается фамилия.
+var SUG_MAX=8;
+function sugBox(id,value,names,open,handler,placeholder){
+  var qq=String(value||'').trim().toLowerCase(),seen={},uniq=[];
+  (names||[]).forEach(function(n){
+    n=String(n||'').trim();if(!n)return;
+    var k=n.toLowerCase();if(seen[k])return;seen[k]=1;uniq.push(n);
+  });
+  // Список показываем ТОЛЬКО когда человек начал печатать. Раньше он падал
+  // на первое же касание поля, закрывал собой всё и мешал клавиатуре.
+  var hits=qq?uniq.filter(function(n){return n.toLowerCase().indexOf(qq)>=0}):[];
+  var shown=hits.slice(0,SUG_MAX);
+  var rows=shown.map(function(n){
+    return '<div class="pi" onmousedown="event.preventDefault()" onclick="'+handler+'Pick(\''+q(n)+'\')">'+esc(n)+'</div>';
+  }).join('');
+  if(hits.length>shown.length)rows+='<div class="pi more">+'+(hits.length-shown.length)+' '+esc(X.sugMore)+'</div>';
+  if(qq&&!hits.length)rows='<div class="pi more">'+esc(X.sugNone)+'</div>';
+  return '<div class="searchwrap"><input class="search" style="margin:0" id="'+id+'" autocomplete="off"'
+    +' placeholder="'+esc(placeholder||X.search)+'" value="'+esc(value||'')+'"'
+    +' oninput="'+handler+'Set(this.value)" onblur="'+handler+'Blur()">'
+    +(value?'<div class="sugx" onmousedown="event.preventDefault()" onclick="'+handler+'Pick(\'\')">×</div>':'')
+    +(open&&qq&&rows?'<div class="psug">'+rows+'</div>':'')+'</div>';
+}
+function matchDate(v){
+  var t=String(v||'').trim();
+  if(!t)return '';
+  var d=null,mo=null;
+  var iso=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  var dot=/^(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/.exec(t);
+  if(iso){ d=Number(iso[3]); mo=Number(iso[2]); }
+  else if(dot){ d=Number(dot[1]); mo=Number(dot[2]); }
+  if(!d||!mo||mo<1||mo>12)return t;
+  return d+' '+MONTHS_SHORT[L?'ru':'en'][mo-1];
+}
+function toggleWallet(){ walletOpen=!walletOpen;renderWallet();
+  if(walletOpen)$('walletPanel').scrollIntoView({behavior:'smooth',block:'nearest'}) }
+function topup(amount){
+  var min=(wallet&&wallet.min)||1000;
+  if(!amount||amount<min){toast(X.wMin.replace('{n}',min));return}
+  toast(X.evSending);
+  fetch('/api/league/wallet-topup',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({initData:initData,amount:amount},linkToken?{t:linkToken}:{}))})
+    .then(function(r){return r.json()}).then(function(j){
+      toast(j&&j.ok?X.wSent:((j&&j.error)||'…'));
+    }).catch(function(){toast('…')});
+}
+function topupOwn(){
+  var el=$('wOwn');
+  topup(Math.round(Number(String(el&&el.value||'').replace(/[^\d]/g,''))||0));
+}
+
+// ---------------------------------------------------------------- главная
+// Итоги последнего завершённого сезона: чемпионы из плей-офф, финалисты помельче
+// и те, кто поднялся дивизионом выше по итогам регулярки.
+var summary=null,summaryLoaded=false;
+function loadSummary(){
+  if(summaryLoaded)return;summaryLoaded=true;
+  fetch('/api/league/seasons-summary?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j||!j.ok)return;
+      summary=j.seasons||[];
+      divIndex=null;
+      // Итоги пришли позже первого рендера — перерисовываем то, что открыто:
+      // без них дивизионы матчей подписаны по старой таблице.
+      if(openId){ var pl=byId(openId); if(pl)renderPlayer(pl); }
+      else if(mode==='home')renderHome();
+      else if(mode==='matches')renderFeed();
+      else if(mode==='div')renderDiv();
+    }).catch(function(){});
+}
+// Где игрок играл в каждом сезоне — по таблицам дивизионов, а не по текущему
+// дивизиону из профиля. Иначе переход между дивизионами задним числом
+// переписывает всю историю: у человека оба сезона показываются в новом дивизионе.
+var divIndex=null;
+function buildDivIndex(){
+  divIndex={};
+  (summary||[]).forEach(function(s){
+    var key=String(s.number);
+    divIndex[key]=divIndex[key]||{};
+    (s.divisions||[]).forEach(function(d){
+      (d.table||[]).forEach(function(p){
+        // Только имя: номер в таблице дивизиона — свой, 1..n, и к номеру игрока
+        // в витрине отношения не имеет. По нему дивизион определялся наугад.
+        var nm=String(p.name||'').trim().toLowerCase();
+        if(nm&&!divIndex[key][nm])divIndex[key][nm]=d.letter;
+      });
+    });
+  });
+}
+// Дивизион матча: тот, в котором игрок ИГРАЛ тогда, а не тот, где он сейчас.
+// Главный источник — сама строка матча: в журнале лиги дивизион записан рядом со
+// счётом и после заморозки колонок он уже не меняется вслед за переходами.
+// Таблицы дивизионов сезона — запасной вариант, на случай пустой ячейки: реестр
+// может быть заполнен неточно, и перебивать им живую строку матча опаснее.
+function divisionAt(season,aName,aId,bName,bId,rowDiv){
+  var own=String(rowDiv||'').trim();
+  if(own)return own;
+  if(!divIndex)buildDivIndex();
+  var box=divIndex[String(season||'')];
+  if(box){
+    var keys=[String(aName||'').trim().toLowerCase(),String(bName||'').trim().toLowerCase()];
+    for(var i=0;i<keys.length;i++){ if(keys[i]&&box[keys[i]])return box[keys[i]] }
+  }
+  return '';
+}
+function seasonPlacesOf(name,id){
+  var out={};
+  (summary||[]).forEach(function(s){
+    (s.divisions||[]).forEach(function(d){
+      (d.table||[]).forEach(function(p){
+        // Только по имени. Номера в таблице дивизиона свои, 1..n, и с номером
+        // игрока в витрине они не связаны: сравнение по id ловило чужого
+        // игрока из первого попавшегося дивизиона — так в карточке появлялся
+        // Prime у того, кто играет в A.
+        var same=String(p.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase();
+        // Игрок за сезон играет в одном дивизионе — берём первое совпадение
+        // и не перетираем его следующими таблицами.
+        if(same&&!out[String(s.number)])out[String(s.number)]={division:d.letter,place:p.place||'',
+          points:p.points||0,matches:p.matches||0,wins:p.wins||0};
+      });
+    });
+  });
+  return out;
+}
+// Есть ли у сезона живые таблицы дивизионов. Пока их нет (реестр не заполнен или
+// ответ ещё не пришёл), делать выводы о составе сезона нельзя.
+function seasonHasTables(n){
+  var s=(summary||[]).filter(function(x){return String(x.number)===String(n)})[0];
+  if(!s)return false;
+  return (s.divisions||[]).some(function(d){return (d.table||[]).length>0});
+}
+function lastFinishedSeason(){
+  var list=(summary||[]).filter(function(x){
+    return String(x.status||'').toLowerCase()==='finished'&&(x.divisions||[]).length;
+  });
+  return list.length?list[list.length-1]:null;
+}
+function chLine(pl,sub,small){
+  if(!pl||!pl.name)return '';
+  return '<div class="chline'+(small?' small':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
+    +avL(pl)+'<div><div class="nm2">'+esc(pl.name)+'</div>'
+    +(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div><span></span></div>';
+}
+// Крупная карточка чемпиона: большая аватарка, под ней дивизион и титул, ниже —
+// сам финал со счётом, чтобы финалист был виден без отдельной строки.
+// Чемпион сверху крупно и в золотой рамке, под ним счёт финала, под счётом —
+// финалист мелкой серебряной аватаркой. Видно с первого взгляда, кто выиграл.
+function champCard(d){
+  if(!d.champion)return '';
+  var h='<div class="chbig">'
+    +'<div onclick="openPlayerByName(\''+q(d.champion.name)+'\',\'home\')">'
+    +avL(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div></div>'
+    +'<div class="sub">'+esc((d.title||divLabel(d.letter))+' '+X.champTag)+'</div>';
+  if(d.final_score)h+='<div class="chsc">'+esc(d.final_score)+'</div>';
+  if(d.runner_up&&d.runner_up.name){
+    h+='<div class="chru" onclick="openPlayerByName(\''+q(d.runner_up.name)+'\',\'home\')">'
+      +avL(d.runner_up)+'<span class="nm3">'+esc(d.runner_up.name)+'</span></div>';
+  }
+  return h+'</div>';
+}
+// Переход между дивизионами: аватарка покрупнее и путь стрелкой.
+function mvLine(pl,cls,arrow){
+  return '<div class="mv '+cls+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
+    +avL(pl)+'<div><div class="nm2">'+esc(pl.name)
+    +(pl.wildcard?'<span class="wc">wildcard</span>':'')+'</div>'
+    +'<div class="path">'+esc(divLabel(pl.from))+' <i>'+arrow+'</i> '+esc(divLabel(pl.to))+'</div></div></div>';
+}
+function championsBlock(){
+  var s=lastFinishedSeason();
+  if(!s)return '';
+  var h='<div class="card"><h3>'+esc((L?'Итоги сезона ':'Season ')+s.number+(L?'':' results'))+'</h3>';
+  var any='';
+  (s.divisions||[]).forEach(function(d){ any+=champCard(d) });
+  h+=any||'<div class="hint">'+esc(X.noData)+'</div>';
+  // Кто поднимается и кто падает — считает сервер по местам в регулярке
+  // и по вайлдкартам из ачивок.
+  // Показываем только повышения: у вылетевших сезон часто недоигран, и ставить
+  // их рядом с чемпионами нечестно. Обладатели wildcard идут здесь же, с меткой.
+  var up='';
+  (s.divisions||[]).forEach(function(d){
+    (d.promoted||[]).forEach(function(pl){ up+=mvLine(pl,'up','→') });
+  });
+  if(up)h+='<div class="lab" style="margin-top:14px">'+esc(X.promoted)+'</div>'+up;
+  return h+'</div>';
+}
+// Короткий баннер-приглашение в Fantasy на главной — виден только тем, у кого
+// вообще есть доступ (лига-игроки), сразу ведёт на вкладку Fantasy.
+// Плашка Fantasy на главной. Три состояния, и самое яркое — то, ради которого
+// она и нужна: набор открыт, а команды у человека ещё нет. Тогда это не тихая
+// справка, а заметный призыв собрать состав, с дедлайном и кнопкой.
+function fanDeadlineShort(){
+  if(!fantasyData||!fantasyData.lock_at)return '';
+  var d=new Date(fantasyData.lock_at);
+  if(isNaN(d.getTime()))return '';
+  return d.toLocaleDateString(L?'ru-RU':'en-GB',{day:'numeric',month:'long'});
+}
+function homeFantasyBanner(){
+  if(!fantasyData){
+    // Данные Fantasy не доехали (сбой или таймаут). Вкладка и вход всё равно
+    // должны остаться: человек пришёл по кнопке именно за этим.
+    if(!fantasyAllowed)return '';
+    return '<div class="card fanhomebanner live" onclick="openFantasyApp()"><div class="fhb-top"><div class="fhb-ico">\u2728</div><div><h3>PTF Fantasy</h3></div></div>'
+      +'<div class="fhb-text">'+esc(L?'Соберите команду из настоящих игроков PTF — их матчи в сезоне принесут вам очки.':'Build a squad of real PTF players — their real matches this season earn you points.')+'</div>'
+      +'<button class="fanopen" onclick="event.stopPropagation();openFantasyApp()">'+esc(L?'Открыть Fantasy':'Open Fantasy')+'</button></div>';
+  }
+  var have=(fantasyData.teams||[]).length;
+  var open=Boolean(fantasyData.entry_open);
+  var until=fanDeadlineShort();
+  // Набор открыт и команды нет — ведём за руку к созданию состава.
+  if(open&&!have){
+    var call=L?'Соберите команду из настоящих игроков PTF — их матчи в сезоне принесут вам очки. Бесплатно, до двух команд.'
+             :'Build a squad of real PTF players — their real matches this season earn you points. Free, up to two squads.';
+    var due=until?(L?('Составы принимаются до '+until+'.'):('Squads are open until '+until+'.')):'';
+    return '<div class="card fanhomebanner live" onclick="openFantasyApp()">'
+      +'<div class="fhb-top"><div class="fhb-ico">✨</div><div><h3>PTF Fantasy</h3>'
+      +'<div class="fhb-tag">'+esc(L?'Набор открыт':'Entry is open')+'</div></div></div>'
+      +'<div class="fhb-text">'+esc(call)+(due?' '+esc(due):'')+'</div>'
+      +'<button class="fanopen" onclick="event.stopPropagation();openFantasyApp()">'+esc(L?'Собрать команду':'Build my squad')+'</button></div>';
+  }
+  var text=have
+    ?(L?('У вас '+have+(have===1?' команда':' команды')+' в игре — загляните за очками и составом.'):('You have '+have+' Fantasy '+(have===1?'team':'teams')+' in play — check your points and squad.'))
+    :(L?'Скоро откроется набор составов. Загляните, как это устроено.':'Squad entry opens soon. Take a look at how it works.');
+  return '<div class="card fanhomebanner" onclick="showTab(\'fantasy\')"><div class="fhb-ico">✨</div><div><h3 style="margin:0 0 4px">PTF Fantasy</h3><div class="hint">'+esc(text)+'</div></div></div>';
+}
+function renderHome(){
+  var h='';
+  // Блок «Твой сезон» убран: своя карточка открывается плашкой в шапке.
+  // Когда и где играем — самое частое, что спрашивают в чате. Логотип площадки
+  // добавим отдельно, когда Костас пришлёт файл.
+  h+='<div class="card"><h3>'+esc(X.sInfo)+'</h3>'
+    +'<div class="stats">'+stt(X.sDates,X.sDatesV,true)+stt(X.sSemi,X.sSemiV)+'</div>'
+    +'<div class="venue"><img src="/public/img/peak.jpg" alt="">'
+    +'<div><div class="vt">'+esc(X.sVenueV)+'</div><div class="vd">'+esc(X.sVenue)+'</div></div></div></div>';
+  loadSummary();
+  h+=homeFantasyBanner();
+  h+=championsBlock();
+  h+='<div class="card"><h3>'+esc(X.title)+'</h3><div class="hint">'+esc(X.sub)+'</div>'
+    +'<div class="chips" style="margin-top:11px;margin-bottom:0">'
+    +[['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],['matches',X.tMatches]].map(function(x){
+      return '<div class="chip" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
+    }).join('')+'</div></div>';
+  $('viewHome').innerHTML=h;
+}
+
+// ---------------------------------------------------------------- гонка
+// Номер в гонке. У кого есть очки — своё место из таблицы. У кого очков ещё нет,
+// номер берём не из таблицы (там он случайный и шёл вниз), а просто продолжаем
+// нумерацию: 31, 32, 33… — сами игроки при этом идут по алфавиту.
+// Считаем по всему составу, а не по отфильтрованному списку, чтобы номера не
+// прыгали при поиске и переключении дивизионов.
+var raceNoIdx=null;
+function buildRaceNo(){
+  raceNoIdx={};
+  var all=(players||[]).filter(function(p){return p.points>0||p.position>0});
+  var ranked=all.filter(function(p){return (p.points||0)>0});
+  var rest=all.filter(function(p){return !((p.points||0)>0)});
+  var maxNo=0;
+  ranked.sort(function(a,b){return (b.points||0)-(a.points||0)||(a.position||9999)-(b.position||9999)});
+  ranked.forEach(function(p,i){
+    var n=Number(p.position)||(i+1);
+    raceNoIdx['#'+String(p.id)]=n;
+    if(n>maxNo)maxNo=n;
+  });
+  rest.sort(function(a,b){return String(a.name||'').localeCompare(String(b.name||''),'en',{sensitivity:'base'})});
+  rest.forEach(function(p){ maxNo++; raceNoIdx['#'+String(p.id)]=maxNo; });
+}
+function raceNo(p){
+  if(!raceNoIdx)buildRaceNo();
+  return raceNoIdx['#'+String(p&&p.id)]||Number(p&&p.position)||0;
+}
+function raceList(){
+  var qq=rQuery.trim().toLowerCase();
+  var list=players.filter(function(p){return p.points>0||p.position>0});
+  if(rFilter){
+    var f=rFilter;
+    list=list.filter(function(p){
+      var d=String(p.division||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+      if(f==='ab')return d==='A'||d==='B';
+      if(f==='cd')return d==='C'||d==='D';
+      if(f==='prime')return d==='PRIME'||d==='P';
+      return d===f;
+    });
+  }
+  if(qq)list=list.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qq)>=0});
+  var key={pos:function(p){return -(raceNo(p)||9999)},name:function(p){return p.name||''},
+    m:function(p){return p.matches},w:function(p){return p.wins||0},
+    wr:function(p){return pct(p)},points:function(p){return p.points}};
+  var k=key[rSort]||key.points;
+  return list.slice().sort(function(a,b){
+    var x=k(a),y=k(b),r;
+    if(typeof x==='string')r=String(y).localeCompare(String(x),'en');
+    else r=x-y;
+    if(r)return rDesc?-r:r;
+    // При равенстве порядок всегда один и тот же — по номеру в гонке. Раньше
+    // он переворачивался вместе с основной сортировкой, и все безрейтинговые
+    // игроки выстраивались задом наперёд.
+    return (raceNo(a)||9999)-(raceNo(b)||9999);
+  });
+}
+var RULES_DIV = {
+  ru: '<h4>Регулярная часть</h4>'
+    +'<ul><li>Каждый игрок проводит 7 матчей регулярной части. Таблица строится по лиговым очкам.</li>'
+    +'<li>Победа — 3 очка, поражение — 1 очко.</li>'
+    +'<li>Техническая победа засчитывается как победа и даёт лиговые очки, но не добавляет сетов и геймов для тай-брейков таблицы.</li>'
+    +'<li>Для полноценного спортивного результата нужно сыграть все 7 матчей.</li></ul>'
+    +'<h4>Места в таблице</h4>'
+    +'<ul><li>Места 1–2 поднимаются дивизионом выше. Из дивизиона A наверх идёт только победитель — место в Prime одно.</li>'
+    +'<li>Обладатель wildcard поднимается независимо от места.</li>'
+    +'<li>Места 3–6 остаются в своём дивизионе.</li>'
+    +'<li>Места 7–8 опускаются дивизионом ниже. Из Prime и из дивизиона D не опускается никто.</li>'
+    +'<li>Места 1–4 выходят в плей-офф.</li>'
+    +'<li>За итоговое место начисляются очки годовой гонки (YRP).</li></ul>'
+    +'<h4>Тай-брейки</h4>'
+    +'<ul><li>При равенстве лиговых очков сравниваются: число побед, разница сетов, разница геймов, личная встреча.</li>'
+    +'<li>Если равны трое и больше — тот же порядок сравнения, без отдельной мини-таблицы.</li></ul>'
+    +'<h4>Плей-офф</h4>'
+    +'<ul><li>Плей-офф определяет итоговый спортивный результат дивизиона: победителя, призёров, финальные места и итоговые очки гонки.</li>'
+    +'<li>Регулярная часть расставляет игроков по позициям, плей-офф решает, кто заканчивает дивизион первым.</li></ul>',
+  en: '<h4>Regular season</h4>'
+    +'<ul><li>Each player plays 7 regular season matches. The table is ranked by League Points.</li>'
+    +'<li>Win = 3 points, loss = 1 point.</li>'
+    +'<li>A technical win counts as a win and gives League Points, but it does not add extra sets or games for tie-break statistics.</li>'
+    +'<li>For a full sporting result, a player should complete all 7 matches.</li></ul>'
+    +'<h4>Table positions</h4>'
+    +'<ul><li>Places 1-2 move up to a higher division. From Division A only the winner moves up, because Prime has a single spot.</li>'
+    +'<li>A wildcard holder moves up regardless of place.</li>'
+    +'<li>Places 3-6 stay in the same division.</li>'
+    +'<li>Places 7-8 move down to a lower division. Nobody drops out of Prime or Division D.</li>'
+    +'<li>Places 1-4 qualify for the playoffs.</li>'
+    +'<li>Players also receive YRP points based on their final position.</li></ul>'
+    +'<h4>Tie-breaks</h4>'
+    +'<ul><li>If players are tied on League Points: number of wins, set difference, game difference, head-to-head result.</li>'
+    +'<li>If 3 or more players are tied, the same general tie-break system is used, without a separate mini-table.</li></ul>'
+    +'<h4>Playoffs</h4>'
+    +'<ul><li>The playoffs decide the final sporting result of the division: the winner, prize winners, final season positions and final Year Ranking Points.</li>'
+    +'<li>The regular season gets players into position, and the playoffs decide who finishes the division on top.</li></ul>'
+};
+var YRP_BASE = [[1,160,130,106,86,70],[2,145,118,96,78,63],[3,132,107,87,71,57],[4,120,97,79,64,52],
+  [5,108,87,71,58,47],[6,96,78,63,51,42],[7,84,68,55,45,37],[8,72,59,48,39,32]];
+var YRP_BONUS = [['A','+12','+18','+30'],['B','+10','+15','+25'],['C','+8','+12','+20'],
+  ['D','+6','+9','+15'],['E','+5','+7','+12'],['Prime','+12','+18','+30']];
+function yrpTables(L){
+  var h1=L?['Место','Div A','Div B','Div C','Div D','E и ниже']:['Place','Div A','Div B','Div C','Div D','E / below'];
+  var t='<table><tr>'+h1.map(function(x){return '<th>'+esc(x)+'</th>'}).join('')+'</tr>'
+    +YRP_BASE.map(function(r){return '<tr>'+r.map(function(v){return '<td>'+v+'</td>'}).join('')+'</tr>'}).join('')+'</table>';
+  var h2=L?['Дивизион','Победа в полуфинале','Победа в финале','Максимум']:['Division','Win in semifinal','Win in final','Maximum bonus'];
+  t+='<h4>'+esc(L?'Бонусы плей-офф':'Playoff bonus points')+'</h4><table><tr>'
+    +h2.map(function(x){return '<th>'+esc(x)+'</th>'}).join('')+'</tr>'
+    +YRP_BONUS.map(function(r){return '<tr>'+r.map(function(v){return '<td>'+esc(v)+'</td>'}).join('')+'</tr>'}).join('')+'</table>';
+  return t;
+}
+var RULES_RACE = {
+  ru: '<h4>Что такое YRP</h4>'
+    +'<ul><li>Year Ranking Points — сезонные спортивные очки. Из них складывается годовой рейтинг игрока внутри Phuket Tennis Family.</li>'
+    +'<li>YRP это не деньги, не кредиты и не внутренняя валюта. Они показывают долгий спортивный результат за год.</li>'
+    +'<li>Базовые YRP игрок получает за результат сезона, участники плей-офф добавляют бонус сверху.</li></ul>'
+    +'<h4>Как начисляются</h4>'
+    +'<ul><li>Базовые YRP даются за итоговое место в таблице дивизиона или группы.</li>'
+    +'<li>Плей-офф добавляет очки поверх базовых очков регулярной части.</li>'
+    +'<li>Проигравший полуфинал бонуса не получает. Проигравший финал получает только бонус за победу в полуфинале. Победитель дивизиона получает оба бонуса.</li>'
+    +'<li>Prime считается по той же шкале, что и дивизион A.</li></ul>'
+    +'<h4>Базовые очки за место</h4>',
+  en: '<h4>What is YRP</h4>'
+    +'<ul><li>Year Ranking Points are seasonal sports ranking points. They form the annual ranking inside Phuket Tennis Family.</li>'
+    +'<li>YRP are not money, credits, or an internal currency. They show a long-term sporting result across the year.</li>'
+    +'<li>A player earns base YRP from the season result, and playoff players can add bonus points on top.</li></ul>'
+    +'<h4>How points are added</h4>'
+    +'<ul><li>Base YRP are awarded according to the final place in the division or group table.</li>'
+    +'<li>The playoff gives additional YRP on top of the base regular season points.</li>'
+    +'<li>A losing semifinalist gets no playoff bonus. A losing finalist gets only the semifinal win bonus. The division winner gets both bonuses.</li>'
+    +'<li>Prime uses the same YRP scale as Division A.</li></ul>'
+    +'<h4>Base YRP by place</h4>'
+};
+var RULES_GF = {
+  ru: '<h4>Отбор в Grand Final</h4>'
+    +'<ul><li>Grand Final — главный турнир года для лучших и самых стабильных игроков по накопленным очкам гонки.</li>'
+    +'<li>Отбор идёт двумя блоками: верхний — дивизионы A и B, нижний — дивизионы C и D.</li>'
+    +'<li>Игрок попадает в свой блок по дивизиону, в котором находится на дату отсечки.</li>'
+    +'<li>Если за год игрок играл в разных дивизионах, его очки сохраняются. Для отбора считаются три лучших сезона.</li></ul>',
+  en: '<h4>Grand Final selection</h4>'
+    +'<ul><li>The Grand Final is the biggest tournament of the year for the best and most consistent players based on accumulated Year Ranking Points.</li>'
+    +'<li>Selection is divided into two blocks: Upper (Division A + B) and Lower (Division C + D).</li>'
+    +'<li>A player qualifies for the block according to the division they are in at the qualification cutoff date.</li>'
+    +'<li>If a player played in different divisions during the year, their points are preserved. Only the best three season results count.</li></ul>'
+};
+function rulesDiv(){ return L?RULES_DIV.ru:RULES_DIV.en }
+function rulesRace(){ return (L?RULES_RACE.ru:RULES_RACE.en)+yrpTables(L)+(L?RULES_GF.ru:RULES_GF.en) }
+function spoiler(title,html){
+  return '<details class="spo"><summary>? '+esc(title)+'</summary><div class="in">'+html+'</div></details>';
+}
+function renderRace(){
+  var list=raceList();
+  var totalM=Object.keys(matches).reduce(function(s,k){return s+(matches[k]||[]).length},0);
+  var top=players.slice().sort(function(a,b){return (b.points||0)-(a.points||0)})[0];
+  var lead=top?(top.name+' · '+(top.points||0)):'—';
+  var buckets=[['','' ,X.all],['ab','','A+B'],['cd','','C+D'],['prime','','PRIME']];
+  var chips=buckets.map(function(b){
+    return '<div class="chip'+(rFilter===b[0]?' on':'')+'" onclick="setRaceFilter(\''+b[0]+'\')">'+esc(b[2])+'</div>';
+  }).join('')+divisionsOfPlayers().map(function(d){
+    var k=String(d).replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    return '<div class="chip'+(rFilter===k?' on':'')+'" onclick="setRaceFilter(\''+q(k)+'\')">'+esc(divLabel(d))+'</div>';
+  }).join('');
+  var nfilters=(rFilter?1:0);
+  var h='<div class="kpi"><span>'+esc(X.players)+' <b>'+players.length+'</b></span>'
+    +'<span>'+esc(X.matchesN)+' <b>'+Math.round(totalM/2)+'</b></span>'
+    +'<span class="a">'+esc(X.leader)+' <b>'+lead+'</b></span></div>'
+    +'<div class="fbar">'+sugBox('rq',rQuery,players.map(function(p){return p.name}),rSugOpen,'race')
+    +'<div class="fbtn'+(rFiltersOpen||nfilters?' on':'')+'" onclick="toggleFilters()">'+esc(X.filters)
+    +(nfilters?' <span class="n">'+nfilters+'</span>':'')+'</div></div>'
+    +(rFiltersOpen?'<div class="fpanel"><div class="flab">'+esc(X.bucketsDiv)+'</div><div class="chips sm" style="margin-bottom:0">'+chips+'</div></div>':'');
+  var col=function(k,t,cls){
+    return '<span class="'+(rSort===k?'s':'')+(cls?' '+cls:'')+'" onclick="setSort(\''+k+'\')">'+esc(t)+(rSort===k?(rDesc?' ▼':' ▲'):'')+'</span>';
+  };
+  h+='<div class="tb race"><div class="thd">'+col('pos',X.colNo)+'<span></span>'
+    +col('name',X.colPlayer,'n')+col('m',X.colM)+col('w',X.colW)+col('wr',X.colWR)+col('points',X.colPts)+'</div>';
+  h+=list.length?list.map(function(p){
+    var w=pct(p);
+    return '<div class="trw'+(p.position&&p.position<=3?' top':'')+'" onclick="openPlayer(\''+q(p.id)+'\',\'race\')">'
+      +'<span class="p">'+(raceNo(p)||'—')+'</span>'+av(p)
+      +'<span class="n"><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div><div style="margin-top:3px">'+divChip(p.division)+'</div></span>'
+      +'<span>'+p.matches+'</span>'
+      +'<span>'+(p.wins||0)+'</span>'
+      +'<span>'+w+'%<div class="bar"><i style="width:'+w+'%"></i></div></span>'
+      +'<span class="pt">'+p.points+'</span></div>';
+  }).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
+  h+='</div><div class="tip">'+esc(X.sortTip)+'</div>'+spoiler(X.howRaceT,rulesRace());
+  $('viewRace').innerHTML=h;
+  keepFocus('rq',rQuery);
+}
+function divisionsOfPlayers(){
+  var seen={},out=[];
+  players.forEach(function(p){var d=(p.division||'').trim();if(d&&!seen[d]){seen[d]=1;out.push(d)}});
+  return out.sort();
+}
+function setRaceFilter(f){rFilter=(rFilter===f?'':f);renderRace()}
+function toggleFilters(){rFiltersOpen=!rFiltersOpen;renderRace()}
+function setSort(k){ if(rSort===k)rDesc=!rDesc; else {rSort=k;rDesc=(k!=='name'&&k!=='pos')} renderRace() }
+// Возврат фокуса после перерисовки — ТОЛЬКО если человек прямо сейчас печатает
+// в этом поле. Перерисовка пересоздаёт поле, и без возврата клавиатура
+// закрывалась бы на каждой букве. Но при открытии страницы, смене вкладки или
+// подгрузке данных фокус ставить нельзя: тогда клавиатура выскакивала сама,
+// будто человек ткнул в поиск.
+var typingIn='',typingAt=0;
+function markTyping(id){typingIn=id;typingAt=Date.now()}
+function keepFocus(id,val){
+  if(typingIn!==id||Date.now()-typingAt>1500)return;
+  var el=$(id);if(!el)return;
+  var v=String(val==null?el.value:val);
+  if(document.activeElement!==el)el.focus();
+  try{el.setSelectionRange(v.length,v.length)}catch(e){}
+}
+
+// ---------------------------------------------------------------- игроки
+// Порядок случайный при каждом открытии: так на первом экране каждый раз
+// новые лица. Как только выбран дивизион или идёт поиск — порядок осмысленный.
+function shuffledPlayers(){
+  if(!pOrder.length){
+    pOrder=players.map(function(p,i){return i});
+    for(var i=pOrder.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=pOrder[i];pOrder[i]=pOrder[j];pOrder[j]=t}
+  }
+  return pOrder.map(function(i){return players[i]}).filter(Boolean);
+}
+// Игрок относится к сезону, если он в нём реально сыграл (есть матчи с этим
+// номером сезона в истории) либо это текущий активный сезон и игрок сейчас
+// в составе дивизиона — до первого сыгранного матча в истории пусто.
+function playerHasSeason(p,num){
+  if(!num)return true;
+  if(String(season)===String(num)&&isActive(p))return true;
+  return (matches[p.id]||[]).some(function(m){return String(m.season||'')===String(num)});
+}
+function playersList(){
+  var qq=pQuery.trim().toLowerCase();
+  var ordered=(pDiv||qq)?players.slice().sort(function(a,b){return (a.position||9999)-(b.position||9999)}):shuffledPlayers();
+  return ordered.filter(function(p){
+    if(pDiv&&String(p.division||'').trim()!==pDiv)return false;
+    if(pSeason&&!playerHasSeason(p,pSeason))return false;
+    if(qq&&String(p.name||'').toLowerCase().indexOf(qq)<0)return false;
+    return true;
+  });
+}
+function renderPlayers(){
+  var list=playersList();
+  var chips='<div class="chip'+(pDiv===''?' on':'')+'" onclick="setPDiv(\'\')">'+esc(X.all)+'</div>'
+    +divisionsOfPlayers().map(function(d){
+      return '<div class="chip'+(pDiv===d?' on':'')+'" onclick="setPDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
+    }).join('');
+  // Сезонные вкладки: сначала «Все», затем сезоны от самого свежего к
+  // старым — список берётся из реального реестра сезонов, а не захардкожен.
+  var seasonOpts=[['',X.all]].concat(seasons.slice().sort(function(a,b){return Number(b.number)-Number(a.number)}).map(function(s){return [String(s.number),s.label];}));
+  var sch=seasonOpts.map(function(x){
+    return '<div class="chip'+(pSeason===x[0]?' on':'')+'" onclick="setPSeason(\''+q(x[0])+'\')">'+esc(x[1])+'</div>';
+  }).join('');
+  var nf=(pDiv?1:0)+((pSeason&&pSeason!==String(season))?1:0);
+  var qq2=pQuery.trim().toLowerCase();
+  var h='<div class="fbar">'+sugBox('pq',pQuery,players.map(function(p){return p.name}),pSugOpen,'plr')
+    +'<div class="fbtn'+(pFiltersOpen||nf?' on':'')+'" onclick="togglePFilters()">'+esc(X.filters)
+    +(nf?' <span class="n">'+nf+'</span>':'')+'</div></div>'
+    +(pFiltersOpen?'<div class="fpanel"><div class="flab">'+esc(X.bucketsDiv)+'</div>'
+      +'<div class="chips sm">'+chips+'</div>'
+      +'<div class="flab">'+esc(X.statusLab)+'</div>'
+      +'<div class="chips sm" style="margin-bottom:0">'+sch+'</div></div>':'')
+    +'<div class="view"><div class="vb'+(pView==='tile'?' on':'')+'" onclick="setPView(\'tile\')">'+esc(X.tile)+'</div>'
+    +'<div class="vb'+(pView==='detail'?' on':'')+'" onclick="setPView(\'detail\')">'+esc(X.detail)+'</div></div>'
+    +'<div class="cnt">'+esc(X.found)+list.length+((!pDiv&&!pQuery)?esc(X.random):'')+'</div>';
+  if(!list.length){$('viewPlayers').innerHTML=h+'<div class="empty">'+esc(X.nobody)+'</div>';keepFocus('pq',pQuery);return}
+  h+=pView==='tile'
+    ? '<div class="grid">'+list.map(playerTile).join('')+'</div>'
+    : list.map(playerRow).join('');
+  $('viewPlayers').innerHTML=h;
+  keepFocus('pq',pQuery);
+}
+function togglePFilters(){pFiltersOpen=!pFiltersOpen;renderPlayers()}
+function setPDiv(d){pDiv=d;renderPlayers()}
+function setPSeason(s){pSeason=s;pSeasonTouched=true;renderPlayers()}
+function setPView(v){pView=v;openAch='';renderPlayers()}
+function achSub(a){
+  var s=a.season?(X.cSeason+' '+a.season):'';
+  return [s,a.date].filter(Boolean).join(' · ');
+}
+function achBadges(p,cls){
+  var list=(p.achievements||[]).slice(0,3);
+  if(!list.length)return '';
+  return '<div class="'+(cls||'ach')+'">'+list.map(function(a,i){
+    return '<span onclick="event.stopPropagation();toggleAch(\''+q(p.id)+'\',\''+i+'\')">'+achIcon(a)+'</span>';
+  }).join('')+'</div>';
+}
+function toggleAch(id,i){
+  var key=id+':'+i;
+  openAch=(openAch===key?'':key);
+  renderPlayers();
+}
+function achNote(p){
+  if(!openAch||openAch.indexOf(p.id+':')!==0)return '';
+  var a=(p.achievements||[])[Number(openAch.split(':')[1])];
+  if(!a)return '';
+  var sub=achSub(a);
+  return '<div class="note"><span>'+achIcon(a)+'</span><div>'+esc(a.title||a.type)
+    +(sub?'<b>'+esc(sub)+'</b>':'')+'</div></div>';
+}
+function playerRow(p){
+  var w=pct(p);
+  return '<div class="pr" onclick="openPlayer(\''+q(p.id)+'\',\'players\')"><div class="top">'
+    +'<div class="ph">'+av(p)+'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p)+'</div>'
+    +'<div><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
+    +'<div class="rw">'+divChip(p.division,p.division_position)+statusBadge(p)+'</div>'
+    +'<div class="meta">'+(p.ntrp?'<span>'+esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b></span>':'')
+      +(p.nationality?'<span>'+flag(p.nationality)+' <b>'+esc(p.nationality)+'</b></span>':'')
+      +(p.experience?'<span>'+esc(X.exp)+' <b>'+esc(p.experience)+'</b></span>':'')+'</div>'
+    +(p.form&&p.form.length?'<div class="rw" style="margin-top:9px">'+formRow(p.form)+'</div>':'')
+    +fantasyBadges(p)
+    +'<div class="wrbar"><div class="t2"><span>'+esc(X.sWR)+'</span><span>'+w+'%</span></div>'
+    +'<div class="bg"><i style="width:'+w+'%"></i></div></div>'
+    +'</div></div>'
+    +'<div class="nums"><div><div class="k">'+esc(X.sMatches)+'</div><div class="v">'+p.matches+'</div></div>'
+    +'<div><div class="k">'+esc(X.sWins)+'</div><div class="v">'+p.wins+'</div></div>'
+    +'<div><div class="k">'+esc(X.sPoints)+'</div><div class="v a">'+p.points+'</div></div></div>'
+    +achNote(p)+'</div>';
+}
+function playerTile(p){
+  var w=pct(p);
+  return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'players\')">'+av(p)
+    +'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p,'ach2')
+    +'<div class="bd"><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
+    +'<div class="rw">'+divChip(p.division,p.division_position)+'</div>'
+    +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
+      +(p.ntrp?esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b> · ':'')+'WR <b>'+w+'%</b></div>'+fantasyBadges(p)
+    +'<div class="bg"><i style="width:'+w+'%"></i></div>'
+    +'<div class="st"><div><div class="k">'+esc(X.sMatches)+'</div><div class="v">'+p.matches+'</div></div>'
+    +'<div><div class="k">'+esc(X.sWins)+'</div><div class="v">'+p.wins+'</div></div>'
+    +'<div><div class="k">'+esc(X.sPoints)+'</div><div class="v a">'+p.points+'</div></div></div>'
+    +'</div></div>';
+}
+
+// ---------------------------------------------------------------- дивизион
+// Сезоны разведены: у прошедших есть таблицы, у будущего пока только заглушка.
+function seasonOf(n){ return seasons.filter(function(s){return String(s.number)===String(n)})[0]||null }
+function seasonDivisions(n){ var s=seasonOf(n); return (s&&s.divisions)||[] }
+function pickSeason(n){
+  if(String(divSeason)===String(n))return;
+  divSeason=String(n);divLetter='';divData=null;divErr='';showExt=false;showMx=false;renderDiv();
+}
+var crossOpen=false;
+function toggleCross(){crossOpen=!crossOpen;renderDiv()}
+function crossGroupBlock(groups){
+  var all=[],seen={};(groups||[]).forEach(function(g){(g.cross_matches||[]).forEach(function(m){var k=m.match_id||[m.season,m.division,m.player_1,m.player_2].join('|');if(!seen[k]){seen[k]=1;all.push(m)}})});
+  if(!all.length)return '';
+  all.sort(function(a,b){return String(a.date||'9999').localeCompare(String(b.date||'9999'))||String(a.player_1||'').localeCompare(String(b.player_1||''))});
+  var title=L?'Межгрупповые матчи':'Cross-group matches';
+  var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):'',middle=done?'<s>'+esc(score)+'</s>':'<i class="cross-vs">vs</i>';var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(matchDate(m.date)):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> '+middle+' <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
+  return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
+}
+function playoffStages(po){
+  po=po||{};var stages=[],has=function(m){return m&&(m.first||m.second)};
+  var qf=(po.qf||[]).filter(has),sf=(po.sf||[po.sf1,po.sf2]).filter(has);
+  if(qf.length)stages.push({t:L?'Четвертьфиналы':'Quarterfinals',m:qf});
+  if(sf.length)stages.push({t:L?'Полуфиналы':'Semifinals',m:sf});
+  if(has(po.final))stages.push({t:X.final,m:[po.final],fin:true});
+  if(has(po.third))stages.push({t:L?'За 3-е место':'Third place',m:[po.third]});
+  if(!stages.length)return '';
+  return '<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div><div class="playgrid">'+stages.map(function(st){return '<div class="playstage"><div class="playtitle">'+esc(st.t)+'</div>'+st.m.map(function(m,i){return poBox(st.t+(st.m.length>1?' · '+(i+1):''),m,st.fin)}).join('')+'</div>'}).join('')+'</div>';
+}
+function renderDiv(){
+  if(!divSeason)divSeason=String(season||(seasons.length?seasons[seasons.length-1].number:''))||'';
+  var list=seasons.length?seasonDivisions(divSeason):divisions;
+  // Сезоны идут от свежего к старому: нужный почти всегда последний.
+  // У идущего сезона мигает мячик — видно, где сейчас живая таблица.
+  var seasonsDesc=seasons.slice().sort(function(a,b){return Number(b.number)-Number(a.number)});
+  var seasonChips=seasons.length>1?'<div class="chips sm">'+seasonsDesc.map(function(s){
+    var live=String(s.status||'').toLowerCase()!=='finished'&&String(s.status||'').toLowerCase()!=='upcoming';
+    var mark=live?' <b class="ball">🎾</b>':(s.status==='upcoming'?' ○':'');
+    return '<div class="chip'+(String(divSeason)===String(s.number)?' on':'')+'" onclick="pickSeason(\''+q(s.number)+'\')">'+esc(s.label)+mark+'</div>';
+  }).join('')+'</div>':'';
+  if(!list.length){
+    var st=seasonOf(divSeason);
+    $('viewDiv').innerHTML=seasonChips+'<div class="soon"><div class="ic">🎾</div>'
+      +'<div class="t">'+esc(st?st.label:X.tDiv)+'</div>'
+      +'<div class="d">'+esc(st&&st.status==='upcoming'?X.seasonSoon:X.noDiv)+'</div></div>';
+    return;
+  }
+  if(!divLetter||list.indexOf(divLetter)<0){
+    var mineD=String(meDivision||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    divLetter=list.indexOf(mineD)>=0?mineD:list[0];
+  }
+  var chips=seasonChips+'<div class="chips">'+list.map(function(d){
+    return '<div class="chip'+(divLetter===d?' on':'')+'" onclick="pickDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>';
+  }).join('')+'</div>';
+  if(divLoading){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';return}
+  if(divErr){$('viewDiv').innerHTML=chips+'<div class="empty" style="color:#C2695E">'+esc(divErr)+'</div>';return}
+  if(!divData){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';loadDiv();return}
+
+  var d=divData,po=d.playoff||{},h=chips;
+  if(po.champion){
+    h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in">'
+      +'<div class="cl">'+esc(X.champion)+'</div>'+avL(po.champion)
+      +'<div class="cn">'+esc(po.champion.name)+'</div>'
+      +'<div class="cd">'+esc(divLabel(d.division))+(divSeason?(L?' · Сезон ':' · Season ')+esc(divSeason):'')+'</div></div></div>';
+  }
+  // Сетка идёт сразу под чемпионом; если плей-офф ещё не игрался — блока нет.
+  var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played);
+  if(hasPo){
+    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'
+      +'<div class="tree"><div class="col">'
+      +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
+      +'</div><div class="conn"><i></i><u></u></div><div class="col">'
+      +poBox(X.final,po.final,true)+'</div></div>'+(po.third?'<div class="playgrid"><div class="playstage">'+poBox(L?'За 3-е место':'Third place',po.third)+'</div></div>':'');
+  }
+  h+=standingsBlock(d,divLabel(d.division));
+  // Дивизион может идти двумя группами: показываем вторую таблицу сразу под первой,
+  // без переключателей — так проще сравнивать составы.
+  var groups=d.groups||[];
+  if(groups.length>1){
+    h=chips;
+    if(po.champion){h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in"><div class="cl">'+esc(X.champion)+'</div>'+avL(po.champion)+'<div class="cn">'+esc(po.champion.name)+'</div><div class="cd">'+esc(divLabel(d.division))+(divSeason?(L?' · Сезон ':' · Season ')+esc(divSeason):'')+'</div></div></div>';}
+    h+=playoffStages(po);
+    for(var gi=0;gi<groups.length;gi++){
+      var g=groups[gi];
+      h+=standingsBlock(g,divLabel(d.division)+' · '+((L?g.group_title:g.group_title_en)||((L?'Группа ':'Group ')+g.group)));
+    }
+    h+=crossGroupBlock(groups);
+  }
+  h+='<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
+    +(showExt?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+extTable(g)}).join(''):extTable(d)):'')
+    +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
+    +(showMx?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+mxTable(g)}).join(''):mxTable(d)):'')
+    +spoiler(X.howDivT,groups.length>1?(L?
+      '<p>В каждой группе отдельная таблица: победа — 3 очка, поражение — 1. Порядок при равенстве: победы, разница сетов, разница геймов, выигранные сеты. Межгрупповые матчи входят в общие очки группы; посев определяется местом внутри своей группы. Пары плей-офф организатор подтверждает отдельно.</p>':
+      '<p>Each group has its own standings: 3 points for a win, 1 for a loss. Ties are ranked by wins, set difference, game difference, then sets won. Cross-group matches count toward group points; playoff seeding is based on the ranking within each group. The organiser confirms playoff pairs separately.</p>'):rulesDiv());
+  $('viewDiv').innerHTML=h;
+}
+// Турнирная таблица одного состава: используется и для обычного дивизиона,
+// и для каждой группы, когда дивизион разбит на две.
+function standingsBlock(d,title){
+  return '<div class="lab">'+esc(X.standings)+'<span class="dot"></span>'+esc(title)+'</div>'
+    +'<div class="panel"><div class="drow hd"><span class="p">#</span><span class="n"><em>'+esc(X.colPlayer)+'</em></span>'
+    +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span></span></div>'
+    +d.players.map(function(p){
+      // ▲ только у первых двух — они поднимаются. 3–6 остаются, 7–8 вылетают.
+      var mk=d.grouped?'':(p.place<=2?'▲':(p.zone==='relegation'?'▼':'—'));
+      var zone=p.zone==='playoff'?'z-up':(p.zone==='relegation'?'z-down':'z-stay');
+      var promo=!d.grouped&&p.place<=2?' promo':'';
+      return '<div class="drow '+zone+promo+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
+        +'<span class="p">'+p.place+'</span>'
+        +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em>'+myFantasyMarks(p.name)+'</span>'
+        +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
+        +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
+    }).join('')+'</div>'
+    +(d.grouped?'': '<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
+    +'<span class="u"><i>▲</i> '+esc(X.zPromo)+'</span>'
+    +'<span><i>—</i> '+esc(X.zStay)+'</span>'
+    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>');
+}
+function poBox(title,m,isFinal){
+  if(!m)return '';
+  var side=function(pl,other){
+    if(!pl)return '<div class="sl"><div class="avph">?</div><span class="nm2">—</span><b></b></div>';
+    var win=m.winner_id&&String(m.winner_id)===String(pl.id);
+    var sc=m.score||'';
+    return '<div class="sl'+(win?' win':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'div\')">'
+      +avL(pl)+'<span class="nm2">'+esc(shortName(pl.name))+'</span><b>'+esc(win?sc:'')+'</b></div>';
+  };
+  return '<div class="mbox'+(isFinal?' fin':'')+'"><div class="mtitle">'+esc(title)+'</div>'
+    +side(m.first)+side(m.second)+'</div>';
+}
+function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
+function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv()}
+function toggleExt(){showExt=!showExt;renderDiv()}
+function toggleMx(){showMx=!showMx;renderDiv()}
+function loadDiv(){
+  divLoading=true;divErr='';
+  fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&season='+encodeURIComponent(divSeason)+'&initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      divLoading=false;
+      if(!j.ok){divErr=j.error||'Error';divData=null}else divData=j;
+      renderDiv();
+    }).catch(function(e){divLoading=false;divErr=e.message;renderDiv()});
+}
+function extTable(d){
+  return '<div class="ext"><div class="er hd"><span>#</span><span class="n">'+esc(X.colPlayer)+'</span>'
+    +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>L</span><span>'+esc(X.colPts)+'</span>'
+    +'<span>±S</span><span>±G</span><span>WR</span></div>'
+    +d.players.map(function(p){
+      var sd=(p.setDiff>0?'+':'')+p.setDiff,gd=(p.gameDiff>0?'+':'')+p.gameDiff;
+      return '<div class="er"><span>'+p.place+'</span><span class="n">'+esc(shortName(p.name))+'</span>'
+        +'<span>'+p.matches+'</span><span>'+p.wins+'</span><span>'+p.losses+'</span>'
+        +'<span class="b">'+p.points+'</span><span>'+esc(sd)+'</span><span>'+esc(gd)+'</span>'
+        +'<span>'+p.winRate+'%</span></div>';
+    }).join('')+'</div>';
+}
+function mxTable(d){
+  var ps=d.players;
+  var head='<tr><th>'+esc(X.colPlayer)+'</th>'+ps.map(function(p){return '<th>'+esc(shortName(p.name))+'</th>'}).join('')+'</tr>';
+  var body=ps.map(function(a){
+    return '<tr><td class="rowh">'+esc(shortName(a.name))+'</td>'+ps.map(function(b){
+      if(a.id===b.id)return '<td class="self">—</td>';
+      return '<td>'+esc(d.matrix[a.id+'-'+b.id]||'')+'</td>';
+    }).join('')+'</tr>';
+  }).join('');
+  return '<div class="mx"><table>'+head+body+'</table></div>';
+}
+
+// ---------------------------------------------------------------- лента матчей
+function allMatchesList(){
+  var out=[],seen={};
+  Object.keys(matches).forEach(function(pid){
+    (matches[pid]||[]).forEach(function(m){
+      var key=(m.match_no||'')+'-'+[pid,m.opponent_id].sort().join('-');
+      if(seen[key])return;seen[key]=1;
+      var p=byId(pid)||{name:'',photo:''};
+      var win=m.result==='WIN';
+      out.push({no:m.match_no,date:m.date,competition:m.competition,
+        winner:win?{id:pid,name:p.name,photo:p.photo}:{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo},
+        loser:win?{id:m.opponent_id,name:m.opponent,photo:m.opponent_photo}:{id:pid,name:p.name,photo:p.photo},
+        score:win?m.score:reverseScore(m.score),season:m.season||'',
+        division:divisionAt(m.season,p.name,pid,m.opponent,m.opponent_id,m.division||m.opponent_division),
+        court:m.court||''});
+    });
+  });
+  return out.sort(function(a,b){return sortableDate(b.date)-sortableDate(a.date)||Number(b.no||0)-Number(a.no||0)});
+}
+// Дата матча приходит и в ISO, и через точку. Для сортировки сводим к числу:
+// без этого «01.09» стояло бы выше «12.08» как строка.
+function sortableDate(v){
+  var t=String(v||'').trim();
+  var iso=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  if(iso)return Number(iso[1])*10000+Number(iso[2])*100+Number(iso[3]);
+  var dot=/^(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2,4}))?/.exec(t);
+  if(dot){
+    var y=dot[3]?Number(dot[3]):0;
+    if(y&&y<100)y+=2000;
+    return (y||new Date().getFullYear())*10000+Number(dot[2])*100+Number(dot[1]);
+  }
+  return 0;
+}
+function reverseScore(sc){
+  return String(sc||'').split('/').map(function(part){
+    return part.replace(/(\d+):(\d+)/g,function(_,a,b){return b+':'+a});
+  }).join('/');
+}
+// Вкладка «Матчи»: сверху ближайшие согласованные, снизу история лиги.
+// У каждого блока свой набор фильтров, и оба спрятаны под язычки.
+var fOpen=false;
+function toggleF(){fOpen=!fOpen;renderFeed()}
+function setMatchesView(v){matchesView=v;renderFeed()}
+function renderFeed(){
+  var list=allMatchesList();
+  var divs=[];
+  list.forEach(function(m){var d=(m.division||'').trim();if(d&&divs.indexOf(d)<0)divs.push(d)});
+  divs.sort();
+  var qq=fQuery.trim().toLowerCase();
+  var shown=list.filter(function(m){
+    if(fDiv&&String(m.division||'').trim()!==fDiv)return false;
+    if(qq&&String(m.winner.name).toLowerCase().indexOf(qq)<0&&String(m.loser.name).toLowerCase().indexOf(qq)<0)return false;
+    return true;
+  });
+  var upcoming=upcomingBlock();
+  var history='<div class="bhead"><h3>'+esc(X.histTitle)+'</h3>'
+    +'<div class="bcnt">'+shown.length+'</div>'
+    +'<div class="chip sm'+(fOpen||fQuery||fDiv?' on':'')+'" onclick="toggleF()">'+esc(X.filters)+'</div></div>';
+  if(fOpen||fQuery||fDiv){
+    var chips='<div class="chip'+(fDiv===''?' on':'')+'" onclick="setFDiv(\'\')">'+esc(X.all)+'</div>'
+      +divs.map(function(d){return '<div class="chip'+(fDiv===d?' on':'')+'" onclick="setFDiv(\''+q(d)+'\')">'+esc(divLabel(d))+'</div>'}).join('');
+    history+=sugBox('fq',fQuery,list.reduce(function(acc,m){acc.push(m.winner.name,m.loser.name);return acc},[]),fSugOpen,'feed',X.searchP)
+      +'<div class="chips sm">'+chips+'</div>';
+  }
+  var page=shown.slice(0,fLimit);
+  history+=page.length?page.map(feedCard).join(''):'<div class="empty">'+esc(X.nobody)+'</div>';
+  if(shown.length>fLimit)history+='<button class="more" onclick="moreFeed()">'+esc(X.showMore)+'</button>';
+  var h='<div class="matchswitch"><button class="'+(matchesView==='upcoming'?'on':'')+'" onclick="setMatchesView(\'upcoming\')">'+esc(X.matchesUpcoming)+'</button>'
+    +'<button class="'+(matchesView==='history'?'on':'')+'" onclick="setMatchesView(\'history\')">'+esc(X.matchesHistory)+'</button></div>'
+    +(matchesView==='upcoming'?upcoming:history);
+  $('viewMatches').innerHTML=h;
+  if(fOpen)keepFocus('fq',fQuery);
+}
+function setFDiv(d){fDiv=d;fLimit=20;renderFeed()}
+// По четыре обработчика на поле: ввод, выбор из списка, открытие и закрытие.
+// Закрытие с задержкой — иначе blur успевает съесть нажатие по подсказке.
+// Set — человек печатает: фокус держим. Pick с именем — выбор сделан, клавиатура
+// больше не нужна. Pick('') — это крестик очистки: человек собирается
+// печатать заново, фокус возвращаем.
+function feedSet(v){markTyping('fq');fQuery=v;fSugOpen=!!String(v||'').trim();fLimit=20;renderFeed()}
+function feedPick(n){if(!n)markTyping('fq');else typingIn='';fQuery=n;fSugOpen=false;fLimit=20;renderFeed()}
+function feedBlur(){setTimeout(function(){if(!fSugOpen)return;fSugOpen=false;renderFeed()},180)}
+function raceSet(v){markTyping('rq');rQuery=v;rSugOpen=!!String(v||'').trim();renderRace()}
+function racePick(n){if(!n)markTyping('rq');else typingIn='';rQuery=n;rSugOpen=false;renderRace()}
+function raceBlur(){setTimeout(function(){if(!rSugOpen)return;rSugOpen=false;renderRace()},180)}
+function plrSet(v){markTyping('pq');pQuery=v;pSugOpen=!!String(v||'').trim();renderPlayers()}
+function plrPick(n){if(!n)markTyping('pq');else typingIn='';pQuery=n;pSugOpen=false;renderPlayers()}
+function plrBlur(){setTimeout(function(){if(!pSugOpen)return;pSugOpen=false;renderPlayers()},180)}
+function moreFeed(){fLimit+=20;renderFeed()}
+function feedCard(m){
+  var top=[m.no?'#'+m.no:'',matchDate(m.date),m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+  // В ленте ярлык дивизиона стоит по центру под счётом — второй, в углу,
+  // был дублем. Угловой остаётся только в карточке игрока.
+  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="fm2">'
+    +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
+    // По имени тоже открывается карточка игрока — раньше кликался только кружок.
+    +'<div class="mid"><div class="nm3">'
+      +'<b onclick="event.stopPropagation();openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+esc(m.winner.name)+'</b>'+myFantasyMarks(m.winner.name)
+      +' <s>vs</s> '
+      +'<em onclick="event.stopPropagation();openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+esc(m.loser.name)+'</em>'+myFantasyMarks(m.loser.name)+'</div>'
+    +'<div class="sc">'+esc(m.score||'—')+'</div>'
+    +(m.division?'<div style="margin-top:6px" onclick="event.stopPropagation();openDivFrom(\''+q(m.season||'')+'\',\''+q(m.division)+'\')">'+divChip(m.division)+'</div>':'')+'</div>'
+    +'<div onclick="openPlayer(\''+q(m.loser.id)+'\',\'matches\')">'+av(m.loser)+'</div>'
+    +'</div></div>';
+}
+
+// ---------------------------------------------------------------- турниры и о лиге
+// События: карточки со свободными местами, ценой и статусом самого игрока.
+// Записываться уходим в бот — там кнопки, счёт и оплата с депозита.
+var evList=null,evBalance=0,evLoaded=false,evAdmin=false;
+function loadEvents(){
+  if(evLoaded)return;evLoaded=true;
+  fetch('/api/league/events?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j||!j.ok)return;
+      evList=j.events||[];evBalance=j.balance||0;evAdmin=!!j.is_admin;
+      buildTabs();
+      if(mode==='events')renderEvents();
+    }).catch(function(){});
+}
+setInterval(function(){if(document.hidden||!evList)return;var changed=false;evList.forEach(function(e){if(e.ends_at&&Date.now()>=e.ends_at&&!e.past){e.past=true;changed=true}if(e.starts_at&&Date.now()>=e.starts_at&&e.open_now){e.open_now=false;changed=true}});if(changed){buildTabs();if(mode==='events')renderEvents()}},30000);
+function evStatusBadge(e){
+  if(e.past)return '<span class="badge">'+(L?'Прошло':'Past')+'</span>';
+  if(!e.my_status)return '';
+  var map={waitlist:X.evWait,invoiced:X.evPay,paid:X.evPaid,confirmed:X.evYouIn,pending:X.evPay};
+  var text=map[e.my_status]||e.my_status;
+  var cls=(e.my_status==='paid'||e.my_status==='confirmed')?' ok':'';
+  return '<span class="badge'+cls+'">'+esc(text)+'</span>';
+}
+// Дата события: без года, зато с днём недели — так сразу видно, попадаешь ли.
+var DOW=[['вс','пн','вт','ср','чт','пт','сб'],['Sun','Mon','Tue','Wed','Thu','Fri','Sat']];
+function dayLabel(v){
+  var m=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(v||''));
+  if(!m)return String(v||'');
+  var d=new Date(Date.UTC(+m[3],+m[2]-1,+m[1]));
+  return DOW[L?0:1][d.getUTCDay()]+', '+m[1]+'.'+m[2];
+}
+function eventCard(e){
+  if(e.ends_at&&Date.now()>=e.ends_at)e.past=true;
+  if(e.starts_at&&Date.now()>=e.starts_at)e.open_now=false;
+  var title=L?(e.title_ru||e.title_en):(e.title_en||e.title_ru);
+  var desc=L?(e.description_ru||e.description_en):(e.description_en||e.description_ru);
+  var when=[dayLabel(e.date),e.time].filter(Boolean).join(' · ');
+  var rows='';
+  // Место ссылкой, если она задана: адрес отдельной строкой не дублируем.
+  if(e.place)rows+='<div class="hint">📍 '+(e.place_url
+    ? '<a class="lnk" href="'+esc(e.place_url)+'" onclick="event.preventDefault();openLink(\''+q(e.place_url)+'\')">'+esc(e.place)+'</a>'
+    : esc(e.place))+'</div>';
+  if(when)rows+='<div class="hint">📅 '+esc(when)+'</div>';
+  if(e.capacity)rows+='<div class="hint">👥 '+esc(X.evSpots)+': <b>'+(e.seats_left)+' / '+e.capacity+'</b></div>';
+  if(e.payment_required&&e.price_thb)rows+='<div class="hint">💳 '+esc(X.evPrice)+': <b>'+e.price_thb+' ฿</b>'
+    +(e.guests_allowed?' · '+esc(X.evGuest)+': <b>'+((e.guest_price_thb===null||e.guest_price_thb==='')?e.price_thb:e.guest_price_thb)+' ฿</b>':'')+'</div>';
+  if(e.signup_deadline)rows+='<div class="hint">⏳ '+esc(X.evUntil)+' '+esc(dayLabel(e.signup_deadline))+'</div>';
+  if(e.invite_only)rows+='<div class="hint">🔒 '+esc(X.evInviteOnly)+'</div>';
+  var badges=evStatusBadge(e);
+  var mine=!!e.my_status&&e.my_status!=='cancelled';
+  var canJoin=!mine&&e.open_now;
+  var full=!mine&&e.capacity&&e.seats_left<=0;
+  var closed=!mine&&!e.open_now&&!full;
+  var btn='';
+  if(e.past)btn='';
+  else if(canJoin)btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>';
+  else if(mine)btn='<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
+  else if(full)btn='<div class="hint" style="margin-top:11px;color:var(--lose)">'+esc(X.evFull)+'</div>';
+  else if(closed)btn='<div class="hint" style="margin-top:11px">'+esc(X.evClosed)+'</div>';
+  return '<div class="card'+(e.past?' event-past':'')+'">'
+    +'<h3>'+esc(title)+'</h3>'
+    // Описание сразу под заголовком: сперва о чём событие, потом детали.
+    +(desc?'<div class="hint" style="margin:0 0 9px">'+esc(desc)+'</div>':'')
+    +(badges?'<div class="rw" style="margin-bottom:8px">'+badges+'</div>':'')
+    +rows
+    +btn
+    +evPeople(e)
+    +'</div>';
+}
+// Кто чего заплатил — дело организатора. Игрокам показываем только участие:
+// подтверждён, записался или ждёт места.
+function evWhoStatus(p){
+  if(p.waitlist)return X.evWait;
+  if(evAdmin)return p.paid?X.evPaid:X.evPay;
+  return p.confirmed?'✅ '+X.evOk:X.evPending;
+}
+// Состав под спойлером: в карточке он мешает, но посмотреть, кто идёт, важно.
+function evPeople(e){
+  var list=e.participants||[];
+  var body=list.length?'<div class="evwho">'+list.map(function(p){
+    return '<div class="evp'+(p.waitlist?' wait':'')+'">'
+      +'<span class="nm">'+esc(p.name)+(p.guests?' <span class="sub">+'+p.guests+'</span>':'')+'</span>'
+      +'<span class="st">'+esc(evWhoStatus(p))+'</span>'
+      +(evAdmin&&p.signup_id?'<span class="rm" onclick="evDrop(\''+q(p.signup_id)+'\')">✕</span>':'')
+      +'</div>';
+  }).join('')+'</div>':'<div class="hint">'+esc(X.evNobody)+'</div>';
+  var add=evAdmin?'<div class="evadd"><input id="evAdd_'+esc(e.event_id)+'" placeholder="'+esc(X.evAdd)+'" oninput="evAddInput(this,\''+q(e.event_id)+'\')" autocomplete="off"><div class="sug hidden" id="evSug_'+esc(e.event_id)+'"></div></div>':'';
+  return '<details class="spo evspo"><summary>'+esc(X.evWho)+' · '+list.length+'</summary>'
+    +'<div class="in">'+body+add+'</div></details>';
+}
+function evPost(url,body,done){
+  fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({initData:initData},linkToken?{t:linkToken}:{},body))})
+    .then(function(r){return r.json()}).then(function(j){
+      evLoaded=false;evList=null;loadEvents();
+      if(done)done(j);
+    }).catch(function(){ if(done)done({ok:false,error:'network'}) });
+}
+function evJoin(id){
+  toast(X.evSending);
+  evPost('/api/league/event-join',{event_id:id},function(j){
+    toast(j&&j.ok?X.evJoined:(j&&j.error)||'…');
+  });
+}
+function evCancel(sid){
+  if(!confirm(X.evCancelAsk))return;
+  toast(X.evSending);
+  evPost('/api/league/event-cancel',{signup_id:sid},function(){});
+}
+function evDrop(sid){
+  toast(X.evSending);
+  // Дальше бот спрашивает про возврат — но уже в теме игрока, а не в личке,
+  // поэтому говорим, куда смотреть.
+  evPost('/api/league/event-roster',{action:'remove',signup_id:sid},function(j){
+    toast(j&&j.ok?X.evToTopic:((j&&j.error)||'…'));
+  });
+}
+function evAddInput(el,eventId){
+  var box=document.getElementById('evSug_'+eventId);
+  var s=String(el.value||'').trim().toLowerCase();
+  if(!s){box.classList.add('hidden');box.innerHTML='';return}
+  var hits=(players||[]).filter(function(p){
+    return String(p.name||'').toLowerCase().indexOf(s)>=0;
+  }).slice(0,6);
+  if(!hits.length){box.classList.add('hidden');box.innerHTML='';return}
+  box.innerHTML=hits.map(function(p){
+    return '<div onclick="evAddPick(\''+q(eventId)+'\',\''+q(p.name)+'\')">'+esc(p.name)
+      +(p.division?' <span class="sub">'+esc(divLabel(p.division))+'</span>':'')+'</div>';
+  }).join('');
+  box.classList.remove('hidden');
+}
+// Игрока ищем по имени, а телеграм-id спрашиваем у сервера: в витрине его нет.
+function evAddPick(eventId,name){
+  var box=document.getElementById('evSug_'+eventId);
+  box.classList.add('hidden');box.innerHTML='';
+  var inp=document.getElementById('evAdd_'+eventId); if(inp)inp.value='';
+  toast(X.evSending);
+  evPost('/api/league/event-roster',{action:'add',event_id:eventId,player_name:name},function(j){
+    toast(j&&j.ok?X.evToTopic:((j&&j.error)||'…'));
+  });
+}
+var toastTimer=null;
+function toast(text){
+  var el=document.getElementById('toast');
+  if(!el){el=document.createElement('div');el.id='toast';document.body.appendChild(el)}
+  el.textContent=text;el.classList.add('on');
+  clearTimeout(toastTimer);toastTimer=setTimeout(function(){el.classList.remove('on')},2600);
+}
+function openBot(){ if(tg&&tg.close)tg.close(); }
+// ------------------------------------------------------------- партнёры
+// Всё содержимое вкладки лежит в таблице состава: лист Partners — сами партнёры,
+// лист Partners_Page — подписи самой страницы. Оба листа двуязычные, поэтому в
+// коде текста нет вообще: Костас правит таблицу, приложение показывает.
+var partners=[];
+var partnerTexts={};
+// Значение на языке читателя. Из таблицы приходит пара {ru,en}; если колонку
+// заполнили одну, она и покажется на обоих языках.
+function partnerText(value){
+  if(value==null)return '';
+  if(typeof value==='string')return value;
+  return (L?(value.ru||value.en):(value.en||value.ru))||'';
+}
+// Подпись страницы: сначала таблица, потом встроенный запасной текст.
+function partnerLabel(key,fallbackRu,fallbackEn){
+  var fromSheet=partnerText(partnerTexts[key]);
+  return fromSheet||(L?fallbackRu:fallbackEn);
+}
+// Готовое письмо партнёру, как у бронирования корта: человек только жмёт кнопку.
+// Сообщение всегда на английском — его читает партнёр, а не игрок.
+// {name} — имя игрока, {partner} — название партнёра, {league} — лига.
+function partnerMessage(p){
+  var mine=(me&&me.name)||'';
+  var fromSheet=partnerTexts.message_default;
+  var fallback=(fromSheet&&typeof fromSheet==='object'?(fromSheet.en||fromSheet.ru):fromSheet)||'Hello! I am writing from Phuket Tennis Family.';
+  var base=String(p.message||'')||fallback;
+  var title=p.name||'';
+  return base
+    .replace(/\{name\}/gi,mine)
+    .replace(/\{имя\}/gi,mine)
+    .replace(/\{partner\}/gi,title)
+    .replace(/\{партнёр\}/gi,title)
+    .replace(/\{партнер\}/gi,title)
+    .replace(/\{league\}/gi,'Phuket Tennis Family')
+    .replace(/\{лига\}/gi,'Phuket Tennis Family');
+}
+// Под описанием — до четырёх кнопок: карта, Instagram, WhatsApp, сайт. Каждая
+// появляется, только если её поле в таблице заполнено. Номер телефона на экран
+// не выводим: из него собирается только кнопка с готовым сообщением.
+function partnerCard(p){
+  var title=p.name||p.name_en||'';
+  // Описание приходит с оформлением из таблицы (жирный, курсив…) уже готовым
+  // безопасным HTML: сервер сам экранирует текст и ставит только эти теги.
+  var descHtml=partnerText(p.description_html);
+  var desc=descHtml||esc(partnerText(p.description));
+  var cat=partnerText(p.category);
+  var btn=function(url,label,cls){
+    return '<a'+(cls?' class="'+cls+'"':'')+' href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(label)+'</a>';
+  };
+  var acts=[];
+  if(p.maps)acts.push(btn(p.maps,partnerLabel('button_maps','📍 Карта','📍 Map'),''));
+  if(p.instagram)acts.push(btn(p.instagram,partnerLabel('button_instagram','📸 Instagram','📸 Instagram'),''));
+  if(p.whatsapp)acts.push(btn('https://wa.me/'+p.whatsapp+'?text='+encodeURIComponent(partnerMessage(p)),
+    partnerLabel('button_whatsapp','📲 WhatsApp','📲 WhatsApp'),'wa'));
+  if(p.site)acts.push(btn(p.site,partnerLabel('button_site','🌐 Сайт','🌐 Website'),''));
+  return '<div class="pt">'
+    +(p.photo?'<img class="ptimg" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="this.remove()">':'')
+    +'<div class="ptbody">'
+    +(cat?'<div class="ptcat">'+esc(cat)+'</div>':'')
+    +'<div class="ptname">'+esc(title)+'</div>'
+    +(desc?'<div class="ptdesc">'+desc+'</div>':'')
+    +(acts.length?'<div class="ptacts">'+acts.join('')+'</div>':'')
+    +'</div></div>';
+}
+function renderPartners(){
+  var box=$('viewPartners');
+  if(!partners.length){
+    box.innerHTML='<div class="empty">'+esc(partnerLabel('empty',
+      'Партнёры скоро появятся.','Partners are coming soon.'))+'</div>';
+    return;
+  }
+  var intro=partnerLabel('intro',
+    'Партнёры лиги: скажите, что вы из Phuket Tennis Family — кнопка уже подставит сообщение.',
+    'League partners: mention Phuket Tennis Family — the button fills the message for you.');
+  box.innerHTML='<div class="card"><h3>'+esc(partnerLabel('title',X.tPartners,X.tPartners))+'</h3>'
+    +(intro?'<p class="hint">'+esc(intro)+'</p>':'')+'</div>'
+    +partners.map(partnerCard).join('');
+}
+function renderEvents(){
+  loadEvents();
+  if(evList===null){$('viewEvents').innerHTML='<div class="empty">…</div>';return}
+  var h='';
+  if(evBalance>0)h+='<div class="card"><h3>'+esc(X.evDeposit)+'</h3><div class="stats">'
+    +stt(X.evDeposit,evBalance+' ฿',true)+'</div></div>';
+  h+=evList.length?evList.map(eventCard).join(''):'<div class="empty">'+esc(X.noEvents)+'</div>';
+  $('viewEvents').innerHTML=h;
+}
+function renderAbout(){
+  var rules=L?[
+    'Победа — <b>3</b> очка, поражение — <b>1</b>.',
+    'При равенстве: очки → разница сетов → разница геймов → выигранные сеты.',
+    'Места <b>1–2</b> — повышение, <b>1–4</b> — плей-офф, <b>5–6</b> остаются, <b>7–8</b> — вылет.',
+    'Тай-брейк в сете показан в счёте. Чемпионский тай-брейк считается сетом, но не влияет на разницу геймов.',
+    'Техническое поражение: сопернику 3 очка, сеты и геймы не начисляются.'
+  ]:[
+    'A win is <b>3</b> points, a loss is <b>1</b>.',
+    'Ties: points → set difference → game difference → sets won.',
+    'Places <b>1–2</b> promote, <b>1–4</b> reach the playoff, <b>5–6</b> stay, <b>7–8</b> relegate.',
+    'Set tie-breaks show in the score. A match tie-break counts as a set but not towards game difference.',
+    'A walkover gives the opponent 3 points; no sets or games are added.'
+  ];
+  $('viewAbout').innerHTML='<div class="card"><h3>'+esc(X.rules)+'</h3>'
+    +rules.map(function(r){return '<div class="sr" style="grid-template-columns:1fr"><span class="sn" style="font-weight:600;font-size:12.5px;color:var(--dim);line-height:1.5">'+r+'</span></div>'}).join('')
+    +'</div><div class="card"><h3>Phuket Tennis Family</h3><div class="hint">'+esc(X.sub)+'</div>'
+    +'<button class="website-link-hidden" onclick="openLink(\'https://www.phukettennis.com\')">🌐 '+esc(X.site)+'</button></div>';
+}
+
+function toggleFanTeam(id){fanTeamOpen=(fanTeamOpen===id?'':id);renderFantasy()}
+// По просьбе Костаса: рейтинг команд должен быть не скучным списком, а как
+// таблица гонки — с местом-медалью и возможностью раскрыть состав команды,
+// чтобы сразу увидеть, кто в неё входит и сколько очков принёс каждый игрок.
+function fanSquadList(picks){
+  if(!picks||!picks.length)return '<div class="hint">'+esc(L?'Состав скрыт.':'Squad is hidden.')+'</div>';
+  return '<div class="fansquad">'+picks.map(function(pk){
+    return '<div class="fansquad-row" onclick="event.stopPropagation();openPlayerByName(\''+q(pk.name)+'\',\'fantasy\')">'
+      +'<span class="nm">'+esc(pk.name)+(pk.captain?' <b class="cap">'+esc(L?'К':'C')+'</b>':pk.vice?' <b class="cap vc">'+esc(L?'ВК':'VC')+'</b>':'')+'</span>'
+      +'<b class="pt">'+esc(pk.points||0)+'</b></div>';
+  }).join('')+'</div>';
+}
+var fanPlayerOpen='';
+function toggleFanPlayer(key){fanPlayerOpen=(fanPlayerOpen===key?'':key);renderFantasy()}
+// Костас: клик по игроку в рейтинге Fantasy должен раскрывать, сколько и за что
+// он заработал очков, — не сразу перекидывать на его страницу. На страницу
+// по-прежнему можно попасть через обычную вкладку «Игроки».
+function fantasyRankRows(list,kind){
+  if(!list||!list.length)return '<div class="empty">'+esc(X.fantasyEmpty)+'</div>';
+  if(kind==='players')return '<div class="tb race fantasy-race"><div class="thd"><span>#</span><span></span><span class="n">'+esc(X.tPlayers)+'</span><span>'+esc(X.fantasyTeams)+'</span><span>'+esc(X.fantasyPoints)+'</span></div>'+list.map(function(x){
+    var medal=x.place===1?'🥇':x.place===2?'🥈':x.place===3?'🥉':x.place,key=x.key||x.name,open=fanPlayerOpen===key;
+    var src=(fantasyData.players||[]).filter(function(pp){return pp.key===x.key})[0];
+    return '<div class="trw-wrap"><div class="trw" onclick="toggleFanPlayer(\''+q(key)+'\')" aria-expanded="'+open+'"><span class="p">'+medal+'</span>'+av(x)+'<span class="n"><div class="nm">'+esc(x.name)+'</div></span><span class="team-count">'+esc(x.selected_by||0)+'</span><span class="pt">'+esc(x.points||0)+'</span></div>'
+      +(open?'<div class="fansquad">'+fanMatchBreakdown(src&&src.score&&src.score.details||[])+'<button class="website-link-hidden" onclick="event.stopPropagation();openPlayerByName(\''+q(x.name)+'\',\'fantasy\')">'+esc(L?'Страница игрока':'Player page')+'</button></div>':'')+'</div>';
+  }).join('')+'</div>';
+  return list.map(function(x,i){
+    var id=x.team_id||String(i),open=fanTeamOpen===id;
+    var medal=x.place===1?'🥇':x.place===2?'🥈':x.place===3?'🥉':x.place,pic={name:x.owner_name,photo:x.owner_photo};
+    return '<div class="fanrank-wrap'+(open?' open':'')+'"><div class="fanrank" onclick="toggleFanTeam(\''+q(id)+'\')" aria-expanded="'+open+'"><div class="fanplace">'+medal+'</div>'+av(pic)+'<div><div class="nm">'+esc(x.team_name)+'</div><div class="sub">'+esc(X.fantasyOwner)+': '+esc(x.owner_name||'')+'</div></div><div class="fanpts">'+esc(x.points||0)+'</div><div class="fanchev">'+(open?'▲':'▼')+'</div></div>'
+      +(open?fanSquadList(x.picks):'')+'</div>';
+  }).join('');
+}
+function setFantasyRank(v){fRank=v;renderFantasy()}
+function openFantasyApp(){location.href='/fantasy'+(linkToken?'?t='+encodeURIComponent(linkToken):'')}
+function renderFantasy(){
+  if(!fantasyData){
+    $('viewFantasy').innerHTML='<div class="card fanhero compact"><div class="fanhero-top"><div class="fanmark">\ud83c\udfbe</div><div class="fanhero-title"><h3>Fantasy</h3><div class="sub">'
+      +esc(fantasyAllowed?(L?'Данные не загрузились. Откройте приложение Fantasy.':'Data did not load. Open the Fantasy app.'):X.fantasyEmpty)+'</div></div></div>'
+      +(fantasyAllowed?'<button class="fanopen" onclick="openFantasyApp()">'+esc(L?'Открыть Fantasy':'Open Fantasy')+'</button>':'')+'</div>';
+    return}
+  var list=fRank==='teams'?(fantasyData.leaderboard||[]):(fantasyData.player_leaderboard||[]);
+  var first=(fantasyData.teams||[]).filter(function(t){return Number(t.team_slot||1)===1})[0];
+  var label=first?(L?'Продолжить команду':'Continue team'):(L?'Создать первую команду':'Create first team');
+  var status=first?(first.status==='locked'?(L?'Подтверждена':'Confirmed'):(L?'Черновик':'Draft')):'';
+  var date=fantasyData.lock_at?new Date(fantasyData.lock_at).toLocaleString(L?'ru-RU':'en-GB'):(L?'Дедлайн ещё не установлен':'Deadline is not set yet');
+  $('viewFantasy').innerHTML='<div class="card fanhero compact">'
+    +'<div class="fanhero-top"><div class="fanmark">🎾</div><div class="fanhero-title"><h3>Fantasy</h3><div class="sub">'+(first?esc(first.team_name)+' · '+esc(status)+' · '+Number(first.points||0)+' pts':esc(fantasyData.roster_size+' '+(L?'игроков':'players')+' · '+fantasyData.budget+' '+(L?'бюджет':'budget')+' · ×1.5 '+(L?'капитан':'captain')))+'</div></div></div>'
+    +'<div class="fanhero-meta"><span>'+esc(date)+'</span>'+(!fantasyData.entry_open?'<span class="fanpreview-tag">'+esc(fantasyData.locked?(L?'Дедлайн прошёл':'Deadline passed'):X.fantasyPreview)+'</span>':'')+'</div>'
+    +'<button class="fanopen" onclick="openFantasyApp()">'+esc(first||fantasyData.entry_open?label:(L?'Посмотреть Fantasy':'View Fantasy'))+'</button></div>'
+    +'<div class="fanseg"><button class="'+(fRank==='teams'?'on':'')+'" onclick="setFantasyRank(\'teams\')">'+esc(X.fantasyTeamRank)+'</button>'
+    +'<button class="'+(fRank==='players'?'on':'')+'" onclick="setFantasyRank(\'players\')">'+esc(X.fantasyPlayerRank)+'</button></div>'
+    +'<div class="card">'+fantasyRankRows(list,fRank)+'</div>';
 }
 
 
-// --- Турниры: группы, сетка, снятия, замены, парная запись ------------------
-{
- const trn=await load('tournaments.js');
+// ---------------------------------------------------------------- страница игрока
+function openPlayerByName(name,from){
+  var p=players.filter(function(x){return String(x.name||'').toLowerCase()===String(name).toLowerCase()})[0];
+  if(p)openPlayer(p.id,from);
+}
+function openPlayer(id,from){
+  var p=byId(id);
+  if(!p)return;
+  openId=String(id);
+  if(from)backTo=from;
+  allMatches=false;fanBlockOpen=false;
+  renderPlayer(p);
+  ALL_VIEWS.forEach(function(k){$(VIEW_ID[k]).classList.add('hidden')});
+  $('tabs').classList.add('hidden');
+  $('viewCard').classList.remove('hidden');
+  syncBack();
+  renderNav();
+  window.scrollTo(0,0);
+}
+// Сезоны собираем из истории матчей: она знает, в каком сезоне сыгран каждый матч.
+function seasonRows(p){
+  var hist=matches[String(p.id)]||[];
+  var by={};
+  hist.forEach(function(m){
+    // Сезон матча приходит с сервера отдельным полем: подпись Competition
+    // бывает пустой, и тогда матч терял сезон и не попадал ни в одну строку.
+    var raw=String(m.season||'')||String(m.competition||'');
+    var s=raw.match(/(\d+)/);
+    var n=s?Number(s[1]):0;
+    if(!n)return;
+    if(!by[n])by[n]={n:n,g:0,w:0};
+    by[n].g++;
+    if(m.result==='WIN')by[n].w++;
+  });
+  var known={};
+  (p.seasons_list||[]).forEach(function(s){known[s.number]=s});
+  Object.keys(known).forEach(function(n){ if(!by[n])by[n]={n:Number(n),g:0,w:0} });
+  return Object.keys(by).map(Number).sort(function(a,b){return b-a}).map(function(n){
+    var k=known[n]||{};
+    var isLast=n===Math.max.apply(null,Object.keys(by).map(Number));
+    return {n:n,name:k.name||((L?'Сезон ':'Season ')+n),division:k.division||(isLast?p.division:''),
+      g:by[n].g,w:by[n].w,
+      place:k.position||k.regular_finish||(isLast?p.division_position:'')||'',
+      points:k.points||0};
+  }).map(function(r,i,arr){
+    // Очки за сезон приходят из таблицы. Пока их там нет и сезон всего один,
+    // очки игрока целиком заработаны в нём — показываем их, а не прочерк.
+    if(!r.points&&arr.length===1)r.points=p.points||0;
+    return r;
+  });
+}
+// Идущий сезон в список сам не попадает, пока в нём нет сыгранных матчей.
+// А человеку важно видеть, что сезон уже начался и он в нём есть.
+// Но только тем, кто в нём действительно есть: в новый сезон переходят не все,
+// поэтому строку добавляем, лишь когда игрок нашёлся в таблице дивизиона этого
+// сезона. Если таблиц сезона ещё нет вовсе — судить не по чему, показываем как
+// раньше, чтобы не спрятать сезон у всех разом.
+function seasonRowsWithLive(p,byTable){
+  var rows=seasonRows(p);
+  var live=(seasons||[]).filter(function(s){return String(s.status||'').toLowerCase()!=='finished'})
+    .map(function(s){return Number(s.number)}).filter(function(n){return n>0});
+  var now=live.length?Math.max.apply(null,live):Number(season||0);
+  if(!now)return rows;
+  var found=rows.filter(function(r){return r.n===now})[0];
+  if(found){
+    found.live=true;
+    if(p.live_stats){
+      found.g=Number(p.season_matches||0);
+      found.w=Number(p.season_wins||0);
+      if(p.division_position)found.place=p.division_position;
+    }
+    return rows;
+  }
+  var hit=(byTable||{})[String(now)];
+  if(!hit&&seasonHasTables(now))return rows;
+  var s=seasonOf(now);
+  // Очки гонки за идущий сезон появятся, когда организатор их проставит, —
+  // выдумывать их из таблицы дивизиона нельзя, шкала другая.
+  rows.unshift({n:now,name:(s&&s.label)||((L?'Сезон ':'Season ')+now),division:(hit&&hit.division)||p.division||'',
+    g:p.live_stats?Number(p.season_matches||0):0,w:p.live_stats?Number(p.season_wins||0):0,
+    place:(hit&&hit.place)||p.division_position||'',points:0,live:true});
+  return rows;
+}
+function renderPlayer(p){
+  if(!schData&&!schLoading&&!schErr)loadSched();
+  var w=pct(p),fp=fantasyPlayer(p);
+  var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
+  var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>';
+  // Панель загрузки фото — над самой фотографией: иначе её не видно без прокрутки.
+  h+=avatarBlock(p);
+  h+='<div class="hero">'
+    +'<div onclick="openAvatarFull(\''+q(p.photo||'')+'\')">'+av(p)+'</div>'
+    +'<div class="vign t"></div><div class="vign b"></div>'
+    +avatarButton(p)+'<div class="fade"></div><div class="info">'
+    +'<h2>'+esc(p.name)+'</h2>'
+    +'<div class="row"><span onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')">'
+      +divChip(p.division, p.division_position)+'</span>'
+      +(raceNo(p)?'<span class="badge g">'+esc(X.tRace)+' #'+raceNo(p)+'</span>':'')
+      +(fp?'<span class="badge fanpos" onclick="event.stopPropagation();showTab(\'fantasy\')">✨ Fantasy #'+esc(fp.place)+'</span>':'')
+      +statusBadge(p)+'</div>'
+    +(p.form&&p.form.length?'<div class="fline"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
+    +'<div class="stats">'
+      +stt(X.sPoints,p.points||'',true,'yrp')+stt(X.sMatches,p.matches||'','','matches')
+      +(fp?stt(X.fantasyPoints,fp.points,true,'fp'):'')
+      +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0),'','wl')+stt(X.sWR,w+'%','','wr')
+      +stt(X.ntrp,p.ntrp||'','','ntrp')+stt(X.exp,p.experience||'','','exp')
+      +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''),'','country')
+    +'</div>'+statNote()+'</div></div>';
 
- // Круговая система: каждая пара встречается ровно один раз, туры ровные.
- const rr=trn.roundRobinPairs(['a','b','c','d','e']);
- const seen=new Set();
- for(const round of rr)for(const [x,y] of round)seen.add([x,y].sort().join('-'));
- check(seen.size===10,'Круговая система: 5 игроков дают 10 уникальных пар');
- check(rr.every(round=>new Set(round.flat()).size===round.flat().length),'В одном туре игрок встречается один раз');
- check(trn.roundRobinPairs(['a']).length===0,'Один участник — матчей нет');
+  var byTable=seasonPlacesOf(p.name,p.id);
+  var srows=seasonRowsWithLive(p,byTable);
+  srows.forEach(function(r){
+    var hit=byTable[String(r.n)];
+    if(!hit)return;
+    if(hit.division)r.division=hit.division;
+    if(hit.place)r.place=hit.place;
+    // Очки в этой строке — очки гонки за сезон (лист Year ranking points),
+    // а не очки внутри таблицы дивизиона: гонка считается по своей шкале.
+  });
+  h+='<div class="card"><h3>'+esc(X.seasons)+'</h3>';
+  if(!srows.length)h+='<div class="hint">'+esc(X.noData)+'</div>';
+  else{
+    h+='<div class="sr hd"><span class="sn"></span><span>'+esc(X.cG)+'</span>'
+      +'<span>'+esc(X.cW)+'</span><span>'+esc(X.cPlace)+'</span><span>'+esc(X.cPts)+'</span></div>'
+      +srows.map(function(s){
+        return '<div class="sr" onclick="openDivFrom(\''+q(s.n)+'\',\''+q(s.division||'')+'\')"><span class="sn">'+esc(s.name)
+          +(s.live?' <b class="live">'+esc(X.sSeasonNow)+'</b>':'')
+          +(s.division?'<div class="sd">'+esc(divLabel(s.division))+'</div>':'')+'</span>'
+          +'<span>'+s.g+'</span><span>'+s.w+'</span>'
+          +'<span class="pl">'+esc(s.place||'—')+'</span>'
+          +'<span class="ptt">'+(s.points||'—')+'</span></div>';
+      }).join('');
+  }
+  h+='</div>';
 
- // Змейка разводит сильных по разным группам.
- check(JSON.stringify(trn.snakeDistribute([1,2,3,4,5,6],2))==='[[1,4,5],[2,3,6]]','Змейка раскладывает 1-2 / 3-4 наоборот');
- check(trn.snakeDistribute([1,2,3],1).length===1,'Одна группа принимает всех');
+  h+=fantasyBlock(p);
 
- check(JSON.stringify(trn.parseScore('6:4 7:6 (7:4)'))==='[{"a":6,"b":4},{"a":7,"b":6}]','Тай-брейк в скобках не считается сетом');
- check(trn.parseScore('W/O').length===0,'W/O не даёт сетов');
+  var ach=p.achievements||[];
+  h+='<div class="card"><h3>'+esc(X.ach)+'</h3>';
+  h+=ach.length?ach.map(function(a){
+    var sub=achSub(a);
+    return '<div class="aline"><div class="ic">'+achIcon(a)+'</div><div><div class="tx">'+esc(a.title||a.type)+'</div>'
+      +(sub?'<div class="dt">'+esc(sub)+'</div>':'')+'</div></div>';
+  }).join(''):'<div class="hint">'+esc(X.noAch)+'</div>';
+  h+='</div>';
 
- // Полный проход по турниру на мок-таблицах.
- const admin={id:'99',name:'Admin'};
- const t=await trn.createTournament({name:'Тестовый турнир',kind:'singles',playoff_type:'cross_1_4',third_place:'yes'},admin,false);
- check(t.tournament_id.startsWith('trn_'),'Турнир создан');
- check((await trn.listTournaments(false)).length===1,'Турнир виден в списке');
-
- const names=['P1','P2','P3','P4'];
- const made=[];
- for(let i=0;i<names.length;i++){
-  made.push(await trn.addEntry(t.tournament_id,{player_id:String(100+i),player_name:names[i],display_name:names[i],status:'accepted',group:'A',seed:String(i+1)},admin,false));
- }
- check((await trn.listEntries(t.tournament_id,false,false)).length===4,'Четыре заявки записаны');
- const twin=await trn.addEntry(t.tournament_id,{player_id:'100',player_name:'P1'},admin,false);
- check(twin.entry_id===made[0].entry_id,'Повторная заявка того же игрока не плодит дубль');
-
- const stage=await trn.createStage(t.tournament_id,{kind:'group',name:'Группы'},admin,false);
- const gm=await trn.generateGroupMatches(t.tournament_id,stage.stage_id,admin,false);
- check(gm.length===6,'Расписание группы из четырёх: шесть матчей');
-
- // Вносим счёт так, чтобы порядок был предсказуемым: P1 > P2 > P3 > P4.
- const rank={};made.forEach((e,i)=>rank[e.entry_id]=i);
- for(const m of await trn.listMatches(t.tournament_id,false,false)){
-  const winner=rank[m.entry_a]<rank[m.entry_b]?m.entry_a:m.entry_b;
-  await trn.setMatchResult(m.match_id,{status:'completed',score:'6:1 6:1',winner_entry:winner},admin,false);
- }
- let state=await trn.tournamentState(t.tournament_id,false);
- check(state.standings.map(x=>x.name).join()==='P1,P2,P3,P4','Таблица считается из матчей в верном порядке');
- check(state.standings[0].points===9&&state.standings[3].points===3,'Очки: 3 за победу, 1 за поражение');
-
- const po=await trn.generatePlayoff(t.tournament_id,{},admin,false);
- const semis=po.matches.filter(m=>Number(m.round)===1);
- check(semis.length===2,'Плей-офф: два полуфинала');
- check(semis[0].entry_a_name==='P1'&&semis[0].entry_b_name==='P4','Первый полуфинал 1-4');
- check(semis[1].entry_a_name==='P2'&&semis[1].entry_b_name==='P3','Второй полуфинал 2-3');
- check(po.matches.some(m=>m.round_label==='Финал'),'Финал создан');
- check(po.matches.some(m=>m.round_label==='Матч за 3-е место'),'Матч за третье место создан');
-
- // Победитель полуфинала сам встаёт в финал.
- await trn.setMatchResult(semis[0].match_id,{status:'completed',score:'6:2 6:2',winner_entry:semis[0].entry_a},admin,false);
- await trn.setMatchResult(semis[1].match_id,{status:'completed',score:'7:5 6:4',winner_entry:semis[1].entry_b},admin,false);
- let all=await trn.listMatches(t.tournament_id,false,false);
- const final=all.find(m=>m.round_label==='Финал');
- check(final.entry_a_name==='P1'&&final.entry_b_name==='P3','Победители полуфиналов подставились в финал');
- const third=all.find(m=>m.round_label==='Матч за 3-е место');
- check(third.entry_a_name==='P4'&&third.entry_b_name==='P2','Проигравшие полуфиналов подставились в матч за третье место');
-
- // Исправление счёта переписывает и таблицу, и подстановку в финал.
- await trn.setMatchResult(semis[1].match_id,{status:'completed',score:'6:7 4:6',winner_entry:semis[1].entry_a},admin,false);
- const log=await trn.readLog(t.tournament_id,false);
- check(log.some(r=>r.action==='result_corrected'),'Исправление счёта попадает в журнал отдельным действием');
-
- // Победитель определяется по счёту, если его не указали явно.
- const extra=await trn.createManualTournamentMatch(t.tournament_id,{entry_a:made[0].entry_id,entry_b:made[3].entry_id,round_label:'Кросс-групповой'},admin,false);
- const auto=await trn.setMatchResult(extra.match_id,{status:'completed',score:'6:3 4:6 10:8'},admin,false);
- check(auto.winner_entry===made[0].entry_id,'Победитель выведен из счёта без явного указания');
- let failed='';
- try{await trn.setMatchResult(extra.match_id,{status:'completed',score:''},admin,false)}catch(e){failed=e.message}
- check(/счёт/i.test(failed),'Пустой счёт не принимается');
- failed='';
- try{await trn.setMatchResult(extra.match_id,{status:'walkover'},admin,false)}catch(e){failed=e.message}
- check(/победител/i.test(failed),'W/O без победителя не принимается');
-
- // Снятие: сыгранное остаётся, несыгранное превращается в W/O сопернику.
- const t2=await trn.createTournament({name:'Снятия',kind:'singles'},admin,false);
- const st2=await trn.createStage(t2.tournament_id,{kind:'group'},admin,false);
- const e2=[];
- for(let i=0;i<4;i++)e2.push(await trn.addEntry(t2.tournament_id,{player_id:String(200+i),player_name:'W'+i,display_name:'W'+i,status:'accepted',group:'A',seed:String(i+1)},admin,false));
- await trn.generateGroupMatches(t2.tournament_id,st2.stage_id,admin,false);
- const before=(await trn.listMatches(t2.tournament_id,false,false)).filter(m=>[m.entry_a,m.entry_b].includes(e2[0].entry_id));
- await trn.setMatchResult(before[0].match_id,{status:'completed',score:'6:0 6:0',winner_entry:e2[0].entry_id},admin,false);
- await trn.withdrawEntry(e2[0].entry_id,{reason:'injury'},admin,false);
- const after=(await trn.listMatches(t2.tournament_id,false,false)).filter(m=>[m.entry_a,m.entry_b].includes(e2[0].entry_id));
- check(after.find(m=>m.match_id===before[0].match_id).status==='completed','Сыгранный матч снятого игрока не тронут');
- check(after.filter(m=>m.status==='walkover').length===2,'Несыгранные матчи снятого стали W/O');
- check(after.filter(m=>m.status==='walkover').every(m=>m.winner_entry&&m.winner_entry!==e2[0].entry_id),'W/O засчитан сопернику');
- const withdrawn=(await trn.listEntries(t2.tournament_id,false,false)).find(x=>x.entry_id===e2[0].entry_id);
- check(withdrawn.status==='withdrawn'&&withdrawn.withdrawal_reason==='injury','Заявка снята с причиной');
-
- // Замена: новый участник наследует место, группу и несыгранные матчи.
- const spare=await trn.addEntry(t2.tournament_id,{player_id:'299',player_name:'Spare',display_name:'Spare',status:'waitlist'},admin,false);
- await trn.withdrawEntry(e2[1].entry_id,{reason:'travel',replacedBy:spare.entry_id},admin,false);
- const swapped=(await trn.listEntries(t2.tournament_id,false,false)).find(x=>x.entry_id===spare.entry_id);
- check(swapped.status==='accepted'&&swapped.group===e2[1].group&&swapped.seed===e2[1].seed,'Замена встала на то же место с тем же посевом');
- const inherited=(await trn.listMatches(t2.tournament_id,false,false)).filter(m=>[m.entry_a,m.entry_b].includes(spare.entry_id));
- check(inherited.length>0&&inherited.every(m=>m.status==='scheduled'),'Замена унаследовала несыгранные матчи');
- check((await trn.listEntries(t2.tournament_id,false,false)).find(x=>x.entry_id===e2[1].entry_id).status==='replaced','Заменённый помечен отдельным статусом, не «снят»');
-
- // Подмена участника прямо в слоте сетки.
- const slotMatch=inherited[0];
- const side=slotMatch.entry_a===spare.entry_id?'a':'b';
- await trn.slotAction(slotMatch.match_id,{side,action:'bye'},admin,false);
- const byeMatch=(await trn.listMatches(t2.tournament_id,false,false)).find(m=>m.match_id===slotMatch.match_id);
- check(byeMatch.status==='bye'&&byeMatch.winner_entry,'Проход без игры отдаёт победу второму участнику слота');
-
- // Парная цепочка.
- const dbl=await trn.createTournament({name:'Парный',kind:'doubles',status:'registration'},admin,false);
- const pair=await trn.createPair(dbl.tournament_id,{playerAId:'301',playerAName:'Alpha'},admin,false);
- check(pair.status==='seeking','Запись без партнёра создаёт пару в поиске');
- const again=await trn.createPair(dbl.tournament_id,{playerAId:'301',playerAName:'Alpha'},admin,false);
- check(again.pair_id===pair.pair_id,'Повторная запись не плодит вторую пару');
- const inv=await trn.invitePartner(pair.pair_id,{toId:'302',toName:'Beta'},admin,false);
- check((await trn.findPair(pair.pair_id,false)).status==='invite_pending','После приглашения пара ждёт ответа');
- await trn.declineInvite(inv.invite_id,admin,false);
- const afterDecline=await trn.findPair(pair.pair_id,false);
- check(afterDecline.status==='seeking'&&!afterDecline.player_b_id,'Отказ не убивает заявку — пара снова ищет партнёра');
- const inv2=await trn.invitePartner(pair.pair_id,{toId:'303',toName:'Gamma'},admin,false);
- const accepted=await trn.acceptInvite(inv2.invite_id,{playerId:'303',playerName:'Gamma'},admin,false);
- check(accepted.pair.status==='confirmed','Согласие собирает пару');
- check(accepted.entry.entrant_type==='pair'&&accepted.entry.display_name==='Alpha / Gamma','После согласия появляется заявка пары');
- check((await trn.pendingInvitesFor('303',false)).length===0,'Принятое приглашение больше не висит');
-
- // Встречные приглашения засчитываются как согласие.
- const p1=await trn.createPair(dbl.tournament_id,{playerAId:'401',playerAName:'Mu'},admin,false);
- const p2=await trn.createPair(dbl.tournament_id,{playerAId:'402',playerAName:'Nu'},admin,false);
- await trn.invitePartner(p1.pair_id,{toId:'402',toName:'Nu'},admin,false);
- await trn.invitePartner(p2.pair_id,{toId:'401',toName:'Mu'},admin,false);
- const mutual=await trn.matchMutualInvites(dbl.tournament_id,false);
- check(mutual.length===1,'Встречные приглашения схлопнулись в одно согласие');
- const confirmed=(await trn.listPairs(dbl.tournament_id,false,false)).filter(p=>p.status==='confirmed');
- check(confirmed.length===2,'После встречного согласия собранных пар стало две');
-
- // Тестовый режим живёт в отдельных листах и не видит боевых данных.
- check(trn.sheetName('entries',true).endsWith(' TEST'),'Тестовые листы помечены суффиксом');
- const sandbox=await trn.createTournament({name:'Песочница',kind:'singles'},admin,true);
- check((await trn.listTournaments(true)).length===1,'В тестовом режиме свой список турниров');
- check((await trn.listTournaments(false)).every(x=>x.tournament_id!==sandbox.tournament_id),'Тестовый турнир не попал в боевой список');
- check((await trn.listTournaments(false)).length===3,'Боевой список не изменился от записей в тест');
+  var mine=matches[String(p.id)]||[];
+  var future=futureForPlayer(p);
+  var count=mine.length+future.length;
+  h+='<div class="card"><h3>'+esc(X.history)+(count?' · '+count:'')+'</h3>';
+  if(!count)h+='<div class="hint">'+esc(X.noMatches)+'</div>';
+  else{
+    var shown=allMatches?mine:mine.slice(0,5);
+    h+=future.map(function(i){return futureMatchRow(i,p)}).join('')+shown.map(matchRow).join('');
+    if(mine.length>5)h+='<button class="more" onclick="toggleMatches(\''+q(p.id)+'\')">'
+      +esc(allMatches?X.collapse:X.showAll+' ('+mine.length+')')+'</button>';
+  }
+  h+='</div>';
+  if(p.profile_url){
+    var u=/^https?:/i.test(p.profile_url)?p.profile_url:'https://www.phukettennis.com'+p.profile_url;
+    h+='<button class="website-link-hidden" onclick="openLink(\''+q(u)+'\')">🌐 '+esc(X.site)+'</button>';
+  }
+  $('viewCard').innerHTML=h;
+}
+// Плашки под аватаркой. Очков в лиге стало много — YRP, FP, «выбрали команд» —
+// и без подписи не понять, что есть что. Поэтому каждая плашка кликается и
+// объясняет себя: коротко, своими словами, прямо под сеткой.
+var openStat='';
+var STAT_HELP={
+  yrp:['Очки годовой гонки. Начисляются за результаты в сезонах лиги и складываются в общий рейтинг года — это и есть таблица «Гонка».',
+       'Yearly Race points. Earned from league season results and added up into the year-long rating — the Race table.'],
+  matches:['Сколько матчей сыграно в лиге за всю историю — все сезоны вместе, а не только текущий. Счёт идущего сезона — в блоке «История дивизионов» ниже.','Matches played in the league all-time — every season combined, not just the current one. The running season is in the Division history block below.'],
+  fp:['Fantasy Points. Начисляются игроку за его реальные матчи: победы, выигранные сеты и геймы. Эти очки получают все, кто взял его в свою Fantasy-команду.',
+      'Fantasy Points. Earned from the player\u2019s real matches: wins, sets and games won. Everyone who picked him for their Fantasy squad gets these points.'],
+  teams:['Сколько участников Fantasy взяли этого игрока в свой состав.','How many Fantasy players picked him for their squad.'],
+  wl:['Победы и поражения за всю историю выступлений в лиге — все сезоны вместе. Счёт идущего сезона — в блоке «История дивизионов» ниже.','Wins and losses all-time — every season combined. The running season is in the Division history block below.'],
+  wr:['Доля выигранных матчей за всю историю — по всем сезонам, а не только по текущему.','Share of matches won all-time, across every season rather than the current one.'],
+  ntrp:['Уровень игры по шкале NTRP. Указывается самим игроком или по результатам теста.','NTRP playing level. Set by the player or from the rating test.'],
+  exp:['Сколько лет человек играет в теннис.','How long the player has been playing tennis.'],
+  country:['Страна, откуда игрок.','Where the player is from.']
+};
+function toggleStat(key){ openStat=(openStat===key?'':key); renderPlayer(byId(openId)); }
+function stt(k,v,acc,key){
+  if(v===''||v===null||v===undefined)return '';
+  var on=key&&openStat===key;
+  return '<div class="stt'+(on?' on':'')+(key?' tap':'')+'"'+(key?' onclick="toggleStat(\''+q(key)+'\')"':'')
+    +'><div class="k">'+esc(k)+(key?' <i class="qm">?</i>':'')+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>';
+}
+function statNote(){
+  if(!openStat||!STAT_HELP[openStat])return '';
+  return '<div class="stnote">'+esc(L?STAT_HELP[openStat][0]:STAT_HELP[openStat][1])+'</div>';
+}
+// Ярлык дивизиона на карточке матча: показывает, в каком дивизионе матч игрался,
+// и открывает таблицу того самого сезона.
+function divTag(division,season){
+  if(!division)return '';
+  // Цвет тот же, что и везде: дивизион узнаётся по цвету, не читая текст.
+  return '<div class="mdiv dv '+divClass(division)+'" onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(division)+'\')">'
+    +esc(divLabel(division))+'</div>';
+}
+function matchRow(m){
+  var opp={name:m.opponent,photo:m.opponent_photo};
+  // Дивизион берём из истории матчей — там записан тот, в котором матч реально
+  // игрался, а не текущий дивизион игрока. Клик ведёт в ту самую таблицу.
+  // Тот же индекс, что и в ленте: подписываем матч дивизионом того сезона.
+  var meName=(byId(openId)||{}).name||'';
+  var dv=divTag(divisionAt(m.season,meName,openId,m.opponent,m.opponent_id,m.division),m.season);
+  // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
+  var top=[m.match_no?'#'+m.match_no:'',matchDate(m.date),m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+  return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result==='WIN'?'WIN':'LOST')+'</div>'
+    +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
+    +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
+    +'</div></div>';
+}
+function futureMatchRow(i,p){
+  var p1=i.p1||{},p2=i.p2||{};
+  var other=nameKey(p1.name)===nameKey(p.name)?p2:p1;
+  var hit=players.filter(function(x){return nameKey(x.name)===nameKey(other.name)})[0];
+  var opp={name:other.name||'',photo:livePhoto(hit||other)};
+  var dv=divTag(i.division,season);
+  var top=[matchDate(i.date),i.time,i.court?'📍 '+i.court:''].filter(Boolean).join(' · ');
+  return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+    +'<div class="mrow"><div class="res w">'+esc(X.matchSoon)+'</div>'
+    +'<div onclick="openPlayerByName(\''+q(other.name)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
+    +'<div><div class="who">'+esc(other.name||'—')+'</div><div class="sc">'+esc(X.matchAgreed)+'</div></div>'
+    +'</div></div>';
+}
+// Раньше здесь вызывался openPlayer, а он первым делом сбрасывает allMatches
+// обратно в false — список всегда оставался свёрнутым. Перерисовываем карточку
+// напрямую, не трогая состояние открытого игрока.
+function toggleMatches(id){
+  allMatches=!allMatches;
+  var p=byId(id);
+  if(p)renderPlayer(p);
 }
 
-
-// --- Турнирное API: доступ только админу, ошибки едут отдельным полем -------
-{
- for(const p of ['/api/tournaments/bootstrap','/api/tournaments/state','/api/tournaments/candidates','/api/tournaments/log','/api/tournaments/open','/api/tournaments/my-invites'])
-  check(routes.some(r=>r.method==='get'&&r.p===p),'Зарегистрирован GET '+p);
- for(const p of ['/api/tournaments/create','/api/tournaments/update','/api/tournaments/import-season','/api/tournaments/entry/add','/api/tournaments/entry/update','/api/tournaments/entry/assign','/api/tournaments/entry/withdraw','/api/tournaments/pair/create','/api/tournaments/pair/invite','/api/tournaments/pair/accept','/api/tournaments/pair/decline','/api/tournaments/groups/distribute','/api/tournaments/matches/generate','/api/tournaments/playoff/generate','/api/tournaments/match/result','/api/tournaments/match/slot','/api/tournaments/match/create'])
-  check(routes.some(r=>r.method==='post'&&r.p===p),'Зарегистрирован POST '+p);
-
- const denied=await request('get','/api/tournaments/bootstrap','3');
- check(denied.code===403&&denied.body.code==='tournament_admin_only','Не-админа в турнирную админку не пускают');
- const boot=await request('get','/api/tournaments/bootstrap','99');
- check(boot.code===200&&Array.isArray(boot.body.tournaments),'Админ получает список турниров');
- const bad=await request('post','/api/tournaments/create','99',{});
- check(bad.code===400&&/назван/i.test(bad.body.detail||''),'Настоящая причина ошибки едет в detail, а не теряется в общем переводчике');
- const created=await request('post','/api/tournaments/create','99',{name:'API турнир',kind:'doubles'});
- check(created.body.ok&&created.body.tournament.kind==='doubles','Турнир создаётся через API');
- const testMode=await request('get','/api/tournaments/bootstrap','99',{test:'1'});
- check(testMode.body.test===true,'Флаг тестового режима доезжает до сервера');
-
- // Файлы интерфейса и цепочки загружаются без сюрпризов.
- const pair=await load('pairflow.js');
- check(typeof pair.handlePairCallback==='function'&&pair.isPairCallback('pr:join:x')&&!pair.isPairCallback('pay:1'),'Парные колбэки отделены от остальных');
- const page=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
- for(const path0 of ['bootstrap','state','entry/assign','playoff/generate','match/result','match/slot','pair/invite'])
-  check(page.includes(`'${path0}'`)||page.includes(`api('${path0}'`),'Интерфейс зовёт '+path0);
- check(!/localStorage|sessionStorage/.test(page),'Интерфейс не полагается на браузерное хранилище');
+// ---------------------------------------------------------------- старт
+// ?as=<группа> — организатор смотрит приложение глазами выбранной группы.
+var asQ=(new URLSearchParams(location.search).get('as')||'').trim();
+// Очки Fantasy подставляются в список игроков: all_scores — это все игроки лиги
+// с реальными очками, players (состав сезона) поверх добавляет число команд,
+// которых у остальных попросту нет. Так очки видно у всех, а не только у состава.
+function applyFantasyScores(){
+  if(!fantasyData)return;
+  var fs={};
+  (fantasyData.all_scores||[]).forEach(function(x){fs[nameKey(x.name)]={points:x.total||0,teams:0}});
+  (fantasyData.players||[]).forEach(function(fp){fs[nameKey(fp.name)]={points:(fp.score&&fp.score.total)||0,teams:fp.selected_by||0}});
+  players.forEach(function(p){var x=fs[nameKey(p.name)]||{};p.fantasy_points=x.points||0;p.fantasy_teams=x.teams||0});
 }
-
-
-// --- Команды не теряются: и в меню по слэшу, и в /help ----------------------
-{
- const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/cmd:'tournaments'/.test(tg),'Команда /tournaments есть в едином списке команд организатора');
- check(/command: 'doubles'/.test(tg)&&tg.match(/command: 'doubles'/g).length===2,'Команда /doubles есть в меню игрока на обоих языках');
- check(/'\/doubles — парные турниры/.test(bot)&&/'\/doubles — doubles tournaments/.test(bot),'Команда /doubles описана в /help на обоих языках');
- check(/'Турниры':'🥇'/.test(bot)&&/'Турниры':'Tournaments'/.test(bot),'Раздел «Турниры» в админском /help переведён');
- check(/text === '\/tournaments'/.test(bot),'Обработчик команды /tournaments на месте');
- check(/param\.startsWith\('pair_'\)/.test(bot),'Ссылка-приглашение в пару разбирается в /start');
- check(/PERSONAL_PREFIXES[^\n]*'pr:'/.test(bot),'Парные кнопки помечены личными — в группе их не нажать');
+// Догрузка Fantasy после первой отрисовки. Что бы ни пошло не так — интерфейс
+// уже на экране и работает, поэтому ошибку просто пишем в консоль.
+function loadFantasyLater(){
+  fetch('/api/fantasy/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
+    .then(function(r){return r.json()})
+    .then(function(f){
+      if(!f||!f.ok)return;
+      fantasyData=f;fantasyAllowed=true;
+      applyFantasyScores();
+      if(VIEWS.indexOf('fantasy')<0&&Array.isArray(VIEWS)){VIEWS.push('fantasy');buildTabs()}
+      // Перерисовываем то, что человек видит прямо сейчас: на карточке игрока
+      // появляются очки, в списках — значки своих Fantasy-команд.
+      if(openId)renderPlayer(byId(openId));
+      else if(typeof mode!=='undefined'&&mode)showTab(mode);
+    })
+    .catch(function(e){console.log('fantasy later:',e&&e.message)});
 }
+fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
+  .then(function(r){return r.json()}).then(function(j){
+    if(j.lang){var lg=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;L=lg==='ru';X=L?T.ru:T.en;document.documentElement.lang=lg}
+    if(!j.ok)throw new Error(j.code||j.error||(L?'Ошибка':'Error'));
+    players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];partners=j.partners||[];partnerTexts=j.partner_texts||{};fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy||j.fantasy_deferred);
+    applyFantasyScores();
+    // Fantasy считается тяжело, поэтому сервер её в первый ответ не кладёт:
+    // приложение рисуется сразу, а очки подтягиваются следом и подставляются
+    // на месте. Пока их нет, всё остальное уже работает.
+    if(j.fantasy_deferred)loadFantasyLater();
+    photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;loadWallet();
+    season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
+    seasons=(j.seasons||[]).map(function(s){return Object.assign({},s,{label:(L?'Сезон ':'Season ')+s.number})});
+    // По умолчанию в списке игроков выбран самый свежий активный сезон, а не
+    // "Все" — это только первичная инициализация, свой выбор пользователя не трогаем.
+    if(!pSeasonTouched&&season)pSeason=String(season);
+    // Нижнее меню приходит с сервера: какие вкладки и в каком порядке видит
+    // именно эта группа игроков.
+    if(Array.isArray(j.tabs)){
+      VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
+    }
+    if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy')
+    buildTabs();
+    $('title').textContent=X.title;
+    // Видно, что это чужой набор вкладок, а не поломка.
+    if(j.view_as){
+      var names=L?{active:'участники лиги',waitlist:'лист ожидания',applied:'заявка без оплаты',guest:'все остальные'}:{active:'league members',waitlist:'waitlist',applied:'unpaid application',guest:'others'};
+      var b=document.createElement('div');
+      b.className='hint';
+      b.style.cssText='position:sticky;top:0;z-index:40;background:#E8A45C;color:#191512;font-weight:800;padding:8px 12px;text-align:center';
+      b.textContent=(L?'👁 Смотришь глазами группы: ':'👁 Previewing group: ')+(names[j.view_as]||j.view_as);
+      document.body.insertBefore(b,document.body.firstChild);
+    }
+    // ?tab=race / ?division=B — чтобы кнопка из меню или рассылки открывала
+    // приложение сразу на нужном разделе, а не на главной.
+    var qs=new URLSearchParams(location.search);
+    // Ссылка из ленты результатов приходит как startapp=<что открыть>: обычных
+    // query-параметров в ней нет, Telegram кладёт полезную нагрузку отдельно.
+    // Раскладываем её в те же параметры, чтобы дальше всё работало как прежде.
+    try {
+      var sp=String((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||qs.get('tgWebAppStartParam')||'').trim();
+      if(sp){
+        var kind=sp.slice(0,2),raw=sp.slice(2);
+        var val=decodeURIComponent(escape(atob(raw.replace(/-/g,'+').replace(/_/g,'/'))));
+        if(kind==='p_'&&val)qs.set('player_name',val);
+        else if(kind==='d_'&&val){qs.set('tab','div');qs.set('division',val)}
+      }
+    } catch(e){ /* мусорный startapp просто игнорируем */ }
+    var wantDiv=(qs.get('division')||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
+    if(wantDiv&&divisions.indexOf(wantDiv)>=0)divLetter=wantDiv;
+    var wantTab=(qs.get('tab')||'').trim().toLowerCase();
+    if(wantDiv&&!wantTab)wantTab='div';
+    initTheme();
+    renderMePlate();
+    loadSummary();
+    showTab(VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home'));
+    var wantPlayer=(qs.get('player')||'').trim();
+    // «me» в ссылке — это «моя карточка»: рассылка не знает id игрока в витрине,
+    // зато его знает само приложение после авторизации.
+    if(wantPlayer==='me'&&me){
+      var mine=byId(me.id)||players.filter(function(x){
+        return String(x.name||'').trim().toLowerCase()===String(me.name||'').trim().toLowerCase();
+      })[0];
+      wantPlayer=mine?String(mine.id):'';
+    }
+    var backFor=VIEWS.indexOf(wantTab)>=0?wantTab:(VIEWS[0]||'home');
+    if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,backFor);
+    // Из бота приходит имя, а не id витрины: в сообщении о результате id нет.
+    else if((qs.get('player_name')||'').trim())openPlayerByName((qs.get('player_name')||'').trim(),backFor);
+  }).catch(function(e){
+    if(String(e.message||'')==='profile_required')return renderInvite();
+    $('viewHome').innerHTML='<div class="empty" style="color:var(--lose)">'+esc(e.message)+'</div>';
+  });
 
-
-// --- Сообщения об ошибках счёта доходят до человека -------------------------
-{
- const ui=await load('ui-errors.js');
- const generic=ui.uiError('какая-то неизвестная ошибка','ru');
- for(const msg of ['Указанный победитель не совпадает со счётом','Выберите победителя или результат для обоих','Для RET укажите сыгранный счёт','Выберите двух разных игроков','Игроки должны быть из одного дивизиона','Только для организатора','Профиль не найден'])
-  check(ui.uiError(msg,'ru')!==generic&&ui.uiError(msg,'en')!==ui.uiError('неизвестно','en'),'Переведено: '+msg);
- check(/переверн/i.test(ui.uiError('Указанный победитель не совпадает со счётом','ru')),'Ошибка про победителя подсказывает, что делать');
-
- // Ровно та ситуация со скриншота: победитель выбран, а решающий тай-брейк
- // выигран соперником. Форма обязана сказать это человеческим текстом.
- const mismatch=await request('post','/api/match/manual','99',{from_telegram_id:'7',to_telegram_id:'9',date:'2099-09-20',court:'Court A',kind:'played',winner:'9',sets:[{a:6,b:3},{a:6,b:7,tba:4,tbb:7},{a:4,b:10}]});
- check(mismatch.code===400,'Несовпадение победителя и счёта не проходит');
- check(mismatch.body.code==='Указанный победитель не совпадает со счётом','Машинный код ошибки сохраняется');
- check(/переверн|flip the score/i.test(mismatch.body.error),'Человек видит подсказку, а не дежурную фразу');
+// Экран для того, кто ещё не в лиге. Раньше здесь была строка об ошибке, и
+// человек упирался в тупик: внутрь не пускают, а что делать — не сказано.
+// Теперь это приглашение: что такое лига, что открывается после анкеты, какие
+// события идут и куда открыт набор. Про Fantasy не пишем — он только для
+// участников лиги.
+var inviteSeasons={};
+var invitePlayersOpen='';
+// Номер сезона у события: он же связывает строку Events с тем, что лига реально
+// сыграла — дивизионами, составом, финалами и чемпионами.
+function inviteSeasonNo(ev){
+  var m=String(ev.event_id||'').match(/(\d+)/)||String(ev.event_name_en||ev.event_name||ev.event_name_ru||'').match(/(\d+)/);
+  return m?String(m[1]):'';
 }
-
-
-// --- Порядок матчей и поиск по имени ---------------------------------------
-{
- const league=await fs.readFile(path.join(root,'public','league.html'),'utf8');
- const match=await fs.readFile(path.join(root,'public','match.html'),'utf8');
-
- // Победитель встаёт слева — синхронно с колонками счёта и очков.
- check(/function orderByWinner/.test(match),'Победитель переставляется влево при выборе');
- check(/orderByWinner\(prefix\|\|'r',node\)/.test(match),'Перестановка вызывается из выбора победителя');
- check(/two\.insertBefore\(two\.children\[1\],first\)/.test(match),'Очки переставляются блоками, а не значениями');
-
- // Ближайшая дата сверху во всех трёх списках — не нужно листать в конец,
- // чтобы увидеть, что актуально прямо сейчас.
- check(/function byFreshest/.test(match),'Есть единая сортировка списков матчей');
- check(/byFreshest\(myMatches\)/.test(match)&&/byFreshest\(resultTasks\)/.test(match),'Мои матчи и результаты идут от ближней даты к дальней');
- check(/adminMatchTime\(a\)-adminMatchTime\(b\)/.test(match),'Админская вкладка тоже развёрнута ближней датой вверх');
- check(/openSlots\.slice\(\)\.sort\(function\(a,b\)\{[\s\S]{0,80}adminMatchTime\(a\)-adminMatchTime\(b\)/.test(match),'Открытые окна тоже сортируются по ближней дате');
- check(/sortableDate\(b\.date\)-sortableDate\(a\.date\)/.test(league),'Лента лиги сортируется по дате, а не по номеру матча');
- check(/function sortableDate/.test(league),'Дата приводится к числу: «01.09» не встаёт выше «12.08»');
-
- // Окно уходит только тем, с кем ещё не играли.
- const openSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
- check(/async function alreadyPairedNames/.test(openSrc),'Уже сыгранные соперники отсеиваются');
- check(/String\(r\.completed \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'yes'/.test(openSrc),'Строка расписания без результата парой не считается');
- check(/\['pending', 'confirmed', 'disputed', 'unfinished'\]\.includes\(result\)/.test(openSrc),'Согласованный матч тоже занимает пару');
- check(/пропущено уже сыгранных/.test(openSrc),'Сколько пропустили — видно в журнале');
-
- // Повторная подача счёта и цепочка подтверждения.
- const idxSrc=await fs.readFile(path.join(root,'index.js'),'utf8');
- const matchesSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
- check(/result_pending_confirm/.test(idxSrc),'Пока счёт ждёт подтверждения, второй игрок его не переписывает');
- check(/notifyResultForVerification\(slot,\{only:String\(v\.user\.id\)\}\)/.test(idxSrc),'Не заметил уведомление — присылаем то же самое заново');
- check(/String\(t\.id\) !== String\(slot\.result_by \|\| ''\)/.test(matchesSrc),'Автору счёта просьба подтвердить не уходит никогда');
- check(/const RESEND_GAP_MS/.test(matchesSrc),'Повтор ограничен по времени — три нажатия не дадут трёх писем');
- check(/app\.post\('\/api\/match\/result\/dispute'/.test(idxSrc),'«Не согласен» работает и из мини-приложения');
- const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/Счёт по этому матчу уже внесён и ждёт вашего подтверждения/.test(botSrc),'Кнопка «Матч не доигран» при внесённом счёте отвечает подсказкой');
- check(/function renderConfirmScreen/.test(match),'Вместо формы показывается экран подтверждения');
- check(/pingConfirmation\(s\.challenge_id\)/.test(match),'Открыл экран — бот продублировал сообщение в чат');
- const dbSrc=await fs.readFile(path.join(root,'matchesdb.js'),'utf8');
- check(/const CONFIRM_STAGES = \[\['n2',4\],\['d1',24\]\]/.test(dbSrc),'У подтверждения своя лесенка: две ступени');
-
- // Форма создания вызова: выбор корта не сбрасывает время и комментарий.
- check(/function keepNewForm/.test(match),'Перед перерисовкой форма запоминает введённое');
- check(/toggleCourt\(name\)\{keepNewForm\(\)/.test(match),'Клик по корту сохраняет время');
- check(/toggleDate\(iso\)\{keepNewForm\(\)/.test(match),'Клик по дате сохраняет время');
- check(/timeOptions\(selFrom\)/.test(match)&&/timeOptions\(selTo\)/.test(match),'Время рисуется из сохранённого, а не из 17:00');
- check(/oninput="selComment=this\.value"/.test(match),'Комментарий тоже переживает перерисовку');
-
- // Поиск с выпадающим списком во всех трёх местах лиги.
- check(/function sugBox/.test(league),'Есть общий конструктор поля поиска');
- for(const [id,handler] of [['rq','race'],['pq','plr'],['fq','feed']]){
-  check(new RegExp(`sugBox\\('${id}'`).test(league),'Поле '+id+' собрано через общий конструктор');
-  for(const suffix of ['Set','Pick','Blur'])
-   check(new RegExp(`function ${handler}${suffix}\\(`).test(league),'Обработчик '+handler+suffix+' определён');
-  check(!new RegExp(`function ${handler}Focus\\(`).test(league),'По касанию поля список больше не открывается: '+handler);
- }
- check(!/onfocus="/.test(league),'Обработчика onfocus у поиска нет вовсе');
- check(/var hits=qq\?uniq\.filter/.test(league),'Подсказки появляются только после ввода символов');
- check(/open&&qq&&rows/.test(league),'Пустой запрос списка не рисует');
- check(/class="sugx"/.test(league),'У поля поиска есть крестик очистки');
- check(/max-height:46vh/.test(league),'Список ограничен по высоте и не накрывает соседние поля');
- check(/if\(document\.activeElement!==el\)el\.focus\(\)/.test(league),'Фокус возвращается после перерисовки — клавиатура не закрывается');
- check(/if\(typingIn!==id\|\|Date\.now\(\)-typingAt>1500\)return;/.test(league),'Фокус возвращается только пока человек печатает — страница сама клавиатуру не открывает');
- for(const h of ['feed','race','plr'])
-  check(new RegExp(`function ${h}Set\\(v\\)\\{markTyping\\(`).test(league),'Ввод в '+h+' отмечает, что человек печатает');
- check(!/function setPQuery|function pickPQ|function setRaceQuery|function setFQuery/.test(league),'Старые обработчики поиска убраны, двух путей к одному полю не осталось');
-
- // Игрок в ручном матче выбирается из списка или набирается руками.
- check(!/datalist/.test(match),'Нативных выпадающих списков в ручном матче не осталось');
- check(/function comboBox\(id,names,placeholder,onpick\)/.test(match),'Поля игрока и корта собраны своим поиском');
- check(/if\(!v\)\{box\.style\.display='none'/.test(match),'Пустое поле списка не показывает');
- check(/function comboClear/.test(match)&&/class="sugx"/.test(match),'Список можно закрыть и очистить');
- check(/function manualPerson\(value\)/.test(match),'Игрок ищется по тексту поля, а не по telegram_id');
- check(/manualPerson\(\$\('mOpp'\)\.value\)\.telegram_id/.test(match),'На сервер уходит найденный telegram_id, а не введённый текст');
- check(/sugMore/.test(league),'Подсказка «сколько ещё» переведена');
- check(/awaitingResult\.sort\(\(a, b\) => byStart\(b, a\)\)/.test(await fs.readFile(path.join(root,'matchesdb.js'),'utf8')),'Сводка /matches: сыгранные без счёта идут от свежего к старому');
+function inviteStat(v,k,onclick){
+  return '<div class="ivStat'+(onclick?' tap':'')+'"'+(onclick?' onclick="'+onclick+'"':'')+'>'
+    +'<div class="ivStatV">'+esc(v)+'</div><div class="ivStatK">'+esc(k)+(onclick?' <i class="qm">▾</i>':'')+'</div></div>';
 }
-
-
-// --- Непринятый вызов и кнопка «Напомнить» ---------------------------------
-{
- const invite={challenge_id:'inv1',match_type:'direct',status:'open',division:'Division C',season:'2',group:'1',
-   from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',
-   dates:'2099-10-10',time_from:'10:00',time_to:'12:00',duration_min:'120',courts:'Court A',created_at:'2099-01-01T00:00:00+07:00'};
- const pending={...invite,challenge_id:'neg1',status:'pending',pending_by:'2',responded_at:'2099-01-01T00:00:00+07:00'};
-
- // Непринятый адресный вызов больше не выдаёт себя за идущее согласование.
- check(db.pendingAction(invite).scope==='invite','Непринятый вызов — отдельная ветка invite');
- check(db.pendingAction(invite).waitingIds.join()==='2','Ждём того, кого вызвали');
- check(db.pendingAction(pending).scope==='negotiation','Ответивший матч остаётся согласованием');
- check(db.pendingAction({...invite,status:'accepted',result_status:'confirmed'})===null,'У закрытого матча ждать нечего');
-
- // Ступени напоминаний не тронуты: те же 15 минут, 2, 4, 24 часа.
- const hours=h=>Date.parse(invite.created_at)+h*3600000;
- check(!db.stuckItem(invite,hours(0.1)),'До 15 минут никто никого не дёргает');
- check(db.stuckItem(invite,hours(0.3)).stage==='m20','Первая ступень на 15 минутах осталась');
- check(db.stuckItem(invite,hours(3)).stage==='n1','Вторая ступень осталась');
- check(db.stuckItem(invite,hours(5)).stage==='n2','Третья ступень осталась');
- check(db.stuckItem(invite,hours(30)).stage==='close','Автозакрытие через 28 часов осталось');
- check(db.stuckItem(invite,hours(0.3)).scope==='invite','Напоминание по вызову идёт своей веткой');
-
- // Сводка: адресный вызов не лежит среди открытых окон.
- const overview=await db.matchesOverview();
- check(!overview.openSlots.some(x=>x.challenge_id==='inv1'),'Адресный вызов не считается открытым окном');
-
- // Текст напоминания по непринятому вызову — приглашение, а не укор.
- const matchesSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
- check(/Вас вызвали на матч/.test(matchesSrc)&&/You have a match challenge/.test(matchesSrc),'У непринятого вызова свой заголовок на двух языках');
- check(/nudgeWarning\(stage,ru,initial\)/.test(matchesSrc),'Предупреждение о снятии сформулировано отдельно для вызова');
-
- // Ручное напоминание.
- check(routes.some(r=>r.method==='post'&&r.p==='/api/match/nudge'),'Эндпоинт ручного напоминания зарегистрирован');
- const page=await fs.readFile(path.join(root,'public','match.html'),'utf8');
- check(/function nudgeOpponent/.test(page)&&/function waitingOnOpponent/.test(page),'В интерфейсе есть кнопка и правило её показа');
- check(/nudge:'🔔 Напомнить'/.test(page)&&/nudge:'🔔 Remind'/.test(page),'Кнопка переведена');
- const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
- check(/MANUAL_NUDGE_MS = 60 \* 60 \* 1000/.test(idx),'Ручное напоминание ограничено одним разом в час');
- check(/isNightHold\(Date\.now\(\),TIMEZONE,win\)/.test(idx),'Ночью ручное напоминание тоже молчит');
- check(/pendingAction\(slot\)/.test(idx),'Кого будить, решает сервер, а не интерфейс');
- // Живые проверки доступа: до ночного правила и лимита частоты.
- await db.createSlot({...invite,challenge_id:'nudge1',status:'pending',pending_by:'2',responded_at:new Date().toISOString()});
- // pending_by — тот, кто предложил; ждём другого. Напоминать может предложивший.
- const self=await request('post','/api/match/nudge','1',{challenge_id:'nudge1'});
- check(self.code===409,'Тому, за кем ход, кнопка ничего не отправляет');
- const stranger=await request('post','/api/match/nudge','3',{challenge_id:'nudge1'});
- check(stranger.code===403,'Посторонний не может слать напоминания по чужому матчу');
- const missing=await request('post','/api/match/nudge','1',{challenge_id:'нет-такого'});
- check(missing.code===404,'Несуществующий матч честно отвечает «не найден»');
+// Финалы дивизионов показываем той же карточкой, что и на главной лиги:
+// крупное фото чемпиона, подпись дивизиона, счёт финала и кто проиграл финал.
+function inviteFinal(f){
+  var h='<div class="chbig" style="cursor:default">'
+    +'<div>'+av({name:f.champion.name,photo:f.champion.photo})+'<div class="nm2">'+esc(f.champion.name)+'</div></div>'
+    +'<div class="sub">'+esc((f.title||('Division '+f.letter))+' '+(L?'ЧЕМПИОН':'CHAMPION'))+'</div>';
+  if(f.score)h+='<div class="chsc">'+esc(f.score)+'</div>';
+  if(f.runner_up&&f.runner_up.name){
+    h+='<div class="chru">'+av({name:f.runner_up.name,photo:f.runner_up.photo})
+      +'<span class="nm3">'+esc(f.runner_up.name)+'</span></div>';
+  }
+  return h+'</div>';
 }
-
-
-
-// --- 90 минут, отключённые напоминания о счёте, двойное подтверждение -------
-{
- // Просьба внести счёт приходит через 90 минут ПОСЛЕ НАЧАЛА, а не после конца.
- const start=Date.parse('2099-05-05T10:00:00+07:00');
- await db.createSlot({challenge_id:'p90',match_type:'manual',status:'accepted',division:'Division C',season:'2',group:'1',
-   from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',
-   dates:'2099-05-05',time_from:'10:00',time_to:'12:00',duration_min:'120',courts:'Court A',
-   agreed_date:'2099-05-05',agreed_time:'10:00',agreed_court:'Court A'});
- check(db.RESULT_PROMPT_AFTER_MIN===90,'По умолчанию просим счёт через 90 минут');
- check(await db.resultPromptDelayMin()===90,'Без настройки берём значение по умолчанию');
- const soon=(await db.listMatchesNeedingResultPrompt(start+89*60000)).some(x=>x.challenge_id==='p90');
- const due=(await db.listMatchesNeedingResultPrompt(start+91*60000)).some(x=>x.challenge_id==='p90');
- check(!soon&&due,'Через 89 минут ещё рано, через 91 — пора');
-
- // Значение настраивается из Settings без правки кода.
- tables.set('crm|Settings',[['key','value'],['season_number','2'],['league_seasons','2:active'],['result_prompt_after_min','75']]);
- sheets.invalidateSheetCache();
- await new Promise(r=>setTimeout(r,0));
- check(db.RESULT_PROMPT_AFTER_MIN===90,'Значение по умолчанию остаётся в коде неизменным');
-
- // Счёт от организатора: автор — не игрок, подтверждают оба.
- const organiser={from_telegram_id:'1',to_telegram_id:'2',result_by:'99'};
- check(db.isOrganiserResult(organiser),'Счёт от организатора отличается по автору');
- check(!db.isOrganiserResult({...organiser,result_by:'1'}),'Счёт от игрока остаётся обычным');
- check(db.resultConfirmationsLeft(organiser).join()==='1,2','Сначала ждём обоих');
- check(db.resultConfirmationsLeft({...organiser,result_confirmed_by:'1'}).join()==='2','После первой подписи ждём второго');
- check(db.resultConfirmationsLeft({...organiser,result_by:'1'}).length===0,'У обычного счёта списка подписей нет');
-
- // Живая цепочка: организатор вносит счёт за двоих.
- const byAdmin=await request('post','/api/match/manual','99',{from_telegram_id:'1',to_telegram_id:'2',
-   date:'2099-05-06',court:'Court A',kind:'played',winner:'1',sets:[{a:6,b:3},{a:6,b:4}],perspective:'winner'});
- check(byAdmin.body.ok,'Организатор внёс счёт за двоих');
- const made=await db.findSlot(byAdmin.body.challenge_id);
- check(String(made.result_by)==='99','Автором счёта записан организатор, а не первый игрок формы');
- check(db.isOrganiserResult(made),'Матч распознаётся как внесённый организатором');
-
- messages.length=0;
- const first=await db.confirmResult(made.challenge_id,{telegram_id:'1',name:'Alice One'});
- check(first.ok&&first.waiting,'Первая подпись не закрывает результат');
- check(String(first.slot.result_status)==='pending','Пока ждём второго, результат не засчитан');
- const second=await db.confirmResult(made.challenge_id,{telegram_id:'2',name:'Bob Two'});
- check(second.ok&&!second.waiting,'Вторая подпись закрывает результат');
- check(String(second.slot.result_status)==='confirmed','После двух подписей результат засчитан');
- check(db.resultConfirmedBy(second.slot).sort().join()==='1,2','В таблице видно, кто именно подтвердил');
-
- // Несогласие любого из двоих отправляет счёт в спор и стирает подписи.
- const byAdmin2=await request('post','/api/match/manual','99',{from_telegram_id:'1',to_telegram_id:'2',
-   date:'2099-05-07',court:'Court A',kind:'played',winner:'2',sets:[{a:6,b:0},{a:6,b:0}],perspective:'winner'});
- const slot2=byAdmin2.body.challenge_id;
- await db.confirmResult(slot2,{telegram_id:'1',name:'Alice One'});
- const disputed=await db.disputeResult(slot2,{telegram_id:'2',name:'Bob Two'});
- check(disputed.ok,'Второй игрок может не согласиться');
- const after=await db.findSlot(slot2);
- check(String(after.result_status)==='disputed'&&!String(after.result_confirmed_by||'').trim(),'Спор стирает собранные подписи');
-
- // Автору непринятого вызова бот больше ничего не пишет.
- const src=await fs.readFile(path.join(root,'matches.js'),'utf8');
- check(/if\(stage==='n2'&&!initial&&proposer\?\.id\)/.test(src),'По непринятому вызову автору ничего не уходит');
- check(/Подтвердить должны оба игрока/.test(src),'В уведомлении сказано, что подтверждают оба');
- check(/Организатор<\/b> внёс счёт/.test(src),'В уведомлении честно указан организатор как автор счёта');
- const ui=await fs.readFile(path.join(root,'public','match.html'),'utf8');
- check(/function byOrganiser/.test(ui)&&/function canConfirmResult/.test(ui),'Интерфейс различает счёт от организатора');
- check(/alreadyConfirmed/.test(ui),'Подтвердивший второй раз кнопку не видит');
- check(/waitingOther:'Вы подтвердили, ждём соперника'/.test(ui)&&/waitingOther:'You confirmed/.test(ui),'Ожидание второго подтверждения переведено');
- check(/appendObjects/.test(await fs.readFile(path.join(root,'tournaments.js'),'utf8')),'Перенос сезона пишет участников одним запросом');
- const page=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
- check(/Ответ \$\{res\.status\}/.test(page),'Турнирная админка показывает настоящий код ответа, а не «сервер не ответил»');
+function invitePlayerList(list){
+  return '<div class="ivRoster">'+list.map(function(p){
+    return '<div class="ivRow">'+av({name:p.name,photo:p.photo})
+      +'<div class="ivRowName">'+esc(p.name)+'</div>'
+      +(p.division?'<div class="ivRowDiv">'+esc(p.division)+'</div>':'')+'</div>';
+  }).join('')+'</div>';
 }
-
-
-// --- Каждый вызов админки попадает в существующий маршрут нужным методом ----
-// Ровно на этом сломалась турнирная админка: метод угадывался по наличию
-// параметров, и чтение состояния уходило POST-запросом в никуда.
-{
- const page=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
- const getList=/const GET_PATHS = new Set\(\[([^\]]+)\]\)/.exec(page);
- check(Boolean(getList),'Список читающих ручек объявлен явно');
- const gets=new Set(getList[1].split(',').map(x=>x.trim().replace(/^'|'$/g,'')));
- const called=[...page.matchAll(/\bapi\('([a-z0-9/-]+)'/gi)].map(m=>m[1]);
- check(called.length>10,'Нашли вызовы админки в разметке');
- const missing=[];
- for(const p of new Set(called)){
-  const method=gets.has(p)?'get':'post';
-  if(!routes.some(r=>r.method===method&&r.p==='/api/tournaments/'+p))missing.push(method.toUpperCase()+' '+p);
- }
- check(!missing.length,'Каждый вызов админки находит маршрут: '+missing.join(', '));
- // И обратное: объявленный как чтение путь не должен быть только POST-ручкой.
- for(const p of gets){
-  if(routes.some(r=>r.p==='/api/tournaments/'+p))
-   check(routes.some(r=>r.method==='get'&&r.p==='/api/tournaments/'+p),'Путь '+p+' действительно читающий');
- }
- // Метод берётся из списка, а не угадывается по наличию параметров: именно
- // из-за угадывания чтение состояния уходило POST-запросом и падало в 404.
- check(/const isGet = method \? method === 'GET' : GET_PATHS\.has\(path\);/.test(page),'Метод запроса определяется по списку чтений');
- check(!/body \? 'POST' : 'GET'/.test(page),'Метод больше не выводится из наличия данных');
- check(/function plainError/.test(page),'Ошибку сервера показываем текстом, а не разметкой');
+function toggleInvitePlayers(no){
+  invitePlayersOpen=(invitePlayersOpen===no?'':no);
+  var box=document.getElementById('ivEvents');
+  if(box)box.innerHTML=inviteEventsHtml();
 }
-
-
-// --- Приглашение и форма счёта открываются в один и тот же момент -----------
-// Ровно здесь сломалось у живого игрока: бот звал вносить счёт через 90 минут
-// после начала, а список задач ждал конца брони — и человек упирался в пустой
-// экран на полчаса.
-{
- const start=Date.parse('2099-06-06T11:00:00+07:00');
- const two={challenge_id:'win2h',match_type:'manual',status:'accepted',division:'Division C',season:'2',group:'1',
-   from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',
-   dates:'2099-06-06',time_from:'11:00',time_to:'13:00',duration_min:'120',courts:'Court A',
-   agreed_date:'2099-06-06',agreed_time:'11:00',agreed_court:'Court A',court_confirmed_at:'2099-06-05T10:00:00+07:00'};
- await db.createSlot(two);
- const hour={...two,challenge_id:'win1h',time_to:'12:00',duration_min:'60'};
- await db.createSlot(hour);
-
- check(db.resultOpenMs(two)===start+90*60000,'Двухчасовой матч открывает счёт через 90 минут после начала');
- check(db.resultOpenMs(hour)===start+60*60000,'Часовой матч не заставляет ждать дольше своей брони');
- check(db.resultOpenMs({agreed_date:'',agreed_time:''})===null,'Матч без даты порога не имеет');
-
- const at=m=>start+m*60000;
- const prompted=async m=>(await db.listMatchesNeedingResultPrompt(at(m))).some(x=>x.challenge_id==='win2h');
- const tasked=async m=>(await db.listResultTasks('1',at(m))).some(x=>x.challenge_id==='win2h');
- check(!await prompted(89)&&!await tasked(89),'До порога нет ни приглашения, ни задачи');
- check(await prompted(91),'После порога приглашение уходит');
- check(await tasked(91),'И в тот же момент матч появляется в списке «внести результат»');
- // Старое поведение: приглашение есть, а задачи нет. Проверяем, что окна больше нет.
- for(const m of [91,100,115,119]) check(await tasked(m),'В окне между порогом и концом брони матч доступен ('+m+' мин)');
-
- // «Матч не доигран» открывается тогда же, а не по концу брони.
- const early=await db.markMatchUnfinished('win2h',{telegram_id:'1',name:'Alice One'});
- check(!early.ok&&early.reason==='match_not_ended','До порога отметить недоигранным нельзя');
-
- // Интерфейс считает по тому же правилу и берёт число с сервера.
- const ui=await fs.readFile(path.join(root,'public','match.html'),'utf8');
- check(/resultAfterMin=Number\(j\.result_after_min\|\|90\)/.test(ui),'Интерфейс берёт порог с сервера, а не зашивает своё число');
- check(/Math\.min\(Number\(resultAfterMin\)\|\|90,Number\(s\.duration_min\|\|matchDuration\)\|\|120\)/.test(ui),'Интерфейс считает порог той же формулой');
- check(/myMatches\.filter\(function\(x\)\{return x\.challenge_id===resultSlotId/.test(ui),'Ссылка из бота открывает форму, даже если матча нет в списке задач');
- const boot=await request('get','/api/match/bootstrap','1');
- check(Number(boot.body.result_after_min)===90,'Порог уезжает в интерфейс при загрузке');
+function inviteEventCard(ev){
+  var s=String(ev.status_code||ev.status||'open').toLowerCase();
+  var name=L?(ev.event_name_ru||ev.event_name_en||ev.event_name||''):(ev.event_name_en||ev.event_name_ru||ev.event_name||'');
+  var label=s==='live'?(L?'Идёт сейчас':'Live now')
+    :s==='waitlist'?(L?'Лист ожидания':'Waitlist')
+    :s==='archived'?(L?'Завершено':'Finished'):(L?'Открыт набор':'Registration open');
+  var cls=s==='archived'?'past':(s==='waitlist'?'wait':'live');
+  var fmt=function(d){var x=new Date(d);return isNaN(x.getTime())?String(d):x.toLocaleDateString(L?'ru-RU':'en-US',{day:'numeric',month:'short'})};
+  var dates=[ev.start_date||'',ev.end_date||''].filter(Boolean).map(fmt).join(' — ');
+  var no=inviteSeasonNo(ev),info=inviteSeasons[no]||null;
+  // Длительность берём по реально сыгранным матчам сезона; даты в строке
+  // события бывают плановыми и сезон выглядел короче, чем шёл.
+  var weeks=(info&&info.weeks)||0;
+  if(!weeks&&ev.start_date&&ev.end_date){
+    var a=new Date(ev.start_date),b=new Date(ev.end_date);
+    if(!isNaN(a.getTime())&&!isNaN(b.getTime()))weeks=Math.max(1,Math.round((b-a)/6048e5));
+  }
+  var roster=(info&&info.players_list)||[];
+  var stats='';
+  if((info&&(info.divisions||info.players))||weeks){
+    stats='<div class="ivStats">'
+      +(info&&info.divisions?inviteStat(info.divisions,L?'дивизиона':'divisions',''):'')
+      +(info&&info.players?inviteStat(info.players,L?'игроков':'players',roster.length?'toggleInvitePlayers(\''+esc(no)+'\')':''):'')
+      +(weeks?inviteStat(weeks+(L?' нед.':'w'),L?'длительность':'duration',''):'')
+      +'</div>';
+  }
+  var finals=(info&&info.finals)||[];
+  var desc=L?(ev.description_ru||ev.description_en||ev.description||''):(ev.description_en||ev.description_ru||ev.description||'');
+  return '<div class="ivEv'+(s==='archived'?' done':'')+'"><div class="ivEvName">'+esc(name)+'</div>'
+    +'<div class="ivEvRow"><span class="ivTag '+cls+'">'+esc(label)+'</span>'
+    +(dates?'<span class="ivTag">'+esc(dates)+'</span>':'')+'</div>'
+    +(desc&&s!=='archived'?'<div class="ivEvDesc">'+esc(desc)+'</div>':'')
+    +stats
+    +(invitePlayersOpen===no&&roster.length?invitePlayerList(roster):'')
+    +(finals.length?'<div class="ivGrp2">'+esc(L?'Финалы сезона':'Season finals')+'</div>'+finals.map(inviteFinal).join(''):'')
+    +'</div>';
 }
-
-
-// --- Постер: новая раскладка, стадия матча и один общий файл спонсоров ------
-{
- const src=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
- // Промпт: портретное кадрирование вместо общего плана.
- check(/Crop each player just below the shoulders, at mid-chest level/.test(src),'Промпт требует портретного кадрирования по грудь');
- check(/Do not show the waist, hips, legs or full torso/.test(src),'Промпт прямо запрещает общий план');
- check(!/Show both players from approximately the chest or waist upward/.test(src),'Старая формулировка кадрирования убрана');
-
- // Оформление взято из карточки матча, Fantasy Points нет.
- check(/gold:'#C9A76A'/.test(src)&&/amber:'#E8A45C'/.test(src),'Палитра та же, что в карточке матча');
- check(!/FANTASY POINTS/i.test(src.replace(/\/\/[^\n]*/g,'')),'Fantasy Points на постере нет');
- check(/DIVISION RANK/.test(src),'Место в дивизионе на постере есть');
- check(!/DejaVu Sans,Arial/.test(src),'Зашитый чужой шрифт убран — берём шрифт карточки');
-
- // Один общий файл спонсоров, и без него плашки просто нет.
- const sponsorsSrc=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
- check(/SPONSOR_FILE = path\.join\(ASSETS_DIR, 'sponsors\.png'\)/.test(sponsorsSrc),'Спонсоры читаются из assets/sponsors.png');
- const poster=await import(pathToFileURL(path.join(root,'matchposter.js')).href);
- check(poster.sponsorsAvailable()===false,'Без файла спонсоров лента просто не рисуется');
- check(poster.posterStageLabel({round:'SF'})==='PLAYOFF · SEMIFINAL','Стадия читается из round слота');
- check(poster.posterStageLabel({round:'QF'})==='PLAYOFF · QUARTERFINAL','Четвертьфинал подписан');
- check(poster.posterStageLabel({round:'Final'})==='PLAYOFF · FINAL','Финал подписывается финалом');
- check(poster.posterStageLabel({round:'3rd'})==='PLAYOFF · THIRD PLACE MATCH','Матч за третье место подписан');
- check(poster.posterStageLabel({})==='GROUP STAGE','Обычный матч — групповой этап');
- // На постере не должно быть ни одной русской буквы: картинка уходит всем
- // сразу, в том числе в Instagram.
- const drawn=src.split('\n').filter(line=>!/^\s*\/\//.test(line)).join('\n');
- const cyrillic=[...drawn.matchAll(/>[^<>]*[А-Яа-яЁё][^<>]*</g)].map(m=>m[0]);
- check(!cyrillic.length,'В разметке постера нет русского текста: '+cyrillic.join(' | '));
- check(!/SEASON PARTNERS/.test(src),'Подписи над логотипами нет — только сама лента');
- check(poster.posterStageLabel({label:'TECHNICAL RESULT'})==='TECHNICAL RESULT','Техническое поражение перебивает стадию');
-
- // Стадия доезжает из слота в данные постера.
- const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
- check(/round:slot\.round\|\|''/.test(card),'Стадия матча передаётся из слота в данные постера');
-
- // Команда на постер по уже сыгранному матчу есть и в /help, и в меню.
- const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(/cmd:'poster_test'/.test(tg),'Команда /poster_test попала в единый список команд');
- const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/text\.startsWith\('\/poster_test'\)/.test(bot),'Обработчик /poster_test на месте');
+function renderInvite(){
+  var wrap=$('viewHome');
+  var perks=L?['Витрина игроков: карточки, уровень, статистика','Таблицы дивизионов и годовая гонка','История матчей лиги','Заявки на события и лист ожидания']
+             :['Player showcase: cards, level, statistics','Division tables and the Yearly Race','League match history','Event applications and the waitlist'];
+  var h='<div class="invite">'
+    +'<div class="ivHead"><div class="ivKicker">PHUKET TENNIS FAMILY</div>'
+    +'<h2>'+esc(L?'Лига открывается после анкеты':'The League opens after your profile')+'</h2>'
+    +'<p>'+esc(L?'Анкета занимает пару минут. После неё открывается интерфейс лиги, а заявку на событие или лист ожидания можно оставить там же.'
+                :'The form takes a couple of minutes. After it the League interface opens, and you can apply for an event or join the waitlist right there.')+'</p></div>'
+    +'<div id="ivHero"></div>'
+    +'<ul class="ivList">'+perks.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul>'
+    +'<button class="ivBtn" onclick="location.href=\'/apply?mode=profile\'+(tokQ||\'\')">'+esc(L?'Заполнить анкету':'Complete the profile')+'</button>'
+    +'<div class="ivNote">'+esc(L?'Анкета уже заполнена? Доступ откроется, как только организатор внесёт вас в состав.'
+                                 :'Already completed it? Access opens as soon as the organiser adds you to the line-up.')+'</div>'
+    +'<div id="ivEvents"></div></div>';
+  wrap.innerHTML=h;
+  Promise.all([
+    fetch('/api/bootstrap?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null}),
+    fetch('/api/public/seasons',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null})
+  ]).then(function(res){
+    var j=res[0]||{},sj=res[1]||{};
+    (sj.seasons||[]).forEach(function(x){inviteSeasons[String(x.number)]=x});
+    inviteEvents=(j.all_events||j.events)||[];
+    var box=$('ivEvents');if(box)box.innerHTML=inviteEventsHtml();
+    var hero=$('ivHero');if(hero)hero.innerHTML=inviteHeroHtml();
+  });
 }
-
-
-// --- Instagram: опрос, согласие, сторис и карусель недели ------------------
-{
- const pub=await load('publicity.js');
- const ig=await load('instagram.js');
-
- // Опрос на двух языках, со ссылкой на аккаунт и кнопкой отказа.
- const ruText=pub.instagramAskText('ru'), enText=pub.instagramAskText('en');
- check(/пришлите свой Instagram/i.test(ruText)&&/send us your Instagram|send your Instagram/i.test(enText),'Опрос просит прислать инстаграм на обоих языках');
- check(ruText.includes(ig.IG_ACCOUNT)&&enText.includes(ig.IG_ACCOUNT),'В тексте назван наш аккаунт');
- const kb=pub.instagramAskKeyboard('ru').inline_keyboard.flat();
- check(kb.some(b=>b.url===ig.IG_PROFILE_URL),'В опросе есть прямая ссылка на аккаунт');
- check(kb.some(b=>b.callback_data==='pub:send')&&kb.some(b=>b.callback_data==='pub:no'),'Есть кнопки «прислать» и «не публиковать»');
- check(pub.isPublicityCallback('pub:no')&&!pub.isPublicityCallback('pr:join:x'),'Кнопки опроса отделены от остальных');
-
- // Ник приводится к одному виду, мусор не принимается.
- check(sheets.normalizeInstagramHandle('https://instagram.com/kostas.p/?hl=ru')==='@kostas.p','Ссылка превращается в ник');
- check(sheets.normalizeInstagramHandle('@@Kostas_P')==='@Kostas_P','Лишние собачки убираются');
- check(sheets.normalizeInstagramHandle('не инстаграм')==='','Мусор не принимается');
- check(sheets.normalizeInstagramHandle('')==='','Пустое остаётся пустым');
-
- // Согласие: публикуем по умолчанию, останавливает только явный отказ.
- check(sheets.publicationAllowed({})===true,'Молчание не запрещает публикацию');
- check(sheets.publicationAllowed({photo_publication_consent:'YES'})===true,'Согласие разрешает');
- check(sheets.publicationAllowed({photo_publication_consent:'no'})===false,'Явный отказ запрещает, регистр не важен');
- check(sheets.publicationAllowed({instagram:''})===true,'Отсутствие инстаграма публикации не мешает');
-
- // Отказ одного игрока снимает весь матч: в карточке двое.
- await sheets.setPhotoConsent('4','NO');
- await sheets.setPlayerInstagram('3','@carol.tennis');
- const both={from_telegram_id:'3',from_name:'Carol Three',to_telegram_id:'4',to_name:'Dan Four'};
- const verdict=await pub.matchPublicity(both);
- check(!verdict.allowed&&verdict.blocked.length===1,'Отказ одного снимает весь матч');
- const clean={from_telegram_id:'3',from_name:'Carol Three',to_telegram_id:'1',to_name:'Alice One'};
- const ok=await pub.matchPublicity(clean);
- check(ok.allowed&&ok.handles.join()==='carol.tennis','У разрешённого матча собираются ники для отметок');
-
- // Запрет доходит до самой публикации, а не только до интерфейса.
- let blocked='';
- try { await pub.publishPosterToStory(Buffer.from('x'),both); } catch(e) { blocked=e.message; }
- check(/не публиков|Instagram не подключ/.test(blocked),'Публикация запрещённого матча не проходит');
-
- // Воскресенье 19:00 и ничего в другое время.
- const at=iso=>Date.parse(iso);
- check(pub.carouselDue(at('2099-01-04T12:00:00Z')),'Воскресенье 19:00 по Пхукету — время карусели');
- check(!pub.carouselDue(at('2099-01-04T09:00:00Z')),'В воскресенье утром карусель не собирается');
- check(!pub.carouselDue(at('2099-01-05T12:00:00Z')),'В понедельник карусель не собирается');
-
- // Подпись к посту — короткий обзор недели, а не список счетов.
- const week=[{slot:{from_name:'Alice One',to_name:'Bob Two',division:'Division C'}},
-   {slot:{from_name:'Carol Three',to_name:'Dan Four',division:'Division W'}}];
- const caption=pub.carouselCaption(week,at('2099-01-04T12:00:00Z'),['alice.t','carol.t']);
- check(!/6:4|def\./.test(caption),'Счёта матчей в подписи нет — он и так на карточках');
- check(/2 matches played this week/.test(caption),'Единственная цифра в подписи — сколько матчей сыграно');
- check(!/players on court|divisions in action|Jan|Sept/.test(caption),'Ни игроков, ни дивизионов, ни дат в подписи нет');
- check(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(caption.split('\n')[0]),'Заголовок с эмодзи');
- check(/@alice\.t @carol\.t/.test(caption),'Игроки, давшие согласие, упомянуты в подписи');
- const pubSrc=await fs.readFile(path.join(root,'publicity.js'),'utf8');
- check(/const caption = carouselCaption\(used, span, handles\);/.test(pubSrc),'Подпись одна на всю подборку, а не на каждый пост');
- check(/const buttons = canPublish/.test(pubSrc),'Кнопки публикации собраны под одной подписью');
- // Карточки недели не пересобираются — пересылается сохранённая в момент результата.
- check(!/cardForSlot/.test(pubSrc.slice(pubSrc.indexOf('export async function buildWeeklyCarousel'),pubSrc.indexOf('export async function publishWeeklyCarousel'))),'Подборка недели карточки не пересобирает');
- check(/txt\(item\.slot\.result_card_file_id\)/.test(pubSrc),'Берётся сохранённая карточка матча');
- check(/Нет сохранённой карточки/.test(pubSrc),'Матчи без сохранённой карточки названы в сводке');
- const mSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
- check(/export async function archiveResultCard/.test(mSrc),'Карточка сохраняется в момент результата');
- check(/if \(media\.buffer\) await archiveResultCard\(slot, media\.buffer\)/.test(mSrc),'Сохраняется та же картинка, что уходит в ленту');
- check(/sendDocumentBuffer\(chatId, buffer, `card-/.test(mSrc)&&/deleteMessage\(chatId, sent\.message_id\)/.test(mSrc),'Файлом, в оригинале, и сообщение сразу удаляется');
- check(/'result_card_file_id'/.test(await fs.readFile(path.join(root,'matchesdb.js'),'utf8')),'Под карточку есть колонка в Match Slots');
- // Fantasy Points в публичные материалы не идут.
- const rSrc=await fs.readFile(path.join(root,'results.js'),'utf8');
- check(!/buildFantasyCatalog|scoreFantasyMatch/.test(rSrc),'Снимок для карточки больше не считает очки Fantasy');
- check(!/FANTASY POINTS/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Плашки Fantasy на карточке нет даже в коде');
- // Перенос аватарок из Players_Master выполнен и больше не нужен: новые
- // аватарки грузятся через Telegram, автопрогон удалён вместе с запуском.
- const avSrc=await fs.readFile(path.join(root,'avatars.js'),'utf8');
- check(!/importMasterAvatars/.test(avSrc),'Функции переноса из Players_Master больше нет');
- check(!/avatarImport|importMasterAvatars/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'И её запуска после старта и раз в сутки тоже');
- check(/sameName\(n, wanted\)/.test(await fs.readFile(path.join(root,'matchcard.js'),'utf8')),'Фото на карточке ищется по имени терпимо');
-
- check(pub.CAROUSEL_HASHTAGS.join(' ')==='#phuket #tennis #phukettennis #phukettennisfamily','Хэштеги те, что просили');
- check(caption.includes(pub.CAROUSEL_HASHTAGS.join(' ')),'Хэштеги есть в подписи');
- check(!/[А-Яа-я]/.test(caption),'Подпись к посту без русского текста');
- // Две недели подряд текст не повторяется.
- const a=pub.carouselCaption(week,at('2099-01-04T12:00:00Z'),[]);
- const b=pub.carouselCaption(week,at('2099-01-11T12:00:00Z'),[]);
- check(a.split('\n')[0]!==b.split('\n')[0],'Первая фраза меняется от недели к неделе');
-
- // Витрина картинок: ссылка живёт, отдаётся и умирает по требованию.
- const kept=ig.rememberMedia(Buffer.from('jpeg-bytes'),'image/jpeg');
- check(/\/ig\/[a-z0-9]+\.jpg$/.test(kept.url),'Картинка получает публичную ссылку');
- check(ig.takeMedia(kept.id)?.buffer?.toString()==='jpeg-bytes','По ссылке отдаётся та самая картинка');
- ig.forgetMedia(kept.id);
- check(ig.takeMedia(kept.id)===null,'После публикации ссылка умирает');
- check(ig.instagramEnabled()===false,'Без ключей Instagram считается неподключённым');
- check(ig.CAROUSEL_MAX===20,'В карусель кладём двадцать карточек');
- check(ig.CAROUSEL_SAFE===10,'Безопасный откат — десять, как обещает документация Meta');
-
- // Маршрут отдачи и команды на месте.
- check(routes.some(r=>r.method==='get'&&r.p==='/ig/:id.jpg'),'Маршрут отдачи картинок зарегистрирован');
- const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- for(const cmd of ['instagram_ask','instagram_status','instagram_week'])
-  check(new RegExp(`cmd:'${cmd}'`).test(tg),'Команда /'+cmd+' в едином списке команд');
- const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/poster:ig:/.test(bot),'Под постером есть кнопка публикации в сторис');
- check(/igweek:go/.test(bot),'Под каруселью есть кнопка публикации');
- check(/'Instagram':'📸'/.test(bot),'Раздел Instagram в админском /help');
+// Чемпионы — сразу под шапкой, до списка того, что открывается: это первое,
+// что должно зацепить, а не то, до чего надо долистать.
+function inviteHeroHtml(){
+  var nums=Object.keys(inviteSeasons).map(Number).filter(function(n){return n>0});
+  var best=null;
+  nums.sort(function(a,b){return b-a}).forEach(function(n){
+    var s=inviteSeasons[String(n)];
+    if(!best&&s&&(s.finals||[]).length)best=s;
+  });
+  if(!best)return '';
+  var faces=best.finals.slice(0,4).map(function(f){
+    return '<div class="ivFace">'+av({name:f.champion.name,photo:f.champion.photo})
+      +'<div class="ivFaceName">'+esc(f.champion.name)+'</div>'
+      +'<div class="ivFaceDiv">'+esc(f.title||('Division '+f.letter))+'</div></div>';
+  }).join('');
+  return '<div class="ivHero"><div class="ivHeroHead">'
+    +'<div class="ivHeroTitle">🏆 '+esc((L?'Чемпионы сезона ':'Season ')+best.number+(L?'':' champions'))+'</div>'
+    +'<div class="ivFaceDiv">'+esc(best.players?best.players+(L?' игроков':' players'):'')+'</div></div>'
+    +'<div style="display:grid;grid-template-columns:repeat('+Math.min(4,best.finals.length)+',1fr);gap:8px">'+faces+'</div></div>';
 }
-
-
-// --- Подборка недели уходит целиком, лимит Instagram только при публикации --
-{
- const pub2=await load('publicity.js');
- const ig2=await load('instagram.js');
- const src=await fs.readFile(path.join(root,'publicity.js'),'utf8');
- check(/return { matches: out, extra/.test(src),'Организатору показываем все матчи недели, а не первые десять');
- check(/export const POST_SIZE = 10/.test(src),'Подборка режется на посты по десять картинок');
- check(/const handles = \[\.\.\.new Set\(list\.flatMap\(x => x\.handles \|\| \[\]\)\)\]/.test(src),'В посте отмечены только те игроки, чьи картинки в него вошли');
- check(/publishCarousel\(post\.images, \{ caption: post\.caption, handles: post\.handles \}\)/.test(src),'Публикуется один конкретный пост: подпись общая, отметки свои');
- check(/callback_data: `\$\{action\}:\$\{post\.index\}`/.test(src),'У каждого поста своя кнопка публикации');
- check(ig2.CAROUSEL_MAX===20,'По умолчанию двадцать');
- check(/children\.slice\(0, CAROUSEL_SAFE\)/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'При отказе карусель сама урезается до десяти, а не падает');
- check(/IG_CAROUSEL_MAX/.test(await fs.readFile(path.join(root,'instagram.js'),'utf8')),'Лимит меняется переменной, без правки кода');
-
- // Тема для материалов задаётся отдельно от админского чата.
- const bot2=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/text === '\/instagram_here'/.test(bot2),'Есть привязка темы для материалов Instagram');
- check(/instagram_chat_id/.test(src)&&/instagram_topic_id/.test(src),'Подборка уходит в привязанную тему');
- check(/canPublish: instagramEnabled\(\)/.test(src),'Кнопка публикации появляется только когда Instagram подключён');
-
- // Постер: счёт больше не налезает на имена.
- const poster=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
- check(/function nameFit/.test(poster)&&/const textWidth/.test(poster),'Ширина имени считается, а не угадывается');
- check(/const room=Math\.max\(160/.test(poster),'Кегль счёта подбирается под фактический просвет между именами');
- check(!/scoreRoom:420/.test(poster),'Фиксированный просвет убран');
- check(/LIGHTING — both players must look photographed together/.test(poster),'В промпте есть требование одинакового света');
- check(/Do not light one player brightly and the other in shadow/.test(poster),'Запрет на разное освещение сформулирован прямо');
- // Плашка опущена, спонсорская стала компактнее.
- check(/panel:\{ x:40, y:1120/.test(poster),'Информационная плашка опущена ниже');
- check(/sponsor:\{ top:1556, bottom:1818 \}/.test(poster),'Под партнёров оставлена свободная полоса под панелью счёта');
- const panelBottom=1120+424;
- check(1818<1920*0.95,'Спонсоры не заходят в нижние 5%, закрытые интерфейсом Stories');
- check(panelBottom<1556,'Лента не налезает на панель счёта');
- check(!/SEASON PARTNERS/.test(poster),'Плашки и подписи под спонсорами больше нет');
- check(!/<rect[^>]*S\.x/.test(poster),'Рамки вокруг логотипов не рисуем');
- const strip=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
- check(/fit: 'inside'/.test(strip),'Логотипы вписываются целиком, без растяжения и обрезки');
- check(/width: Math\.round\(width \|\| canvas\)/.test(strip),'Лента идёт во всю ширину картинки');
- check(/export async function sponsorStrip/.test(strip),'Лента партнёров собирается в одном месте для всех картинок');
- const cardSrc=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
- const standSrc=await fs.readFile(path.join(root,'standings.js'),'utf8');
- check(/sponsorStrip/.test(cardSrc),'Карточка матча берёт ту же ленту');
- check(/sponsorStrip/.test(standSrc),'Постер таблицы берёт ту же ленту');
- check(/sponsorsAvailable\(\)/.test(cardSrc),'Общий файл партнёров главнее папки с отдельными логотипами');
+// Прошедшие сезоны показываем развёрнутыми: это витрина, а не архив. Под ними
+// цифры сезона и кнопка с чемпионами — то, ради чего человек и приходит.
+var inviteEvents=[];
+function inviteEventsHtml(){
+  if(!inviteEvents.length)return '';
+  var by=function(s){return inviteEvents.filter(function(ev){return String(ev.status_code||ev.status||'open').toLowerCase()===s})};
+  var live=by('live'),open=by('open'),wait=by('waitlist'),past=by('archived');
+  var sec=function(title,rows){return rows.length?('<div class="ivGrp">'+esc(title)+'</div>'+rows.map(inviteEventCard).join('')):''};
+  return sec(L?'Идут сейчас':'Live now',live)
+    +sec(L?'Открыт набор':'Registration open',open)
+    +sec(L?'Лист ожидания':'Waitlist',wait)
+    +sec(L?'Прошлые сезоны':'Past seasons',past);
 }
+</script>
+</body>
+</html>
 
-
-// --- Постер старого матча: форма и место берутся по логике карточки ---------
- // Форма: журналы дивизионов главнее витрины, сквозь сезоны, свежее слева.
- const divForm=await fs.readFile(path.join(root,'division.js'),'utf8');
- check(/export async function playerFormAcrossSeasons/.test(divForm),'Форма собирается по журналам дивизионов сквозь сезоны');
- check(/if \(out\.length >= limit\) break;/.test(divForm),'Прошлый сезон добирается только пока не набрана пятёрка');
- check(/if \(current && Number\(one\) > Number\(current\)\) continue;/.test(divForm),'Будущие сезоны в форму не попадают');
- const res5=await fs.readFile(path.join(root,'results.js'),'utf8');
- check(/const live = await playerFormAcrossSeasons\(name, \{ season, upTo, limit: 5 \}\)/.test(res5),'Карточка берёт форму из журналов, витрина — запасной вариант');
- const card5=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
- check(/const live = await playerFormAcrossSeasons\(name, \{ season, limit: 5 \}\)/.test(card5),'Постер старого матча берёт форму оттуда же');
- check(/slice\(-5\)\.reverse\(\)/.test(card5),'На карточке свежий матч слева');
- const post5=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
- check(/\.filter\(x=>x==='W'\|\|x==='L'\)\.reverse\(\)/.test(post5),'На постере свежий матч слева');
- const lg5=await fs.readFile(path.join(root,'public/league.html'),'utf8');
- check(/form\.slice\(-5\)\.reverse\(\)/.test(lg5),'В мини-приложении свежий матч слева');
-
-
-{
- const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
- check(/async function metasFromSheets/.test(card),'Без контекста карточка не остаётся пустой');
- check(/if \(!ctx\) return metasFromSheets\(slot, winnerIsFrom, seasonHint\)/.test(card),'Запасной путь включается именно при отсутствии контекста');
- check(/playerFormAcrossSeasons/.test(card),'Форма берётся из журналов дивизионов сквозь сезоны');
- check(/getLeagueProfiles\(\)/.test(card),'Витрина профилей осталась запасным источником формы');
- check(/sameName\(x\.name, name\)\)\?\.place/.test(card),'Место читается из живой таблицы дивизиона');
- check(/position: \{ after: place\(p1\) \}/.test(card),'Место «до» задним числом не выдумываем — стрелки нет');
- check(!/fp:/.test(card),'Fantasy Points в данных карточки нет вовсе');
-
- const results2=await fs.readFile(path.join(root,'results.js'),'utf8');
- check(/recent_form/.test(results2)||/cardFormsBefore/.test(results2),'Карточка по-прежнему снимает контекст при записи счёта');
- const div=await fs.readFile(path.join(root,'division.js'),'utf8');
- check(!/getDivisionTable\(letter, season = '', group = '', \{ upTo/.test(div),'Срезов таблицы в прошлое нет — место считаем по живой таблице');
-}
-
-
-// --- Таблицы дивизионов: вторник, снимки мест, по картинке на группу --------
-{
- const st=await load('standings.js');
- const at=iso=>Date.parse(iso);
- const src=await fs.readFile(path.join(root,'standings.js'),'utf8');
- check(st.WEEKLY_FROM==='2026-10-06','Автовыпуски начинаются 6 октября');
- check(st.SEASON_END==='2026-11-08','После 8 ноября автоматика молчит');
- check(st.standingsDue(at('2026-10-06T12:00:00Z')),'Вторник 19:00 по Пхукету — время таблиц');
- check(!st.standingsDue(at('2026-10-07T12:00:00Z')),'В среду выпуск не собирается');
- check(!st.standingsDue(at('2026-10-06T09:00:00Z')),'Во вторник утром выпуск не собирается');
- check(!st.standingsDue(at('2026-09-29T12:00:00Z')),'До 6 октября автоматических выпусков нет — только руками');
- check(!st.standingsDue(at('2026-11-10T12:00:00Z')),'После конца сезона выпусков нет');
- check(st.groupTitle('B','2','')==='DIVISION B · GROUP 2','Заголовок группы по-английски');
- check(!/[А-Яа-я]/.test(st.groupTitle('W','1','')),'В заголовке картинки нет кириллицы');
-
- const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]});
- check(!/#/.test(cap),'В подписи к сторис нет хэштегов');
- check(!/DIVISION|GROUP|SEASON/i.test(cap),'Дивизион, группа и сезон в тексте не повторяются — они на картинке');
- check(cap.split(/\s+/).length<=16,'Подпись — одно короткое предложение');
- check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
- check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
-
- check(/playerPhotoForPoster\(\{ telegramId, name \}\)/.test(src),'Аватарки идут по той же цепочке, что в карточке матча');
- check(/publishedAvatars\(\)/.test(src),'Своя аватарка игрока находится по имени через витрину аватарок');
- check(/sources\?\.master\.find\(\(\[n\]\) => sameName\(n, name\)\)/.test(src),'Фото из Players_Master подбирается терпимым сравнением имён');
- check(/async function orgLogoLayer/.test(src),'В шапке таблицы есть логотип лиги');
- check(/'match-card-logos', 'ptf\.png'/.test(src),'Логотип берётся из того же файла, что на постере матча');
- const tg4=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(/export async function sendDocumentBuffer/.test(tg4),'Картинки уходят файлом, без пережатия Телеграмом');
- check(/sendDocumentBuffer\(chatId, item\.buffer, tableFileName\(item\)/.test(src),'Таблица приходит файлом');
- check(/table-\$\{String\(item\.key/.test(src),'У файла осмысленное имя');
- const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/sendDocumentBuffer\(chatId,finalBuffer,posterFileName/.test(bot4),'Постер матча приходит файлом');
- check(/result\?\.document\?\.file_id/.test(bot4),'file_id у файла читается из document, а не из photo');
- const pub4=await fs.readFile(path.join(root,'publicity.js'),'utf8');
- check(/sendDocumentAlbumBuffers/.test(pub4),'Недельные подборки уходят файлами');
- check(/>G<\/text>/.test(src),'Колонка сыгранных матчей подписана G — Games');
- check(/const SPONSOR = \{ top: 1398, bottom: 1660 \}/.test(src),'Лента партнёров поднята выше кнопок сторис');
- check(/title: 236, logoTop: 268/.test(src),'Шапка опущена ниже полосы просмотра сторис');
- check(/Math\.min\(L\.row, Math\.floor\(\(bandBottom - bandTop\) \/ rows\.length\)\)/.test(src),'Длинная группа ужимается по высоте строки, а не вылезает за кадр');
- const league=await fs.readFile(path.join(root,'public/league.html'),'utf8');
- check(/colM:'И',colW:'П',colWR:'WR',colPts:'ОЧК'/.test(league),'В русском интерфейсе колонки И · П · ОЧК');
- check(/colM:'G',colW:'W',colWR:'WR',colPts:'PTS'/.test(league),'В английском интерфейсе колонки G · W · PTS');
- check(/Standings Snapshots/.test(src),'Снимки мест лежат в нашей таблице, а не в таблицах дивизионов');
- check(/ensureExtraSheet/.test(src),'Лист снимков заводится сам');
- check(/const move = Number\.isFinite\(was\) \? was - p\.place : null/.test(src),'Движение считается от прошлого выпуска, а не от начала сезона');
- check(/data\.baseline \? '' :/.test(src),'Первый выпуск выходит без стрелок');
- check(/if \(save\) for \(const item of prepared\.items\)/.test(src),'Снимок кладётся только после отправки');
- check(/callback_data: `igtable:\$\{item\.key\}`/.test(src),'У каждой группы своя кнопка публикации');
- check(/publishStory/.test(src)&&!/publishCarousel/.test(src),'Таблицы уходят в сторис по одной, а не каруселью');
-
- const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/text\.startsWith\('\/tables'\)/.test(bot3),'Команда /tables есть');
- check(/data\.startsWith\('igtable:'\)/.test(bot3),'Кнопка «В сторис» обрабатывается');
- check(/\bdraft\b/.test(bot3),'Черновой прогон не сдвигает точку отсчёта');
- const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(/cmd:'tables'/.test(tg3),'Команда есть и в /help, и в меню по слэшу');
- const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
- check(/runWeeklyStandings/.test(idx3),'Вторничный выпуск подключён к общему проходу');
-}
-
-
-// --- Фотографии недели: четверг, только с согласия, только с фото -----------
-{
- const pub3=await load('publicity.js');
- const at=iso=>Date.parse(iso);
- check(pub3.photosDue(at('2099-01-01T12:00:00Z')),'Четверг 19:00 по Пхукету — время фотографий');
- check(!pub3.photosDue(at('2099-01-04T12:00:00Z')),'В воскресенье фотоподборка не собирается');
- check(!pub3.photosDue(at('2099-01-01T09:00:00Z')),'В четверг утром фотоподборка не собирается');
- check(pub3.carouselDue(at('2099-01-04T12:00:00Z'))&&!pub3.carouselDue(at('2099-01-01T12:00:00Z')),'Карточки и фото разведены по разным дням');
-
- const cap=pub3.photosCaption([{slot:{from_name:'A',to_name:'B'}}],at('2099-01-01T12:00:00Z'),['a.t']);
- check(/@a\.t/.test(cap)&&cap.includes(pub3.CAROUSEL_HASHTAGS.join(' ')),'В подписи есть упоминания и хэштеги');
- check(!/[А-Яа-я]/.test(cap),'Подпись к фотопосту без русского текста');
- check(!/\d/.test(cap.replace(/#\S+|@\S+/g,'')),'Ни дат, ни числа игроков — никакой статистики в подписи');
- check(!/Sept|players on court/i.test(cap),'Даты и счётчики убраны');
- check(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(cap.split('\n')[0]),'Заголовок с эмодзи');
- check(cap.split('\n')[2].length>30,'Под заголовком живой текст про неделю, а не метрика');
- check(pub3.photosCaption([],at('2099-01-01T12:00:00Z'),[]).split('\n')[0]
-   !==pub3.photosCaption([],at('2099-01-08T12:00:00Z'),[]).split('\n')[0],'Первая фраза меняется от недели к неделе');
-
- // Берём только матчи с фотографией и только разрешённые.
- const src=await fs.readFile(path.join(root,'publicity.js'),'utf8');
- check(/if \(!txt\(r\.result_photo_file_id\)\) return false;/.test(src),'Без фотографии матч в подборку не попадает');
- check(/const who = await matchPublicity\(slot\);\n    if \(!who\.allowed\)/.test(src),'Согласие проверяется и здесь');
- check(/getFileBuffer\(txt\(item\.slot\.result_photo_file_id\)\)/.test(src),'Фото скачивается из Telegram по file_id');
- check(/instagram_photos_last/.test(src),'Повтор в тот же четверг отсекается отметкой');
-
- const bot3=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/text\.startsWith\('\/instagram_photos'\)/.test(bot3),'Есть команда ручной сборки фотографий');
- check(/data\.startsWith\('igweek:go'\) \|\| data\.startsWith\('igphotos:go'\)/.test(bot3),'Обе подборки публикуются одним обработчиком');
- check(/publishWeeklyCarousel\(prepared,index\)/.test(bot3),'Кнопка публикует именно свой пост, а не всю подборку');
- const tg3=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(/cmd:'instagram_photos'/.test(tg3),'Команда /instagram_photos в едином списке');
- const idx3=await fs.readFile(path.join(root,'index.js'),'utf8');
- check(/runWeeklyPhotos\(Date\.now\(\), evAdmin\)/.test(idx3),'Четверговая подборка висит на общем проходе');
-}
-
-
-// --- Диапазоны, превью опроса, согласие в анкете, ссылки на Instagram ------
-{
- const pub4=await load('publicity.js');
- const now=Date.parse('2099-03-01T12:00:00Z');
- check(pub4.parseRange('',now).label==='последние 7 дней','Без аргумента — последняя неделя');
- check(pub4.parseRange('-2',now).label==='2 недели назад','Неделя назад задаётся числом');
- const exact=pub4.parseRange('2099-01-05 2099-01-11',now);
- check(exact.label==='2099-01-05 — 2099-01-11'&&exact.to>exact.from,'Точный отрезок разбирается по двум датам');
- check(pub4.parseRange('2099-02-01',now).label==='2099-02-01 + 7 дней','Одна дата — неделя от неё');
- check(pub4.parseRange('2099-13-45',now).label==='последние 7 дней','Битая дата не ломает сборку');
- // Подпись сама по себе дат не показывает, но отрезок всё равно определяет её
- // содержание: по нему выбирается заголовок недели.
- const cap=pub4.carouselCaption([{slot:{from_name:'A',to_name:'B',division:'C'}}],exact,[]);
- check(!/Jan|Feb/.test(cap),'Дат в подписи нет');
- check(/1 match played this week/.test(cap),'Число матчей считается по выбранному отрезку');
-
- const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/\btest\b/.test(bot4)&&/Так опрос выглядит у игрока/.test(bot4),'Есть превью опроса перед рассылкой');
- check(/instagramAskText\('ru'\)/.test(bot4)&&/instagramAskText\('en'\)/.test(bot4),'Превью показывает обе языковые версии');
- check(/parseRange\(text\.replace/.test(bot4),'Команды подборок принимают даты');
-
- // Анкета спрашивает согласие и прячет ник у отказавшихся.
- const form=await fs.readFile(path.join(root,'public','apply.html'),'utf8');
- check(/id="photoConsent"/.test(form),'В анкете есть вопрос про публикацию');
- check(/consentLabel:'Публиковать вас в Instagram лиги\?'/.test(form)&&/consentLabel:'Publish you on the league Instagram\?'/.test(form),'Вопрос переведён');
- check(/function toggleInstagram/.test(form),'Поле инстаграма прячется при отказе');
- check(/photo_publication_consent:\$\('photoConsent'\)\.value/.test(form),'Ответ уезжает на сервер');
- check(/@phukettennisfamily/.test(form),'Аккаунт назван прямо в подсказке к полю, без отдельной кнопки');
-
- // Ответ доезжает до таблицы — раньше инстаграм из анкеты терялся.
- const sh=await fs.readFile(path.join(root,'sheets.js'),'utf8');
- check(/instagram: profile\.instagram \|\| existing\?\.instagram/.test(sh),'Инстаграм из анкеты попадает в таблицу');
- check(/photo_publication_consent: profile\.photo_publication_consent/.test(sh),'Согласие из анкеты попадает в таблицу');
- const idx4=await fs.readFile(path.join(root,'index.js'),'utf8');
- check(/function consentFromForm/.test(idx4),'Ответ анкеты приводится к YES/NO/пусто');
-
- // Ссылка на аккаунт в приветствии и после анкеты.
- const kb=await fs.readFile(path.join(root,'keyboards.js'),'utf8');
- // Отдельных кнопок под Instagram нет: ссылка живёт строкой в тексте.
- check(!/Instagram/.test(kb),'В приветственной клавиатуре нет отдельной кнопки Instagram');
- check(!/📸 Наш Instagram/.test(idx4),'После анкеты тоже нет отдельной кнопки');
- check(/href="\$\{IG_PROFILE_URL\}">Instagram<\/a>/.test(idx4),'Ссылка встроена в текст сообщения после анкеты');
- check(/href="\$\{INSTAGRAM_URL\}">Instagram<\/a>/.test(await fs.readFile(path.join(root,'admin.js'),'utf8')),'Ссылка встроена в текст приветствия');
- const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
- check(/Постеры матчей и результаты выкладываем/.test(adm)&&/Match posters and results go to our/.test(adm),'В тексте приветствия сказано про Instagram');
- // Пропущенный вопрос — это разрешение: публикуем, просто не отмечаем.
- check(sheets.publicationAllowed({})===true&&sheets.publicationAllowed({photo_publication_consent:''})===true,'Молчание считается разрешением');
- const silent=await pub4.matchPublicity({from_telegram_id:'1',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two'});
- check(silent.allowed===true,'Матч двоих промолчавших публикуется');
- check(silent.handles.length===0,'Промолчавших просто не отмечаем');
- check(/Не ответите — ничего страшного/.test(await fs.readFile(path.join(root,'publicity.js'),'utf8')),'В опросе прямо сказано, что молчание — не отказ');
-}
-
-// --- Афиша-анонс: постер до результата -------------------------------------
-{
- const posterSrc=await fs.readFile(path.join(root,'matchposter.js'),'utf8');
- check(/export async function prepareAnnouncementJob/.test(posterSrc),'Есть подготовка задания без слота матча');
- check(/export async function composeAnnouncementPoster/.test(posterSrc),'Есть отдельная отрисовка панели анонса');
- check(/export async function renderAnnouncementPoster/.test(posterSrc),'Есть оркестратор анонса');
- check(/UPCOMING MATCH/.test(posterSrc),'На афише анонса нет счёта — вместо него метка анонса');
- check(!/composeAnnouncementPoster[\s\S]{0,900}rankPlate/.test(posterSrc),'На афише анонса нет плашки места в дивизионе');
- check(!/composeAnnouncementPoster[\s\S]{0,900}formSvg/.test(posterSrc),'На афише анонса нет формы W/L');
- check(/\$\{note\?`<text[\s\S]{0,200}esc\(note\)/.test(posterSrc),'Комментарий, если задан, ложится строкой на афишу');
-
- const botSrc2=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/export async function prepareAnnouncementForAdmin/.test(botSrc2),'Отправка анонса в чат админов вынесена отдельной функцией');
- check(/rememberPosterVariant\(jobId,variant,\{fileId,buffer:finalBuffer,comment:job\.comment,createdAt:new Date\(\)\.toISOString\(\),player1,player2\}\)/.test(botSrc2),'Игроки анонса запоминаются в run — слот матча не нужен для публикации');
- check(/data\.startsWith\('announce:ig:'\)/.test(botSrc2),'Публикация анонса в сторис — своя кнопка');
- check(/pseudoSlot=\{from_telegram_id:saved\.player1\?\.telegram_id/.test(botSrc2),'Для отметок в Instagram собирается облегчённый слот из памяти');
-
- const idxSrc2=await fs.readFile(path.join(root,'index.js'),'utf8');
- check(/app\.post\('\/api\/match\/announce-poster'/.test(idxSrc2),'Есть endpoint запуска афиши из мини-приложения');
- check(/if\(!v\.isAdmin\)return res\.status\(403\)\.json\(\{ok:false,error:'admin_required'\}\)/.test(idxSrc2.slice(idxSrc2.indexOf("'/api/match/announce-poster'"))),'Запускать афишу может только админ');
-
- const matchHtml2=await fs.readFile(path.join(root,'public','match.html'),'utf8');
- check(/function renderAnnouncePanel/.test(matchHtml2),'В админской вкладке есть блок создания афиши');
- check(/function submitAnnouncePoster/.test(matchHtml2),'Отправка формы анонса реализована');
- check(/\/api\/match\/announce-poster'/.test(matchHtml2),'Форма анонса стучится в новый endpoint');
- check(/comboBox\('annP1'/.test(matchHtml2)&&/comboBox\('annP2'/.test(matchHtml2),'Игроки для анонса выбираются тем же комбобоксом, что и везде');
-}
-
-// --- Тема и язык во всех мини-приложениях -----------------------------------
-{
- const pub=f=>fs.readFile(path.join(root,'public',f),'utf8');
- const prefs=await pub('ptf-prefs.js');
- check(/ptf_theme/.test(prefs)&&/ptf_lang/.test(prefs),'Тема и язык хранятся на устройстве под общими ключами');
- check(/\/api\/ui-language',\{method:'POST'/.test(prefs),'Смена языка уходит на сервер, в анкету');
- check(/j\.lang_source==='profile'/.test(prefs),'Язык из анкеты главнее выбора на устройстве');
- check(/lang\?'EN':'RU'|lang==='ru'\?'EN':'RU'/.test(prefs),'На кнопке — язык, на который переключимся, как в Fantasy');
- for(const f of ['league.html','match.html','apply.html','participants.html','tournament.html','admin.html','fantasy.html'])
-  check(/<script src="\/public\/ptf-prefs\.js"><\/script>/.test(await pub(f)),f+' подключает общий переключатель');
- for(const f of ['league.html','match.html','apply.html','participants.html'])
-  check(/PTFPrefs\.mount\(/.test(await pub(f))&&/id="thSw"/.test(await pub(f)),f+': переключатель темы и языка в шапке');
- check(/PTFPrefs\.mount\(document\.getElementById\('thSw'\),\{lang:false\}\)/.test(await pub('admin.html')),'В админке только тема — её не переводим');
- check(/PTFPrefs\.mount\(document\.getElementById\('thSw'\),\{lang:false\}\)/.test(await pub('tournament.html')),'В турнирах только тема');
- check(/html\[data-theme="light"\]/.test(await pub('apply.html'))&&/html\[data-theme="light"\]/.test(await pub('participants.html'))&&/html\[data-theme="light"\]/.test(await pub('admin.html')),'У анкеты, состава и админки есть светлая тема');
- check(/PTFPrefs\.resolveLang\(j\)/.test(await pub('league.html'))&&/PTFPrefs\.resolveLang\(j\)/.test(await pub('match.html')),'Лига и матчи берут язык через общее правило');
- check(/saved\.then\(function\(\)\{location\.reload\(\)\}\)/.test(await pub('league.html')),'Лига перезагружается только после записи языка в анкету');
- check(/PTFPrefs\?\.setLang\(ru\?'ru':'en'\)/.test(await pub('fantasy-onboarding.js')),'Язык в Fantasy теперь запоминается');
- const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
- check(/app\.post\('\/api\/ui-language'/.test(idx),'Есть запись языка из мини-приложения');
- check(/if \(!profile\) return res\.json\(\{ ok:true, lang, saved:false \}\)/.test(idx),'Без анкеты новую строку не создаём');
- check(/lang_source:body\.lang_source/.test(idx),'Сервер сообщает, откуда взят язык');
- const r1=await request('post','/api/ui-language','1',{lang:'ru'});
- check(r1.code===200&&r1.body.ok,'Смена языка отвечает без ошибок');
-}
-
-// --- «Контроль»: подтверждение за игрока, а не «нужно ваше» -----------------
-{
- const match=await fs.readFile(path.join(root,'public','match.html'),'utf8');
- check(/function adminOnlyConfirm\(s\)\{return isAdmin&&!amPlayer\(s\)\}/.test(match),'Админ отличает свои матчи от чужих');
- check(/adminOnlyConfirm\(s\)\?X\.awaitingPlayer:X\.pendingApproval/.test(match),'В чужом матче — «ждёт подтверждения игрока»');
- check(/adminOnlyConfirm\(s\)\?X\.confirmForPlayer:X\.confirmResult/.test(match),'Кнопка подписана как ручное подтверждение за игрока');
-}
-
-// --- /announce и клавиатура без Fantasy --------------------------------------
-{
- const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(/cmd:'announce'/.test(tg),'Команда /announce в едином списке — попадает и в /help, и в меню по слэшу');
- const botSrc3=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/\/\^\\\/announce/.test(botSrc3),'Бот понимает /announce');
- check(/findRosterPlayer\(roster,parts\[0\]\)/.test(botSrc3),'Игроки ищутся по составу лиги, как в /test_match');
- const kbSrc=await fs.readFile(path.join(root,'keyboards.js'),'utf8');
- check(/k !== 'fantasy'/.test(kbSrc)&&!/make\('fantasy'\)/.test(kbSrc),'Кнопки Fantasy в клавиатуре чата нет');
-}
-
-// --- Партнёры: своя таблица, раскладка по столбцам, отдельные кнопки ---------
-{
- const cfg=await fs.readFile(path.join(root,'config.js'),'utf8');
- check(/PARTNERS_SPREADSHEET_ID = process\.env\.PARTNERS_SPREADSHEET_ID \|\| '1QjPUpMEcb2bI7N0xsO4xjSeJMqTT_VTGyq1U5waCHO0'/.test(cfg),'Партнёры читаются из таблицы PTF Partners');
- const list=sheets.partnersFromColumns([
-  ['Name','Club A','Cafe B','Hidden'],
-  ['Description RU','Корты','Кофе'],['Description EN','Courts','Coffee'],
-  ['Google Maps','maps.app.goo.gl/x','',''],['Instagram','@club_a','',''],
-  ['WhatsApp','+66 81 234 5678','https://wa.me/66899999999',''],
-  ['Message','Hi, I am {name}','',''],['Site','','cafe.com',''],
-  ['Order','2','1','3'],['Active','','yes','no']]);
- check(list.length===2&&list[0].name==='Cafe B','Каждый столбец — партнёр; порядок по Order; Active=no прячет');
- const club=list.find(p=>p.name==='Club A');
- check(club.maps==='https://maps.app.goo.gl/x'&&club.instagram==='https://instagram.com/club_a','Карта и Instagram — отдельные ссылки, @ник превращается в профиль');
- check(club.whatsapp==='66812345678'&&list[0].whatsapp==='66899999999','WhatsApp — номер или wa.me-ссылка, на выходе цифры');
- check(club.site===''&&list[0].site==='https://cafe.com','Сайт пустой — кнопки нет; без https дописывается');
- check(club.message==='Hi, I am {name}'&&typeof club.message==='string','Сообщение одно, на английском');
- check(club.description.ru==='Корты'&&club.description.en==='Courts','Описание на двух языках');
- const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
- for(const k of ['button_maps','button_instagram','button_whatsapp','button_site'])check(lg.includes("partnerLabel('"+k+"'"),'Кнопка '+k+' в карточке партнёра');
- check(!/phone_label/.test(lg),'Номер телефона на экран больше не выводится');
-}
-
-console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
+<style>.fantasy-player-card{cursor:pointer}.fantasy-stats-head,.fantasy-stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}.fantasy-stats-head{color:#8291a2;font-size:11px;text-transform:uppercase;margin-top:2px}.fantasy-stats-row{margin-top:6px;font-size:16px}.crosslist{margin-top:8px}</style>
