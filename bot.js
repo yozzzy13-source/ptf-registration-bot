@@ -2316,7 +2316,14 @@ export function queueMatchAttention(ids,previous={}) {
    try {
     const p=await findApplicantByTelegramId(id);if(!p)continue;
     const n=pendingActionsFor(id,await allSlots()).total;
-    if(n===(attentionCounts.get(id)??0))continue;
+    // Счётчик живёт в памяти и обнуляется при каждом перезапуске сервиса
+    // (каждый деплой). Раньше после перезапуска фоновая проверка считала «было
+    // 0, стало 1» и присылала игроку то же самое «ждут вашего действия — 1»
+    // снова и снова. Теперь первое наблюдение без известного «до» — молча
+    // запоминаем. Настоящие изменения (новый вызов, внесённый счёт) приходят
+    // с прошлым значением и по-прежнему дают сообщение.
+    if(!attentionCounts.has(id)){attentionCounts.set(id,n);continue;}
+    if(n===attentionCounts.get(id))continue;
     const lang=p.language==='ru'?'ru':'en',st=await playerState(id);
     const kb=await keyboardFor(id,lang,st.kind,id);if(!kb)continue;
     await sendMessage(id,n?(lang==='ru'?'🔴 Мои матчи: ждут вашего действия — '+n:'🔴 My matches: actions waiting for you — '+n):(lang==='ru'?'✅ В матчах нет действий, ожидающих вашего ответа.':'✅ No match actions are waiting for your response.'),{reply_markup:kb,disable_notification:true});
