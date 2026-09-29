@@ -349,12 +349,23 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .mq-track>*{flex:0 0 auto}
 .mq.drag{cursor:grabbing}
 .mq img{-webkit-user-drag:none;pointer-events:none}
-.pmq{width:118px;cursor:pointer;text-align:center}
-.pmq-logo{height:52px;border:1px solid var(--line2);border-radius:12px;background:var(--surf2);display:flex;align-items:center;justify-content:center;overflow:hidden;padding:4px}
-.pmq-logo img{max-width:100%;max-height:100%;object-fit:contain;display:block;border-radius:6px}
-.pmq-logo b{font-size:11.5px;line-height:1.2;padding:0 6px}
-.pmq-cat{margin-top:6px;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;font-weight:800;color:var(--champ);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mq-partners{margin:0 -16px 14px;padding:4px 16px}
+.mq-partners .mq-track{gap:22px;align-items:center}
+.pmq{height:40px;cursor:pointer;display:flex;align-items:center}
+.pmq img{height:40px;width:auto;max-width:170px;object-fit:contain;display:block;border-radius:6px}
+.pmq b{font-size:12px;font-weight:800;color:var(--dim);white-space:nowrap}
 .mq-champ .chbig{width:250px;margin-bottom:0}
+.mq-ldr .chbig{width:196px;padding:12px 10px 11px}
+.mq-ldr .chbig .avr,.mq-ldr .chbig .avph{width:64px;height:64px;flex:0 0 64px;font-size:20px;margin:0 auto 8px}
+.mq-ldr .chbig .nm2{font-size:14px}
+.ldst{margin-top:6px;font-size:11.5px;font-weight:800;color:var(--amber);font-variant-numeric:tabular-nums}
+.mq-prom .mv{width:250px;margin-bottom:0}
+.live{display:inline-flex;align-items:center;gap:5px;margin-left:6px;font-size:10.5px;letter-spacing:1.2px;font-weight:900;color:var(--win);vertical-align:middle}
+.live .ball{font-style:normal;font-size:13px;display:inline-block;animation:ballPulse 1.4s ease-in-out infinite}
+@keyframes ballPulse{0%,100%{transform:scale(.85);filter:drop-shadow(0 0 0 rgba(200,230,80,0))}50%{transform:scale(1.15);filter:drop-shadow(0 0 5px rgba(200,230,80,.8))}}
+@media(prefers-reduced-motion:reduce){.live .ball{animation:none}}
+.homeev{margin-bottom:12px}.homeev .card{margin-bottom:0;border-color:var(--accLine)}
+.homeev-tag{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;font-weight:900;color:var(--win);margin:0 0 6px 4px}
 .mq-champ .chbig *{pointer-events:auto}
 h3.tap{cursor:pointer}.h3go{font-style:normal;color:var(--mute);font-weight:700}
 .venue.tap{cursor:pointer}.venue .vgo{margin-left:auto;font-style:normal;font-size:20px;color:var(--mute)}
@@ -726,7 +737,6 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
   <div id="walletPanel" class="hidden"></div>
   <div class="tabs" id="tabs"></div>
   <div id="viewHome"></div>
-  <div id="viewHome2" class="hidden"></div>
   <div id="viewDiv" class="hidden"></div>
   <div id="viewRace" class="hidden"></div>
   <div id="viewPlayers" class="hidden"></div>
@@ -774,7 +784,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   wBalance:'Депозит',wEmpty:'Операций пока нет',wTopup:'Пополнить',wOwn:'Своя сумма',wGo:'Пополнить',
   wSent:'Счёт на пополнение отправлен в бот',wMin:'Минимум {n} ฿',
   wNote:'После перевода пришли скриншот в бот — организатор подтвердит, и деньги появятся здесь.',
-  tHome:'Главная',tHome2:'Главная β',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Собери команду из игроков всех дивизионов и следи за всей лигой. Здесь будут отдельные рейтинги Fantasy-команд и игроков.',fantasyTeams:'Команд выбрали',fantasyPoints:'FP',fantasyTeamRank:'Команды Fantasy',fantasyPlayerRank:'Игроки Fantasy',fantasyOpen:'Открыть Fantasy',fantasyPreview:'Предпросмотр: участие и сохранение составов пока закрыты.',fantasyEmpty:'Данных Fantasy пока нет.',fantasyOwner:'Автор',
+  tHome:'Главная',tDiv:'Дивизионы',tRace:'Гонка',tPlayers:'Игроки',tSched:'Расписание',tMatches:'Матчи',tEvents:'События',tAbout:'О лиге',tPartners:'Партнёры',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Собери команду из игроков всех дивизионов и следи за всей лигой. Здесь будут отдельные рейтинги Fantasy-команд и игроков.',fantasyTeams:'Команд выбрали',fantasyPoints:'FP',fantasyTeamRank:'Команды Fantasy',fantasyPlayerRank:'Игроки Fantasy',fantasyOpen:'Открыть Fantasy',fantasyPreview:'Предпросмотр: участие и сохранение составов пока закрыты.',fantasyEmpty:'Данных Fantasy пока нет.',fantasyOwner:'Автор',
   search:'Поиск по имени…',searchP:'Поиск по игроку…',sugMore:'ещё',sugNone:'Никого не нашли',all:'Все',found:'Найдено: ',random:' · порядок случайный',
   nobody:'Никого не нашлось — попробуй другое имя.',noData:'Данных пока нет.',
   filters:'Фильтры',bucketsDiv:'Корзины и дивизионы',statusLab:'Сезон',
@@ -813,7 +823,7 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   seasons:'Сезоны',ach:'Достижения',history:'История матчей',
   cSeason:'Сезон',cG:'M',cW:'W',cPlace:'Ранг',cPts:'YRP',
   showAll:'Показать все матчи',collapse:'Свернуть',noMatches:'Матчей пока нет.',noAch:'Достижений пока нет.',
-  sInfo:'Сезон 2',sDates:'Регулярка',sDatesV:'14 сен – 5 ноя',
+  sInfo:'Сезон 2',leaders:'Лидеры дивизионов',leaderTag:'leader',ptsShort:'очк',mShort:'матч.',evNow:'Идёт запись',sDates:'Регулярка',sDatesV:'14 сен – 5 ноя',
   sSemi:'Плей-офф',sSemiV:'7–8 ноя',sVenue:'Площадка',sVenueV:'The Peak Racket Park',
   yourSeason:'Твой сезон',notInLeague:'Ты пока не в составе дивизиона. Подай заявку — и раздел оживёт.',
   champions:'Чемпионы сезона',rules:'Как считается таблица',site:'Открыть сайт',
@@ -833,7 +843,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   wBalance:'Deposit',wEmpty:'No operations yet',wTopup:'Top up',wOwn:'Custom amount',wGo:'Top up',
   wSent:'Top-up invoice sent to the bot',wMin:'Minimum {n} ฿',
   wNote:'After the transfer send the screenshot to the bot — once confirmed the money appears here.',
-  tHome:'Home',tHome2:'Home β',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Build a squad across every division and follow the whole league. Fantasy teams and players have their own standings here.',fantasyTeams:'Selected by teams',fantasyPoints:'FP',fantasyTeamRank:'Fantasy teams',fantasyPlayerRank:'Fantasy players',fantasyOpen:'Open Fantasy',fantasyPreview:'Preview: squad entry and saving are still closed.',fantasyEmpty:'No Fantasy data yet.',fantasyOwner:'Owner',
+  tHome:'Home',tDiv:'Divisions',tRace:'Race',tPlayers:'Players',tSched:'Schedule',tMatches:'Matches',tEvents:'Events',tAbout:'About',tPartners:'Partners',tFantasy:'Fantasy',fantasyTitle:'Fantasy Clubhouse',fantasyIntro:'Build a squad across every division and follow the whole league. Fantasy teams and players have their own standings here.',fantasyTeams:'Selected by teams',fantasyPoints:'FP',fantasyTeamRank:'Fantasy teams',fantasyPlayerRank:'Fantasy players',fantasyOpen:'Open Fantasy',fantasyPreview:'Preview: squad entry and saving are still closed.',fantasyEmpty:'No Fantasy data yet.',fantasyOwner:'Owner',
   search:'Search by name…',searchP:'Search by player…',sugMore:'more',sugNone:'Nobody found',all:'All',found:'Found: ',random:' · random order',
   nobody:'Nobody matched — try another name.',noData:'No data yet.',
   filters:'Filters',bucketsDiv:'Groups and divisions',statusLab:'Season',
@@ -872,7 +882,7 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   seasons:'Seasons',ach:'Achievements',history:'Match history',
   cSeason:'Season',cG:'M',cW:'W',cPlace:'Rank',cPts:'YRP',
   showAll:'Show all matches',collapse:'Collapse',noMatches:'No matches yet.',noAch:'No achievements yet.',
-  sInfo:'Season 2',sDates:'Regular season',sDatesV:'14 Sep – 5 Nov',
+  sInfo:'Season 2',leaders:'Division leaders',leaderTag:'leader',ptsShort:'pts',mShort:'played',evNow:'Registration open',sDates:'Regular season',sDatesV:'14 Sep – 5 Nov',
   sSemi:'Playoffs',sSemiV:'7–8 Nov',sVenue:'Venue',sVenueV:'The Peak Racket Park',
   yourSeason:'Your season',notInLeague:'You are not in a division yet. Apply and this section comes alive.',
   champions:'Season champions',rules:'How the table works',site:'Open the website',
@@ -1093,12 +1103,12 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
 // ожидания, заявка без оплаты, остальные). Главная есть всегда.
 // «Расписание» больше не отдельный экран: согласованные матчи живут сверху
 // вкладки «Матчи», прямо над историей.
-var ALL_VIEWS=['home','home2','div','race','players','matches','events','fantasy','partners'];
+var ALL_VIEWS=['home','div','race','players','matches','events','fantasy','partners'];
 var VIEWS=ALL_VIEWS.slice();
-var VIEW_ID={home:'viewHome',home2:'viewHome2',div:'viewDiv',race:'viewRace',players:'viewPlayers',
+var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
 matches:'viewMatches',events:'viewEvents',fantasy:'viewFantasy',partners:'viewPartners',about:'viewAbout'};
 function buildTabs(){
-  var byCode={home:X.tHome,home2:X.tHome2,div:X.tDiv,race:X.tRace,players:X.tPlayers,
+  var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
               matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
   var labels=VIEWS.map(function(k){return [k,byCode[k]||k]});
   $('tabs').innerHTML=labels.map(function(x){
@@ -1173,10 +1183,9 @@ function showTab(t){
   $('tabs').classList.remove('hidden');
   $('hdr').classList.remove('hidden');
   $('viewCard').classList.add('hidden');
-  var titles={home:X.title,home2:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
+  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
   $('title').textContent=titles[t]||X.title;
   if(t==='home')renderHome();
-  else if(t==='home2')renderHome2();
   else if(t==='div')renderDiv();
   else if(t==='race')renderRace();
   else if(t==='players')renderPlayers();
@@ -1429,7 +1438,7 @@ function openAvatarFull(src){
 // Разделы идут по кругу в порядке верхнего меню. На странице игрока стрелки
 // работают как «назад к разделу», вперёд там некуда.
 function tabTitle(t){
-  var titles={home:X.tHome,home2:X.tHome2,div:X.tDiv,race:X.tRace,players:X.tPlayers,
+  var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
               matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
   return titles[t]||X.title;
 }
@@ -1586,7 +1595,6 @@ function loadSummary(){
       // без них дивизионы матчей подписаны по старой таблице.
       if(openId){ var pl=byId(openId); if(pl)renderPlayer(pl); }
       else if(mode==='home')renderHome();
-      else if(mode==='home2')renderHome2();
       else if(mode==='matches')renderFeed();
       else if(mode==='div')renderDiv();
     }).catch(function(){});
@@ -1716,12 +1724,20 @@ function championsStrip(){
   var h='<div class="card"><h3>'+esc((L?'Итоги сезона ':'Season ')+s.number+(L?'':' results'))+'</h3>';
   h+=cards?'<div class="mq mq-champ" data-speed="22"><div class="mq-track">'+cards+'</div></div>'
           :'<div class="hint">'+esc(X.noData)+'</div>';
+  return h+'</div>';
+}
+// Кто поднялся дивизионом выше по итогам прошлого сезона — тоже лентой,
+// последним блоком главной.
+function promotionsStrip(){
+  var s=lastFinishedSeason();
+  if(!s)return '';
   var up='';
   (s.divisions||[]).forEach(function(d){
     (d.promoted||[]).forEach(function(pl){ up+=mvLine(pl,'up','→') });
   });
-  if(up)h+='<div class="lab" style="margin-top:14px">'+esc(X.promoted)+'</div>'+up;
-  return h+'</div>';
+  if(!up)return '';
+  return '<div class="card"><h3>'+esc(X.promoted)+' · '+esc((L?'сезон ':'season ')+s.number)+'</h3>'
+    +'<div class="mq mq-prom" data-speed="26"><div class="mq-track">'+up+'</div></div></div>';
 }
 
 // ------------------------------------------------------ бегущая строка
@@ -1842,34 +1858,75 @@ function homeFantasyBanner(){
     :(L?'Скоро откроется набор составов. Загляните, как это устроено.':'Squad entry opens soon. Take a look at how it works.');
   return '<div class="card fanhomebanner" onclick="showTab(\'fantasy\')"><div class="fhb-ico">✨</div><div><h3 style="margin:0 0 4px">PTF Fantasy</h3><div class="hint">'+esc(text)+'</div></div></div>';
 }
+// Сезон идёт — рядом с названием «LIVE» и пульсирующий мячик. Даты те же,
+// что в подписях блока; после финала метка пропадает сама.
+var SEASON_LIVE_FROM='2026-09-14',SEASON_LIVE_TO='2026-11-08';
+function seasonLive(){
+  var today=new Date().toISOString().slice(0,10);
+  return today>=SEASON_LIVE_FROM&&today<=SEASON_LIVE_TO;
+}
 // Блок «Сезон 2»: сроки коротко, чтобы не съедать экран, и площадка сезона —
 // кнопкой на её карточку во вкладке «Партнёры».
 function seasonCard(){
   var peak=partnerIndexByName('peak');
-  return '<div class="card"><h3>'+esc(X.sInfo)+'</h3>'
+  return '<div class="card"><h3>'+esc(X.sInfo)+(seasonLive()?' <span class="live"><i class="ball">🎾</i>LIVE</span>':'')+'</h3>'
     +'<div class="stats">'+stt(X.sDates,X.sDatesV,true)+stt(X.sSemi,X.sSemiV)+'</div>'
     +'<div class="venue'+(peak>=0?' tap':'')+'"'+(peak>=0?' onclick="openPartner('+peak+')"':'')+'><img src="/public/img/peak.jpg" alt="">'
     +'<div><div class="vt">'+esc(X.sVenueV)+'</div><div class="vd">'+esc(X.sVenue)+'</div></div>'
     +(peak>=0?'<i class="vgo">›</i>':'')+'</div></div>';
 }
-function homeLinks(){
-  return '<div class="card"><h3>'+esc(X.title)+'</h3><div class="hint">'+esc(X.sub)+'</div>'
-    +'<div class="chips" style="margin-top:11px;margin-bottom:0">'
-    +[['div',X.tDiv],['race',X.tRace],['players',X.tPlayers],['matches',X.tMatches]].map(function(x){
-      return '<div class="chip" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+'</div>';
-    }).join('')+'</div></div>';
+// Открытая запись на событие — сразу под партнёрами, самым заметным блоком,
+// с той же кнопкой записи, что во вкладке «События». Нет таких событий —
+// блока нет, порядок главной обычный.
+function homeEvents(){
+  var open=(evList||[]).filter(function(e){
+    if(e.ends_at&&Date.now()>=e.ends_at)return false;
+    if(e.starts_at&&Date.now()>=e.starts_at)return false;
+    return e.open_now&&!e.past;
+  });
+  if(!open.length)return '';
+  return open.map(function(e){
+    return '<div class="homeev"><div class="homeev-tag">● '+esc(X.evNow)+'</div>'+eventCard(e)+'</div>';
+  }).join('');
 }
+// Лидеры текущего сезона: первое место каждого дивизиона, а где дивизион
+// разбит на группы — каждой группы. Пока в таблице ни у кого нет очков,
+// лидера нет: иначе висел бы случайный «первый» с нулём.
+function currentSeasonSummary(){
+  return (summary||[]).filter(function(x){return String(x.number)===String(season)})[0]||null;
+}
+function leaderCard(pl,label){
+  return '<div class="chbig ldr" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
+    +avL(pl)+'<div class="nm2">'+esc(pl.name)+'</div>'
+    +'<div class="sub">'+esc(label+' '+X.leaderTag)+'</div>'
+    +'<div class="ldst">'+esc((pl.points||0)+' '+X.ptsShort+' · '+(pl.matches||0)+' '+X.mShort)+'</div></div>';
+}
+function leadersStrip(){
+  var s=currentSeasonSummary();
+  if(!s)return '';
+  var cards='';
+  (s.divisions||[]).forEach(function(d){
+    var dname=d.title&&!/^[A-Z]$/i.test(d.title)?d.title:divLabel(d.letter);
+    var tables=(d.groups&&d.groups.length)?d.groups.map(function(g){
+      return {label:(L?(g.title||g.title_en):(g.title_en||g.title))||(dname+' · '+g.group),table:g.table||[]};
+    }):[{label:dname,table:d.table||[]}];
+    tables.forEach(function(t){
+      var top=(t.table||[]).slice().sort(function(a,b){return (a.place||99)-(b.place||99)})[0];
+      if(top&&top.name&&(top.points||0)>0)cards+=leaderCard(top,t.label);
+    });
+  });
+  if(!cards)return '';
+  return '<div class="card"><h3 class="tap" onclick="showTab(\'div\')">'+esc(X.leaders)+' <i class="h3go">›</i></h3>'
+    +'<div class="mq mq-champ mq-ldr" data-speed="24"><div class="mq-track">'+cards+'</div></div></div>';
+}
+// Главная: партнёры → открытая запись на событие (если есть) → лидеры →
+// чемпионы прошлого сезона → текущий сезон → повышения. Плашки Fantasy тут
+// больше нет: в Fantasy заходят вкладкой в меню.
 function renderHome(){
-  // Плашка Fantasy с главной убрана: в Fantasy заходят вкладкой в меню.
   loadSummary();
-  $('viewHome').innerHTML=seasonCard()+championsBlock()+homeLinks();
-}
-// Тестовая главная (видна только организатору): партнёры и чемпионы —
-// бегущими строками. Когда её одобрят, она заменит настоящую.
-function renderHome2(){
-  loadSummary();
-  $('viewHome2').innerHTML=seasonCard()+partnersStrip()+championsStrip()+homeLinks();
-  mountMarquees($('viewHome2'));
+  loadEvents();
+  $('viewHome').innerHTML=partnersStrip()+homeEvents()+leadersStrip()+championsStrip()+seasonCard()+promotionsStrip();
+  mountMarquees($('viewHome'));
 }
 
 // ---------------------------------------------------------------- гонка
@@ -2487,6 +2544,7 @@ function loadEvents(){
       evList=j.events||[];evBalance=j.balance||0;evAdmin=!!j.is_admin;
       buildTabs();
       if(mode==='events')renderEvents();
+      else if(mode==='home'&&!openId)renderHome();
     }).catch(function(){});
 }
 setInterval(function(){if(document.hidden||!evList)return;var changed=false;evList.forEach(function(e){if(e.ends_at&&Date.now()>=e.ends_at&&!e.past){e.past=true;changed=true}if(e.starts_at&&Date.now()>=e.starts_at&&e.open_now){e.open_now=false;changed=true}});if(changed){buildTabs();if(mode==='events')renderEvents()}},30000);
@@ -2654,16 +2712,14 @@ function partnerThumb(url){
 }
 function partnersStrip(){
   if(!partners.length)return '';
+  // Одни логотипы, без рамок и подписей: одинаковая высота, ширина по пропорции.
   var items=partners.map(function(p,i){
-    var cat=partnerText(p.category);
-    return '<div class="pmq" onclick="openPartner('+i+')">'
-      +'<div class="pmq-logo">'+(p.photo
-        ?'<img src="'+esc(partnerThumb(p.photo))+'" alt="'+esc(p.name||'')+'" loading="lazy" decoding="async" draggable="false" onerror="this.parentNode.innerHTML=\'<b>'+esc(String(p.name||'').replace(/'/g,''))+'</b>\'">'
-        :'<b>'+esc(p.name||'')+'</b>')+'</div>'
-      +(cat?'<div class="pmq-cat">'+esc(cat)+'</div>':'')+'</div>';
+    return '<div class="pmq" onclick="openPartner('+i+')" title="'+esc(p.name||'')+'">'
+      +(p.photo
+        ?'<img src="'+esc(partnerThumb(p.photo))+'" alt="'+esc(p.name||'')+'" loading="lazy" decoding="async" draggable="false" onerror="this.outerHTML=\'<b>'+esc(String(p.name||'').replace(/'/g,''))+'</b>\'">'
+        :'<b>'+esc(p.name||'')+'</b>')+'</div>';
   }).join('');
-  return '<div class="card"><h3 class="tap" onclick="showTab(\'partners\')">'+esc(partnerLabel('title',X.tPartners,X.tPartners))+' <i class="h3go">›</i></h3>'
-    +'<div class="mq" data-speed="28">'+'<div class="mq-track">'+items+'</div></div></div>';
+  return '<div class="mq mq-partners" data-speed="28"><div class="mq-track">'+items+'</div></div>';
 }
 var partnerTexts={};
 // Значение на языке читателя. Из таблицы приходит пара {ru,en}; если колонку
@@ -3111,9 +3167,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
       VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
     }
     if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy')
-    // Тестовая главная видна только организатору — рядом с настоящей.
     isLeagueAdmin=Boolean(j.is_admin);
-    if(isLeagueAdmin&&VIEWS.indexOf('home2')<0)VIEWS.splice(Math.max(0,VIEWS.indexOf('home'))+1,0,'home2');
     buildTabs();
     $('title').textContent=X.title;
     // Видно, что это чужой набор вкладок, а не поломка.
