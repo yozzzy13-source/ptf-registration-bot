@@ -2789,12 +2789,8 @@ function renderPartners(){
       'Партнёры скоро появятся.','Partners are coming soon.'))+'</div>';
     return;
   }
-  var intro=partnerLabel('intro',
-    'Партнёры лиги: скажите, что вы из Phuket Tennis Family — кнопка уже подставит сообщение.',
-    'League partners: mention Phuket Tennis Family — the button fills the message for you.');
-  box.innerHTML='<div class="card"><h3>'+esc(partnerLabel('title',X.tPartners,X.tPartners))+'</h3>'
-    +(intro?'<p class="hint">'+esc(intro)+'</p>':'')+'</div>'
-    +partners.map(partnerCard).join('');
+  // Вводной плашки нет: заголовок вкладки уже в шапке, сразу идут партнёры.
+  box.innerHTML=partners.map(partnerCard).join('');
 }
 function renderEvents(){
   loadEvents();
