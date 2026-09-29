@@ -433,15 +433,24 @@ export async function renderInstagramMatchCard(match = {}) {
   const fs = Math.min(68, Math.max(38, scoreSize(lines, 300)));
   const step = Math.round(fs * 1.16), scoreCenter = centers[0].y;
   const first = Math.round(scoreCenter + fs * 0.34 - (lines.length - 1) * step / 2);
-  const scoreSvg = lines.map((line, i) => {
-    const tie = line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
-    const main = tie ? tie[1] : line, y = first + i * step;
-    return `<text x="${IW / 2}" y="${y}" text-anchor="middle" font-family="${FONT}"
-      font-size="${fs}" font-weight="800" fill="${C.amber}" letter-spacing="1">${esc(main)}</text>`
-      + (tie ? `<text x="${IW / 2 + 76}" y="${y - Math.round(fs * 0.36)}" text-anchor="start"
-        font-family="${FONT}" font-size="${Math.max(18, Math.round(fs * 0.32))}" font-weight="800"
-        fill="${C.amber}">(${esc(tie[2])})</text>` : '');
-  }).join('');
+  // Тайбрейк — маленькой строкой под счётом сета, по центру: справа от счёта
+  // ему не хватает места, длинный «(10:8)» уезжал под портрет.
+  const scoreSvg = (() => {
+    const tbGap = Math.round(fs * 0.5); // лишняя высота под строку тайбрейка
+    const extra = lines.filter(l => /\(\d+:\d+\)$/.test(l)).length * tbGap;
+    let y = Math.round(scoreCenter + fs * 0.34 - ((lines.length - 1) * step + extra) / 2);
+    return lines.map(line => {
+      const tie = line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
+      const main = tie ? tie[1] : line;
+      const out = `<text x="${IW / 2}" y="${y}" text-anchor="middle" font-family="${FONT}"
+        font-size="${fs}" font-weight="800" fill="${C.amber}" letter-spacing="1">${esc(main)}</text>`
+        + (tie ? `<text x="${IW / 2}" y="${y + Math.round(fs * 0.42)}" text-anchor="middle"
+        font-family="${FONT}" font-size="${Math.max(22, Math.round(fs * 0.38))}" font-weight="800"
+        fill="${C.amber}" fill-opacity="0.85" letter-spacing="1">(${esc(tie[2])})</text>` : '');
+      y += step + (tie ? tbGap : 0);
+      return out;
+    }).join('');
+  })();
   const rank = (meta, cx) => {
     if (!meta) return '';
     const pos = meta.position || {};
