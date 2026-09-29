@@ -1599,6 +1599,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
  for(const k of ['button_maps','button_instagram','button_whatsapp','button_site'])check(lg.includes("partnerLabel('"+k+"'"),'Кнопка '+k+' в карточке партнёра');
  check(!/phone_label/.test(lg),'Номер телефона на экран больше не выводится');
+ check(/box\.innerHTML=partners\.map\(partnerCard\)\.join\(''\);/.test(lg),'На вкладке «Партнёры» нет вводной плашки — сразу карточки');
 }
 
 // --- Оформление описания партнёра из таблицы --------------------------------
