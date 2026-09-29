@@ -3,6 +3,7 @@ import { getSetting, setSetting, getRows, getSegmentContacts, logBroadcast, logB
 import { SHEETS, ADMIN_IDS, CLUB_CHAT_URL, PUBLIC_URL } from './config.js';
 import { IG_PROFILE_URL as INSTAGRAM_URL } from './instagram.js';
 import { nowISO, escapeHtml, uid } from './util.js';
+import { enqueueBroadcast, registerBroadcastKind } from './broadcast.js';
 import { t } from './i18n.js';
 import { adminApplicationKeyboard, adminPaymentKeyboard, clubKeyboard, welcomeKeyboard } from './keyboards.js';
 import { broadcastPreview, validateBroadcastLanguages, parseTemplate, renderText, renderButtons, destinationLabel, getBotUsername, linksCheatSheet } from './links.js';
@@ -1518,6 +1519,18 @@ export async function handleBroadcastMenuMessage(msg, state) {
   ]]}});
 }
 
+registerBroadcastKind('bot_menu', {
+  async make(params) {
+    const parsed = parseTemplate(params.messageText.includes('{') ? params.messageText : `${params.messageText}\n{menu}`);
+    const username = await getBotUsername();
+    return async (c) => {
+      const view = renderFor(parsed, c, username);
+      if (!view.reply_markup) view.reply_markup = { inline_keyboard: [[{ text: view.lang === 'ru' ? '🏠 Открыть меню' : '🏠 Open menu', callback_data: 'main' }]] };
+      await sendMessage(c.telegram_id, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
+    };
+  }
+});
+
 export async function executeBroadcastWithMenu(callbackQuery) {
   const adminId = callbackQuery.from.id;
   const state = adminState.get(String(adminId));
@@ -1525,25 +1538,13 @@ export async function executeBroadcastWithMenu(callbackQuery) {
   const contacts = await getSegmentContacts('all');
   const parsed = state.parsed || parseTemplate(`${state.message_text}\n{menu}`);
   try{validateBroadcastLanguages(parsed,contacts)}catch(e){return sendMessage(callbackQuery.message.chat.id,e.message+' — пришлите варианты [RU] и [EN] отдельными блоками.');}
-  const username = await getBotUsername();
-  const broadcastId = uid('broadcast');
-  let sent = 0, failed = 0;
-  for (const c of contacts) {
-    try {
-      const view = renderFor(parsed, c, username);
-      if(!view.reply_markup)view.reply_markup={inline_keyboard:[[{text:view.lang==='ru'?'🏠 Открыть меню':'🏠 Open menu',callback_data:'main'}]]};
-      await sendMessage(c.telegram_id, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
-      sent++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:'all_menu_button' });
-      await new Promise(r => setTimeout(r, 45));
-    } catch (e) {
-      failed++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:'all_menu_button' });
-    }
-  }
-  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:'all_menu_button', language:'mixed', message_text:state.message_text, media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+  // Рассылка уходит в очередь: отправка идёт в фоне, итог придёт сюда же.
+  await enqueueBroadcast({
+    kind: 'bot_menu', params: { messageText: state.message_text }, recipients: contacts,
+    segment: 'all_menu_button', messageText: state.message_text, mediaType: 'text',
+    admin: { id: adminId, name: callbackQuery.from.username || callbackQuery.from.first_name || '', chatId: callbackQuery.message.chat.id }
+  });
   adminState.delete(String(adminId));
-  await sendMessage(callbackQuery.message.chat.id, `✅ Broadcast finished\n\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>`);
 }
 
 
@@ -1609,42 +1610,45 @@ export async function handleBroadcastMessage(msg, state) {
   ]]}});
 }
 
+registerBroadcastKind('bot_copy', {
+  async make(params) {
+    const parsed = parseTemplate(params.text || '');
+    const username = await getBotUsername();
+    return async (c) => {
+      const view = parsed.hasLinks ? renderFor(parsed, c, username) : null;
+      if (view && !params.hasMediaMsg) {
+        // Текстовая рассылка с кодами: у каждого свой язык кнопок и ссылок.
+        await sendMessage(c.telegram_id, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
+      } else if (view) {
+        // Медиа сохраняем копированием, подпись и кнопки подменяем на свои.
+        await copyMessage(c.telegram_id, params.sourceChatId, params.sourceMessageId, {
+          caption: view.text, parse_mode: 'HTML',
+          ...(view.reply_markup ? { reply_markup: view.reply_markup } : {})
+        });
+      } else {
+        await copyMessage(c.telegram_id, params.sourceChatId, params.sourceMessageId);
+      }
+    };
+  }
+});
+
 export async function executeBroadcast(callbackQuery) {
   const adminId = callbackQuery.from.id;
   const state = adminState.get(String(adminId));
   if (!state || state.mode !== 'broadcast_confirm') return;
   const contacts = await getSegmentContacts(state.segment);
-  const parsed = state.parsed || parseTemplate(state.sourceMessage.text || state.sourceMessage.caption || '');
+  const text = state.sourceMessage.text || state.sourceMessage.caption || '';
+  const parsed = state.parsed || parseTemplate(text);
   try{validateBroadcastLanguages(parsed,contacts)}catch(e){return sendMessage(callbackQuery.message.chat.id,e.message+' — пришлите варианты [RU] и [EN] отдельными блоками.');}
-  const username = await getBotUsername();
-  const broadcastId = uid('broadcast');
-  let sent = 0, failed = 0;
-  for (const c of contacts) {
-    try {
-      const view = parsed.hasLinks ? renderFor(parsed, c, username) : null;
-      if (view && !state.hasMediaMsg) {
-        // Текстовая рассылка с кодами: у каждого свой язык кнопок и ссылок.
-        await sendMessage(c.telegram_id, view.text, view.reply_markup ? { reply_markup: view.reply_markup } : {});
-      } else if (view) {
-        // Медиа сохраняем копированием, подпись и кнопки подменяем на свои.
-        await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id, {
-          caption: view.text, parse_mode: 'HTML',
-          ...(view.reply_markup ? { reply_markup: view.reply_markup } : {})
-        });
-      } else {
-        await copyMessage(c.telegram_id, state.sourceMessage.chat.id, state.sourceMessage.message_id);
-      }
-      sent++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:state.segment });
-      await new Promise(r => setTimeout(r, 45));
-    } catch (e) {
-      failed++;
-      await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:String(e.message || e), language:c.language, segment_filter:state.segment });
-    }
-  }
-  await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:adminId, admin_name:callbackQuery.from.username || callbackQuery.from.first_name || '', segment_filter:state.segment, language:'mixed', message_text:state.sourceMessage.text || state.sourceMessage.caption || '[media]', media_type: state.sourceMessage.photo ? 'photo' : state.sourceMessage.document ? 'document' : state.sourceMessage.video ? 'video' : 'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
+  // Рассылка уходит в очередь: отправка идёт в фоне, итог придёт сюда же.
+  await enqueueBroadcast({
+    kind: 'bot_copy',
+    params: { text, hasMediaMsg: Boolean(state.hasMediaMsg), sourceChatId: state.sourceMessage.chat.id, sourceMessageId: state.sourceMessage.message_id },
+    recipients: contacts, segment: String(state.segment || ''), messageText: text || '[media]',
+    mediaType: state.hasMediaMsg ? 'media' : 'text',
+    admin: { id: adminId, name: callbackQuery.from.username || callbackQuery.from.first_name || '', chatId: callbackQuery.message.chat.id }
+  });
   adminState.delete(String(adminId));
-  await sendMessage(callbackQuery.message.chat.id, `✅ Broadcast finished\n\nSent: <b>${sent}</b>\nFailed: <b>${failed}</b>`);
 }
 
 // Ответ админа должен лечь в тему игрока, а не в общую ленту: иначе скриншот

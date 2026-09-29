@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // In-memory Sheets and Telegram. No credentials, network, bot startup or writes
 // to real spreadsheets are involved. Run: node --experimental-vm-modules tests/regression.mjs
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let telegramFailureId='';
+let telegramFailureId='',telegramTransientId='',transientLeft=0;
 const tables = new Map(), writes = [], messages = [], routes = [], middleware = [], sheetEdits = [];
 const put = (id,title,rows) => tables.set(id+'|'+title,structuredClone(rows));
 put('crm','Applicants',[
@@ -65,7 +65,7 @@ const google={spreadsheets:{
   append:async({spreadsheetId,range,requestBody})=>{const r=rangeInfo(spreadsheetId,range);const rows=tables.get(r.key)||[];rows.push(...structuredClone(requestBody.values));tables.set(r.key,rows);return {data:{updates:{updatedRange:r.title+'!A'+rows.length}}}}
  }}};
 const context=vm.createContext({console,URL,URLSearchParams,Buffer,Date,Math,JSON,Intl,Set,Map,FormData,Blob,Uint8Array,
- process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',ADMIN_IDS:'99',NODE_ENV:'production'}},
+ process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',ADMIN_IDS:'99',BROADCAST_QUIET_HOURS:'off',NODE_ENV:'production'}},
  setTimeout:(fn)=>{queueMicrotask(fn);return 1},clearTimeout(){},setInterval:()=>({unref(){}}),
  fetch:()=>{throw Error('Unexpected network access')}
 });
@@ -74,10 +74,11 @@ function synthetic(key,values){const m=new vm.SyntheticModule(Object.keys(values
 synthetic(path.join(root,'google.js'),{sheets:()=>google});
 const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
-synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
+synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n==='sendMessage'&&String(args[0])===telegramTransientId&&transientLeft-->0)throw Error('sendMessage: {"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardContexts=new Map();
 const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
+const sourceLoads=new Map();
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
  if(modules.has(key))return modules.get(key);
@@ -85,9 +86,16 @@ async function getModule(spec,ref){
   const imported=await import(spec==='luxon'?pathToFileURL(path.join(root,'node_modules/luxon/build/node/luxon.js')).href:spec);
   return synthetic(key,imported);
  }
+ // Два модуля могут одновременно попросить один и тот же файл — без этой
+ // защиты тест получал бы две копии модуля (в бою ES-модуль всегда один).
+ if(sourceLoads.has(key))return sourceLoads.get(key);
+ const loading=(async()=>{
  const source=await fs.readFile(key,'utf8');
  const m=new vm.SourceTextModule(source,{context,identifier:key,initializeImportMeta(meta){meta.url='file:///'+key.replaceAll('\\','/')},importModuleDynamically:async(spec,ref)=>{const d=await getModule(spec,ref);if(d.status==='unlinked')await d.link(getModule);if(d.status==='linked')await d.evaluate();return d;}});
  modules.set(key,m);return m;
+ })();
+ sourceLoads.set(key,loading);
+ return loading;
 }
 async function load(name){const m=await getModule('./'+name,{identifier:path.join(root,'_test.js')});if(m.status==='unlinked')await m.link(getModule);if(m.status==='linked')await m.evaluate();return m.namespace;}
 const sheets=await load('sheets.js'),division=await load('division.js'),db=await load('matchesdb.js'),access=await load('access.js'),results=await load('results.js');
@@ -484,10 +492,58 @@ const preview=await request('post','/api/admin/broadcast-preview','99',{initData
 check(preview.body.ok&&preview.body.text==='Hello'&&preview.body.buttons[0].includes('Matches'),'Panel preview renders EN body and EN buttons');
 messages.length=0;const missing=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'',filters:{selected_ids:['1','2']}});
 check(!missing.body.ok&&!messages.some(m=>m.method==='sendMessage'&&['1','2'].includes(String(m.args[0]))),'Panel refuses all delivery if one recipient language is missing');
-put('crm','Broadcasts',[['broadcast_id','message_text','sent_count']]);put('crm','Broadcast Logs',[['broadcast_id','telegram_id','status','language']]);
+put('crm','Broadcasts',[['broadcast_id','created_at','message_text','recipients_count','sent_count','failed_count','status','notes']]);put('crm','Broadcast Logs',[['broadcast_id','telegram_id','name','telegram_username','status','sent_at','error','language','segment_filter']]);
 messages.length=0;const delivered=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',filters:{selected_ids:['1','2']}});
-check(delivered.body.ok&&delivered.body.sent===2,'Bilingual panel broadcast reaches both language groups');
+const settle=async()=>{for(let i=0;i<50;i++)await new Promise(r=>setImmediate(r));await (await load('broadcast.js')).whenBroadcastsIdle()};
+check(delivered.body.ok&&delivered.body.queued&&delivered.body.recipients===2,'Panel broadcast is queued and answers at once');
+await settle();
 check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&messages.some(m=>String(m.args[0])==='2'&&m.args[1]==='Привет'),'Recipients receive only selected text, not both variants');
+{
+ // --- устойчивая очередь рассылок -------------------------------------------
+ const rowsOf=name=>{const t=tables.get('crm|'+name)||[];const h=t[0]||[];return t.slice(1).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]])))};
+ const logs=rowsOf('Broadcast Logs'),summary=rowsOf('Broadcasts');
+ check(logs.length===2&&logs.every(r=>r.status==='sent'),'Результаты рассылки записаны в журнал (пачкой)');
+ check(summary.length===1&&summary[0].status==='sent'&&Number(summary[0].sent_count)===2&&Number(summary[0].recipients_count)===2,'Итоговая строка истории обновлена: 2 из 2');
+ check(messages.some(m=>String(m.args[0])==='99'&&String(m.args[1]).includes('Рассылка принята'))&&messages.some(m=>String(m.args[0])==='99'&&String(m.args[1]).includes('Рассылка завершена')),'Организатор получает «принята» и итог в чат с ботом');
+ check(!String((tables.get('crm|Settings')||[]).find(r=>r[0]==='broadcast_jobs')?.[1]||''),'После завершения очередь в Settings пуста');
+ // Один игрок заблокировал бота — остальным доходит, причина в итоге.
+ messages.length=0;telegramFailureId='2';
+ await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'Hello',filters:{selected_ids:['1','2']}});await settle();telegramFailureId='';
+ const logs2=rowsOf('Broadcast Logs');
+ check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&logs2.some(r=>r.telegram_id==='2'&&r.status==='failed'&&/заблокирован/.test(r.error)),'Отказ одного получателя не останавливает остальных, причина понятна');
+ check(messages.some(m=>String(m.args[0])==='99'&&String(m.args[1]).includes('Не доставлено: <b>1</b>')),'В итоге видно, скольким не дошло');
+ // Временная ошибка (лимит Telegram) — повтор, а не «не доставлено».
+ messages.length=0;telegramTransientId='1';transientLeft=2;
+ await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'Hello',filters:{selected_ids:['1']}});await settle();telegramTransientId='';
+ check(rowsOf('Broadcast Logs').filter(r=>r.telegram_id==='1'&&r.status==='sent').length>=2&&messages.filter(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&m.args[1]==='Hello').length===1,'Лимит Telegram: сообщение повторено и доставлено, без ложного «не доставлено»');
+ // Перезапуск: очередь из Settings продолжается с того же места.
+ const bc=await load('broadcast.js');
+ const saved={id:'resume_job',kind:'rating',params:{},contacts:[{telegram_id:'1',name:'Alice One',language:'en'},{telegram_id:'2',name:'Bob Two',language:'ru'}],next:1,sent:1,failed:0,failures:[],segment:'x',mediaType:'text',status:'running',createdAt:new Date().toISOString(),admin:{id:'99',name:'Admin',chatId:'99'},told:{}};
+ const st=tables.get('crm|Settings');const idx=st.findIndex(r=>r[0]==='broadcast_jobs');const row=['broadcast_jobs',JSON.stringify([saved])];if(idx>=0)st[idx]=row;else st.push(row);
+ messages.length=0;
+ const resumed=await bc.resumeBroadcasts();check(resumed===1,'После перезапуска найдена незаконченная рассылка');await settle();
+ check(!messages.some(m=>String(m.args[0])==='1'&&m.method==='sendMessage'&&m.args[1]!==undefined&&String(m.args[1]).includes('NTRP'))&&messages.some(m=>String(m.args[0])==='2'&&m.method==='sendMessage'),'Продолжение с места остановки: уже получившим повторно не шлём');
+ // Автоочистка журналов: старое сверху удаляется, заголовок и последние строки — нет.
+ const oldRow=i=>['b'+i,String(i),'N','u','sent','2026-01-01T10:00:00.000+07:00','','en','x'],newRow=i=>['c'+i,String(i),'N','u','sent','2026-09-28T10:00:00.000+07:00','','en','x'];
+ const logHead=['broadcast_id','telegram_id','name','telegram_username','status','sent_at','error','language','segment_filter'];
+ put('crm','Broadcast Logs',[logHead,...Array.from({length:70},(_,i)=>oldRow(i)),...Array.from({length:60},(_,i)=>newRow(i))]);
+ sheetEdits.length=0;
+ const cut=Date.parse('2026-08-01T00:00:00Z');
+ check(await sheets.deleteOldRows('Broadcast Logs','sent_at',cut,{keepAtLeast:50})===70,'Автоочистка удаляет только старые строки');
+ const del=sheetEdits.find(r=>r.deleteDimension)?.deleteDimension?.range;
+ check(del&&del.startIndex===1&&del.endIndex===71,'Удаляется один блок сразу под заголовком (строки 2–71), заголовок остаётся');
+ put('crm','Broadcast Logs',[logHead,...Array.from({length:60},(_,i)=>oldRow(i))]);sheetEdits.length=0;
+ check(await sheets.deleteOldRows('Broadcast Logs','sent_at',cut,{keepAtLeast:50})===10&&sheetEdits.some(r=>r.deleteDimension),'Последние 50 строк журнала не удаляются, даже если все старые');
+ put('crm','Broadcast Logs',[logHead,oldRow(1),['x','1','N','u','sent','','','en','x'],...Array.from({length:80},(_,i)=>oldRow(i+5))]);sheetEdits.length=0;
+ check(await sheets.deleteOldRows('Broadcast Logs','sent_at',cut,{keepAtLeast:50})===1,'Строка без даты останавливает очистку — лишнего не удаляем');
+ put('crm','Broadcast Logs',[logHead]);
+ const bsrc=await fs.readFile(path.join(root,'broadcast.js'),'utf8');
+ check(/catch \(e\) \{ console\.error\('broadcast: журнал не записан, повторим позже/.test(bsrc)&&/catch \(e\) \{ console\.error\('broadcast: не удалось сохранить прогресс/.test(bsrc),'Ошибка записи в таблицу (лимит Google) не обрывает рассылку');
+ check(/inQuiet\(win\)/.test(bsrc)&&/тихие часы|Тихие часы/i.test(bsrc),'Ночью рассылка на паузе и предупреждает организатора');
+ const ad=await fs.readFile(path.join(root,'admin.js'),'utf8'),ap=await fs.readFile(path.join(root,'adminPanel.js'),'utf8'),ix=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(!/for \(const c of contacts\)/.test(ad.slice(ad.indexOf('export async function executeBroadcast')))&&!/logBroadcastResult\(/.test(ap),'Цикл отправки по получателям больше не живёт внутри запроса');
+ check(/resumeBroadcasts\(\)/.test(ix)&&/process\.on\?\.\('SIGTERM'/.test(ix)&&/startLogCleanup\(\)/.test(ix),'Сервер продолжает очередь на старте, сохраняет прогресс при деплое и чистит журналы');
+}
 messages.length=0;
 messages.length=0;await flow.reviewTopup({telegramId:'1',approve:false});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Top-up not confirmed')),'Top-up rejection follows player language');
 const futureEvent={...event,date:'16.09.2099',title_ru:'Турнир',title_en:'Tournament',audience:'all'};

@@ -1622,6 +1622,64 @@ export async function logMessage(row) { return appendObject(SHEETS.messages, row
 export async function logPayment(row) { return appendObject(SHEETS.payments, row); }
 export async function logBroadcast(row) { return appendObject(SHEETS.broadcasts, row); }
 export async function logBroadcastResult(row) { return appendObject(SHEETS.broadcastLogs, row); }
+// Пачкой: одна запись на много получателей. Запись по одной строке после
+// каждого сообщения упиралась в лимит Google на чтения и сбрасывала общий кэш.
+export async function logBroadcastResults(rows = []) { return appendObjects(SHEETS.broadcastLogs, rows); }
+// Обновляет итоговую строку рассылки (получатели/отправлено/ошибки/статус).
+export async function updateBroadcastSummary(broadcastId, patch = {}) {
+  const { rows } = await getRows(SHEETS.broadcasts, { useCache:false });
+  const found = rows.find(r => String(r.broadcast_id) === String(broadcastId));
+  if (!found) return false;
+  await updateObjectByRow(SHEETS.broadcasts, found._rowNumber, patch);
+  return true;
+}
+// Отметка «селфи запрошено» сразу у многих: одно чтение листа и одна запись.
+export async function markSelfieRequestedBatch(telegramIds = []) {
+  const ids = new Set(telegramIds.map(v => String(v).trim()).filter(Boolean));
+  if (!ids.size) return 0;
+  const { headers, rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const endCol = colToA1(headers.length);
+  const data = [];
+  for (const r of rows) {
+    if (!ids.has(String(r.telegram_id || '').trim())) continue;
+    const merged = { ...r,
+      selfie_status: r.selfie_status === 'received' ? 'received' : 'requested',
+      selfie_requested_at: nowISO(),
+      selfie_reminder_count: Number(r.selfie_reminder_count || 0) + 1,
+      updated_at: nowISO() };
+    data.push({ range: `'${SHEETS.applicants}'!A${r._rowNumber}:${endCol}${r._rowNumber}`, values: [headers.map(h => merged[h] ?? '')] });
+  }
+  if (!data.length) return 0;
+  await sheetsClient().spreadsheets.values.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { valueInputOption: 'USER_ENTERED', data } });
+  cache.clear();
+  return data.length;
+}
+// Автоочистка журналов: удаляем старые строки с начала листа. Журналы пишутся
+// по времени, поэтому старое лежит подряд сверху. Заголовок и последние
+// keepAtLeast строк не трогаем никогда; если порядок нарушен (строка без даты
+// или номера строк идут не подряд) — не удаляем ничего.
+export async function deleteOldRows(sheetName, dateColumn, cutoffMs, { keepAtLeast = 50 } = {}) {
+  const { headers, rows } = await getRows(sheetName, { useCache:false });
+  if (!headers.includes(dateColumn) || !rows.length) return 0;
+  let k = 0;
+  while (k < rows.length) {
+    const t = Date.parse(String(rows[k][dateColumn] || '').trim());
+    if (!Number.isFinite(t) || t >= cutoffMs) break;
+    if (rows[k]._rowNumber !== k + 2) return 0;
+    k++;
+  }
+  k = Math.min(k, rows.length - keepAtLeast);
+  if (k <= 0) return 0;
+  const meta = await spreadsheetMeta();
+  const props = meta.sheets?.find(s => s.properties?.title === sheetName)?.properties;
+  if (!props) return 0;
+  await sheetsClient().spreadsheets.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { requests: [
+    { deleteDimension: { range: { sheetId: props.sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + k } } }
+  ] } });
+  gridInfo.delete(sheetName);
+  cache.clear();
+  return k;
+}
 
 export async function updatePayment(paymentId, patch) {
   const { rows } = await getRows(SHEETS.payments, { useCache:false });

@@ -104,6 +104,12 @@ export const sendVoice = (chat_id, voice, opts={}) => call('sendVoice', { chat_i
 export const sendAudio = (chat_id, audio, opts={}) => call('sendAudio', { chat_id, audio, parse_mode: 'HTML', ...opts });
 export const sendVideoNote = (chat_id, video_note, opts={}) => call('sendVideoNote', { chat_id, video_note, ...opts });
 export const sendSticker = (chat_id, sticker, opts={}) => call('sendSticker', { chat_id, sticker, ...opts });
+// Альбом по уже загруженным file_id: рассылка грузит фото в Telegram один раз,
+// а каждому получателю отдаёт только идентификатор — это быстро и переживает
+// перезапуск сервера (сами файлы в памяти не нужны).
+export const sendPhotoAlbumIds = (chat_id, photoIds = [], opts={}) => call('sendMediaGroup', {
+  chat_id, media: photoIds.map(id => ({ type: 'photo', media: id })), ...opts
+});
 export const copyMessage = (chat_id, from_chat_id, message_id, opts={}) => call('copyMessage', { chat_id, from_chat_id, message_id, ...opts });
 export const createForumTopic = (chat_id, name, opts={}) => call('createForumTopic', { chat_id, name, ...opts });
 export const getChat = (chat_id) => call('getChat', { chat_id });

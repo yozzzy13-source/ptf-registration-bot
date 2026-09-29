@@ -1,7 +1,8 @@
 import { ADMIN_IDS, SHEETS, BOT_TOKEN, PUBLIC_URL } from './config.js';
 import { parseInitData, verifyTelegramInitData, nowISO, uid, escapeHtml } from './util.js';
-import { getRows, logBroadcast, logBroadcastResult, logMessage, markSelfieRequested, hasMissingRating, needsRatingCheck, canonicalStatus } from './sheets.js';
-import { sendMessage, sendPhotoBuffer, sendPhotoAlbumBuffers, withBulkRetries} from './telegram.js';
+import { getRows, logMessage, markSelfieRequestedBatch, hasMissingRating, needsRatingCheck, canonicalStatus } from './sheets.js';
+import { sendMessage, sendPhotoBuffer, sendPhoto, sendPhotoAlbumIds, deleteMessage } from './telegram.js';
+import { enqueueBroadcast, registerBroadcastKind } from './broadcast.js';
 import { ratingUpdateKeyboard, missingRatingMessage } from './admin.js';
 import { panelBroadcastText, broadcastVariant, validateBroadcastLanguages, parseTemplate, renderText, renderButtons, getBotUsername, linksCheatSheet, DESTINATIONS, destinationLabel } from './links.js';
 
@@ -30,6 +31,82 @@ function panelPhotos(value) {
     return { buffer, mimeType: m[1].toLowerCase().replace('image/jpg','image/jpeg') };
   });
 }
+// Загрузка фото рассылки в Telegram один раз (в личку организатору), чтобы
+// дальше отправлять по file_id. Служебные сообщения сразу удаляются.
+async function uploadBroadcastPhotos(photos = [], adminChatId) {
+  const ids = [];
+  for (const photo of photos) {
+    const msg = await sendPhotoBuffer(adminChatId, photo.buffer, photo.mimeType);
+    const sizes = msg?.photo || [];
+    const id = sizes[sizes.length - 1]?.file_id;
+    if (!id) throw new Error('Telegram не вернул идентификатор фото');
+    ids.push(id);
+    await deleteMessage(adminChatId, msg.message_id).catch(() => {});
+  }
+  return ids;
+}
+
+// Виды рассылок панели. Каждый умеет подготовиться (make) и отправить одному
+// получателю; всё остальное — очередь, пауза, повторы, журнал — в broadcast.js.
+registerBroadcastKind('panel', {
+  async make(params) {
+    const message = String(params.message || '');
+    const parsed = parseTemplate(message);
+    const username = await getBotUsername();
+    let event = null;
+    if (params.eventId) {
+      const { findEvent } = await import('./events.js');
+      event = await findEvent(params.eventId).catch(() => null);
+    }
+    const ids = Array.isArray(params.photoIds) ? params.photoIds : [];
+    // Если фото не ушло, а текст уже доставлен, повтор не должен слать текст второй раз.
+    const textDone = new Set();
+    return async (c) => {
+      const lang = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
+      if (!textDone.has(c.telegram_id)) {
+        const raw = parsed.hasLinks ? renderText(parsed, lang, username) : message;
+        // {событие}, {дата}, {время}, {место} — из выбранного события.
+        const body = fillEventTokens(raw, event, lang);
+        // Кнопка из выпадающего списка панели добавляется отдельной строкой снизу.
+        const fromCodes = renderButtons(parsed, lang);
+        const fromPicker = broadcastButtonMarkup(params.button || '', lang);
+        const rows = [...(fromCodes?.inline_keyboard || []), ...(fromPicker?.inline_keyboard || [])];
+        await sendMessage(c.telegram_id, body, rows.length ? { reply_markup: { inline_keyboard: rows } } : {});
+        textDone.add(c.telegram_id);
+      }
+      if (ids.length === 1) await sendPhoto(c.telegram_id, ids[0]);
+      else if (ids.length > 1) await sendPhotoAlbumIds(c.telegram_id, ids);
+      textDone.delete(c.telegram_id);
+    };
+  }
+});
+registerBroadcastKind('rating', {
+  async make() {
+    return async (c) => {
+      const lang = c.language === 'ru' ? 'ru' : 'en';
+      await sendMessage(c.telegram_id, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
+    };
+  }
+});
+registerBroadcastKind('selfie', {
+  // Отметку «селфи запрошено» ставим пачкой после отправки — по одной строке
+  // на игрока это снова упёрлось бы в лимит чтений Google.
+  async afterBatch(sentContacts) { await markSelfieRequestedBatch(sentContacts.map(c => c.telegram_id)); },
+  async make() {
+    return async (c) => {
+      const lang = c.language === 'ru' ? 'ru' : 'en';
+      const text = lang === 'ru'
+        ? '<b>🖼 Сделай себе аватарку PTF</b>\n\nЗагрузи одно селфи — и получишь аватарку для своей карточки игрока. Можно сделать до трёх вариантов и выбрать тот, что больше нравится.\n\nЧто нужно от фото: лицо крупно, дневной свет, без кепки и тёмных очков, один человек в кадре.'
+        : '<b>🖼 Create your PTF avatar</b>\n\nUpload one selfie and get an avatar for your player card. You can make up to three versions and pick the one you like best.\n\nWhat the photo needs: face close up, daylight, no cap or sunglasses, one person in the frame.';
+      // Кнопка ведёт сразу на экран аватарки в своей карточке — раньше она
+      // просто просила прислать фото в чат, и половина людей терялась.
+      await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[
+        [{ text: lang === 'ru' ? '🖼 Сделать аватарку' : '🖼 Create my avatar', web_app:{ url: `${PUBLIC_URL}/league?player=me` } }]
+      ] } });
+    };
+  }
+});
+
 function publicContact(row) {
   return {
     row: row._rowNumber,
@@ -263,36 +340,19 @@ export function registerAdminRoutes(app) {
       // в кнопки под сообщением с названием на языке получателя.
       const parsed = parseTemplate(message);
       validateBroadcastLanguages(parsed,contacts);
-      const username = await getBotUsername();
-      const broadcastId = uid('broadcast');
-      let sent = 0, failed = 0;
-      // Массовая рассылка: здесь ожидание лимитов Telegram включено.
-      await withBulkRetries(async () => {
-      for (const c of contacts) {
-        try {
-          const lang = String(c.language || '').toLowerCase() === 'ru' ? 'ru' : 'en';
-          const raw = parsed.hasLinks ? renderText(parsed, lang, username) : message;
-          // {событие}, {дата}, {время}, {место} — из выбранного события.
-          const body = fillEventTokens(raw, event, lang);
-          // Кнопка из выпадающего списка панели добавляется отдельной строкой снизу.
-          const fromCodes = renderButtons(parsed, lang);
-          const fromPicker = broadcastButtonMarkup(button, lang);
-          const rows = [...(fromCodes?.inline_keyboard || []), ...(fromPicker?.inline_keyboard || [])];
-          const markup = rows.length ? { inline_keyboard: rows } : null;
-          // Сначала всегда идёт локализованный текст с кнопками, затем фото.
-          await sendMessage(c.telegram_id, body, markup ? { reply_markup: markup } : {});
-          if (photos.length === 1) await sendPhotoBuffer(c.telegram_id, photos[0].buffer, photos[0].mimeType);
-          else if (photos.length > 1) await sendPhotoAlbumBuffers(c.telegram_id, photos);
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:c.language, segment_filter:segment });
-          sent++;
-        } catch (e) {
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:c.language, segment_filter:segment });
-          failed++;
-        }
-      }
+      // Фото загружаем в Telegram один раз: получателям уходит только file_id.
+      // Так рассылка не держит файлы в памяти и переживает перезапуск сервера.
+      const photoIds = await uploadBroadcastPhotos(photos, auth.user.id);
+      const queued = await enqueueBroadcast({
+        kind: 'panel',
+        params: { message, button, eventId, photoIds },
+        recipients: contacts,
+        segment,
+        messageText: message,
+        mediaType: photos.length > 1 ? `album:${photos.length}` : photos.length === 1 ? 'photo' : (button ? `text+button:${button}` : 'text'),
+        admin: { id: auth.user.id, name: auth.user.username || auth.user.first_name || '', chatId: auth.user.id }
       });
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:segment, language:'mixed', message_text:message, media_type: photos.length > 1 ? `album:${photos.length}` : photos.length === 1 ? 'photo' : (button ? `text+button:${button}` : 'text'), recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-      res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
+      res.json({ ok:true, queued:true, broadcast_id:queued.id, recipients:queued.recipients, night:queued.night });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -304,24 +364,12 @@ export function registerAdminRoutes(app) {
       // scope=recheck — вместе с теми, чью цифру организатор не подтверждал.
       const pick = req.body.scope === 'recheck' ? needsRatingCheck : hasMissingRating;
       const contacts = applyFilters(await getContacts(), req.body.filters || {}).filter(pick);
-      const broadcastId = uid('broadcast');
-      let sent = 0, failed = 0;
-      // Массовая рассылка: здесь ожидание лимитов Telegram включено.
-      await withBulkRetries(async () => {
-      for (const c of contacts) {
-        const lang = c.language === 'ru' ? 'ru' : 'en';
-        try {
-          await sendMessage(c.telegram_id, missingRatingMessage(lang), { reply_markup: ratingUpdateKeyboard(lang) });
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'missing_rating_panel' });
-          sent++;
-        } catch(e) {
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:lang, segment_filter:'missing_rating_panel' });
-          failed++;
-        }
-      }
+      const queued = await enqueueBroadcast({
+        kind: 'rating', params: {}, recipients: contacts, segment: 'missing_rating_panel',
+        messageText: 'Update NTRP (Raketo)', mediaType: 'text',
+        admin: { id: auth.user.id, name: auth.user.username || auth.user.first_name || '', chatId: auth.user.id }
       });
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:'missing_rating_panel', language:'mixed', message_text:'Update NTRP (Raketo)', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-      res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
+      res.json({ ok:true, queued:true, broadcast_id:queued.id, recipients:queued.recipients, night:queued.night });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 
@@ -383,32 +431,12 @@ export function registerAdminRoutes(app) {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
       const contacts = applyFilters(await getContacts(), { ...(req.body.filters || {}), selfie_status:'missing' }).filter(r => String(r.status).toLowerCase() === 'active');
-      const broadcastId = uid('broadcast');
-      let sent = 0, failed = 0;
-      // Массовая рассылка: здесь ожидание лимитов Telegram включено.
-      await withBulkRetries(async () => {
-      for (const c of contacts) {
-        const lang = c.language === 'ru' ? 'ru' : 'en';
-        const text = lang === 'ru'
-          ? '<b>🖼 Сделай себе аватарку PTF</b>\n\nЗагрузи одно селфи — и получишь аватарку для своей карточки игрока. Можно сделать до трёх вариантов и выбрать тот, что больше нравится.\n\nЧто нужно от фото: лицо крупно, дневной свет, без кепки и тёмных очков, один человек в кадре.'
-          : '<b>🖼 Create your PTF avatar</b>\n\nUpload one selfie and get an avatar for your player card. You can make up to three versions and pick the one you like best.\n\nWhat the photo needs: face close up, daylight, no cap or sunglasses, one person in the frame.';
-        try {
-          // Кнопка ведёт сразу на экран аватарки в своей карточке — раньше она
-          // просто просила прислать фото в чат, и половина людей терялась.
-          await sendMessage(c.telegram_id, text, { reply_markup:{ inline_keyboard:[
-            [{ text: lang === 'ru' ? '🖼 Сделать аватарку' : '🖼 Create my avatar', web_app:{ url: `${PUBLIC_URL}/league?player=me` } }]
-          ] } });
-          await markSelfieRequested(c.telegram_id);
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'sent', sent_at:nowISO(), language:lang, segment_filter:'selfie_request_panel' });
-          sent++;
-        } catch(e) {
-          await logBroadcastResult({ broadcast_id:broadcastId, telegram_id:c.telegram_id, name:c.name, telegram_username:c.telegram_username, status:'failed', sent_at:nowISO(), error:e.message, language:lang, segment_filter:'selfie_request_panel' });
-          failed++;
-        }
-      }
+      const queued = await enqueueBroadcast({
+        kind: 'selfie', params: {}, recipients: contacts, segment: 'selfie_request_panel',
+        messageText: 'Selfie request', mediaType: 'text',
+        admin: { id: auth.user.id, name: auth.user.username || auth.user.first_name || '', chatId: auth.user.id }
       });
-      await logBroadcast({ broadcast_id:broadcastId, created_at:nowISO(), admin_id:auth.user.id, admin_name:auth.user.username || auth.user.first_name || '', segment_filter:'selfie_request_panel', language:'mixed', message_text:'Selfie request', media_type:'text', recipients_count:contacts.length, sent_count:sent, failed_count:failed, status:'sent' });
-      res.json({ ok:true, broadcast_id:broadcastId, recipients:contacts.length, sent, failed });
+      res.json({ ok:true, queued:true, broadcast_id:queued.id, recipients:queued.recipients, night:queued.night });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
 

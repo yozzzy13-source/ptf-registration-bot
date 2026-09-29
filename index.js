@@ -30,6 +30,8 @@ import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCac
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
 import { uiError } from './ui-errors.js';
+import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
+import { startLogCleanup } from './retention.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2016,6 +2018,18 @@ async function runDeadlineNudge() {
   if (sent) console.log(`deadline nudge sent to ${sent} players`);
 }
 
+// Деплой останавливает сервис сигналом SIGTERM. Успеваем записать прогресс
+// рассылки, чтобы после запуска она продолжилась с того же места, без повторов.
+let shuttingDown = false;
+process.on?.('SIGTERM', async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const force = setTimeout(() => process.exit(0), 8000);
+  try { await flushBroadcasts(); } catch (e) { console.error('shutdown flush failed:', e.message); }
+  clearTimeout(force);
+  process.exit(0);
+});
+
 app.listen(PORT, async () => {
   setMatchChangeHandler(queueMatchAttention);
   // Снимок витрины лиги сбрасывается вместе с остальными кэшами — то есть сразу
@@ -2043,6 +2057,11 @@ app.listen(PORT, async () => {
   }
   // Time can create a result task without a player pressing a button.
   setInterval(async()=>{try{const rows=await allSlots();queueMatchAttention([...new Set(rows.filter(s=>s.status==='accepted').flatMap(s=>[s.from_telegram_id,s.to_telegram_id]).filter(Boolean))]);}catch(e){console.error('attention sweep:',e.message);}},5*60*1000).unref();
+  // Незаконченные рассылки продолжаются сами. Ждём минуту после старта: при
+  // деплое старая копия сервиса ещё какое-то время дописывает свой прогресс, и
+  // раньше подхватывать очередь нельзя — получатели получили бы сообщение дважды.
+  setTimeout(() => { resumeBroadcasts().catch(e => console.error('broadcast resume failed:', e.message)); }, 60 * 1000).unref?.();
+  startLogCleanup();
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);
   if (!BOT_TOKEN) console.warn('BOT_TOKEN is empty. Set it in Railway Variables.');
