@@ -328,7 +328,10 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 /* Партнёры: карточка с обложкой, описанием и кнопками связи. Список приходит
    из листа Partners — верстка не знает, сколько их и какие они. */
 .pt{border:1px solid var(--line2);border-radius:16px;background:var(--card2);overflow:hidden;margin-bottom:11px}
-.pt .ptimg{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:var(--surf2);border-bottom:1px solid var(--line2)}
+/* Картинка партнёра — целиком, без обрезки: у логотипов важны края. Любая
+   пропорция вписывается по ширине карточки; слишком высокая упирается в
+   потолок и центрируется, по бокам остаются поля фона. */
+.pt .ptimg{width:100%;height:auto;max-height:260px;object-fit:contain;display:block;background:var(--surf2);border-bottom:1px solid var(--line2)}
 .pt .ptbody{padding:13px 13px 12px}
 .pt .ptcat{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;font-weight:800;color:var(--champ)}
 .pt .ptname{font-size:17px;font-weight:800;margin-top:3px}
