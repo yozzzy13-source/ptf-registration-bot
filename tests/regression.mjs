@@ -65,7 +65,7 @@ const google={spreadsheets:{
   append:async({spreadsheetId,range,requestBody})=>{const r=rangeInfo(spreadsheetId,range);const rows=tables.get(r.key)||[];rows.push(...structuredClone(requestBody.values));tables.set(r.key,rows);return {data:{updates:{updatedRange:r.title+'!A'+rows.length}}}}
  }}};
 const context=vm.createContext({console,URL,URLSearchParams,Buffer,Date,Math,JSON,Intl,Set,Map,FormData,Blob,Uint8Array,
- process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',ADMIN_IDS:'99',BROADCAST_QUIET_HOURS:'off',NODE_ENV:'production'}},
+ process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',TOURNAMENTS_SPREADSHEET_ID:'trn',TOURNAMENTS_TEST_SPREADSHEET_ID:'trn-test',ADMIN_IDS:'99',BROADCAST_QUIET_HOURS:'off',NODE_ENV:'production'}},
  setTimeout:(fn)=>{queueMicrotask(fn);return 1},clearTimeout(){},setInterval:()=>({unref(){}}),
  fetch:()=>{throw Error('Unexpected network access')}
 });
@@ -836,11 +836,30 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(confirmed.length===2,'После встречного согласия собранных пар стало две');
 
  // Тестовый режим живёт в отдельных листах и не видит боевых данных.
- check(trn.sheetName('entries',true).endsWith(' TEST'),'Тестовые листы помечены суффиксом');
  const sandbox=await trn.createTournament({name:'Песочница',kind:'singles'},admin,true);
+ check(writes.some(w=>w.spreadsheetId==='trn-test'),'Тест пишет в отдельную тестовую таблицу');
+ check(!writes.some(w=>w.spreadsheetId==='crm'&&/Tournament/.test(w.range)),'Турниры не пишут в основную таблицу Players list');
+ check(writes.some(w=>w.spreadsheetId==='trn'),'Бой пишет в боевую таблицу турниров');
  check((await trn.listTournaments(true)).length===1,'В тестовом режиме свой список турниров');
  check((await trn.listTournaments(false)).every(x=>x.tournament_id!==sandbox.tournament_id),'Тестовый турнир не попал в боевой список');
  check((await trn.listTournaments(false)).length===3,'Боевой список не изменился от записей в тест');
+
+ // Перенос сезона: один дивизион — один турнир, группы как в лиге, без дублей.
+ const imp=await trn.importSeason('2',{},admin,true);
+ check(imp.created.length===3&&imp.created.map(c=>c.division).sort().join()==='A,C,W','Перенос сезона: по одному турниру на дивизион');
+ const byDiv=Object.fromEntries(imp.created.map(c=>[c.division,c]));
+ check(byDiv.A.entries===8&&byDiv.C.entries===4&&byDiv.W.entries===4,'В каждый турнир попали игроки только своего дивизиона');
+ const cEntries=await trn.listEntries(byDiv.C.tournament.tournament_id,true,false);
+ check(new Set(cEntries.map(e=>e.group)).size===2&&cEntries.every(e=>['1','2'].includes(String(e.group))),'Группы дивизиона C перенесены как в лиге (1 и 2)');
+ check(byDiv.C.tournament.playoff_type==='cross_groups'&&byDiv.A.tournament.playoff_type==='cross_1_4','Плей-офф: две группы — крест, одна — 1–4');
+ check((await trn.listEntries(byDiv.A.tournament.tournament_id,true,false)).every(e=>e.division==='Division A'&&e.group==='1'),'Дивизион без групп — одна группа, дивизион подписан верно');
+ const reimp=await trn.importSeason('2',{},admin,true);
+ check(reimp.created.length===0&&reimp.skipped.length===3,'Повторный перенос не плодит дубли');
+ const dbls=await trn.importSeason('2',{division:'A',kind:'doubles'},admin,true);
+ const dEntries=await trn.listEntries(dbls.tournament.tournament_id,true,false);
+ const dPairs=await trn.listPairs(dbls.tournament.tournament_id,true,false);
+ check(dEntries.length===4&&dPairs.length===4&&dEntries.every(e=>e.entrant_type==='pair'&&e.status==='accepted'),'Парный перенос: восемь игроков → четыре готовые пары-участника');
+ check(new Set(dPairs.flatMap(p=>[p.player_a_name,p.player_b_name])).size===8,'В парах каждый игрок встречается один раз');
 }
 
 

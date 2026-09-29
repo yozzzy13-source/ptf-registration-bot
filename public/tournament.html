@@ -188,7 +188,7 @@ textarea{min-height:64px;resize:vertical}
     <button class="testsw" id="testsw" onclick="toggleTest()"><span class="dot"></span><span id="testlbl">Боевой</span></button>
   </div>
   <select class="pick" id="tpick" onchange="pickTournament(this.value)"></select>
-  <div class="testbar" id="testbar" style="display:none">Тестовый режим: пишем в листы с пометкой TEST. Боевые таблицы не меняются.</div>
+  <div class="testbar" id="testbar" style="display:none">Тестовый режим: работаем в отдельной тестовой таблице «PTF Tournaments TEST». Боевые данные не меняются.</div>
 </div>
 
 <div class="wrap" id="view"><div class="spin">Загружаю…</div></div>
@@ -665,15 +665,18 @@ function openImport() {
       <label class="f"><span>СЕЗОН</span><input id="i_season" value="${esc(S.season)}"></label>
       <label class="f"><span>ДИВИЗИОН</span><input id="i_div" placeholder="все"></label>
     </div>
-    <label class="f"><span>НАЗВАНИЕ ТУРНИРА</span><input id="i_name" placeholder="по умолчанию — «Сезон N»"></label>
-    ${S.test ? '' : '<div class="err">Сейчас боевой режим. Для проверки включите «Тест» в шапке — тогда всё уедет в листы с пометкой TEST.</div>'}
+    <label class="f"><span>ТИП</span><select id="i_kind"><option value="singles">Одиночный (как в лиге)</option><option value="doubles">Парный (пары соберу автоматически)</option></select></label>
+    <label class="f"><span>НАЗВАНИЕ ТУРНИРА</span><input id="i_name" placeholder="по умолчанию — «Сезон N · Дивизион»"></label>
+    <div class="hint">На каждый дивизион создаётся отдельный турнир. Уже перенесённые дивизионы пропускаются.</div>
+    ${S.test ? '' : '<div class="err">Сейчас боевой режим. Для проверки включите «Тест» в шапке — тогда всё уедет в тестовую таблицу.</div>'}
     <button class="btn pri wide" onclick="doImport()">Перенести</button>`);
 }
 function doImport() {
   run(async () => {
-    const j = await api('import-season', { season: val('i_season'), division: val('i_div'), name: val('i_name') });
-    S.id = j.tournament.tournament_id;
+    const j = await api('import-season', { season: val('i_season'), division: val('i_div'), name: val('i_name'), kind: val('i_kind') });
+    if (j.tournament) S.id = j.tournament.tournament_id;
     closeModal();
+    if (!(j.created || []).length) throw new Error('Ничего не перенесено: эти дивизионы уже есть в турнирах');
   }, 'Сезон перенесён');
 }
 

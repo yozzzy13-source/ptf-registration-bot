@@ -22,7 +22,8 @@
 // турнирные листы читаются и пишутся с пометкой TEST. Составы игроков и
 // Players_Master при этом читаются настоящие и никогда не меняются — турнирный
 // модуль не пишет ни в одну таблицу организатора.
-import { getRows, appendObject, appendObjects, updateObjectByRow, ensureExtraSheet, invalidateSheetCache, sameName, getAllActiveLeaguePlayers, getAllApplicants } from './sheets.js';
+import { sameName, getAllActiveLeaguePlayers, getAllApplicants } from './sheets.js';
+import { tournamentStore } from './tournamentstore.js';
 import { seasonRoster, latestSeason, divisionLetter, divisionDisplayName } from './division.js';
 import { uid, nowISO } from './util.js';
 
@@ -36,8 +37,9 @@ const BASE = {
   matches:'Tournament Matches',
   log:'Tournament Log'
 };
-export const TEST_SUFFIX = ' TEST';
-export const sheetName = (key, test = false) => `${BASE[key]}${test ? TEST_SUFFIX : ''}`;
+// Листы живут в отдельных таблицах (боевая и тестовая — два разных файла, см.
+// tournamentstore.js), поэтому суффикса «TEST» в названиях листов больше нет.
+export const sheetName = key => BASE[key];
 
 const HEADERS = {
   tournaments:['tournament_id','name','name_en','kind','season','status','format','playoff_type','third_place',
@@ -58,35 +60,39 @@ const HEADERS = {
   log:['log_id','tournament_id','at','admin_id','admin_name','action','target','before','after','note']
 };
 
-const ensured = new Set();
-async function sheet(key, test = false) {
-  const name = sheetName(key, test);
-  if (!ensured.has(name)) {
-    await ensureExtraSheet(name, HEADERS[key]);
-    ensured.add(name);
-  }
-  return name;
-}
+const ensuredSheets = new Map();   // test → Promise: листы заведены
 export async function ensureTournamentSheets(test = false) {
-  for (const key of Object.keys(BASE)) await sheet(key, test);
-  return Object.fromEntries(Object.keys(BASE).map(k => [k, sheetName(k, test)]));
+  const flag = Boolean(test);
+  if (!ensuredSheets.has(flag)) {
+    const store = tournamentStore(flag);
+    ensuredSheets.set(flag, (async () => {
+      for (const key of Object.keys(BASE)) await store.ensureSheet(BASE[key], HEADERS[key]);
+    })().catch(e => { ensuredSheets.delete(flag); throw e; }));
+  }
+  await ensuredSheets.get(flag);
+  return Object.fromEntries(Object.keys(BASE).map(k => [k, BASE[k]]));
 }
 async function rows(key, test = false, useCache = true) {
-  const name = await sheet(key, test);
-  const { rows } = await getRows(name, { useCache });
+  await ensureTournamentSheets(test);
+  const { rows } = await tournamentStore(test).getRows(BASE[key], { useCache });
   return rows;
 }
 async function insert(key, obj, test = false) {
-  const name = await sheet(key, test);
-  return appendObject(name, obj);
+  await ensureTournamentSheets(test);
+  return tournamentStore(test).appendObject(BASE[key], obj);
 }
 async function insertMany(key, list = [], test = false) {
-  const name = await sheet(key, test);
-  return appendObjects(name, list);
+  await ensureTournamentSheets(test);
+  return tournamentStore(test).appendObjects(BASE[key], list);
 }
 async function patch(key, rowNumber, data, test = false) {
-  const name = await sheet(key, test);
-  return updateObjectByRow(name, rowNumber, { ...data, updated_at: nowISO() });
+  await ensureTournamentSheets(test);
+  return tournamentStore(test).updateObjectByRow(BASE[key], rowNumber, { ...data, updated_at: nowISO() });
+}
+async function patchMany(key, changes = [], test = false) {
+  await ensureTournamentSheets(test);
+  const stamp = nowISO();
+  return tournamentStore(test).updateRows(BASE[key], changes.map(c => ({ row: c.row, patch: { ...c.patch, updated_at: stamp } })));
 }
 
 // ----------------------------------------------------------------- мелочёвка
@@ -510,7 +516,7 @@ export async function findMatch(matchId, test = false) {
 }
 async function insertMatches(list = [], test = false) {
   const out = [];
-  for (const m of list) { await insert('matches', m, test); out.push(m); }
+  await insertMany('matches', list, test); out.push(...list);
   return out;
 }
 
@@ -896,7 +902,7 @@ export async function createManualTournamentMatch(tournamentId, data = {}, actor
   await insert('matches', row, test);
   await logAction(tournamentId, actor, 'match_created', row.match_id, '', { a: row.entry_a_name, b: row.entry_b_name }, '', test);
   if (txt(data.score) || (data.status && lower(data.status) !== 'scheduled')) {
-    invalidateSheetCache();
+    tournamentStore(test).invalidate();
     return setMatchResult(row.match_id, data, actor, test);
   }
   return row;
@@ -968,37 +974,120 @@ export async function candidatePlayers(season = '') {
     || txt(a.group).localeCompare(txt(b.group)) || txt(a.name).localeCompare(txt(b.name)));
 }
 
-// Перенос действующего сезона лиги в турнир. Таблицы организатора только
-// читаются: состав копируется в турнирные листы, дальше турнир живёт своей
-// жизнью. Это и есть безопасный способ пощупать плей-офф на реальных людях.
-export async function importSeason(season = '', { division = '', name = '' } = {}, actor = {}, test = false) {
+// Перенос действующего сезона лиги в турниры. Таблицы организатора только
+// читаются: состав копируется в турнирную таблицу, дальше турнир живёт своей
+// жизнью. Это безопасный способ пощупать группы и плей-офф на реальных людях.
+//
+// Один дивизион — один турнир: у PRIME, A, B, C и W разные составы, группы и
+// плей-офф, и складывать их в один турнир нельзя (первая проба так и
+// сломалась — всё легло в один турнир, а группам без названия подставилась
+// буква «A», похожая на название дивизиона).
+//
+// Для парного турнира состав дивизиона разбивается на пары автоматически:
+// сильнейший со слабейшим. Это тестовая удобность — без неё пришлось бы руками
+// собирать пары ради проверки таблиц и сетки.
+const ntrpOf = (applicants, name) => {
+  const hit = applicants.find(a => sameName(a.name, name));
+  const v = num(hit?.ntrp);
+  return v > 0 ? v : 0;
+};
+const sourceKey = (season, letter, kind) => `season:${season}:${letter}${kind === 'doubles' ? ':doubles' : ''}`;
+
+export async function importSeason(season = '', { division = '', name = '', kind = 'singles', replace = false } = {}, actor = {}, test = false) {
   const use = season || await latestSeason();
+  const type = lower(kind) === 'doubles' ? 'doubles' : 'singles';
   const roster = await seasonRoster(use);
-  let players = roster.players || [];
-  if (division) players = players.filter(p => divisionLetter(p.letter) === divisionLetter(division));
-  if (!players.length) throw new Error('В этом сезоне состав не найден');
-  const groups = new Set(players.map(p => txt(p.group)).filter(Boolean));
-  const tournament = await createTournament({
-    name: name || `Сезон ${use}${division ? ` · дивизион ${divisionLetter(division)}` : ''}`,
-    kind: 'singles', season: use, status: 'running',
-    format: 'groups_playoff', playoff_type: groups.size > 1 ? 'cross_groups' : 'cross_1_4',
-    group_count: String(Math.max(1, groups.size)), advance_per_group: '4',
-    source: `season:${use}${division ? `:${divisionLetter(division)}` : ''}`
-  }, actor, test);
-  const stage = await createStage(tournament.tournament_id, { kind: 'group', name: 'Групповой этап' }, actor, test);
-  const league = await getAllActiveLeaguePlayers().catch(() => []);
-  const idOf = name => txt(league.find(p => sameName(p.name, name))?.telegram_id || '');
-  // Одним запросом, а не по строке на человека: тридцать отдельных записей
-  // подряд Google обслуживает медленно, и ответ успевает оборваться.
-  const rows = players.map((p, index) => ({
-    entry_id: uid('ent'), tournament_id: tournament.tournament_id, entrant_type: 'player',
-    player_id: idOf(p.name), player_name: txt(p.name), pair_id: '', display_name: txt(p.name),
-    status: 'accepted', seed: String(index + 1), rating: '',
-    division: divisionDisplayName(p.letter), group: txt(p.group) || groupNameByIndex(0),
-    checked_in_at: '', withdrawn_at: '', withdrawal_reason: '', replaced_by: '',
-    payment_status: '', note: '', created_at: nowISO(), updated_at: nowISO()
-  }));
-  await insertMany('entries', rows, test);
-  await logAction(tournament.tournament_id, actor, 'season_imported', use, '', { players: players.length, division }, '', test);
-  return { tournament, stage, players: players.length };
+  const all = roster.players || [];
+  if (!all.length) throw new Error('В этом сезоне состав не найден: проверьте реестр дивизионов');
+  const letters = [...new Set(all.map(p => divisionLetter(p.letter)).filter(Boolean))]
+    .filter(l => !division || l === divisionLetter(division));
+  if (!letters.length) throw new Error('В этом сезоне нет такого дивизиона');
+
+  const [league, applicants, existing] = await Promise.all([
+    getAllActiveLeaguePlayers().catch(() => []),
+    getAllApplicants().catch(() => []),
+    listTournaments(test)
+  ]);
+  const idOf = who => txt(league.find(p => sameName(p.name, who))?.telegram_id || '');
+
+  const created = [], skipped = [];
+  for (const letter of letters) {
+    const key = sourceKey(use, letter, type);
+    const twin = existing.find(t => txt(t.source) === key && lower(t.status) !== 'archived');
+    if (twin && !replace) { skipped.push({ division: letter, reason: 'already_imported', tournament_id: twin.tournament_id, name: twin.name }); continue; }
+    if (twin && replace) await updateTournament(twin.tournament_id, { status: 'archived', notes: 'заменён повторным переносом' }, actor, test);
+
+    const players = all.filter(p => divisionLetter(p.letter) === letter);
+    const groupsInLeague = [...new Set(players.map(p => txt(p.group)).filter(Boolean))];
+    const title = divisionDisplayName(letter);
+    const singles = type === 'singles';
+    const unitCount = singles ? players.length : Math.floor(players.length / 2);
+    // Одиночка повторяет лигу: группы те же, что в таблицах дивизиона. Парам
+    // группы лиги ни к чему — пар вдвое меньше, режем по числу пар.
+    const groupCount = singles ? Math.max(1, groupsInLeague.length) : (unitCount > 8 ? 2 : 1);
+    const tournament = await createTournament({
+      name: name ? (letters.length > 1 ? `${name} · ${title}` : name) : `Сезон ${use} · ${title}${singles ? '' : ' · пары'}`,
+      kind: type, season: use, status: 'running', format: 'groups_playoff',
+      playoff_type: groupCount > 1 ? 'cross_groups' : 'cross_1_4',
+      group_count: String(groupCount), advance_per_group: '4', source: key
+    }, actor, test);
+    const stage = await createStage(tournament.tournament_id, { kind: 'group', name: 'Групповой этап' }, actor, test);
+
+    const rated = players.map((p, i) => ({ ...p, rating: ntrpOf(applicants, p.name), order: i }));
+    let entries = [], pairs = [];
+    if (singles) {
+      const bySeed = rated.slice().sort((a, b) => b.rating - a.rating || a.order - b.order);
+      const seedOf = new Map(bySeed.map((p, i) => [p.name, i + 1]));
+      entries = rated.map(p => ({
+        entry_id: uid('ent'), tournament_id: tournament.tournament_id, entrant_type: 'player',
+        player_id: idOf(p.name), player_name: txt(p.name), pair_id: '', display_name: txt(p.name),
+        status: 'accepted', seed: String(seedOf.get(p.name)), rating: p.rating ? String(p.rating) : '',
+        division: title, group: txt(p.group) || '1',
+        checked_in_at: '', withdrawn_at: '', withdrawal_reason: '', replaced_by: '',
+        payment_status: '', note: '', created_at: nowISO(), updated_at: nowISO()
+      }));
+    } else {
+      const byRating = rated.slice().sort((a, b) => b.rating - a.rating || a.order - b.order);
+      const made = [];
+      for (let i = 0; i < Math.floor(byRating.length / 2); i++) {
+        const a = byRating[i], b = byRating[byRating.length - 1 - i];
+        const avg = Math.round(((a.rating + b.rating) / 2) * 100) / 100;
+        const pair = {
+          pair_id: uid('pair'), tournament_id: tournament.tournament_id,
+          player_a_id: idOf(a.name), player_a_name: txt(a.name), player_b_id: idOf(b.name), player_b_name: txt(b.name),
+          status: 'confirmed', invite_code: Math.random().toString(36).slice(2, 10), payer: 'a', pair_name: '',
+          rating: avg ? String(avg) : '', note: 'тестовая пара из состава дивизиона',
+          created_at: nowISO(), confirmed_at: nowISO(), updated_at: nowISO()
+        };
+        pairs.push(pair);
+        made.push({ pair, rating: avg });
+      }
+      made.sort((x, y) => y.rating - x.rating);
+      const split = snakeDistribute(made.map(m => m.pair.pair_id), groupCount);
+      const groupOf = new Map();
+      split.forEach((ids, gi) => ids.forEach(id => groupOf.set(id, groupNameByIndex(gi))));
+      entries = made.map((m, i) => ({
+        entry_id: uid('ent'), tournament_id: tournament.tournament_id, entrant_type: 'pair',
+        player_id: '', player_name: '', pair_id: m.pair.pair_id, display_name: pairLabel(m.pair),
+        status: 'accepted', seed: String(i + 1), rating: m.pair.rating,
+        division: title, group: groupOf.get(m.pair.pair_id) || 'A',
+        checked_in_at: '', withdrawn_at: '', withdrawal_reason: '', replaced_by: '',
+        payment_status: 'paid', note: '', created_at: nowISO(), updated_at: nowISO()
+      }));
+    }
+    // Одним запросом на лист, а не по строке на человека: строка за строкой
+    // Google обслуживал по секунде на запись, и ответ обрывался по таймауту.
+    if (pairs.length) await insertMany('pairs', pairs, test);
+    await insertMany('entries', entries, test);
+    await logAction(tournament.tournament_id, actor, 'season_imported', `${use}:${letter}`, '',
+      { players: players.length, entries: entries.length, pairs: pairs.length, kind: type }, '', test);
+    created.push({ division: letter, title, tournament, stage, players: players.length, entries: entries.length, pairs: pairs.length });
+  }
+  const first = created[0];
+  return {
+    created, skipped, season: use,
+    // Прежняя форма ответа для экранов, которые ждут один турнир.
+    tournament: first?.tournament || null, stage: first?.stage || null,
+    players: created.reduce((n, c) => n + c.players, 0)
+  };
 }

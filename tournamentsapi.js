@@ -35,7 +35,8 @@ export function registerTournamentRoutes(app, { viewer }) {
     try {
       const v = await admin(req, res);
       if (!v) return;
-      const test = asTest(req);
+      // Тестовую таблицу читает только организатор: игроку флаг test ничего не открывает.
+      const test = Boolean(v.isAdmin) && asTest(req);
       await ensureTournamentSheets(test);
       await handler(req, res, v, test, actorOf(v));
     } catch (e) {
@@ -80,7 +81,7 @@ export function registerTournamentRoutes(app, { viewer }) {
   }));
   app.post('/api/tournaments/import-season', guard(async (req, res, v, test, actor) => {
     const b = req.body || {};
-    res.json({ ok:true, ...await importSeason(String(b.season || ''), { division:String(b.division || ''), name:String(b.name || '') }, actor, test) });
+    res.json({ ok:true, ...await importSeason(String(b.season || ''), { division:String(b.division || ''), name:String(b.name || ''), kind:String(b.kind || 'singles'), replace:['1','true','yes'].includes(String(b.replace || '').toLowerCase()) }, actor, test) });
   }));
 
   // ------------------------------------------------------------- заявки
@@ -192,7 +193,8 @@ export function registerTournamentRoutes(app, { viewer }) {
     try {
       const v = await viewer(String(req.query.initData || ''), String(req.query.t || ''));
       if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-      const test = asTest(req);
+      // Тестовую таблицу читает только организатор: игроку флаг test ничего не открывает.
+      const test = Boolean(v.isAdmin) && asTest(req);
       await ensureTournamentSheets(test);
       const list = (await listTournaments(test)).filter(t => String(t.status || '').toLowerCase() === 'registration');
       const out = [];
@@ -220,7 +222,8 @@ export function registerTournamentRoutes(app, { viewer }) {
     try {
       const v = await viewer(String(req.query.initData || ''), String(req.query.t || ''));
       if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-      const test = asTest(req);
+      // Тестовую таблицу читает только организатор: игроку флаг test ничего не открывает.
+      const test = Boolean(v.isAdmin) && asTest(req);
       await ensureTournamentSheets(test);
       res.json({ ok:true, invites: await pendingInvitesFor(String(v.user.id), test) });
     } catch (e) { res.status(500).json({ ok:false, error:'tournament_error', detail:e.message }); }

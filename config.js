@@ -13,6 +13,11 @@ export const PARTICIPANTS_SPREADSHEET_ID = process.env.PARTICIPANTS_SPREADSHEET_
 // Partners и Partners_Page). Переменная окружения нужна, только если таблицу
 // когда-нибудь заменят другой.
 export const PARTNERS_SPREADSHEET_ID = process.env.PARTNERS_SPREADSHEET_ID || '1QjPUpMEcb2bI7N0xsO4xjSeJMqTT_VTGyq1U5waCHO0';
+// Турниры живут в своих таблицах «PTF Tournaments» и «PTF Tournaments TEST» в
+// папке PTF: боевая и тестовая — два разных файла, смешаться они не могут.
+// Переменные нужны, только если таблицы когда-нибудь заменят другими.
+export const TOURNAMENTS_SPREADSHEET_ID = process.env.TOURNAMENTS_SPREADSHEET_ID || '1VdFFzX0e0gp72WnJiRVJnPZiWEyRAoSAy8Me9joYtc0';
+export const TOURNAMENTS_TEST_SPREADSHEET_ID = process.env.TOURNAMENTS_TEST_SPREADSHEET_ID || '14pRVcvZMhZoRj1dvUotDM2Y-3lJnWPAaHOVWMqTqrZY';
 export const PARTICIPANTS_SHEET_ID = process.env.PARTICIPANTS_SHEET_ID || process.env.MANUAL_PARTICIPANTS_SHEET_ID || '1662536073';
 export const WEBSITE_URL = (process.env.WEBSITE_URL || 'https://www.phukettennis.com').replace(/\/$/, '');
 // Website backend (read-only): sheet with Player ID / Player Name / Profile URL columns.
