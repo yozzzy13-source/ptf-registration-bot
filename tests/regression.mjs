@@ -1623,8 +1623,13 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
  const home=lg.slice(lg.indexOf('function renderHome(){'),lg.indexOf('function renderHome2(){'));
  check(!/homeFantasyBanner\(\)/.test(home),'Плашки Fantasy на главной больше нет');
- check(/'home2'/.test(lg)&&/isLeagueAdmin&&VIEWS\.indexOf\('home2'\)<0/.test(lg),'Тестовая главная появляется только у организатора');
- check(/function partnersStrip/.test(lg)&&/function championsStrip/.test(lg)&&/function mountMarquees/.test(lg),'На тестовой главной партнёры и чемпионы — бегущими строками');
+ check(!/'home2'/.test(lg),'Тестовая вкладка убрана — всё на настоящей главной');
+ check(/partnersStrip\(\)\+homeEvents\(\)\+leadersStrip\(\)\+championsStrip\(\)\+seasonCard\(\)\+promotionsStrip\(\)/.test(lg),'Порядок главной: партнёры, событие, лидеры, чемпионы, сезон, повышения');
+ check(/function mountMarquees/.test(lg)&&/mq-prom/.test(lg)&&/mq-ldr/.test(lg),'Лидеры, чемпионы, повышения и партнёры — бегущими строками');
+ check(/\(top\.points\|\|0\)>0/.test(lg),'Лидер без очков не показывается');
+ check(/class="live"><i class="ball">🎾<\/i>LIVE/.test(lg)&&/@keyframes ballPulse/.test(lg),'У сезона метка LIVE с пульсирующим мячиком');
+ check(/return e\.open_now&&!e\.past/.test(lg)&&/else if\(mode==='home'&&!openId\)renderHome\(\)/.test(lg),'Открытое событие поднимается на главную, как только загрузится');
+ check(!/pmq-cat/.test(lg),'В ленте партнёров только логотипы, без рамок и подписей');
  check(/prefers-reduced-motion: reduce/.test(lg),'При «уменьшить движение» лента сама не едет');
  check(/if\(m\.moved\)\{e\.stopPropagation\(\);e\.preventDefault\(\)/.test(lg),'Перетаскивание не срабатывает как нажатие');
  check(/sz=\)w\\d\+\/,'\$1w400'\)/.test(lg),'В ленту идут уменьшенные логотипы');
