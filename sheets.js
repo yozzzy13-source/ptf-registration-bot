@@ -768,10 +768,18 @@ export function partnerInstagramUrl(value = '') {
   return handle ? `https://instagram.com/${handle}` : '';
 }
 // Номер в любом виде или готовая wa.me-ссылка — на выходе только цифры.
+// Тайские номера часто пишут «66 0…» — код страны плюс местный ноль. В
+// международном формате ноль после кода страны не пишется, и wa.me с ним чат
+// не откроет, поэтому убираем его сами.
 export function partnerWhatsappNumber(value = '') {
-  const v = safe(value);
+  let v = safe(value);
+  // Номер, записанный числом, Google может отдать как 6.6063E+11 — такое
+  // разворачиваем обратно в цифры.
+  if (/^\d+(\.\d+)?e\+?\d+$/i.test(v)) v = Number(v).toFixed(0);
   const fromLink = /wa\.me\/(\+?\d+)/i.exec(v) || /phone=(\+?\d+)/i.exec(v);
-  return (fromLink ? fromLink[1] : v).replace(/[^0-9]/g, '');
+  let digits = (fromLink ? fromLink[1] : v).replace(/\.0+$/, '').replace(/[^0-9]/g, '');
+  if (/^660\d{8,9}$/.test(digits)) digits = '66' + digits.slice(3);
+  return digits;
 }
 const webLink = value => { const v = safe(value); return /^https?:\/\//i.test(v) ? v : (v && /\./.test(v) ? `https://${v}` : ''); };
 
@@ -813,11 +821,16 @@ async function readPartnersGrid(title) {
       spreadsheetId: PARTNERS_SPREADSHEET_ID,
       ranges: [`'${title}'!A1:BZ300`],
       includeGridData: true,
-      fields: 'sheets(data(rowData(values(formattedValue,effectiveFormat/textFormat,textFormatRuns))))'
+      fields: 'sheets(data(rowData(values(formattedValue,effectiveValue,effectiveFormat/textFormat,textFormatRuns))))'
     });
     const rows = res.data.sheets?.[0]?.data?.[0]?.rowData || [];
     return {
-      values: rows.map(r => (r.values || []).map(c => String(c.formattedValue ?? ''))),
+      // Число, которое Google показывает как 6.6E+11, берём целиком из значения.
+      values: rows.map(r => (r.values || []).map(c => {
+        const shown = String(c.formattedValue ?? '');
+        const num = c.effectiveValue?.numberValue;
+        return /e\+/i.test(shown) && Number.isFinite(num) ? num.toFixed(0) : shown;
+      })),
       html: rows.map(r => (r.values || []).map(c => partnerCellHtml(c)))
     };
   } catch (e) {

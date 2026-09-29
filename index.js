@@ -1473,6 +1473,9 @@ app.get('/api/league/bootstrap', async (req, res) => {
       me_group:v.matchGroup, can_match:v.canMatch,
       group,
       view_as: viewAs,
+      // Организатору приложение показывает свои служебные вкладки (тестовая
+      // главная). В режиме «глазами группы» их нет — там всё как у игроков.
+      is_admin: Boolean(v.isAdmin && !viewAs),
       tabs: fantasyAccess.allowed ? tabs : tabs.filter(t => t !== 'fantasy'),
       fantasy_allowed: Boolean(fantasyAccess.allowed),
       // Приложение по этому флагу знает, что очки сейчас подтянутся отдельно.
