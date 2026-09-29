@@ -775,6 +775,57 @@ export function partnerWhatsappNumber(value = '') {
 }
 const webLink = value => { const v = safe(value); return /^https?:\/\//i.test(v) ? v : (v && /\./.test(v) ? `https://${v}` : ''); };
 
+// Ячейка с оформлением → безопасный HTML. Берём только жирный, курсив,
+// подчёркнутый и зачёркнутый: цвет и шрифт в карточку не переносим, иначе
+// ломается тёмная/светлая тема. Текст экранируется, поэтому никакой чужой
+// разметки из таблицы в приложение не попадёт.
+const escCell = (t = '') => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+export function partnerCellHtml(cell = {}) {
+  const text = String(cell.formattedValue ?? '');
+  if (!text) return '';
+  const base = cell.effectiveFormat?.textFormat || {};
+  const runs = (cell.textFormatRuns || []).map(r => ({ start: Number(r.startIndex || 0), format: r.format || {} }))
+    .sort((a, b) => a.start - b.start);
+  if (!runs.length || runs[0].start > 0) runs.unshift({ start: 0, format: {} });
+  let html = '';
+  let carried = {};
+  runs.forEach((run, i) => {
+    const end = i + 1 < runs.length ? runs[i + 1].start : text.length;
+    const piece = text.slice(run.start, end);
+    // Свойства ранa действуют, пока следующий ран их явно не сменит.
+    carried = { ...carried, ...run.format };
+    if (!piece) return;
+    const f = { ...base, ...carried };
+    let out = escCell(piece);
+    if (f.strikethrough) out = `<s>${out}</s>`;
+    if (f.underline) out = `<u>${out}</u>`;
+    if (f.italic) out = `<i>${out}</i>`;
+    if (f.bold) out = `<b>${out}</b>`;
+    html += out;
+  });
+  return html;
+}
+// Лист партнёров вместе с оформлением текста. Не вышло (нет прав на чтение
+// оформления и т.п.) — вернём null, и вызывающий возьмёт просто текст.
+async function readPartnersGrid(title) {
+  try {
+    const res = await sheetsClient().spreadsheets.get({
+      spreadsheetId: PARTNERS_SPREADSHEET_ID,
+      ranges: [`'${title}'!A1:BZ300`],
+      includeGridData: true,
+      fields: 'sheets(data(rowData(values(formattedValue,effectiveFormat/textFormat,textFormatRuns))))'
+    });
+    const rows = res.data.sheets?.[0]?.data?.[0]?.rowData || [];
+    return {
+      values: rows.map(r => (r.values || []).map(c => String(c.formattedValue ?? ''))),
+      html: rows.map(r => (r.values || []).map(c => partnerCellHtml(c)))
+    };
+  } catch (e) {
+    console.log(`partners grid «${title}» not read, falling back to plain text:`, e.message);
+    return null;
+  }
+}
+
 async function readPartnersSheet(title) {
   try {
     return await valuesGetFromSpreadsheet(PARTNERS_SPREADSHEET_ID, `'${title}'!A:BZ`);
@@ -787,16 +838,22 @@ async function readPartnersSheet(title) {
 
 // Лист по столбцам превращаем в список партнёров: строка с «Name» в колонке A
 // задаёт, сколько партнёров (непустые столбцы), остальные строки — их поля.
-export function partnersFromColumns(values = []) {
-  const rows = (values || []).filter(r => Array.isArray(r) && safe(r[0]));
+// html — та же сетка, но с оформлением (см. partnerCellHtml); если её нет,
+// описание уходит простым текстом.
+export function partnersFromColumns(values = [], html = null) {
+  const idx = (values || []).map((r, i) => i).filter(i => Array.isArray(values[i]) && safe(values[i][0]));
+  const rows = idx.map(i => values[i]);
   const nameRow = rows.find(r => NAME_FIELDS.includes(normalizeHeader(r[0])));
   if (!nameRow) return [];
   const width = Math.max(...rows.map(r => r.length));
   const out = [];
   for (let col = 1; col < width; col++) {
     if (!safe(nameRow[col])) continue;
-    const row = {};
-    for (const r of rows) row[safe(r[0])] = r[col] ?? '';
+    const row = {}, htmlRow = {};
+    for (const i of idx) {
+      row[safe(values[i][0])] = values[i][col] ?? '';
+      if (html) htmlRow[safe(values[i][0])] = html[i]?.[col] ?? '';
+    }
     const name = partnerField(row, NAME_FIELDS);
     const active = partnerField(row, ['active', 'вкл', 'показывать', 'status', 'статус']) || 'yes';
     if (['no', 'false', '0', 'off', 'нет', 'выкл', 'hidden', 'скрыт'].includes(active.toLowerCase())) continue;
@@ -804,6 +861,7 @@ export function partnersFromColumns(values = []) {
       name,
       name_en: name,
       description: partnerPair(row, ['description', 'описание', 'about', 'текст']),
+      description_html: html ? partnerPair(htmlRow, ['description', 'описание', 'about', 'текст']) : null,
       category: partnerPair(row, ['category', 'категория', 'type', 'тип']),
       message: partnerField(row, ['message', 'сообщение', 'template', 'шаблон']),
       photo: directPhotoUrl(partnerField(row, ['image', 'картинка', 'photo', 'фото', 'logo', 'логотип'])),
@@ -820,8 +878,9 @@ export function partnersFromColumns(values = []) {
 
 export async function getPartners() {
   if (partnersCache.v && Date.now() - partnersCache.t < PROFILES_CACHE_MS) return partnersCache.v;
-  const values = await readPartnersSheet(PARTNERS_SHEET);
-  const out = values ? partnersFromColumns(values) : [];
+  const grid = await readPartnersGrid(PARTNERS_SHEET);
+  const values = grid ? grid.values : await readPartnersSheet(PARTNERS_SHEET);
+  const out = values ? partnersFromColumns(values, grid ? grid.html : null) : [];
   partnersCache = { t: Date.now(), v: out };
   return out;
 }
