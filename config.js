@@ -9,6 +9,10 @@ export const TIMEZONE = process.env.TIMEZONE || process.env.RESULTS_TIMEZONE || 
 export const ADMIN_IDS = (process.env.ADMIN_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
 export const SHEETS = { applicants:'Applicants', events:'Events', applications:'Applications', messages:'Messages', broadcasts:'Broadcasts', broadcastLogs:'Broadcast Logs', settings:'Settings', botTexts:'Bot Texts', payments:'Payments', paymentMethods:'Payment Methods', matchChallenges:'Match Challenges', courts:'Courts', botMenu:'Bot Menu', pollResults:'Poll Results', fantasyTeams:'Fantasy Teams', fantasyTransfers:'Fantasy Transfers', fantasyTestTeams:'Fantasy Test Teams', fantasyTestTransfers:'Fantasy Test Transfers', fantasyTesters:'Fantasy Testers' };
 export const PARTICIPANTS_SPREADSHEET_ID = process.env.PARTICIPANTS_SPREADSHEET_ID || process.env.MANUAL_PARTICIPANTS_SPREADSHEET_ID || '161O5DWEJU-ik3XoDaUjWeTlm7T2Je98IFd_-DFhRBu8';
+// Партнёры лиги живут в своей таблице «PTF Partners» в папке PTF (листы
+// Partners и Partners_Page). Переменная окружения нужна, только если таблицу
+// когда-нибудь заменят другой.
+export const PARTNERS_SPREADSHEET_ID = process.env.PARTNERS_SPREADSHEET_ID || '1QjPUpMEcb2bI7N0xsO4xjSeJMqTT_VTGyq1U5waCHO0';
 export const PARTICIPANTS_SHEET_ID = process.env.PARTICIPANTS_SHEET_ID || process.env.MANUAL_PARTICIPANTS_SHEET_ID || '1662536073';
 export const WEBSITE_URL = (process.env.WEBSITE_URL || 'https://www.phukettennis.com').replace(/\/$/, '');
 // Website backend (read-only): sheet with Player ID / Player Name / Profile URL columns.

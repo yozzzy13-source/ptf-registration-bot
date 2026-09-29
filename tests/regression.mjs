@@ -1578,4 +1578,27 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/k !== 'fantasy'/.test(kbSrc)&&!/make\('fantasy'\)/.test(kbSrc),'Кнопки Fantasy в клавиатуре чата нет');
 }
 
+// --- Партнёры: своя таблица, раскладка по столбцам, отдельные кнопки ---------
+{
+ const cfg=await fs.readFile(path.join(root,'config.js'),'utf8');
+ check(/PARTNERS_SPREADSHEET_ID = process\.env\.PARTNERS_SPREADSHEET_ID \|\| '1QjPUpMEcb2bI7N0xsO4xjSeJMqTT_VTGyq1U5waCHO0'/.test(cfg),'Партнёры читаются из таблицы PTF Partners');
+ const list=sheets.partnersFromColumns([
+  ['Name','Club A','Cafe B','Hidden'],
+  ['Description RU','Корты','Кофе'],['Description EN','Courts','Coffee'],
+  ['Google Maps','maps.app.goo.gl/x','',''],['Instagram','@club_a','',''],
+  ['WhatsApp','+66 81 234 5678','https://wa.me/66899999999',''],
+  ['Message','Hi, I am {name}','',''],['Site','','cafe.com',''],
+  ['Order','2','1','3'],['Active','','yes','no']]);
+ check(list.length===2&&list[0].name==='Cafe B','Каждый столбец — партнёр; порядок по Order; Active=no прячет');
+ const club=list.find(p=>p.name==='Club A');
+ check(club.maps==='https://maps.app.goo.gl/x'&&club.instagram==='https://instagram.com/club_a','Карта и Instagram — отдельные ссылки, @ник превращается в профиль');
+ check(club.whatsapp==='66812345678'&&list[0].whatsapp==='66899999999','WhatsApp — номер или wa.me-ссылка, на выходе цифры');
+ check(club.site===''&&list[0].site==='https://cafe.com','Сайт пустой — кнопки нет; без https дописывается');
+ check(club.message==='Hi, I am {name}'&&typeof club.message==='string','Сообщение одно, на английском');
+ check(club.description.ru==='Корты'&&club.description.en==='Courts','Описание на двух языках');
+ const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ for(const k of ['button_maps','button_instagram','button_whatsapp','button_site'])check(lg.includes("partnerLabel('"+k+"'"),'Кнопка '+k+' в карточке партнёра');
+ check(!/phone_label/.test(lg),'Номер телефона на экран больше не выводится');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

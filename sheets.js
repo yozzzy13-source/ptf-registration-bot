@@ -1,5 +1,5 @@
 import { sheets as sheetsClient } from './google.js';
-import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID, DIVISIONS_SPREADSHEET_ID, ADMIN_IDS, PUBLIC_URL } from './config.js';
+import { SPREADSHEET_ID, SHEETS, PARTICIPANTS_SPREADSHEET_ID, PARTNERS_SPREADSHEET_ID, PARTICIPANTS_SHEET_ID, WEBSITE_URL, WEBSITE_SPREADSHEET_ID, WEBSITE_PLAYERS_SHEET_ID, LEAGUE_RESULTS_SHEET_ID, DIVISIONS_SPREADSHEET_ID, ADMIN_IDS, PUBLIC_URL } from './config.js';
 import { nowISO, safe, parseSeasonNumber, directPhotoUrl } from './util.js';
 
 const cache = new Map();
@@ -720,25 +720,31 @@ export async function attachWebsiteProfiles(players=[]) {
 }
 
 // ---------------------------------------------------------------------------
-// Партнёры лиги. Лист «Partners» в той же таблице, что и состав участников:
-// Костас правит его руками, а вкладка в приложении просто показывает то, что там
-// лежит. Колонки ищем по заголовкам, а не по буквам, — тогда можно переставлять
-// столбцы и дописывать свои, ничего не ломая.
+// Партнёры лиги. Отдельная таблица «PTF Partners» (PARTNERS_SPREADSHEET_ID),
+// лист «Partners». Костас правит его руками, вкладка в приложении показывает.
 //
-// Название | Описание | Картинка | Телефон/WhatsApp | Сообщение | Ссылка | Категория | Порядок | Вкл
+// Раскладка — по столбцам: в колонке A названия полей, дальше каждый столбец —
+// один партнёр. Поля ищем по названию, а не по номеру строки, поэтому строки
+// можно переставлять и дописывать свои.
 //
-// «Сообщение» — заготовка письма в WhatsApp, как у кортов: человек жмёт кнопку и
-// отправляет готовый текст. Подстановка {name} — имя игрока, {партнёр} — имя
-// партнёра; больше ничего выдумывать не нужно.
+//   Name            — название, одно, на английском
+//   Description RU / Description EN, Category RU / Category EN
+//   Image           — картинка (прямая ссылка, Google Drive или =IMAGE)
+//   Google Maps, Instagram, Site — ссылки; по каждой своя кнопка
+//   WhatsApp        — номер (или wa.me-ссылка); в приложении не показывается,
+//                     из него собирается кнопка с готовым сообщением
+//   Message         — текст этого сообщения, только на английском;
+//                     {name} — имя игрока, {partner} — название партнёра
+//   Order, Active   — порядок и «no», чтобы спрятать
+// Пустое поле — нет кнопки.
 const PARTNERS_SHEET = 'Partners';
 const PARTNERS_TEXT_SHEET = 'Partners_Page';
 let partnersCache = { t: 0, v: null };
 let partnersTextCache = { t: 0, v: null };
 export function invalidatePartnersCache() { partnersCache = { t: 0, v: null }; partnersTextCache = { t: 0, v: null }; }
 
-// Колонку ищем по заголовку, а не по букве: можно переставлять столбцы и
-// дописывать свои. Языковые варианты — тот же заголовок с пометкой RU или EN
-// («Описание RU», «Description EN»); если языковой колонки нет, берётся общая.
+// Поле ищем по названию. Языковые варианты — то же название с пометкой RU или
+// EN («Description RU»); если языкового нет, берётся общее.
 const partnerField = (row, names, lang = '') => {
   const wanted = lang ? names.flatMap(n => [`${n} ${lang}`, `${n}_${lang}`, `${lang} ${n}`]) : names;
   for (const name of wanted) {
@@ -747,14 +753,31 @@ const partnerField = (row, names, lang = '') => {
   }
   return '';
 };
-// Значение на двух языках: если заполнена только общая колонка, она идёт в оба.
+// Значение на двух языках: если заполнено только общее поле, оно идёт в оба.
 const partnerPair = (row, names) => {
   const plain = partnerField(row, names);
   return { ru: partnerField(row, names, 'ru') || plain, en: partnerField(row, names, 'en') || plain };
 };
+const NAME_FIELDS = ['name', 'название', 'партнёр', 'партнер', 'partner'];
+// «@club», «club» или полная ссылка — на выходе всегда ссылка на профиль.
+export function partnerInstagramUrl(value = '') {
+  const v = safe(value);
+  if (!v) return '';
+  if (/^https?:\/\//i.test(v)) return v;
+  const handle = v.replace(/^@/, '').replace(/^(www\.)?instagram\.com\//i, '').replace(/[/?#].*$/, '');
+  return handle ? `https://instagram.com/${handle}` : '';
+}
+// Номер в любом виде или готовая wa.me-ссылка — на выходе только цифры.
+export function partnerWhatsappNumber(value = '') {
+  const v = safe(value);
+  const fromLink = /wa\.me\/(\+?\d+)/i.exec(v) || /phone=(\+?\d+)/i.exec(v);
+  return (fromLink ? fromLink[1] : v).replace(/[^0-9]/g, '');
+}
+const webLink = value => { const v = safe(value); return /^https?:\/\//i.test(v) ? v : (v && /\./.test(v) ? `https://${v}` : ''); };
+
 async function readPartnersSheet(title) {
   try {
-    return await valuesGetFromSpreadsheet(PARTICIPANTS_SPREADSHEET_ID, `'${title}'!A:BZ`);
+    return await valuesGetFromSpreadsheet(PARTNERS_SPREADSHEET_ID, `'${title}'!A:BZ`);
   } catch (e) {
     // Листа ещё нет — это не поломка: вкладка просто покажет пустое состояние.
     console.log(`partners sheet «${title}» not read:`, e.message);
@@ -762,37 +785,43 @@ async function readPartnersSheet(title) {
   }
 }
 
-export async function getPartners() {
-  if (partnersCache.v && Date.now() - partnersCache.t < PROFILES_CACHE_MS) return partnersCache.v;
-  const values = await readPartnersSheet(PARTNERS_SHEET);
-  if (!values) { partnersCache = { t: Date.now(), v: [] }; return []; }
-  const headerIndex = values.findIndex(row => (row || []).some(cell =>
-    ['name', 'название', 'название ru', 'партнёр', 'партнер', 'partner'].includes(normalizeHeader(cell))));
-  if (headerIndex < 0) { partnersCache = { t: Date.now(), v: [] }; return []; }
-  const headers = values[headerIndex] || [];
+// Лист по столбцам превращаем в список партнёров: строка с «Name» в колонке A
+// задаёт, сколько партнёров (непустые столбцы), остальные строки — их поля.
+export function partnersFromColumns(values = []) {
+  const rows = (values || []).filter(r => Array.isArray(r) && safe(r[0]));
+  const nameRow = rows.find(r => NAME_FIELDS.includes(normalizeHeader(r[0])));
+  if (!nameRow) return [];
+  const width = Math.max(...rows.map(r => r.length));
   const out = [];
-  for (const raw of values.slice(headerIndex + 1)) {
+  for (let col = 1; col < width; col++) {
+    if (!safe(nameRow[col])) continue;
     const row = {};
-    headers.forEach((h, i) => { if (safe(h)) row[safe(h)] = raw?.[i] ?? ''; });
-    const name = partnerPair(row, ['name', 'название', 'партнёр', 'партнер', 'partner']);
-    if (!name.ru && !name.en) continue;
+    for (const r of rows) row[safe(r[0])] = r[col] ?? '';
+    const name = partnerField(row, NAME_FIELDS);
     const active = partnerField(row, ['active', 'вкл', 'показывать', 'status', 'статус']) || 'yes';
     if (['no', 'false', '0', 'off', 'нет', 'выкл', 'hidden', 'скрыт'].includes(active.toLowerCase())) continue;
-    const phone = partnerField(row, ['whatsapp', 'телефон', 'phone', 'контакт', 'contact']);
     out.push({
-      name: name.ru || name.en,
-      name_en: name.en || name.ru,
+      name,
+      name_en: name,
       description: partnerPair(row, ['description', 'описание', 'about', 'текст']),
       category: partnerPair(row, ['category', 'категория', 'type', 'тип']),
-      message: partnerPair(row, ['message', 'сообщение', 'текст сообщения', 'template', 'шаблон']),
+      message: partnerField(row, ['message', 'сообщение', 'template', 'шаблон']),
       photo: directPhotoUrl(partnerField(row, ['image', 'картинка', 'photo', 'фото', 'logo', 'логотип'])),
-      whatsapp: phone.replace(/[^0-9]/g, ''),
-      phone_label: phone,
-      link: partnerField(row, ['link', 'ссылка', 'site', 'сайт', 'url']),
+      whatsapp: partnerWhatsappNumber(partnerField(row, ['whatsapp', 'телефон', 'phone'])),
+      maps: webLink(partnerField(row, ['google maps', 'maps', 'map', 'карта'])),
+      instagram: partnerInstagramUrl(partnerField(row, ['instagram', 'инстаграм', 'insta'])),
+      site: webLink(partnerField(row, ['site', 'сайт', 'website', 'link', 'ссылка', 'url'])),
       order: Number(partnerField(row, ['order', 'порядок', 'sort'])) || 0
     });
   }
   out.sort((a, b) => (a.order || 999) - (b.order || 999) || String(a.name).localeCompare(String(b.name)));
+  return out;
+}
+
+export async function getPartners() {
+  if (partnersCache.v && Date.now() - partnersCache.t < PROFILES_CACHE_MS) return partnersCache.v;
+  const values = await readPartnersSheet(PARTNERS_SHEET);
+  const out = values ? partnersFromColumns(values) : [];
   partnersCache = { t: Date.now(), v: out };
   return out;
 }

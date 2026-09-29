@@ -334,7 +334,7 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .pt .ptname{font-size:17px;font-weight:800;margin-top:3px}
 .pt .ptdesc{margin-top:6px;color:var(--dim);font-size:13px;line-height:1.5;white-space:pre-line}
 .ptacts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.ptacts a{flex:1 1 140px;text-align:center;text-decoration:none;border-radius:12px;padding:11px 12px;
+.ptacts a{flex:1 1 110px;text-align:center;text-decoration:none;border-radius:12px;padding:11px 12px;
   font-size:13.5px;font-weight:800;border:1px solid var(--line2);color:var(--txt);background:var(--surf2)}
 .ptacts a.wa{background:var(--goBg,rgba(143,191,154,.15));border-color:var(--goLine);color:var(--win)}
 .ptnote{margin-top:9px;font-size:11.5px;color:var(--mute)}
@@ -2512,13 +2512,14 @@ function partnerLabel(key,fallbackRu,fallbackEn){
   return fromSheet||(L?fallbackRu:fallbackEn);
 }
 // Готовое письмо партнёру, как у бронирования корта: человек только жмёт кнопку.
-// {name} — имя игрока, {partner} / {партнёр} — название партнёра, {league} — лига.
+// Сообщение всегда на английском — его читает партнёр, а не игрок.
+// {name} — имя игрока, {partner} — название партнёра, {league} — лига.
 function partnerMessage(p){
   var mine=(me&&me.name)||'';
-  var base=partnerText(p.message)||partnerLabel('message_default',
-    'Здравствуйте! Пишу от Phuket Tennis Family.',
-    'Hello! I am writing from Phuket Tennis Family.');
-  var title=partnerText(p.name)||p.name||'';
+  var fromSheet=partnerTexts.message_default;
+  var fallback=(fromSheet&&typeof fromSheet==='object'?(fromSheet.en||fromSheet.ru):fromSheet)||'Hello! I am writing from Phuket Tennis Family.';
+  var base=String(p.message||'')||fallback;
+  var title=p.name||'';
   return base
     .replace(/\{name\}/gi,mine)
     .replace(/\{имя\}/gi,mine)
@@ -2528,16 +2529,22 @@ function partnerMessage(p){
     .replace(/\{league\}/gi,'Phuket Tennis Family')
     .replace(/\{лига\}/gi,'Phuket Tennis Family');
 }
+// Под описанием — до четырёх кнопок: карта, Instagram, WhatsApp, сайт. Каждая
+// появляется, только если её поле в таблице заполнено. Номер телефона на экран
+// не выводим: из него собирается только кнопка с готовым сообщением.
 function partnerCard(p){
-  var title=L?(p.name||p.name_en):(p.name_en||p.name);
+  var title=p.name||p.name_en||'';
   var desc=partnerText(p.description);
   var cat=partnerText(p.category);
+  var btn=function(url,label,cls){
+    return '<a'+(cls?' class="'+cls+'"':'')+' href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(label)+'</a>';
+  };
   var acts=[];
-  if(p.whatsapp){
-    acts.push('<a class="wa" href="https://wa.me/'+esc(p.whatsapp)+'?text='+encodeURIComponent(partnerMessage(p))
-      +'" target="_blank" rel="noopener">'+esc(partnerLabel('button_whatsapp','📲 Написать в WhatsApp','📲 Message on WhatsApp'))+'</a>');
-  }
-  if(p.link)acts.push('<a href="'+esc(p.link)+'" target="_blank" rel="noopener">'+esc(partnerLabel('button_link','Открыть','Open'))+'</a>');
+  if(p.maps)acts.push(btn(p.maps,partnerLabel('button_maps','📍 Карта','📍 Map'),''));
+  if(p.instagram)acts.push(btn(p.instagram,partnerLabel('button_instagram','📸 Instagram','📸 Instagram'),''));
+  if(p.whatsapp)acts.push(btn('https://wa.me/'+p.whatsapp+'?text='+encodeURIComponent(partnerMessage(p)),
+    partnerLabel('button_whatsapp','📲 WhatsApp','📲 WhatsApp'),'wa'));
+  if(p.site)acts.push(btn(p.site,partnerLabel('button_site','🌐 Сайт','🌐 Website'),''));
   return '<div class="pt">'
     +(p.photo?'<img class="ptimg" src="'+esc(p.photo)+'" alt="" loading="lazy" onerror="this.remove()">':'')
     +'<div class="ptbody">'
@@ -2545,7 +2552,6 @@ function partnerCard(p){
     +'<div class="ptname">'+esc(title)+'</div>'
     +(desc?'<div class="ptdesc">'+esc(desc)+'</div>':'')
     +(acts.length?'<div class="ptacts">'+acts.join('')+'</div>':'')
-    +(p.whatsapp&&p.phone_label?'<div class="ptnote">'+esc(p.phone_label)+'</div>':'')
     +'</div></div>';
 }
 function renderPartners(){
