@@ -18,12 +18,12 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
   notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultHalfConfirmed, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
-  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled } from './matches.js';
+  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed } from './matches.js';
 import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
-  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin } from './matchesdb.js';
+  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin, confirmCourt, courtCloseAt } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
@@ -656,7 +656,9 @@ app.get('/api/match/bootstrap', async (req, res) => {
       dates: cellToList(s.dates),
       courts: cellToList(s.courts),
       from: byId.get(String(s.from_telegram_id)) || null,
-      contact:contacts.get(s.challenge_id)||null
+      contact:contacts.get(s.challenge_id)||null,
+      // Когда матч снимется, если автор так и не подтвердит корт (0 — не грозит).
+      court_close_at: courtCloseAt(s) || 0
     });
     res.json({
       ok:true, lang:v.lang, user:{ id:v.user.id, name:v.profile.name }, division:v.division,
@@ -1912,6 +1914,20 @@ app.post('/api/match/booking',async(req,res)=>{try{
  const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
  const slot=await findSlot(b.challenge_id);if(!slot||slot.status!=='accepted'||String(slot.from_telegram_id)!==String(v.user.id))return res.status(403).json({ok:false,error:'not_booker'});
  await sendBookingHelper(v.user.id,slot);res.json({ok:true});
+}catch(e){res.status(500).json({ok:false,error:e.message});}});
+// «Корт подтвердил» прямо из карточки матча — то же, что кнопка в чате.
+app.post('/api/match/court-confirm',async(req,res)=>{try{
+ const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));if(!v.ok)return res.status(v.code).json({ok:false,error:v.error});
+ const r=await confirmCourt(String(b.challenge_id||''),{telegram_id:v.user.id,name:v.profile?.name||''});
+ if(!r.ok){
+  const ru=v.lang==='ru';
+  const texts={not_booker:ru?'Бронь подтверждает автор вызова.':'Only the challenge creator confirms the booking.',already_confirmed:ru?'Корт уже подтверждён.':'Already confirmed.',
+   not_accepted:ru?'Матч ещё не согласован.':'Match is not agreed yet.',not_a_player:ru?'Вы не участник этого матча.':'Not your match.',not_found:ru?'Матч не найден.':'Not found.'};
+  // message — готовый текст: общий переводчик ошибок эти коды не знает.
+  return res.status(400).json({ok:false,error:r.reason,message:texts[r.reason]||''});
+ }
+ await notifyCourtConfirmed(r.slot).catch(e=>console.error('notifyCourtConfirmed failed:',e.message));
+ res.json({ok:true});
 }catch(e){res.status(500).json({ok:false,error:e.message});}});
 app.post('/api/match/retime', async (req, res) => {
   try {

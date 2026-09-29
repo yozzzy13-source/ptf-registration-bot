@@ -659,6 +659,18 @@ export function isCloseHold(now = Date.now(), timeZone = TIMEZONE, win = nightWi
   const minutes = localMinutes(now, timeZone);
   return minutes >= win.to && minutes < win.to + CLOSE_GRACE_MIN;
 }
+// Когда бот сам снимет матч с неподтверждённым кортом: 28 часов с момента
+// согласования, но не ночью и не в первый час после неё (те же правила, что у
+// автозакрытия). Нужно, чтобы честно назвать игрокам срок, а не пугать
+// абстрактными «28 часами».
+export function courtCloseAt(slot = {}, win = nightWindowCache.v, timeZone = TIMEZONE) {
+  if (String(slot.status || '').toLowerCase() !== 'accepted' || slot.court_confirmed_at || slot.match_type === 'manual' || slot.result_status) return 0;
+  const since = Date.parse(slot.court_pending_at || slot.responded_at || slot.created_at || '');
+  if (!Number.isFinite(since)) return 0;
+  let t = since + NUDGE_CLOSE_H * 3600000;
+  for (let i = 0; i < 200 && isCloseHold(t, timeZone, win); i++) t += 5 * 60000;
+  return t;
+}
 // Утренний матч: три часа до него попадают в ночь, и будильник в пять утра
 // никому не нужен. Предупреждаем накануне вечером, до начала тихих часов.
 export function eveningNoticeDue(slot, now = Date.now(), timeZone = TIMEZONE, win = nightWindowCache.v) {

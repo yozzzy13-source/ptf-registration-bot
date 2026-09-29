@@ -197,7 +197,7 @@ var T={
       hintOpen:'Бот отправит окно лично игрокам твоей группы дивизиона. Они смогут предложить дату, время и корт.',
       hintDirect:'Вызов уйдёт лично выбранному игроку.',
       hintRange:'Отметь все удобные дни и корты — соперник выберет конкретные.',
-      retime:'🕐 Перенести',cancelMatch:'✖️ Отменить',courtOk:'корт подтверждён',timePending:'ждёт подтверждения времени',
+      retime:'🕐 Перенести',cancelMatch:'✖️ Отменить',courtOk:'корт подтверждён',courtMine:'Корт не подтверждён — ваше действие',courtWait:'Ждём подтверждения корта',courtBtn:'✅ Корт подтвердил',courtAsk:'Площадка подтвердила бронь? Сопернику сразу придёт подтверждение матча.',courtHintMine:'Забронируйте корт и нажмите «Корт подтвердил» — без этого матч не считается согласованным.',courtHintWait:'Соперник бронирует корт. Пока бронь не подтверждена, матч не считается согласованным.',courtUntil:'Снимется автоматически',timePending:'ждёт подтверждения времени',
       retimeTitle:'Перенести время матча',retimeHint:'Дата и корт остаются прежними. Соперник подтвердит новое время — тогда оно станет основным.',
       retimeSend:'🕐 Отправить сопернику',retimeSent:'✅ Новое время отправлено сопернику на подтверждение.',
       cancelMatchAsk:'Отменить матч? Соперник получит уведомление, договариваться придётся заново.',
@@ -241,7 +241,7 @@ var T={
       hintOpen:'The bot sends the slot privately to your division group. Players can propose a date, time and court.',
       hintDirect:'The challenge goes privately to the selected player.',
       hintRange:'Mark every day and court that suits you — your opponent picks the exact ones.',
-      retime:'🕐 Reschedule',cancelMatch:'✖️ Cancel',courtOk:'court confirmed',timePending:'new time pending',
+      retime:'🕐 Reschedule',cancelMatch:'✖️ Cancel',courtOk:'court confirmed',courtMine:'Court not confirmed — your action',courtWait:'Waiting for court confirmation',courtBtn:'✅ Court confirmed',courtAsk:'Has the venue confirmed the booking? Your opponent will get the match confirmation right away.',courtHintMine:'Book the court and tap “Court confirmed” — until then the match isn’t final.',courtHintWait:'Your opponent is booking the court. Until it’s confirmed, the match isn’t final.',courtUntil:'Removed automatically',timePending:'new time pending',
       retimeTitle:'Reschedule the match',retimeHint:'Date and court stay the same. Once your opponent confirms, the new time becomes final.',
       retimeSend:'🕐 Send to opponent',retimeSent:'✅ New time sent to your opponent for confirmation.',
       cancelMatchAsk:'Cancel this match? Your opponent will be notified and you will have to arrange it again.',
@@ -621,6 +621,7 @@ function renderMine(){
       +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?(s.agreed_time+'–'+min2hm(hm2min(s.agreed_time)+Number(s.duration_min||matchDuration))):s.time_from)+'</b></div>'
       +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))
          +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
+      +(agreed?courtStatus(s,iAmAuthor):'')
       +(agreed&&pendingTime(s)?'<div class="meta"><span class="pill open">'+esc(X.timePending)+' '+esc(pendingTime(s))+'</span></div>':'')
       +(agreed&&String(s.result_status||'')==='pending'?'<div class="meta"><span class="pill open">'+esc(String(s.result_by)===String(me&&me.id)?X.pendingRes:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
       +(agreed?agreedActions(s,opp):(opp.name?requestActions(s,opp):(iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')))
@@ -628,6 +629,33 @@ function renderMine(){
   }).join('')+historyBlock();
 }
 
+// Корт ещё не подтверждён: автору — что сделать, сопернику — чего ждём,
+// обоим — когда матч снимется сам.
+function courtPending(s){
+  return String(s.status||'')==='accepted'&&!s.court_confirmed_at&&String(s.match_type||'')!=='manual'&&!String(s.result_status||'')&&!matchEnded(s);
+}
+function closeLabel(ms){
+  if(!ms)return '';
+  var d=new Date(Number(ms)),now=new Date(),tm=d.toLocaleTimeString(L?'ru':'en-GB',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Bangkok'});
+  var key=function(x){return x.toLocaleDateString('en-CA',{timeZone:'Asia/Bangkok'})};
+  var tmr=new Date(now.getTime()+86400000);
+  var day=key(d)===key(now)?(L?'сегодня':'today'):key(d)===key(tmr)?(L?'завтра':'tomorrow'):d.toLocaleDateString(L?'ru':'en-GB',{day:'numeric',month:'short',timeZone:'Asia/Bangkok'}).replace('.','');
+  return day+' '+(L?'в':'at')+' '+tm;
+}
+function courtStatus(s,iAmAuthor){
+  if(!courtPending(s))return '';
+  var until=closeLabel(s.court_close_at);
+  return '<div class="meta"><span class="pill open">'+esc(iAmAuthor?X.courtMine:X.courtWait)+'</span></div>'
+    +'<div class="hint">'+esc(iAmAuthor?X.courtHintMine:X.courtHintWait)+(until?' ⏳ '+esc(X.courtUntil)+' '+esc(until)+'.':'')+'</div>';
+}
+function confirmCourtApp(id,btn){
+  var go=function(){btn.disabled=true;btn.textContent='…';
+    fetch('/api/match/court-confirm',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.message||j.error||'Error');load(true)})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+  if(tg&&tg.showConfirm)tg.showConfirm(X.courtAsk,function(ok){if(ok)go()});else if(confirm(X.courtAsk))go();
+}
 function matchContactUrl(s,opp){return s.contact&&s.contact.url || (opp.username?'https://t.me/'+String(opp.username).replace(/^@/,''):'tg://user?id='+encodeURIComponent(String(s.from_telegram_id)===String(me&&me.id)?s.to_telegram_id:s.from_telegram_id))}
 function requestActions(s,opp){
   var b='<div class="acts">',contact=matchContactUrl(s,opp);
@@ -686,7 +714,8 @@ function agreedActions(s,opp){
     else b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';
     return b+'</div>';
   }
-  if(canRetime(s)&&!s.court_confirmed_at&&!pendingTime(s))b+='<button class="mini primary" onclick="bookingHelper(\''+esc(s.challenge_id)+'\',this)">'+esc(L?'📲 Забронировать корт':'📲 Book court')+'</button>';
+  if(canRetime(s)&&!s.court_confirmed_at&&!pendingTime(s))b+='<button class="mini'+(courtPending(s)?'':' primary')+'" onclick="bookingHelper(\''+esc(s.challenge_id)+'\',this)">'+esc(L?'📲 Забронировать корт':'📲 Book court')+'</button>';
+  if(canRetime(s)&&courtPending(s))b+='<button class="mini primary" onclick="confirmCourtApp(\''+esc(s.challenge_id)+'\',this)">'+esc(X.courtBtn)+'</button>';
   if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';
   if(waitingOnOpponent(s))b+=nudgeButton(s);
   b+='<button class="mini" onclick="cancelMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancelMatch)+'</button>';

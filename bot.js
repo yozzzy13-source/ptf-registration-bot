@@ -1969,7 +1969,7 @@ export async function handleCallback(q) {
     if (String(slot.from_telegram_id) !== String(from.id)) {
       return answerCallbackQuery(q.id, lang === 'ru' ? 'Время меняет тот, кто бронировал корт.' : 'Only the player who booked can change the time.', true).catch(() => {});
     }
-    return sendMessage(chatId, timeChoiceText(slot,lang), { reply_markup: timeChoiceKeyboard(slot) }).catch(() => {});
+    return sendMessage(chatId, timeChoiceText(slot,lang), { reply_markup: timeChoiceKeyboard(slot,lang) }).catch(() => {});
   }
   if (data.startsWith('mt_set:')) {
     const [, id, ...rest] = data.split(':');

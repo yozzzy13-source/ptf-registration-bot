@@ -1650,4 +1650,55 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/for\(const id of ids\)if\(!attentionCounts\.has\(String\(id\)\)&&previous\[id\]!==undefined\)attentionCounts\.set/.test(botSrc4),'Настоящее изменение матча по-прежнему приносит сообщение');
 }
 
+// --- Подтверждение корта: понятно обеим сторонам, кнопка в приложении -----------
+{
+ const mt=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ const ix=await fs.readFile(path.join(root,'index.js'),'utf8');
+ const md=await import(pathToFileURL(path.join(root,'matchesdb.js')).href);
+ const m=await import(pathToFileURL(path.join(root,'matches.js')).href);
+ const now=Date.parse('2026-09-29T10:00:00+07:00');
+ check(m.deadlineLabel(Date.parse('2026-09-29T21:26:00+07:00'),'ru',now)==='сегодня до 21:26','Срок по-русски: «сегодня до 21:26»');
+ check(m.deadlineLabel(Date.parse('2026-10-01T13:00:00+07:00'),'en',now)==='by 13:00 on 1 Oct','Срок по-английски: «by 13:00 on 1 Oct»');
+ const slot={status:'accepted',court_pending_at:'2026-09-28T10:00:00+07:00'};
+ check(md.courtCloseAt(slot)>Date.parse(slot.court_pending_at),'Срок автоснятия считается от «ждём корт»');
+ check(md.courtCloseAt({...slot,court_confirmed_at:'x'})===0&&md.courtCloseAt({...slot,match_type:'manual'})===0,'После подтверждения корта и у ручных матчей срока нет');
+ const agreed=mt.slice(mt.indexOf('export async function notifyMatchAgreed'),mt.indexOf('export async function sendDirectChallenge'));
+ check(/match_court_ok:/.test(agreed)&&/не считается согласованным/.test(agreed)&&/снимется автоматически/.test(agreed),'«Матч согласован»: у автора кнопка «Корт подтвердил», объяснение и срок');
+ check(/Остался последний шаг/.test(agreed)&&/One step left/.test(agreed),'Сопернику объясняем, чего ждём');
+ check(!/до сегодня/.test(mt),'Нет корявого «до сегодня, 21:26»');
+ const stuck=mt.slice(mt.indexOf('export async function notifyStuckCourt'),mt.indexOf('export async function notifyStuckTimeChange'));
+ check(/stage==='d1'&&oppId/.test(stuck)&&/contactRow\(slot,oppId,lang\)/.test(stuck),'На последнем напоминании соперник тоже получает предупреждение с кнопкой «Написать»');
+ check(/app\.post\('\/api\/match\/court-confirm'/.test(ix)&&/notifyCourtConfirmed\(r\.slot\)/.test(ix),'Корт можно подтвердить из мини-приложения — уведомления те же');
+ check(/court_close_at: courtCloseAt\(s\)/.test(ix),'Карточка знает срок автоснятия');
+ check(/function confirmCourtApp/.test(mh)&&/canRetime\(s\)&&courtPending\(s\)\)b\+='<button class="mini primary" onclick="confirmCourtApp/.test(mh),'В «Моих матчах» у автора есть кнопка «Корт подтвердил»');
+ check(/courtMine:'Корт не подтверждён — ваше действие'/.test(mh)&&/courtWait:'Ждём подтверждения корта'/.test(mh),'На карточке видно, кто и что должен сделать с кортом');
+}
+
+// --- Английские кнопки у англоязычных игроков, понятные подсказки --------------
+{
+ const mt=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ const pf=await fs.readFile(path.join(root,'pairflow.js'),'utf8');
+ const bt=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ const map=JSON.parse(mt.match(/const MATCH_BUTTON_EN = (\{.*\});/)[1]);
+ const miss=[...mt.matchAll(/text\s*:\s*(['"`])([^'"`]*[А-Яа-яЁё][^'"`]*)\1/g)].map(m=>m[2]).filter(t=>!map[t]&&!/Создать 2 варианта|Добавить комментарий/.test(t));
+ check(!miss.length,'Каждая русская кнопка матчей имеет английский перевод'+(miss.length?': '+miss.join(', '):''));
+ const m=await import(pathToFileURL(path.join(root,'matches.js')).href);
+ const kb=m.timeChoiceKeyboard({challenge_id:'x',agreed_time:'10:00'},'en');
+ check(kb.inline_keyboard.at(-1)[0].text==='✖️ Cancel match','Выбор нового времени: кнопка отмены по-английски');
+ check(/timeChoiceKeyboard\(slot,lang\)/.test(bt),'Бот передаёт язык в выбор времени');
+ check(/async function langOf\(id\)/.test(pf)&&/'✅ Accept'/.test(pf)&&/'💳 I’ll pay'/.test(pf)&&/'👤 Invite someone else'/.test(pf),'Парный турнир: приглашение, отказ и оплата — на языке получателя');
+ const direct=mt.slice(mt.indexOf('export async function sendDirectChallenge'),mt.indexOf('export async function declineDirectChallenge'));
+ check(!/match_cancel:\$\{slot\.challenge_id\}` \}\]\];/.test(direct.split('const delivered')[0])&&/забронирует корт/.test(direct),'Получателю вызова — без «Отменить запрос», с подсказкой, кто бронирует корт');
+ check(/Вызвать другого игрока/.test(mt.slice(mt.indexOf('export async function declineDirectChallenge'))),'После отказа — кнопки «Вызвать другого» и «Мои матчи»');
+ check(/Отклик на ваше окно/.test(mt)&&!/твоё окно|Подтверди или предложи/.test(mt),'Отклик на окно — на «вы» и с подсказкой про корт');
+ const rem=mt.slice(mt.indexOf('export async function notifyMatchReminder'),mt.indexOf('export async function notifyDeadline'));
+ check(/courtRow/.test(rem)&&/снимется автоматически/.test(rem),'Напоминание о матче при неподтверждённом корте: кнопка и срок');
+ const acc=mt.slice(mt.indexOf('export async function notifyTimeChangeAccepted'),mt.indexOf('export async function notifyTimeChangeRejected'));
+ check(/match_court_ok:/.test(acc),'После переноса времени у автора есть «Корт подтвердил»');
+ const exp=mt.slice(mt.indexOf('export async function notifyNegotiationExpired'),mt.indexOf('export async function notifyStuckCourt'));
+ check(/scope==='court'&&!booker/.test(exp),'Снятие матча без корта: сопернику свой текст');
+ check(/Счёт вносит кто-то один из вас/.test(mt)&&/Only one of you needs to enter the score/.test(mt),'«Матч сыгран?» — счёт вносит один, второй подтверждает');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

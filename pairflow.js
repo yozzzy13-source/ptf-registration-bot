@@ -14,6 +14,7 @@
 //      Пока второй не решил, место никому не отдаётся.
 import { sendMessage, answerCallbackQuery } from './telegram.js';
 import { PUBLIC_URL } from './config.js';
+import { findApplicantByTelegramId } from './sheets.js';
 import {
   ensureTournamentSheets, listTournaments, getTournament, listPairs, createPair, updatePair,
   invitePartner, acceptInvite, declineInvite, findInvite, findPair, candidatePlayers, pairLabel, listEntries
@@ -23,6 +24,11 @@ const txt = v => String(v ?? '').trim();
 const lower = v => txt(v).toLowerCase();
 const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const ru = lang => lang !== 'en';
+// Язык получателя, а не того, кто нажал кнопку: сообщение уходит другому игроку.
+async function langOf(id) {
+  return (await findApplicantByTelegramId(id).catch(() => null))?.language === 'ru' ? 'ru' : 'en';
+}
+const tName = (t, lang) => txt(ru(lang) ? t?.name : (t?.name_en || t?.name));
 
 // Список кандидатов держим в памяти на пользователя: в callback_data влезает
 // 64 байта, имя туда не положить, а индекс — легко.
@@ -186,14 +192,17 @@ async function findMutual(tournamentId, myId, theirId) {
 // Приглашение самому партнёру: кнопки согласия прямо в сообщении.
 export async function notifyInvite(invite, pair, tournament) {
   if (!txt(invite?.to_id)) return null;
-  const name = txt(pair.player_a_name) || 'Игрок';
-  const title = txt(tournament?.name) || 'парный турнир';
-  return sendMessage(invite.to_id,
-    `👥 <b>Приглашение в пару</b>\n\n<b>${esc(name)}</b> зовёт вас в пару на турнир <b>${esc(title)}</b>.\n\n` +
-    `Если соглашаетесь — место за вами обоими, дальше выберете, кто вносит взнос. Если нет, просто откажитесь: у него останется заявка и он позовёт другого.`, {
+  const lang = await langOf(invite.to_id), R = ru(lang);
+  const name = txt(pair.player_a_name) || (R ? 'Игрок' : 'A player');
+  const title = tName(tournament, lang) || (R ? 'парный турнир' : 'the doubles tournament');
+  return sendMessage(invite.to_id, R
+    ? `👥 <b>Приглашение в пару</b>\n\n<b>${esc(name)}</b> зовёт вас в пару на турнир <b>${esc(title)}</b>.\n\n` +
+      `Если соглашаетесь — место за вами обоими, дальше выберете, кто вносит взнос. Если нет, просто откажитесь: у него останется заявка и он позовёт другого.`
+    : `👥 <b>Pair invite</b>\n\n<b>${esc(name)}</b> invites you to play as a pair in <b>${esc(title)}</b>.\n\n` +
+      `If you accept, the spot is held for both of you and you’ll then choose who pays the entry fee. If not, just decline: their entry stays and they can invite someone else.`, {
     reply_markup: { inline_keyboard: [[
-      { text: '✅ Согласен', callback_data: `pr:acc:${invite.invite_id}` },
-      { text: '✖️ Отказаться', callback_data: `pr:dec:${invite.invite_id}` }
+      { text: R ? '✅ Согласен' : '✅ Accept', callback_data: `pr:acc:${invite.invite_id}` },
+      { text: R ? '✖️ Отказаться' : '✖️ Decline', callback_data: `pr:dec:${invite.invite_id}` }
     ]] }
   }).catch(e => { console.error('pair invite notify failed:', e.message); return null; });
 }
@@ -237,9 +246,11 @@ async function decline(chatId, from, lang, inviteId) {
   await declineInvite(inviteId, { id: from.id }, TEST);
   await sendMessage(chatId, ru(lang) ? 'Отказ записан. Спасибо, что ответили.' : 'Your decline is recorded. Thanks for answering.');
   if (txt(invite.from_id)) {
-    await sendMessage(invite.from_id,
-      `😔 <b>${esc(txt(invite.to_name) || 'Игрок')}</b> не сможет играть с вами в паре.\n\nВаша заявка осталась — позовите другого партнёра.`, {
-      reply_markup: { inline_keyboard: [[{ text: '👤 Позвать другого', callback_data: `pr:who:${invite.pair_id}` }]] }
+    const R = ru(await langOf(invite.from_id));
+    await sendMessage(invite.from_id, R
+      ? `😔 <b>${esc(txt(invite.to_name) || 'Игрок')}</b> не сможет играть с вами в паре.\n\nВаша заявка осталась — позовите другого партнёра.`
+      : `😔 <b>${esc(txt(invite.to_name) || 'The player')}</b> can’t play with you as a pair.\n\nYour entry stays — invite another partner.`, {
+      reply_markup: { inline_keyboard: [[{ text: R ? '👤 Позвать другого' : '👤 Invite someone else', callback_data: `pr:who:${invite.pair_id}` }]] }
     }).catch(() => {});
   }
 }
@@ -252,16 +263,21 @@ async function announcePair(tournamentId, pairId, lang = 'ru') {
   const label = pairLabel(pair);
   const fee = [txt(tournament?.entry_fee_thb) ? `${tournament.entry_fee_thb} ฿` : '',
     txt(tournament?.entry_fee_usdt) ? `${tournament.entry_fee_usdt} USDT` : ''].filter(Boolean).join(' / ');
-  const body = `🤝 <b>Пара собрана</b>\n\n<b>${esc(label)}</b> — турнир <b>${esc(tournament?.name || '')}</b>.\n\n` +
-    `Место за вами закреплено.${fee ? ` Взнос за пару: <b>${esc(fee)}</b>.` : ''}\n\n` +
-    `Решите, кто вносит взнос. Пока решение не принято, место держится за вами.`;
-  const keyboard = pid => ({ inline_keyboard: [
-    [{ text: '💳 Плачу я', callback_data: `pr:pay:${pairId}:${pid === txt(pair.player_a_id) ? 'a' : 'b'}` }],
-    [{ text: '👥 Платит партнёр', callback_data: `pr:pay:${pairId}:${pid === txt(pair.player_a_id) ? 'b' : 'a'}` }],
-    [{ text: '🤝 Пополам', callback_data: `pr:pay:${pairId}:both` }]
+  const body = l => ru(l)
+    ? `🤝 <b>Пара собрана</b>\n\n<b>${esc(label)}</b> — турнир <b>${esc(tName(tournament, l))}</b>.\n\n` +
+      `Место за вами закреплено.${fee ? ` Взнос за пару: <b>${esc(fee)}</b>.` : ''}\n\n` +
+      `Решите, кто вносит взнос. Пока решение не принято, место держится за вами.`
+    : `🤝 <b>Pair confirmed</b>\n\n<b>${esc(label)}</b> — <b>${esc(tName(tournament, l))}</b>.\n\n` +
+      `Your spot is secured.${fee ? ` Entry fee per pair: <b>${esc(fee)}</b>.` : ''}\n\n` +
+      `Decide who pays the entry fee. The spot is held for you until you decide.`;
+  const keyboard = (pid, l) => ({ inline_keyboard: [
+    [{ text: ru(l) ? '💳 Плачу я' : '💳 I’ll pay', callback_data: `pr:pay:${pairId}:${pid === txt(pair.player_a_id) ? 'a' : 'b'}` }],
+    [{ text: ru(l) ? '👥 Платит партнёр' : '👥 My partner pays', callback_data: `pr:pay:${pairId}:${pid === txt(pair.player_a_id) ? 'b' : 'a'}` }],
+    [{ text: ru(l) ? '🤝 Пополам' : '🤝 Split it', callback_data: `pr:pay:${pairId}:both` }]
   ] });
   for (const id of [txt(pair.player_a_id), txt(pair.player_b_id)].filter(Boolean)) {
-    await sendMessage(id, body, { reply_markup: keyboard(id) }).catch(() => {});
+    const l = await langOf(id);
+    await sendMessage(id, body(l), { reply_markup: keyboard(id, l) }).catch(() => {});
   }
 }
 
@@ -271,22 +287,26 @@ async function choosePayer(chatId, from, lang, pairId, who) {
   if (txt(pair.payer)) {
     return sendMessage(chatId, ru(lang)
       ? `Уже выбрано: ${esc(payerLabel(pair, pair.payer))}. Если нужно поменять — напишите организатору.`
-      : `Already chosen: ${esc(payerLabel(pair, pair.payer))}. Contact the organiser to change it.`);
+      : `Already chosen: ${esc(payerLabel(pair, pair.payer, 'en'))}. Contact the organiser to change it.`);
   }
   await updatePair(pairId, { payer: who }, { id: from.id }, TEST);
   const updated = { ...pair, payer: who };
   const tournament = await getTournament(pair.tournament_id, TEST);
   const fee = [txt(tournament?.entry_fee_thb) ? `${tournament.entry_fee_thb} ฿` : '',
     txt(tournament?.entry_fee_usdt) ? `${tournament.entry_fee_usdt} USDT` : ''].filter(Boolean).join(' / ');
-  const text = `💳 <b>Оплата пары</b>\n\nПлатит: <b>${esc(payerLabel(updated, who))}</b>.` +
-    `${fee ? `\nСумма: <b>${esc(fee)}</b>${who === 'both' ? ' — делится пополам' : ''}.` : ''}\n\n` +
-    `Реквизиты пришлёт организатор. Место за парой держится до оплаты.`;
+  const text = l => ru(l)
+    ? `💳 <b>Оплата пары</b>\n\nПлатит: <b>${esc(payerLabel(updated, who, l))}</b>.` +
+      `${fee ? `\nСумма: <b>${esc(fee)}</b>${who === 'both' ? ' — делится пополам' : ''}.` : ''}\n\n` +
+      `Реквизиты пришлёт организатор. Место за парой держится до оплаты.`
+    : `💳 <b>Pair payment</b>\n\nPaying: <b>${esc(payerLabel(updated, who, l))}</b>.` +
+      `${fee ? `\nAmount: <b>${esc(fee)}</b>${who === 'both' ? ' — split in half' : ''}.` : ''}\n\n` +
+      `The organiser will send payment details. The spot is held until payment.`;
   for (const id of [txt(pair.player_a_id), txt(pair.player_b_id)].filter(Boolean)) {
-    await sendMessage(id, text).catch(() => {});
+    await sendMessage(id, text(await langOf(id))).catch(() => {});
   }
 }
-function payerLabel(pair, who) {
-  if (who === 'both') return 'оба, пополам';
+function payerLabel(pair, who, lang = 'ru') {
+  if (who === 'both') return ru(lang) ? 'оба, пополам' : 'both, split';
   return who === 'a' ? txt(pair.player_a_name) : txt(pair.player_b_name);
 }
 
