@@ -1643,4 +1643,11 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/is_admin: Boolean\(v\.isAdmin && !viewAs\)/.test(idx),'Лига знает, что открыл организатор; в режиме «глазами группы» — нет');
 }
 
+// --- «Ждут вашего действия» не повторяется после перезапуска -----------------
+{
+ const botSrc4=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/if\(!attentionCounts\.has\(id\)\)\{attentionCounts\.set\(id,n\);continue;\}/.test(botSrc4),'После перезапуска первое наблюдение запоминается молча — без повторного сообщения');
+ check(/for\(const id of ids\)if\(!attentionCounts\.has\(String\(id\)\)&&previous\[id\]!==undefined\)attentionCounts\.set/.test(botSrc4),'Настоящее изменение матча по-прежнему приносит сообщение');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
