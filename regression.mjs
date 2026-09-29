@@ -1610,6 +1610,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(withHtml[0].description_html.en==='<b>plain</b>'&&withHtml[0].description.en==='plain','Описание приходит и простым текстом, и с оформлением');
  const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
  check(/var descHtml=partnerText\(p\.description_html\)/.test(lg)&&/white-space:pre-wrap/.test(lg),'Карточка показывает оформление и сохраняет отступы');
+ check(/\.pt \.ptimg\{[^}]*object-fit:contain/.test(lg)&&!/\.pt \.ptimg\{[^}]*object-fit:cover/.test(lg),'Картинка партнёра показывается целиком, без обрезки');
  const src=await fs.readFile(path.join(root,'sheets.js'),'utf8');
  check(/textFormatRuns/.test(src)&&/falling back to plain text/.test(src),'Не удалось прочитать оформление — берётся простой текст');
 }
