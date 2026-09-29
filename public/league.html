@@ -355,9 +355,9 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .pmq img{height:40px;width:auto;max-width:170px;object-fit:contain;display:block;border-radius:6px}
 .pmq b{font-size:12px;font-weight:800;color:var(--dim);white-space:nowrap}
 .mq-champ .chbig{width:250px;margin-bottom:0}
-.mq-ldr .chbig{width:196px;padding:12px 10px 11px}
+.mq-ldr .chbig{width:164px;padding:12px 8px 11px}
 .mq-ldr .chbig .avr,.mq-ldr .chbig .avph{width:64px;height:64px;flex:0 0 64px;font-size:20px;margin:0 auto 8px}
-.mq-ldr .chbig .nm2{font-size:14px}
+.mq-ldr .chbig .nm2{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ldst{margin-top:6px;font-size:11.5px;font-weight:800;color:var(--amber);font-variant-numeric:tabular-nums}
 .mq-prom .mv{width:250px;margin-bottom:0}
 .live{display:inline-flex;align-items:center;gap:5px;margin-left:6px;font-size:10.5px;letter-spacing:1.2px;font-weight:900;color:var(--win);vertical-align:middle}
@@ -1681,7 +1681,8 @@ function champCard(d){
   var h='<div class="chbig">'
     +'<div onclick="openPlayerByName(\''+q(d.champion.name)+'\',\'home\')">'
     +avL(d.champion)+'<div class="nm2">'+esc(d.champion.name)+'</div></div>'
-    +'<div class="sub">'+esc((d.title||divLabel(d.letter))+' '+X.champTag)+'</div>';
+    // Заголовок блока уже говорит «чемпионы», поэтому в карточке только дивизион.
+    +'<div class="sub">'+esc(d.title||divLabel(d.letter))+'</div>';
   if(d.final_score)h+='<div class="chsc">'+esc(d.final_score)+'</div>';
   if(d.runner_up&&d.runner_up.name){
     h+='<div class="chru" onclick="openPlayerByName(\''+q(d.runner_up.name)+'\',\'home\')">'
@@ -1699,7 +1700,7 @@ function mvLine(pl,cls,arrow){
 function championsBlock(){
   var s=lastFinishedSeason();
   if(!s)return '';
-  var h='<div class="card"><h3>'+esc((L?'Итоги сезона ':'Season ')+s.number+(L?'':' results'))+'</h3>';
+  var h='<div class="card"><h3>'+esc(L?'Чемпионы сезона '+s.number:'Season '+s.number+' Champions')+'</h3>';
   var any='';
   (s.divisions||[]).forEach(function(d){ any+=champCard(d) });
   h+=any||'<div class="hint">'+esc(X.noData)+'</div>';
@@ -1721,7 +1722,7 @@ function championsStrip(){
   if(!s)return '';
   var cards='';
   (s.divisions||[]).forEach(function(d){ cards+=champCard(d) });
-  var h='<div class="card"><h3>'+esc((L?'Итоги сезона ':'Season ')+s.number+(L?'':' results'))+'</h3>';
+  var h='<div class="card"><h3>'+esc(L?'Чемпионы сезона '+s.number:'Season '+s.number+' Champions')+'</h3>';
   h+=cards?'<div class="mq mq-champ" data-speed="22"><div class="mq-track">'+cards+'</div></div>'
           :'<div class="hint">'+esc(X.noData)+'</div>';
   return h+'</div>';
@@ -1898,8 +1899,9 @@ function currentSeasonSummary(){
 function leaderCard(pl,label){
   return '<div class="chbig ldr" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
     +avL(pl)+'<div class="nm2">'+esc(pl.name)+'</div>'
-    +'<div class="sub">'+esc(label+' '+X.leaderTag)+'</div>'
-    +'<div class="ldst">'+esc((pl.points||0)+' '+X.ptsShort+' · '+(pl.matches||0)+' '+X.mShort)+'</div></div>';
+    +'<div class="sub">'+esc(label)+'</div>'
+    // Коротко, как в таблице дивизиона: игры · победы · очки.
+    +'<div class="ldst">'+esc((L?'И ':'G ')+(pl.matches||0)+' · '+(L?'П ':'W ')+(pl.wins||0)+' · '+(L?'ОЧК ':'PTS ')+(pl.points||0))+'</div></div>';
 }
 function leadersStrip(){
   var s=currentSeasonSummary();
