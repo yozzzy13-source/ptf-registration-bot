@@ -332,7 +332,8 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .pt .ptbody{padding:13px 13px 12px}
 .pt .ptcat{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;font-weight:800;color:var(--champ)}
 .pt .ptname{font-size:17px;font-weight:800;margin-top:3px}
-.pt .ptdesc{margin-top:6px;color:var(--dim);font-size:13px;line-height:1.5;white-space:pre-line}
+.pt .ptdesc{margin-top:6px;color:var(--dim);font-size:13px;line-height:1.5;white-space:pre-wrap}
+.pt .ptdesc b{color:var(--text)}
 .ptacts{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 .ptacts a{flex:1 1 110px;text-align:center;text-decoration:none;border-radius:12px;padding:11px 12px;
   font-size:13.5px;font-weight:800;border:1px solid var(--line2);color:var(--txt);background:var(--surf2)}
@@ -2534,7 +2535,10 @@ function partnerMessage(p){
 // не выводим: из него собирается только кнопка с готовым сообщением.
 function partnerCard(p){
   var title=p.name||p.name_en||'';
-  var desc=partnerText(p.description);
+  // Описание приходит с оформлением из таблицы (жирный, курсив…) уже готовым
+  // безопасным HTML: сервер сам экранирует текст и ставит только эти теги.
+  var descHtml=partnerText(p.description_html);
+  var desc=descHtml||esc(partnerText(p.description));
   var cat=partnerText(p.category);
   var btn=function(url,label,cls){
     return '<a'+(cls?' class="'+cls+'"':'')+' href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(label)+'</a>';
@@ -2550,7 +2554,7 @@ function partnerCard(p){
     +'<div class="ptbody">'
     +(cat?'<div class="ptcat">'+esc(cat)+'</div>':'')
     +'<div class="ptname">'+esc(title)+'</div>'
-    +(desc?'<div class="ptdesc">'+esc(desc)+'</div>':'')
+    +(desc?'<div class="ptdesc">'+desc+'</div>':'')
     +(acts.length?'<div class="ptacts">'+acts.join('')+'</div>':'')
     +'</div></div>';
 }
