@@ -13,6 +13,7 @@
 <link rel="icon" href="/public/img/ptf.png" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="/public/ptf-prefs.js"></script>
+<script src="/public/ptf-nav.js"></script>
 <style>
 /* Noir: тёплый чёрный, приглушённый янтарь, шампань для титулов.
    Слои разделяются светлотой и тонкой кромкой, а не жирными рамками. */
@@ -89,6 +90,13 @@ padding:8px 0 10px;background:var(--bg);box-shadow:0 12px 14px -8px var(--bg);ma
 text-align:center;font-size:10.5px;font-weight:700;cursor:pointer;user-select:none;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tab.on{background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--amber);border-color:var(--accLine)}
+/* Значок над подписью: на телефоне так вкладка читается с одного взгляда. */
+.tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 3px 7px}
+.tab .nvi{width:18px;height:18px;flex:0 0 auto;opacity:.85}
+.tab.on .nvi{opacity:1}
+.tab .tl{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tabs.five{grid-template-columns:repeat(5,1fr)}
+.tabs.five .tab{font-size:9.8px}
 .tab.off{opacity:.35;cursor:default}
 
 /* общее */
@@ -763,6 +771,35 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 .loginsheet .tgw{min-height:48px;display:flex;justify-content:center}
 .loginsheet .close{width:auto;display:inline-block;margin-top:16px;background:transparent;border:0;color:var(--mute);font:inherit;font-size:12px;cursor:pointer}
 @media (min-width:560px){.loginsheet{align-items:center}.loginsheet .box{border-radius:20px}}
+.sharebtn{display:inline-flex;align-items:center;gap:6px;width:auto;margin:0;padding:7px 12px;border-radius:999px;
+  border:1px solid var(--line2);background:var(--card2);color:var(--dim);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
+.sharebtn .nvi{width:15px;height:15px}
+.backrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px}
+.backrow .back{margin-bottom:0}
+.divshare{display:flex;justify-content:flex-end;margin:-4px 0 12px}
+.intro{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.62);display:flex;align-items:flex-end;justify-content:center;animation:introIn .25s ease}
+@keyframes introIn{from{opacity:0}to{opacity:1}}
+.intro .box{position:relative;width:100%;max-width:480px;max-height:92vh;overflow:auto;background:linear-gradient(160deg,var(--accBg2),var(--surf) 45%);
+  border:1px solid var(--accLine);border-radius:22px 22px 0 0;padding:24px 20px 22px;box-shadow:0 -20px 50px rgba(0,0,0,.35)}
+.intro .x{position:absolute;top:12px;right:12px;width:32px;height:32px;margin:0;padding:0;border-radius:50%;border:1px solid var(--line2);
+  background:var(--card2);color:var(--mute);font-size:13px;cursor:pointer}
+.intro .kick{font-size:9.5px;letter-spacing:2.6px;font-weight:800;color:var(--champ);margin-bottom:8px}
+.intro h2{font-size:24px;font-weight:900;letter-spacing:-.6px;line-height:1.1;margin-bottom:9px}
+.intro .lead{font-size:13.5px;line-height:1.55;color:var(--dim);margin-bottom:16px}
+.intro .pts{display:grid;gap:8px;margin-bottom:18px}
+.intro .pt1{display:flex;gap:12px;align-items:flex-start;background:var(--card2);border:1px solid var(--line2);border-radius:14px;padding:11px 12px}
+.intro .pt1 .nvi{flex:0 0 22px;width:22px;height:22px;color:var(--amber);margin-top:1px}
+.intro .pt1 b{display:block;font-size:13px;margin-bottom:2px}
+.intro .pt1 span{font-size:12px;line-height:1.45;color:var(--dim)}
+.intro .go{width:100%;margin:0;padding:15px;border:0;border-radius:15px;font:inherit;font-size:15.5px;font-weight:900;color:#1A1208;
+  background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer}
+.intro .alt{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:12.5px}
+.intro .alt a{color:var(--dim);text-decoration:none;font-weight:700}
+.intro .alt a:last-child{color:var(--amber)}
+@media (min-width:560px){.intro{align-items:center}.intro .box{border-radius:22px}}
+.webfoot{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.webfoot a{display:inline-flex;align-items:center;border:1px solid var(--line2);border-radius:999px;padding:7px 12px;color:var(--mute);
+  font-size:11.5px;font-weight:800;text-decoration:none}
 /* Компьютер. Весь интерфейс рисуется в пикселях под телефон, поэтому на
    большом экране его целиком увеличиваем (zoom): буквы, аватарки, таблицы
    растут вместе и не ломают пропорции. Отдельно — то, что на широком экране
@@ -771,7 +808,9 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 @media (min-width:900px){
   .wrap{max-width:820px;padding-top:24px;zoom:1.12}
   .tabs{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:1fr}
-  .tab{font-size:12.5px;padding:11px 4px}
+  .tab{font-size:12px;padding:9px 4px 8px}
+  .tabs.five{grid-template-columns:none}
+  .tabs.five .tab{font-size:11.5px}
   .grid{grid-template-columns:repeat(3,1fr)}
   .pt:has(>.ptimg){display:grid;grid-template-columns:230px minmax(0,1fr)}
   .pt .ptimg{width:230px;height:100%;min-height:230px;max-height:none;border-bottom:0;border-right:1px solid var(--line2);padding:14px}
@@ -816,7 +855,12 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 // мигнуть тёмным, и наоборот.
 try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
   document.documentElement.setAttribute('data-theme',_th); }catch(e){}
-var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
+var tg=window.Telegram&&window.Telegram.WebApp;
+// В обычном браузере скрипт Telegram тоже подключён, но его окна и кнопки там
+// не работают (showAlert и подобные падают). Вне Telegram считаем, что его нет:
+// везде срабатывают обычные браузерные замены.
+if(tg&&(!tg.platform||tg.platform==='unknown')&&!tg.initData)tg=null;
+if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
@@ -824,6 +868,8 @@ var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 // подключён и здесь, но initData в браузере пустой.
 var IS_WEB=!initData&&!linkToken;
 var webGuest=false,needsProfile=false,webBot='';
+// Флаги из адреса читаем сразу: дальше адрес подменяется под открытый экран.
+var wantJoin=/[?&]join=1/.test(location.search),loginFailed=/[?&]login=failed/.test(location.search);
 if(IS_WEB)document.documentElement.classList.add('web');
 var L=window.PTFPrefs?PTFPrefs.lang()==='ru':((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 
@@ -1183,15 +1229,24 @@ var ALL_VIEWS=['home','div','race','players','matches','events','fantasy','partn
 var VIEWS=ALL_VIEWS.slice();
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
 matches:'viewMatches',events:'viewEvents',fantasy:'viewFantasy',partners:'viewPartners',about:'viewAbout'};
+// «Мои матчи» — отдельный экран (/match) со своим меню, но в общем меню лиги
+// он стоит рядом с «Матчами», у игрока лиги и у организатора.
+var canMyMatches=false;
+function goMyMatches(){ location.href=window.PTFNav?PTFNav.hrefFor('mymatches',{token:linkToken}):'/match'+(linkToken?'?t='+encodeURIComponent(linkToken):''); }
 function buildTabs(){
   var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
-              matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
-  var labels=VIEWS.map(function(k){return [k,byCode[k]||k]});
-  $('tabs').innerHTML=labels.map(function(x){
+              matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout,mymatches:L?'Мои матчи':'My matches'};
+  var keys=VIEWS.slice();
+  if(canMyMatches){var at=keys.indexOf('matches');keys.splice(at>=0?at+1:keys.length,0,'mymatches')}
+  var ic=function(k){return window.PTFNav?PTFNav.icon(k):''};
+  var tabs=$('tabs');
+  tabs.classList.toggle('five',keys.length>8);
+  tabs.innerHTML=keys.map(function(k){
     // У «Событий» — зелёная точка, когда есть открытая регистрация: иначе про
     // новое событие узнают только те, кто зашёл во вкладку сам.
-    var dot=(x[0]==='events'&&evOpenCount()>0)?'<span class="dot"></span>':'';
-    return '<div class="tab" data-t="'+x[0]+'" onclick="showTab(\''+x[0]+'\')">'+esc(x[1])+dot+'</div>';
+    var dot=(k==='events'&&evOpenCount()>0)?'<span class="dot"></span>':'';
+    var go=k==='mymatches'?'goMyMatches()':'showTab(\''+k+'\')';
+    return '<div class="tab" data-t="'+k+'" onclick="'+go+'">'+ic(k)+'<span class="tl">'+esc(byCode[k]||k)+dot+'</span></div>';
   }).join('');
   // Активную вкладку заново подсвечивает showTab — вызываем её текущим режимом.
   var cur=document.querySelector('.tab[data-t="'+mode+'"]');
@@ -1547,6 +1602,7 @@ function syncBack(){
   // запись в истории, и «назад» возвращает на вкладку, а не уводит с сайта.
   if(IS_WEB){
     try{ if(openId&&!(history.state&&history.state.card))history.pushState({card:openId},''); }catch(e){}
+    syncUrl();
     return;
   }
   if(!tg||!tg.BackButton)return;
@@ -2400,7 +2456,7 @@ function renderDiv(){
   if(divErr){$('viewDiv').innerHTML=chips+'<div class="empty" style="color:#C2695E">'+esc(divErr)+'</div>';return}
   if(!divData){$('viewDiv').innerHTML=chips+'<div class="empty">…</div>';loadDiv();return}
 
-  var d=divData,po=d.playoff||{},h=chips;
+  var d=divData,po=d.playoff||{},h=chips+'<div class="divshare">'+shareBtn('shareDiv()')+'</div>';
   if(po.champion){
     h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in">'
       +'<div class="cl">'+esc(X.champion)+'</div>'+avL(po.champion)
@@ -2474,7 +2530,7 @@ function poBox(title,m,isFinal){
     +side(m.first)+side(m.second)+'</div>';
 }
 function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
-function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv()}
+function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv();syncUrl()}
 function toggleExt(){showExt=!showExt;renderDiv()}
 function toggleMx(){showMx=!showMx;renderDiv()}
 function loadDiv(){
@@ -2783,7 +2839,8 @@ function renderAccess(){
   // Выход — внизу страницы: в шапке у вошедшего уже стоит его карточка, и на
   // телефоне третьей кнопке там тесно.
   var foot=$('webFoot');
-  if(foot)foot.innerHTML=IS_WEB&&!webGuest?'<button class="quiet" onclick="logout()">'+esc(L?'Выйти из аккаунта':'Log out')+'</button>':'';
+  if(foot)foot.innerHTML=IS_WEB?('<a href="/about">'+esc(L?'О лиге':'About the league')+'</a>'
+    +(webGuest?'':'<button class="quiet" onclick="logout()">'+esc(L?'Выйти из аккаунта':'Log out')+'</button>')):'';
   if(!bar)return;
   if(webGuest){
     bar.innerHTML='<div class="accbar"><div class="tx"><b>'+esc(L?'Вход через Telegram':'Log in with Telegram')+'</b>'
@@ -2825,10 +2882,76 @@ function openLogin(){
   sc.setAttribute('data-radius','12');
   sc.setAttribute('data-request-access','write');
   sc.setAttribute('data-lang',L?'ru':'en');
-  sc.setAttribute('data-auth-url',location.origin+'/auth/telegram?next='+encodeURIComponent(location.pathname+location.search.replace(/[?&]login=failed/,'')));
+  sc.setAttribute('data-auth-url',location.origin+'/auth/telegram?next='+encodeURIComponent(location.pathname+location.search.replace(/[?&](login=failed|join=1)/g,'')));
   $('tgWidget').appendChild(sc);
 }
 function logout(){ location.href='/auth/logout?next='+encodeURIComponent(location.pathname); }
+// ------------------------------------------------------ ссылки «поделиться»
+// У каждого игрока и дивизиона свой адрес на сайте: /p/<имя> и /d/<буква>.
+// По такой ссылке открывается сразу нужная страница, а мессенджер подтягивает
+// в превью имя и фото. Делимся всегда адресом сайта, даже из Telegram.
+var SITE='https://phukettennis.com';
+function slugOf(name){
+  var v=String(name||'');try{v=v.normalize('NFKD').replace(/[\u0300-\u036f]/g,'')}catch(e){}
+  return v.toLowerCase().replace(/[^0-9a-zа-яё]+/gi,'-').replace(/^-+|-+$/g,'');
+}
+function playerUrl(p){return SITE+'/p/'+slugOf(p.name)}
+function divUrl(letter){return SITE+'/d/'+String(letter||'').toUpperCase()}
+function shareLink(url,title){
+  if(tg&&tg.openTelegramLink){tg.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent(url)+'&text='+encodeURIComponent(title||''));return}
+  if(navigator.share){navigator.share({title:title||'PTF',url:url}).catch(function(){});return}
+  var done=function(){toast(L?'Ссылка скопирована':'Link copied')};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(url).then(done,function(){prompt('',url)});
+  else prompt('',url);
+}
+function shareBtn(onclick){
+  return '<button class="sharebtn" onclick="event.stopPropagation();'+onclick+'">'+(window.PTFNav?PTFNav.icon('share'):'')+'<span>'+esc(L?'Поделиться':'Share')+'</span></button>';
+}
+function sharePlayer(id){var p=byId(id);if(p)shareLink(playerUrl(p),p.name+' — Phuket Tennis Family')}
+function shareDiv(){shareLink(divUrl(divLetter),divLabel(divLetter)+' — Phuket Tennis Family')}
+// Адрес в строке браузера следует за экраном: открыл игрока — там /p/имя,
+// вернулся — снова главная. Так ссылку можно скопировать прямо из браузера.
+function syncUrl(){
+  if(!IS_WEB)return;
+  try{
+    var want=openId&&byId(openId)?'/p/'+slugOf(byId(openId).name):(mode==='div'&&divLetter?'/d/'+divLetter:'/');
+    var full=want==='/'&&mode&&mode!=='home'?'/?tab='+mode:want;
+    if(location.pathname+location.search!==full)history.replaceState(history.state,'',full);
+  }catch(e){}
+}
+// ------------------------------------------------------------- лендинг
+// Короткое окно для того, кто впервые пришёл на сайт без входа: что это за
+// лига и как в неё попасть. Закрывается одним нажатием и больше не показывается;
+// вошедшим не показывается никогда. Подробности — на странице /about.
+function introSeen(){try{return localStorage.getItem('ptf_intro_seen')==='1'}catch(e){return true}}
+function markIntro(){try{localStorage.setItem('ptf_intro_seen','1')}catch(e){}}
+function closeIntro(){markIntro();var el=document.getElementById('introSheet');if(el)el.remove()}
+function introJoin(){closeIntro();openLogin()}
+function maybeIntro(){
+  if(!IS_WEB||!webGuest||introSeen())return;
+  if(wantJoin||loginFailed)return;
+  var el=document.createElement('div');
+  el.id='introSheet';el.className='intro';
+  el.onclick=function(e){if(e.target===el)closeIntro()};
+  var pts=L?[['race','Сезоны по 2 месяца','7 матчей с соперниками своего уровня — время и корт выбираете сами'],
+             ['div','Дивизионы по уровню','8 игроков в дивизионе, лучшие поднимаются, таблица обновляется сразу после матча'],
+             ['tournaments','Плей-офф и годовая гонка','Топ-4 играют за титул, очки сезона идут в рейтинг года и отбор на Grand Final'],
+             ['players','Сообщество','Игроки, события, партнёры лиги — теннисная семья Пхукета']]
+            :[['race','2-month seasons','7 matches against players of your level — you pick the time and court'],
+             ['div','Level-based divisions','8 players per division, the best move up, the table updates right after each match'],
+             ['tournaments','Playoffs and the Yearly Race','The top 4 play for the title; season points count toward the year ranking and the Grand Final'],
+             ['players','Community','Players, events and league partners — Phuket’s tennis family']];
+  el.innerHTML='<div class="box"><button class="x" onclick="closeIntro()" aria-label="Close">✕</button>'
+    +'<div class="kick">PHUKET TENNIS FAMILY</div>'
+    +'<h2>'+esc(L?'Теннисная лига Пхукета':'Phuket’s tennis league')+'</h2>'
+    +'<p class="lead">'+esc(L?'Регулярные матчи с соперниками своего уровня, живые таблицы и рост от сезона к сезону. Всё — в одном месте.'
+                            :'Regular matches against players of your level, live standings and progress from season to season. All in one place.')+'</p>'
+    +'<div class="pts">'+pts.map(function(x){return '<div class="pt1">'+(window.PTFNav?PTFNav.icon(x[0]):'')+'<div><b>'+esc(x[1])+'</b><span>'+esc(x[2])+'</span></div></div>'}).join('')+'</div>'
+    +'<button class="go" onclick="introJoin()">'+esc(L?'Вступить в лигу':'Join the league')+'</button>'
+    +'<div class="alt"><a href="#" onclick="event.preventDefault();closeIntro()">'+esc(L?'Сначала посмотреть лигу':'Look around first')+'</a>'
+    +'<a href="/about">'+esc(L?'Подробнее о лиге':'More about the league')+'</a></div></div>';
+  document.body.appendChild(el);
+}
 // ------------------------------------------------------------- партнёры
 // Всё содержимое вкладки лежит в таблице состава: лист Partners — сами партнёры,
 // лист Partners_Page — подписи самой страницы. Оба листа двуязычные, поэтому в
@@ -3108,7 +3231,8 @@ function renderPlayer(p){
   if(!schData&&!schLoading&&!schErr)loadSched();
   var w=pct(p),fp=fantasyPlayer(p);
   var backLabel={players:X.tPlayers,race:X.tRace,div:X.tDiv,matches:X.tMatches,home:X.tHome}[backTo]||X.back;
-  var h='<div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>';
+  var h='<div class="backrow"><div class="back" onclick="showTab(\''+backTo+'\')"><i>‹</i>'+esc(backLabel)+'</div>'
+    +shareBtn('sharePlayer(\''+q(p.id)+'\')')+'</div>';
   // Панель загрузки фото — над самой фотографией: иначе её не видно без прокрутки.
   h+=avatarBlock(p);
   h+='<div class="hero">'
@@ -3312,8 +3436,9 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang
     if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy')
     isLeagueAdmin=Boolean(j.is_admin);
     webGuest=Boolean(j.anonymous);needsProfile=Boolean(j.needs_profile);webBot=j.bot_username||'';
+    canMyMatches=Boolean((j.can_match||j.is_admin)&&!j.guest);
     renderAccess();
-    if(IS_WEB&&/[?&]login=failed/.test(location.search))setTimeout(function(){toast(L?'Вход не удался — попробуйте ещё раз':'Login failed — please try again')},300);
+    if(IS_WEB&&loginFailed)setTimeout(function(){toast(L?'Вход не удался — попробуйте ещё раз':'Login failed — please try again')},300);
     buildTabs();
     $('title').textContent=X.title;
     // Видно, что это чужой набор вкладок, а не поломка.
@@ -3340,6 +3465,10 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang
         else if(kind==='d_'&&val){qs.set('tab','div');qs.set('division',val)}
       }
     } catch(e){ /* мусорный startapp просто игнорируем */ }
+    // Адреса сайта /d/<буква> и /p/<имя> — то же, что ?division= и ?player_name=.
+    var pathDiv=(location.pathname.match(/^\/d\/([A-Za-z]+)/)||[])[1]||'';
+    var pathPlayer=(location.pathname.match(/^\/p\/([^/?#]+)/)||[])[1]||'';
+    if(pathDiv&&!qs.get('division'))qs.set('division',pathDiv);
     var wantDiv=(qs.get('division')||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();
     if(wantDiv&&divisions.indexOf(wantDiv)>=0)divLetter=wantDiv;
     var wantTab=(qs.get('tab')||'').trim().toLowerCase();
@@ -3361,6 +3490,14 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang
     if(wantPlayer&&byId(wantPlayer))openPlayer(wantPlayer,backFor);
     // Из бота приходит имя, а не id витрины: в сообщении о результате id нет.
     else if((qs.get('player_name')||'').trim())openPlayerByName((qs.get('player_name')||'').trim(),backFor);
+    else if(pathPlayer){
+      var bySlug=players.filter(function(x){return slugOf(x.name)===decodeURIComponent(pathPlayer).toLowerCase()})[0];
+      if(bySlug)openPlayer(bySlug.id,backFor);
+    }
+    // ?join=1 — со страницы «О лиге»: сразу окно входа. Иначе новичку без
+    // входа — короткое окно о лиге (один раз).
+    if(IS_WEB&&webGuest&&wantJoin)setTimeout(openLogin,250);
+    else setTimeout(maybeIntro,600);
   }).catch(function(e){
     if(String(e.message||'')==='profile_required')return renderInvite();
     $('viewHome').innerHTML='<div class="empty" style="color:var(--lose)">'+esc(e.message)+'</div>';

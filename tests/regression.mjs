@@ -640,7 +640,7 @@ check((await request('get','/api/league/wallet','777')).code===403,'Личное
   const route=routes.find(r=>r.method===method&&r.p===p);assert.ok(route,'route '+p);
   const req={body:{...body},query:{...query},path:p,method:method.toUpperCase(),headers,secure:true};
   const res={code:200,headers:{},cookies:[],status(n){this.code=n;return this},json(v){this.body=v;return this},set(){return this},send(v){this.body=v;return this},
-   append(k,v){if(k==='Set-Cookie')this.cookies.push(v);return this},redirect(c,u){this.code=c;this.location=u;return this},sendFile(f){this.file=f;return this}};
+   append(k,v){if(k==='Set-Cookie')this.cookies.push(v);return this},redirect(c,u){this.code=c;this.location=u;return this},sendFile(f){this.file=f;return this},type(){return this}};
   await web.webSessionMiddleware(req,res,()=>{});
   const langMiddleware=middleware.find(x=>x[0]==='/api')[1];if(p.startsWith('/api/'))await langMiddleware(req,res,()=>{});
   await route.h(req,res);return {req,res};
@@ -693,7 +693,31 @@ check((await request('get','/api/league/wallet','777')).code===403,'Личное
  check(Boolean(sameSite.body.t),'Запрос со своей страницы кукой авторизуется');
  const out=(await bare('get','/auth/logout')).res;
  check(out.code===302&&/Max-Age=0/.test(out.cookies[0]),'Выход стирает куку');
+ {
+  const wwwHop=middleware.find(x=>typeof x[0]==='function'&&/www/.test(String(x[0])))[0];
+  let moved=null,passed=false;
+  wwwHop({headers:{host:'www.phukettennis.com'},method:'GET',originalUrl:'/?tab=div'},{redirect(c,u){moved=[c,u]}},()=>{passed=true});
+  check(moved&&moved[0]===301&&moved[1]==='https://phukettennis.com/?tab=div','Адрес с www перекидывается на основной домен с тем же путём');
+  passed=false;wwwHop({headers:{host:'phukettennis.com'},method:'GET',originalUrl:'/'},{redirect(){}},()=>{passed=true});
+  check(passed,'Основной домен открывается без перенаправления');
+ }
+ // Лендинг, ссылки «поделиться» и общее меню.
+ check((await bare('get','/about')).res.file?.endsWith('about.html'),'Страница «О лиге» открывается по /about');
+ const dreq=await (async()=>{const route=routes.find(r=>r.p==='/d/:letter');const res={set(){return this},type(){return this},send(v){this.body=v;return this}};await route.h({params:{letter:'c'},headers:{}},res);return res})();
+ check(/<title>Division C — Phuket Tennis Family<\/title>/.test(dreq.body)&&/og:url" content="https:\/\/phukettennis.com\/d\/C"/.test(dreq.body),'Ссылка на дивизион отдаёт свой заголовок и адрес для превью');
+ const preq=await (async()=>{const route=routes.find(r=>r.p==='/p/:slug');const res={set(){return this},type(){return this},send(v){this.body=v;return this}};await route.h({params:{slug:'alice-one'},headers:{}},res);return res})();
+ check(/<title>Alice One — Phuket Tennis Family<\/title>/.test(preq.body)&&/og:url" content="https:\/\/phukettennis.com\/p\/alice-one"/.test(preq.body),'Ссылка на игрока отдаёт имя и адрес для превью');
+ const navAnon=(await bare('get','/api/league/nav')).res;
+ check(navAnon.code===200&&navAnon.body.anonymous===true&&!navAnon.body.tabs.includes('fantasy')&&navAnon.body.can_match===false,'Меню для гостя: без Fantasy и без «Моих матчей»');
+ const navAdmin=(await bare('get','/api/league/nav',{headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('99'))}})).res;
+ check(navAdmin.body.is_admin===true&&navAdmin.body.tabs.length>=7,'Меню для организатора — полный набор вкладок');
+ const mh=await fs.readFile(path.join(root,'public/match.html'),'utf8');
+ check(!/--accBg:var\(--accBg\)/.test(mh)&&/--accBg:rgba\(232,164,92/.test(mh),'В «Моих матчах» тёмная тема снова подсвечивает выбранное');
+ check(/tg\.platform==='unknown'/.test(mh)&&mh.includes('ptf-nav.js')&&mh.includes("id=\"mnav\""),'«Мои матчи» работают в браузере и показывают общее меню сайта');
+ const ab=await fs.readFile(path.join(root,'public/about.html'),'utf8');
+ check(ab.includes('/?join=1')&&ab.includes('Вступить в лигу')&&ab.includes('Join the league'),'Лендинг ведёт ко входу и есть на двух языках');
  const lh=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(lh.includes('function maybeIntro()')&&lh.includes('ptf_intro_seen')&&lh.includes('ptf-nav.js')&&lh.includes('function shareLink('),'На сайте: окно-знакомство для новых, значки меню, кнопки «поделиться»');
  check(lh.includes('telegram-widget.js')&&lh.includes("data-request-access','write'")&&lh.includes('?start=profile'),'На сайте кнопка Telegram Login с правом писать и переход в бот на анкету');
  const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/param === 'profile'/.test(botSrc)&&/🌐 <b>Сайт лиги<\/b>/.test(botSrc),'Бот понимает переход с сайта на анкету; сайт описан в админском /help');

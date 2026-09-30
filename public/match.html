@@ -6,6 +6,7 @@
 <title>PTF Matches</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="/public/ptf-prefs.js"></script>
+<script src="/public/ptf-nav.js"></script>
 <style>
 /* Палитра лиги: та же, что в витрине, чтобы экраны матчей не выглядели
    отдельным приложением. Старые имена переменных сохранены — так правка
@@ -14,8 +15,11 @@
   --bg:#0A0A0B;--card:#111010;--card2:#0D0C0B;--text:#EFEBE4;--muted:#B9B1A5;
   --accent:#E8A45C;--accent2:#C9873C;--border:#2A2521;--line2:#221F1B;
   --danger:#C2695E;--green:#8FBF9A;--green2:#2A3A2E;--yellow:#C9A76A;--champ:#D9C7A3;
-  --accBg:var(--accBg);--accBg2:var(--accBg2);--accLine:var(--accLine);--onAcc:var(--onAcc);--avBg:var(--avBg);
-  --grain:var(--grain);--fadeNone:var(--fadeNone);
+  /* Раньше эти пять ссылались сами на себя и в тёмной теме не работали вовсе:
+     выбранные даты, корты и вкладки оставались без подсветки. */
+  --accBg:rgba(232,164,92,.12);--accBg2:rgba(232,164,92,.18);--accLine:rgba(232,164,92,.34);--onAcc:#12100E;--avBg:#1C1A18;
+  --grain:rgba(255,255,255,.03);--fadeNone:rgba(10,10,11,0);
+  --mute:#8A7F6F;--hair:rgba(255,255,255,.05);--tile:#141312;
 }
 /* Светлая тема Court — те же роли, другой свет. Выбор общий с витриной лиги. */
 html[data-theme="light"]{
@@ -24,6 +28,7 @@ html[data-theme="light"]{
   --danger:#B04A2E;--green:#1F6B44;--green2:#E1F0E7;--yellow:#8E9A2E;--champ:#6E7A22;
   --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--onAcc:#FFFFFF;--avBg:#E7EDE6;
   --grain:rgba(0,0,0,.02);--fadeNone:rgba(242,245,241,0);
+  --mute:#7E8B82;--hair:rgba(0,0,0,.03);--tile:#F4F7F3;
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
@@ -142,6 +147,41 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .action-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;padding:1px 4px;border-radius:12px;background:#d63c47;color:#fff;animation:attentionPulse 1.8s ease-in-out infinite;font-size:12px}
 @keyframes attentionPulse{50%{box-shadow:0 0 0 4px #d63c4730}}@media(prefers-reduced-motion:reduce){.action-count{animation:none}}
 .tab.hot:after{display:none;animation:none}
+/* ---------- шапка и меню сайта: один в один с витриной лиги ---------- */
+.hdr{display:flex;align-items:center;gap:12px;padding:14px 0 12px}
+.hdr .logo{width:40px;height:40px;flex:0 0 40px;display:flex;align-items:center;justify-content:center}
+.hdr .logo img{width:40px;height:40px;display:block}
+html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturate(.6)}
+.hdr .ht{flex:1;min-width:0}
+.hdr .eyebrow{font-size:9px;letter-spacing:2.6px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:3px}
+.hdr h1{margin:0;font-size:22px;font-weight:800;letter-spacing:-.6px;line-height:1}
+.mnav{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:2px 0 14px}
+.mnav.five{grid-template-columns:repeat(5,1fr)}
+.mnav .tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px 3px 7px;
+  background:var(--card2);border:1px solid var(--line2);border-radius:10px;color:var(--muted);text-decoration:none;
+  font-size:10.5px;font-weight:700;min-width:0}
+.mnav.five .tab{font-size:9.8px}
+.mnav .tab.on{background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent);border-color:var(--accLine)}
+.mnav .nvi{width:18px;height:18px;opacity:.85}
+.mnav .tab.on .nvi{opacity:1}
+.mnav .tl{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Разделы «Моих матчей» — сегментированный переключатель под меню сайта:
+   видно, что это вторая ступень, а не ещё одно меню того же уровня. */
+.tabs.subtabs{gap:4px;padding:5px;border:1px solid var(--line2);border-radius:14px;background:var(--card2);
+  top:0;margin:0 0 14px;box-shadow:0 10px 14px -10px var(--bg)}
+.tabs.subtabs .tab{flex:1 1 0;border:0;background:transparent;border-radius:10px;padding:9px 4px;font-size:12px;white-space:nowrap}
+.tabs.subtabs .tab.on{background:var(--card);color:var(--accent);box-shadow:0 0 0 1px var(--accLine) inset}
+.sub{font-size:12.5px;margin:0 2px 10px}
+/* Карточки — та же рука, что в лиге: светлая кромка сверху, мягкие углы. */
+.card,.slot{box-shadow:inset 0 1px 0 var(--hair)}
+.slot{border-radius:16px}
+.who{letter-spacing:-.2px}
+@media (min-width:900px){
+  .wrap{max-width:820px;zoom:1.12}
+  .mnav,.mnav.five{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:1fr}
+  .mnav .tab,.mnav.five .tab{font-size:11.5px;padding:9px 4px 8px}
+}
+@media (min-width:1200px){.wrap{zoom:1.22}}
 .daycell.available{border-color:var(--accent);background:var(--green2);cursor:pointer}.daycell.available:after{content:'●';font-size:8px;color:var(--accent)}
 </style>
 </head>
@@ -153,11 +193,16 @@ try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
 </script>
 <div class="grain"></div>
 <div class="wrap">
-  <div class="ttop"><h1 id="title">Матчи</h1>
+  <!-- Шапка и меню — те же, что у витрины лиги: это один сайт, а «Мои матчи»
+       просто одна из его вкладок. -->
+  <div class="hdr">
+    <a class="logo" href="#" onclick="event.preventDefault();goLeague('home')"><img src="/public/img/ptf.png" alt="PTF"></a>
+    <div class="ht"><div class="eyebrow">Phuket Tennis Family</div><h1 id="title">Мои матчи</h1></div>
     <div class="thsw" id="thSw"></div>
   </div>
+  <nav class="mnav" id="mnav"></nav>
   <p class="sub" id="sub"></p>
-  <div class="tabs">
+  <div class="tabs subtabs">
     <div class="tab on" data-t="mine" id="tabMine">Расписание</div>
     <div class="tab" data-t="open" id="tabOpen">Вызовы</div>
     <div class="tab hidden" data-t="book" id="tabBook">Корт</div>
@@ -172,15 +217,20 @@ try{ var _th=localStorage.getItem('ptf_theme'); if(_th==='light'||_th==='dark')
   <div id="viewAdmin" class="hidden"></div>
 </div>
 <script>
-var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
+var tg=window.Telegram&&window.Telegram.WebApp;
+// В обычном браузере окна Telegram (showAlert, showConfirm) не работают и
+// падают — вне Telegram считаем, что его нет, и срабатывают браузерные замены.
+if(tg&&(!tg.platform||tg.platform==='unknown')&&!tg.initData)tg=null;
+if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
+var IS_WEB=!tg;
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 var L=window.PTFPrefs?PTFPrefs.lang()==='ru':((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 var unplayed={known:false,names:[]};
 var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selFrom='17:00',selTo='21:00',selComment='',selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120,resultAfterMin=90;
 var T={
-  ru:{title:'Матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
+  ru:{title:'Мои матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
       tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
       annTitle:'📣 Афиша-анонс',annHint:'Выберите двух игроков — афиша уйдёт в чат админов, публикация в сторис оттуда же кнопкой.',annP1:'Игрок 1',annP2:'Игрок 2',annDivision:'Дивизион (необязательно — подставится сам, если оба игрока из одного)',annComment:'Комментарий (необязательно) — попадёт и в промпт, и на афишу как дата/место',annCommentPh:'Например: сб · 4 окт · 18:00 · The Dome',annSend:'✨ Сгенерировать афишу',annSending:'Отправляю…',annSent:'✅ Готово — картинки придут в чат админов через пару минут.',annNeedPlayers:'Выберите двух разных игроков',
       emptyOpen:'Сейчас нет открытых окон в твоей группе. Создай своё — бот отправит его соперникам лично.',
@@ -224,7 +274,7 @@ var T={
       needCourts:'Отметьте хотя бы одну площадку',
       bookNote:'Бот ничего не отправляет сам: он только готовит текст и ссылку. Ответы кортов приходят вам в WhatsApp.',
       h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
-  en:{title:'Matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
+  en:{title:'My matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
       tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tAdmin:'Admin',adminTitle:'All active requests',adminSearch:'Search by name',adminAll:'All divisions',adminEmpty:'No active requests',adminOpen:'open slot',adminPending:'negotiating',adminAccepted:'match agreed',adminGroup:'Open to group',contact:'Message',cancelRequestAsk:'Cancel this request? Your opponent will be notified.',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
       annTitle:'📣 Announcement poster',annHint:'Pick two players — the poster goes to the admin chat, publish to story from there with a button.',annP1:'Player 1',annP2:'Player 2',annDivision:'Division (optional — filled in automatically if both players share one)',annComment:'Comment (optional) — goes into the prompt and onto the poster as date/place',annCommentPh:'e.g. Sat · 4 Oct · 18:00 · The Dome',annSend:'✨ Generate poster',annSending:'Sending…',annSent:'✅ Done — images will arrive in the admin chat shortly.',annNeedPlayers:'Pick two different players',
       emptyOpen:'No open slots in your group. Create one — the bot will send it privately to your opponents.',
@@ -288,6 +338,26 @@ function timeOptions(sel,minHM,maxHM){
 // Переключатель общий для всех мини-приложений (public/ptf-prefs.js): тема и
 // язык. После смены языка экран перезагружается — так все подписи, даты и
 // вкладки гарантированно перерисуются на новом языке.
+// --------------------------------------------------- общее меню сайта
+// Те же вкладки, что видит этот человек в лиге, плюс «Мои матчи» (активная).
+// Вкладки лиги открывают витрину: на сайте — главную, в Telegram — /league.
+function goLeague(tab){ location.href=window.PTFNav?PTFNav.hrefFor(tab,{web:IS_WEB,token:linkToken}):(IS_WEB?'/':'/league'); }
+function drawNav(tabs){
+  var el=$('mnav');if(!el||!window.PTFNav)return;
+  var lab=PTFNav.labels(L);
+  var keys=(tabs&&tabs.length?tabs:['home','div','race','players','matches']).slice();
+  var at=keys.indexOf('matches');keys.splice(at>=0?at+1:keys.length,0,'mymatches');
+  el.classList.toggle('five',keys.length>8);
+  el.innerHTML=keys.map(function(k){
+    var on=k==='mymatches';
+    return '<a class="tab'+(on?' on':'')+'" href="'+esc(PTFNav.hrefFor(k,{web:IS_WEB,token:linkToken}))+'">'+PTFNav.icon(k)+'<span class="tl">'+esc(lab[k]||k)+'</span></a>';
+  }).join('');
+}
+function loadNav(){
+  drawNav(null);
+  fetch('/api/league/nav?initData='+encodeURIComponent(initData)+tokQ+'&lang='+(L?'ru':'en'),{cache:'no-store'})
+    .then(function(r){return r.json()}).then(function(j){if(j&&j.ok)drawNav(j.tabs)}).catch(function(){});
+}
 function initTheme(){
   if(window.PTFPrefs)PTFPrefs.mount(document.getElementById('thSw'),{onLang:function(lang,saved){
     saved.then(function(){location.reload()});
@@ -352,6 +422,7 @@ function showTab(t){
   window.scrollTo(0,0);
 }
 // Точка на «Вызовах», когда ход за мной: входящее предложение или встречное.
+var navDrawn=false;
 var attention={total:0,open:0,mine:0,res:0};
 function callsWaiting(){
   return (myMatches||[]).filter(function(s){
@@ -1436,6 +1507,7 @@ function load(keepTab){
       unplayed=j.unplayed||{known:false,names:[]};
       openSlots=j.open_slots||[];myMatches=j.my_matches||[];resultTasks=j.result_tasks||[];adminPlayers=j.admin_players||[];focusSlot=j.focus_slot||'';resultSlotId=j.result_slot||resultSlotId;counterSlotId=j.counter_slot||counterSlotId;
       $('title').textContent=X.title;
+      if(!navDrawn){navDrawn=true;loadNav()}
       $('sub').textContent=division?(X.subDiv+division+(matchGroup?' · '+(L?'Группа ':'Group ')+matchGroup:'')):X.subNone;
       $('tabRes').classList.toggle('hidden',!canMatch);
       $('tabOpen').textContent=X.tCalls;$('tabMine').textContent=X.tMine;$('tabRes').textContent=X.tRes;$('tabBook').textContent=X.tCourt;$('tabAdmin').textContent=X.tAdmin;$('tabBook').classList.toggle('hidden',!canBookCourt);$('tabAdmin').classList.toggle('hidden',!isAdmin);

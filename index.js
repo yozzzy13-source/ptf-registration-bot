@@ -1,6 +1,8 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { SITE_URL } from './config.js';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart, prepareAnnouncementForAdmin, rememberLang } from './bot.js';
@@ -114,6 +116,70 @@ function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revali
 // понимает, где её открыли: в Telegram или в обычном браузере.
 app.get('/', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
 app.get('/health', (req, res) => res.send('PTF Registration Bot is running'));
+// Лендинг: что такое лига, как устроена и как вступить.
+app.get('/about', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'about.html')); });
+
+// Ссылки «поделиться»: /p/<имя игрока> и /d/<дивизион>. Открывают ту же
+// страницу лиги сразу на игроке или таблице, а для превью в мессенджерах
+// подставляют заголовок, описание и фото. Сами страницы ничем не отличаются.
+export const slugOf = (name = '') => String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+let leagueHtmlCache = null;
+async function leagueHtml() {
+  if (!leagueHtmlCache) leagueHtmlCache = await fs.promises.readFile(path.join(__dirname, 'public', 'league.html'), 'utf8');
+  return leagueHtmlCache;
+}
+const escAttr = (v = '') => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+function withMeta(html, { title, description, image, url }) {
+  let out = html;
+  const set = (re, tag) => { out = re.test(out) ? out.replace(re, tag) : out.replace('</head>', tag + '\n</head>'); };
+  set(/<title>[^<]*<\/title>/, `<title>${escAttr(title)}</title>`);
+  set(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${escAttr(title)}" />`);
+  set(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${escAttr(description)}" />`);
+  set(/<meta name="description"[^>]*>/, `<meta name="description" content="${escAttr(description)}" />`);
+  if (image) set(/<meta property="og:image"[^>]*>/, `<meta property="og:image" content="${escAttr(image)}" />`);
+  set(/<meta property="og:url"[^>]*>/, `<meta property="og:url" content="${escAttr(url)}" />`);
+  return out;
+}
+async function snapshotSoon(ms = 3500) {
+  return Promise.race([getLeagueSnapshot(), new Promise(r => setTimeout(() => r(null), ms))]).catch(() => null);
+}
+app.get('/p/:slug', async (req, res) => {
+  noCache(res);
+  try {
+    const snap = await snapshotSoon();
+    const p = (snap?.players || []).find(x => slugOf(x.name) === String(req.params.slug || '').toLowerCase());
+    const html = await leagueHtml();
+    if (!p) return res.type('html').send(html);
+    const div = String(p.division || '').trim();
+    const stats = [div ? divisionLabelFor(div) : '', Number(p.matches) ? `${p.matches} matches · ${p.wins || 0} wins` : '']
+      .filter(Boolean).join(' · ');
+    res.type('html').send(withMeta(html, {
+      title: `${p.name} — Phuket Tennis Family`,
+      description: stats ? `${stats}. Player profile in the PTF tennis league, Phuket.` : 'Player profile in the PTF tennis league, Phuket.',
+      image: /^https?:/.test(p.photo || '') ? p.photo : (p.photo ? PUBLIC_URL + p.photo : ''),
+      url: `${SITE_URL}/p/${slugOf(p.name)}`
+    }));
+  } catch (e) { console.error('share player page:', e.message); res.type('html').send(await leagueHtml()); }
+});
+app.get('/d/:letter', async (req, res) => {
+  noCache(res);
+  const letter = String(req.params.letter || '').toUpperCase().replace(/[^A-Z]/g, '');
+  const html = await leagueHtml();
+  if (!letter) return res.type('html').send(html);
+  res.type('html').send(withMeta(html, {
+    title: `${divisionLabelFor(letter)} — Phuket Tennis Family`,
+    description: `Standings, results and playoffs of ${divisionLabelFor(letter)} in the PTF tennis league, Phuket.`,
+    image: '', url: `${SITE_URL}/d/${letter}`
+  }));
+});
+function divisionLabelFor(d = '') {
+  const k = String(d).replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+  if (k === 'PRIME' || k === 'P') return 'Prime';
+  if (['W','WOMAN','WOMEN'].includes(k)) return 'Division W';
+  return k ? `Division ${k}` : 'Division';
+}
+
 // Вход на сайт через Telegram. Новый человек сразу появляется в Players list
 // лидом с пометкой «сайт», а в админ-чат приходит карточка — как при /start в боте.
 registerWebAuthRoutes(app, {
@@ -1471,6 +1537,20 @@ async function getLeagueSnapshot() {
   // Есть хоть что-то — отдаём немедленно, даже если оно устарело.
   return leagueSnapshot.v || leagueSnapshot.building;
 }
+
+// Меню для страниц, которые живут отдельно от витрины лиги («Мои матчи»):
+// те же вкладки, что видит этот человек в лиге, одним лёгким запросом.
+app.get('/api/league/nav', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const group = v.anonymous ? 'guest' : await playerGroup(v.user.id, v.profile).catch(() => 'guest');
+    const tabs = v.isAdmin ? MINIAPP_TABS.slice() : await getGroupTabs(group).catch(() => MINIAPP_TABS.slice());
+    const fantasy = v.guest ? { allowed:false } : await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isPlayersMasterMember }).catch(() => ({ allowed:false }));
+    res.json({ ok:true, lang:v.lang, tabs: fantasy.allowed ? tabs : tabs.filter(t => t !== 'fantasy'),
+      can_match: Boolean(v.canMatch), is_admin: Boolean(v.isAdmin), guest: Boolean(v.guest), anonymous: Boolean(v.anonymous) });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
 
 app.get('/api/league/bootstrap', async (req, res) => {
   const startedAt = Date.now();

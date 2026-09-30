@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>About the league — Phuket Tennis Family</title>
+<meta name="description" content="Phuket Tennis Family: a tennis league in Phuket with 2-month seasons, level-based divisions, playoffs, a Yearly Race and a Grand Final. Join with Telegram." />
+<meta property="og:title" content="Phuket Tennis Family — tennis league in Phuket" />
+<meta property="og:description" content="2-month seasons, level-based divisions, playoffs, a Yearly Race and a Grand Final. Join with Telegram." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="/public/img/ptf.png" />
+<meta name="theme-color" content="#0A0A0B" />
+<link rel="icon" href="/public/img/ptf.png" />
+<script>try{var _th=localStorage.getItem('ptf_theme');if(_th==='light'||_th==='dark')document.documentElement.setAttribute('data-theme',_th)}catch(e){}</script>
+<script src="/public/ptf-prefs.js"></script>
+<script src="/public/ptf-nav.js"></script>
+<style>
+:root{
+  --bg:#0A0A0B;--surf:#111010;--surf2:#0D0C0B;--line:#2A2521;--line2:#221F1B;
+  --text:#EFEBE4;--dim:#B9B1A5;--mute:#8A7F6F;--mute2:#6E6559;--mute3:#7A7164;
+  --amber:#E8A45C;--amber2:#C9873C;--champ:#D9C7A3;--champ2:#A99167;--gold:#C9A76A;
+  --win:#8FBF9A;--goBtn2:#6FA57C;--goLine:#7FB18C;--onGo:#0E1710;--goGlow:rgba(143,191,154,.28);--link:#7FB6E8;--linkLine:rgba(127,182,232,.4);--lose:#C2695E;--silver:#9A948B;--upArrow:#8FBF9A;
+  --card2:#161514;--line3:#332D28;--line4:#262220;--line5:#1B1918;
+  --accBg:rgba(232,164,92,.12);--accBg2:rgba(232,164,92,.18);--accLine:rgba(232,164,92,.34);--accLine2:rgba(232,164,92,.22);
+  --onAcc:#12100E;--winBg:rgba(143,191,154,.14);--winLine:rgba(143,191,154,.34);--loseBg:rgba(194,105,94,.14);--loseLine:rgba(194,105,94,.34);
+  --tile:#141312;--tile2:#171514;--grain:rgba(255,255,255,.03);
+  --edge:rgba(255,255,255,.06);--edgeOn:rgba(232,164,92,.22);
+  --fadeTop:rgba(17,16,16,.55);--fadeMid:rgba(17,16,16,.92);--fadeNone:rgba(17,16,16,0);
+  --avBg:#1C1A18;--sheet:rgba(17,16,16,.96);--hair:rgba(255,255,255,.05);
+  /* Цвета дивизионов, зон и титулов были заведены только в светлой теме, а в
+     тёмной ссылались сами на себя — то есть не работали вовсе. Отсюда и
+     пропавшие цветные ярлыки. Здесь та же палитра, но по тёмному фону. */
+  --dA:#8FBF9A;--dABg:rgba(143,191,154,.15);--dALine:rgba(143,191,154,.34);
+  --dB:#7FB6E8;--dBBg:rgba(127,182,232,.15);--dBLine:rgba(127,182,232,.34);
+  --dC:#C6CE72;--dCBg:rgba(198,206,114,.14);--dCLine:rgba(198,206,114,.32);
+  --dD:#D9A0C4;--dDBg:rgba(217,160,196,.14);--dDLine:rgba(217,160,196,.32);
+  --dP:#E3C177;--dPBg:rgba(227,193,119,.15);--dPLine:rgba(227,193,119,.34);
+  --champBg:rgba(217,199,163,.10);--champGlow:rgba(201,167,106,.22);--finBg:rgba(201,167,106,.08);
+  --zStay:#3A3531;--zDown1:#C2695E;--zDown2:#8E463C;
+  --zUpTint:rgba(143,191,154,.08);--zDownTint:rgba(194,105,94,.07);
+  --goldLine:rgba(201,167,106,.38);--goldBg:rgba(201,167,106,.12);--onForm:#12100E;
+  --goldRing:#C9A76A;--goldGlow:rgba(201,167,106,.24);
+}
+/* Светлая тема Court: зелень корта как акцент, лимон на титулах. */
+html[data-theme="light"]{
+  --bg:#F2F5F1;--surf:#FFFFFF;--surf2:#EBF0EA;--line:#C7D3C5;--line2:#DDE5DB;
+  --text:#16211A;--dim:#4C5A50;--mute:#7E8B82;--mute2:#93A099;--mute3:#7E8B82;
+  --amber:#1F6B44;--amber2:#145236;--champ:#6E7A22;--champ2:#9AA45E;--gold:#8E9A2E;
+  --win:#1F6B44;--goBtn2:#175635;--goLine:#175635;--onGo:#FFFFFF;--goGlow:rgba(31,107,68,.25);--link:#1A5FB4;--linkLine:rgba(26,95,180,.35);--lose:#B04A2E;--silver:#9AA39C;--upArrow:#1F6B44;
+  --card2:#F5F8F4;--line3:#D5DED3;--line4:#E4EAE2;--line5:#EDF1EC;
+  --accBg:#E1F0E7;--accBg2:#D3E9DC;--accLine:#A6D2BB;--accLine2:#BFDECB;
+  --onAcc:#FFFFFF;--winBg:#E1F0E7;--winLine:#A6D2BB;--loseBg:#F9E7E0;--loseLine:#E5B7A4;
+  --tile:#F0F4EF;--tile2:#EFF4EE;--grain:rgba(0,0,0,.02);
+  --edge:rgba(22,33,26,.06);--edgeOn:rgba(31,107,68,.16);
+  --fadeTop:rgba(255,255,255,.55);--fadeMid:rgba(255,255,255,.92);--fadeNone:rgba(255,255,255,0);
+  --avBg:#E7EDE6;--sheet:rgba(242,245,241,.96);--hair:rgba(22,33,26,.05);
+  --dA:#1F6B44;--dABg:#E1F0E7;--dALine:#A6D2BB;
+  --dB:#2A5F94;--dBBg:#E2EAF5;--dBLine:#AAC3E1;
+  --dC:#6E7A22;--dCBg:#F0F2DC;--dCLine:#CBD495;
+  --dD:#93436F;--dDBg:#F6E3EF;--dDLine:#DFB2CE;
+  --dP:#B08414;--dPBg:#FAF0D9;--dPLine:#E5CE94;
+  --champBg:#EAF3EC;--champGlow:rgba(184,194,74,.22);--finBg:#F4F6E4;
+  --zStay:#C9D2C7;--zDown1:#D89A8B;--zDown2:#B4695C;
+  --zUpTint:rgba(184,194,74,.10);--zDownTint:rgba(176,74,46,.07);
+  --goldLine:#D5DB9A;--goldBg:#F4F6E4;--onForm:#FFFFFF;--goldRing:#B8C24A;--goldGlow:rgba(184,194,74,.22);
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;min-height:100vh;position:relative}
+.grain{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;background-image:radial-gradient(var(--grain) .5px,transparent .5px);background-size:3px 3px}
+.wrap{position:relative;z-index:1;max-width:760px;margin:0 auto;padding:18px 16px 60px}
+a{color:inherit}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+.top img{width:40px;height:40px}
+html[data-theme="light"] .top img{filter:invert(1) brightness(.28) saturate(.6)}
+.top .nm{flex:1;font-size:9.5px;letter-spacing:2.6px;font-weight:800;color:var(--mute);text-transform:uppercase;line-height:1.5}
+.top .nm b{display:block;font-size:17px;letter-spacing:-.3px;color:var(--text);text-transform:none}
+.top .open{border:1px solid var(--line2);border-radius:999px;padding:8px 13px;font-size:12px;font-weight:800;text-decoration:none;color:var(--dim)}
+.hero{position:relative;overflow:hidden;border:1px solid var(--accLine);border-radius:24px;padding:30px 22px 24px;
+  background:radial-gradient(120% 90% at 100% 0%,var(--accBg2),transparent 60%),linear-gradient(170deg,var(--surf),var(--bg));margin-bottom:14px}
+.hero:after{content:'PTF';position:absolute;right:-14px;bottom:-44px;font-size:150px;font-weight:950;letter-spacing:-6px;color:var(--accBg);pointer-events:none}
+.kick{font-size:10px;letter-spacing:2.8px;font-weight:800;color:var(--champ);margin-bottom:12px}
+h1{font-size:32px;line-height:1.05;letter-spacing:-1.2px;font-weight:900;margin-bottom:12px;max-width:560px;position:relative;z-index:1}
+h1 em{font-style:normal;color:var(--amber)}
+.lead{font-size:15px;line-height:1.6;color:var(--dim);max-width:540px;margin-bottom:22px;position:relative;z-index:1}
+.ctas{display:flex;gap:10px;flex-wrap:wrap;position:relative;z-index:1}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:14px;padding:14px 20px;font-size:15px;font-weight:900;text-decoration:none;cursor:pointer;border:0}
+.btn.pri{color:#1A1208;background:linear-gradient(135deg,var(--amber),var(--amber2))}
+html[data-theme="light"] .btn.pri{color:#fff}
+.btn.sec{color:var(--text);background:var(--card2);border:1px solid var(--line)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:28px}
+.st{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:14px 8px;text-align:center}
+.st b{display:block;font-size:24px;font-weight:900;letter-spacing:-.6px;color:var(--amber)}
+.st span{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-top:4px}
+.sec-h{font-size:10px;letter-spacing:2.4px;text-transform:uppercase;font-weight:800;color:var(--mute);margin:30px 2px 12px;display:flex;align-items:center;gap:8px}
+.sec-h:before{content:'';width:3px;height:3px;border-radius:50%;background:var(--amber2)}
+h2{font-size:22px;font-weight:900;letter-spacing:-.6px;margin:0 2px 14px;line-height:1.15}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cd{background:var(--surf);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:inset 0 1px 0 var(--hair)}
+.cd .ic{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:var(--accBg);border:1px solid var(--accLine);color:var(--amber);margin-bottom:11px}
+.cd .ic svg{width:19px;height:19px}
+.cd b{display:block;font-size:14.5px;margin-bottom:5px}
+.cd p{font-size:12.8px;line-height:1.55;color:var(--dim)}
+.flow{display:grid;gap:8px}
+.fl{display:grid;grid-template-columns:42px minmax(0,1fr);gap:12px;align-items:start;background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:14px}
+.fl .n{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:17px;color:var(--amber);background:var(--accBg);border:1px solid var(--accLine)}
+.fl b{display:block;font-size:14px;margin-bottom:3px}
+.fl p{font-size:12.8px;line-height:1.55;color:var(--dim)}
+.zones{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.zn{border-radius:14px;padding:12px;border:1px solid var(--line2);background:var(--card2)}
+.zn b{display:block;font-size:18px;font-weight:900}
+.zn span{font-size:11.5px;color:var(--dim);line-height:1.4}
+.zn.up b{color:var(--win)}.zn.stay b{color:var(--dim)}.zn.down b{color:var(--lose)}
+.champs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.ch{background:var(--surf);border:1px solid var(--line);border-radius:18px;padding:16px 10px;text-align:center}
+.ch .av{width:74px;height:74px;border-radius:50%;margin:0 auto 10px;overflow:hidden;background:var(--avBg);box-shadow:0 0 0 3px var(--goldRing),0 0 0 6px var(--goldGlow);
+  display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--mute)}
+.ch .av img{width:100%;height:100%;object-fit:cover;object-position:50% 30%}
+.ch b{display:block;font-size:13.5px}
+.ch span{display:block;font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:800;color:var(--champ);margin-top:3px}
+.partners{display:flex;flex-wrap:wrap;gap:10px}
+.pa{flex:1 1 150px;display:flex;align-items:center;gap:10px;background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.pa img{width:40px;height:40px;border-radius:10px;object-fit:contain;background:var(--card2)}
+.pa b{display:block;font-size:12.5px}
+.pa span{display:block;font-size:10.5px;color:var(--mute)}
+.pass{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pass ul{list-style:none;display:grid;gap:7px}
+.pass li{font-size:13px;line-height:1.45;color:var(--dim);padding-left:20px;position:relative}
+.pass li:before{content:'✓';position:absolute;left:0;color:var(--win);font-weight:900}
+.pass .no li:before{content:'—';color:var(--mute)}
+.faq details{background:var(--surf);border:1px solid var(--line);border-radius:14px;margin-bottom:8px;overflow:hidden}
+.faq summary{list-style:none;cursor:pointer;padding:14px 16px;font-weight:800;font-size:14px;display:flex;justify-content:space-between;gap:10px}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary:after{content:'+';color:var(--amber);font-size:18px;line-height:1}
+.faq details[open] summary:after{content:'–'}
+.faq p{padding:0 16px 15px;font-size:13px;line-height:1.6;color:var(--dim)}
+.final{margin-top:30px;text-align:center;border:1px solid var(--accLine);border-radius:24px;padding:28px 20px;background:radial-gradient(100% 120% at 50% 0%,var(--accBg2),transparent 70%),var(--surf)}
+.final h2{margin:0 0 10px}
+.final p{font-size:14px;line-height:1.6;color:var(--dim);max-width:460px;margin:0 auto 18px}
+.foot{text-align:center;margin-top:24px;font-size:11.5px;color:var(--mute)}
+.thsw{margin-left:4px}
+@media (max-width:560px){
+  .top .open{display:none}.top .nm{font-size:8.5px;letter-spacing:2px}
+  h1{font-size:27px}.stats{grid-template-columns:repeat(2,1fr)}.cards,.pass{grid-template-columns:1fr}
+  .zones{grid-template-columns:1fr}.btn{flex:1 1 100%}
+}
+@media (min-width:900px){.wrap{zoom:1.1}}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="wrap" id="app"></div>
+<script>
+(function(){
+var ru=window.PTFPrefs?PTFPrefs.lang()==='ru':String(navigator.language||'').toLowerCase().indexOf('ru')===0;
+var loggedIn=false,seasons=[],partners=[];
+var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
+var ic=function(k){return window.PTFNav?PTFNav.icon(k):''};
+var T={
+ ru:{open:'Открыть лигу',kick:'PHUKET TENNIS FAMILY · ТЕННИСНАЯ ЛИГА',
+  h1:'Играйте регулярно. <em>Растите</em> от сезона к сезону.',
+  lead:'Phuket Tennis Family — теннисная лига Пхукета для тех, кто хочет не просто иногда поиграть, а соревноваться с соперниками своего уровня, видеть свой прогресс и быть частью живого теннисного сообщества.',
+  join:'Вступить в лигу',look:'Посмотреть лигу',
+  sSeasons:'сезона',sPlayers:'игроков в сезоне',sDivs:'дивизионов',sLen:'месяца сезон',
+  whyH:'Что внутри',why:[
+   ['race','Сезоны по 2 месяца','7 обязательных матчей — с каждым соперником своего дивизиона. Время и корт договариваетесь сами, бот помогает.'],
+   ['div','Дивизионы по уровню','8 игроков в дивизионе. Новичка распределяет организатор по уровню и опыту, дальше вы двигаетесь сами — по результатам.'],
+   ['tournaments','Плей-офф и титул','Топ-4 дивизиона играют полуфиналы и финал. Победитель — чемпион сезона, с кубком и призовым фондом.'],
+   ['matches','Живые таблицы','Счёт вносится в приложении, соперник подтверждает — и таблица, гонка и карточки игроков обновляются сразу.']],
+  howH:'Как устроен сезон',
+  flow:[['Регулярка','7 матчей за сезон. Победа — 3 очка, поражение — 1. Не нужно быть на острове все 2 месяца: главное — сыграть свои матчи до финальной стадии.'],
+        ['Таблица','Места определяются очками, затем победами, разницей сетов и геймов. Таблица показывает, кто стабилен на дистанции.'],
+        ['Плей-офф','Места 1–4 выходят в плей-офф: полуфиналы и финал решают, кто заканчивает дивизион первым.'],
+        ['Движение','По итогам сезона игроки перемещаются между дивизионами — система растёт вместе с вами.']],
+  zones:[['1–2','поднимаются в дивизион выше'],['3–6','остаются в своём дивизионе'],['7–8','опускаются на дивизион ниже']],
+  raceH:'Годовая гонка и Grand Final',
+  race:'Каждый сезон приносит Year Ranking Points — очки годового рейтинга. Чем выше дивизион и результат, тем больше очков. Гонка показывает не одну удачную неделю, а стабильность за год, и по ней отбираются участники Grand Final — главного турнира года.',
+  champsH:'Чемпионы',passH:'Что входит в участие',
+  passIn:['Призовой фонд каждого дивизиона','Аренда кортов на полуфиналы и финалы','Кубки победителям','Вклад в призовой фонд Grand Final','Приложение лиги: таблицы, матчи, статистика'],
+  passOut:['Матчи регулярки игроки договаривают сами','Аренду корта на матчи регулярки оплачивают игроки'],
+  passNote:'Стоимость участия видна при выборе сезона перед подачей заявки.',
+  partnersH:'Партнёры лиги',
+  joinH:'Как вступить',
+  steps:[['Войдите через Telegram','Одно нажатие на сайте — отдельного пароля нет. Все уведомления о матчах приходят в нашего бота.'],
+         ['Заполните анкету','Пара минут в боте: уровень, опыт, контакт. Уровень можно оценить встроенным тестом.'],
+         ['Выберите сезон','Оставьте заявку на ближайший сезон или встаньте в лист ожидания и оплатите участие.'],
+         ['Получите дивизион','Организатор распределит вас по уровню — и можно вызывать соперников.']],
+  faqH:'Частые вопросы',
+  faq:[['Какой нужен уровень?','Любой. Дивизионы собираются по уровню, поэтому вы играете с соперниками своей силы. Самый сильный дивизион — Prime, дальше A, B, C, D; есть женский дивизион.'],
+       ['Нужно ли быть на Пхукете все 2 месяца?','Нет. Главное — успеть сыграть свои 7 матчей до финальной стадии. Время каждого матча вы согласуете с соперником сами.'],
+       ['Кто бронирует и оплачивает корт?','На регулярку — сами игроки: бот подскажет, кто бронирует. Корты на полуфиналы и финалы входят в участие.'],
+       ['На каком языке всё происходит?','Бот, приложение и сайт работают на русском и английском — выберите удобный.']],
+  finalH:'Готовы к первому сезону?',finalP:'Войдите через Telegram, заполните анкету — и мы подберём вам дивизион и соперников вашего уровня.',
+  foot:'Phuket Tennis Family · Пхукет, Таиланд'},
+ en:{open:'Open the league',kick:'PHUKET TENNIS FAMILY · TENNIS LEAGUE',
+  h1:'Play regularly. <em>Grow</em> season after season.',
+  lead:'Phuket Tennis Family is Phuket’s tennis league for players who want more than the occasional hit: compete against opponents of your level, see your progress and be part of a living tennis community.',
+  join:'Join the league',look:'Look around',
+  sSeasons:'seasons',sPlayers:'players per season',sDivs:'divisions',sLen:'month season',
+  whyH:'What’s inside',why:[
+   ['race','2-month seasons','7 required matches — one against every opponent in your division. You agree the time and court yourselves; the bot helps.'],
+   ['div','Level-based divisions','8 players per division. The organiser places newcomers by level and experience; after that your results move you.'],
+   ['tournaments','Playoffs and a title','The top 4 play semifinals and a final. The winner is the season champion, with a trophy and prize pool.'],
+   ['matches','Live standings','Enter the score in the app, your opponent confirms — the table, the race and player cards update instantly.']],
+  howH:'How a season works',
+  flow:[['Regular season','7 matches per season. A win is 3 points, a loss is 1. You don’t need to stay on the island for all 2 months — just play your matches before the final stage.'],
+        ['Standings','Places are decided by points, then wins, set and game difference. The table shows who is consistent over time.'],
+        ['Playoffs','Places 1–4 go to the playoffs: semifinals and a final decide who finishes the division on top.'],
+        ['Movement','After each season players move between divisions — the system grows with you.']],
+  zones:[['1–2','move up a division'],['3–6','stay in their division'],['7–8','move down a division']],
+  raceH:'Yearly Race and the Grand Final',
+  race:'Every season earns Year Ranking Points. The higher the division and the result, the more points. The race rewards consistency across the year, not one lucky week — and it decides who plays the Grand Final, the biggest tournament of the year.',
+  champsH:'Champions',passH:'What participation includes',
+  passIn:['A prize pool for every division','Court rental for semifinals and finals','Trophies for the winners','A contribution to the Grand Final prize pool','The league app: standings, matches, stats'],
+  passOut:['Regular season matches are arranged by the players','Court rental for regular matches is paid by the players'],
+  passNote:'The participation fee is shown when you choose a season, before you apply.',
+  partnersH:'League partners',
+  joinH:'How to join',
+  steps:[['Log in with Telegram','One tap on the site — no separate password. All match notifications arrive in our bot.'],
+         ['Fill in your profile','A couple of minutes in the bot: level, experience, contact. A built-in test helps estimate your level.'],
+         ['Choose a season','Apply for the next season or join the waitlist, and pay the participation fee.'],
+         ['Get your division','The organiser places you by level — and you can start challenging opponents.']],
+  faqH:'FAQ',
+  faq:[['What level do I need?','Any. Divisions are built by level, so you play people of your strength. The top division is Prime, then A, B, C and D; there is also a women’s division.'],
+       ['Do I need to be in Phuket for the full 2 months?','No. Just play your 7 matches before the final stage. You agree the time of each match with your opponent.'],
+       ['Who books and pays for the court?','For regular matches — the players; the bot tells you who books. Courts for semifinals and finals are included.'],
+       ['What language is it in?','The bot, the app and the site work in English and Russian — pick either.']],
+  finalH:'Ready for your first season?',finalP:'Log in with Telegram, fill in your profile — and we’ll find you a division and opponents of your level.',
+  foot:'Phuket Tennis Family · Phuket, Thailand'}
+};
+function render(){
+  var X=ru?T.ru:T.en;
+  document.documentElement.lang=ru?'ru':'en';
+  var cur=seasons.filter(function(s){return s.players>0}).slice(-1)[0]||null;
+  var played=seasons.filter(function(s){return s.players>0}).length;
+  var champs=[];seasons.slice().reverse().some(function(s){if((s.finals||[]).length){champs=s.finals.map(function(f){return {name:f.champion.name,photo:f.champion.photo,sub:(f.title||('Division '+f.letter))+' · '+(ru?'сезон ':'season ')+s.number}});return true}return false});
+  var joinHref=loggedIn?'/':'/?join=1';
+  var joinText=loggedIn?X.open:X.join;
+  var h='<div class="top"><img src="/public/img/ptf.png" alt="PTF"><div class="nm">Phuket Tennis Family<b>'+(ru?'Теннисная лига':'Tennis league')+'</b></div>'
+    +'<a class="open" href="/">'+esc(X.open)+'</a><div id="thSw"></div></div>';
+  h+='<section class="hero"><div class="kick">'+esc(X.kick)+'</div><h1>'+X.h1+'</h1><p class="lead">'+esc(X.lead)+'</p>'
+    +'<div class="ctas"><a class="btn pri" href="'+joinHref+'">'+esc(joinText)+'</a>'+(loggedIn?'':'<a class="btn sec" href="/">'+esc(X.look)+'</a>')+'</div></section>';
+  h+='<div class="stats">'
+    +'<div class="st"><b>'+(played||'—')+'</b><span>'+esc(X.sSeasons)+'</span></div>'
+    +'<div class="st"><b>'+(cur?cur.players:'—')+'</b><span>'+esc(X.sPlayers)+'</span></div>'
+    +'<div class="st"><b>'+(cur?cur.divisions:'—')+'</b><span>'+esc(X.sDivs)+'</span></div>'
+    +'<div class="st"><b>2</b><span>'+esc(X.sLen)+'</span></div></div>';
+  h+='<div class="sec-h">'+esc(X.whyH)+'</div><div class="cards">'+X.why.map(function(w){return '<div class="cd"><div class="ic">'+ic(w[0])+'</div><b>'+esc(w[1])+'</b><p>'+esc(w[2])+'</p></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.howH)+'</div><div class="flow">'+X.flow.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p>'+(i===3?'<div class="zones">'+X.zones.map(function(z,k){return '<div class="zn '+['up','stay','down'][k]+'"><b>'+esc(z[0])+'</b><span>'+esc(z[1])+'</span></div>'}).join('')+'</div>':'')+'</div></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.raceH)+'</div><div class="cd"><div class="ic">'+ic('race')+'</div><p style="font-size:13.5px">'+esc(X.race)+'</p></div>';
+  if(champs.length)h+='<div class="sec-h">'+esc(X.champsH)+'</div><div class="champs">'+champs.map(function(c){
+    var ini=String(c.name||'').split(/\s+/).map(function(x){return x[0]||''}).join('').slice(0,2).toUpperCase();
+    return '<div class="ch"><div class="av">'+(c.photo?'<img src="'+esc(c.photo)+'" alt="" loading="lazy">':esc(ini))+'</div><b>'+esc(c.name)+'</b><span>'+esc(c.sub)+'</span></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.passH)+'</div><div class="pass"><div class="cd"><ul>'+X.passIn.map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ul></div>'
+    +'<div class="cd no"><ul>'+X.passOut.map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ul><p style="margin-top:12px;font-size:12px;color:var(--mute)">'+esc(X.passNote)+'</p></div></div>';
+  if(partners.length)h+='<div class="sec-h">'+esc(X.partnersH)+'</div><div class="partners">'+partners.map(function(p){
+    var c=p.category,cat=c==null?'':(typeof c==='string'?c:((ru?(c.ru||c.en):(c.en||c.ru))||''));
+    return '<div class="pa">'+(p.photo?'<img src="'+esc(p.photo)+'" alt="" loading="lazy">':'')+'<div><b>'+esc(p.name)+'</b><span>'+esc(cat)+'</span></div></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.joinH)+'</div><div class="flow">'+X.steps.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p></div></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.faqH)+'</div><div class="faq">'+X.faq.map(function(f){return '<details><summary>'+esc(f[0])+'</summary><p>'+esc(f[1])+'</p></details>'}).join('')+'</div>';
+  h+='<section class="final"><h2>'+esc(X.finalH)+'</h2><p>'+esc(X.finalP)+'</p><a class="btn pri" href="'+joinHref+'">'+esc(joinText)+'</a></section>';
+  h+='<div class="foot">'+esc(X.foot)+'</div>';
+  document.getElementById('app').innerHTML=h;
+  if(window.PTFPrefs)PTFPrefs.mount(document.getElementById('thSw'),{onLang:function(l){ru=l==='ru';render()}});
+  document.title=(ru?'О лиге':'About the league')+' — Phuket Tennis Family';
+}
+render();
+Promise.all([
+  fetch('/api/web/session',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}}),
+  fetch('/api/public/seasons',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}}),
+  fetch('/api/league/bootstrap?lang='+(ru?'ru':'en'),{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}})
+]).then(function(r){
+  loggedIn=Boolean(r[0]&&r[0].logged_in);
+  seasons=((r[1]&&r[1].seasons)||[]).slice().sort(function(a,b){return Number(a.number)-Number(b.number)});
+  partners=(r[2]&&r[2].partners)||[];
+  render();
+});
+})();
+</script>
+</body>
+</html>

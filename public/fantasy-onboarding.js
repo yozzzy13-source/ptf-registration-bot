@@ -1,7 +1,11 @@
 
 import {assignSlots, selectionIssue, deadlineReached, seasonFinished} from './fantasy-model.js';
 
-const tg=window.Telegram?.WebApp;
+let tg=window.Telegram?.WebApp;
+// В обычном браузере (сайт) Telegram-кнопки «назад» нет и его окна не работают —
+// там показываем свою строку «‹ Лига / ‹ Назад» над шапкой.
+if(tg&&(!tg.platform||tg.platform==='unknown')&&!tg.initData)tg=null;
+const IN_TG=Boolean(tg);
 try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
@@ -72,7 +76,8 @@ function progress() {
   return '<ol class="progress" aria-label="'+tr('Шаги создания команды','Team creation steps')+'">'+labels.map((label,i)=>'<li '+(i===step?'aria-current="step"':'')+' class="'+(i===step?'on':i<step?'done':'')+'"><b>'+(i<step?'✓':i+1)+'</b><span>'+label+'</span></li>').join('')+'</ol>';
 }
 function header() {
-  return '<div class="top"><div><div class="eyebrow">Phuket Tennis Family</div><h1>Fantasy</h1><div class="sub">'+tr('Сезон','Season')+' '+esc(D.season)+'</div></div><div class="theme">'+button('☾','dark','')+button('☀','light','')+button(ru?'EN':'RU','language','')+'</div></div>'+
+  const web=IN_TG?'':'<div class="webnav"><a href="/?tab=fantasy">‹ '+tr('Лига','League')+'</a>'+(view!=='home'?button('‹ '+tr('Назад','Back'),'back','webback'):'')+'</div>';
+  return web+'<div class="top"><div><div class="eyebrow">Phuket Tennis Family</div><h1>Fantasy</h1><div class="sub">'+tr('Сезон','Season')+' '+esc(D.season)+'</div></div><div class="theme">'+button('☾','dark','')+button('☀','light','')+button(ru?'EN':'RU','language','')+'</div></div>'+
     (D.banner?'<div class="banner">'+esc(D.is_test?tr('TEST · тестовые команды','TEST · test squads'):D.banner)+'</div>':'')+
     '<nav class="tabs">'+[['home',tr('Главная','Home')],['players',tr('Игроки','Players')],['table',tr('Рейтинг','Standings')],['rules',tr('Правила','Rules')]].map(([v,label])=>button(label,v,'tab '+(view===v?'on':''))).join('')+'</nav>';
 }
@@ -193,10 +198,17 @@ const PT_LABELS={appearance:['Участие','Appearance'],win:['Победа',
 function matchBreakdown(p) {
   const details=p.score?.details||[];
   if(!details.length)return '<div class="price-breakdown"><div class="pbd-row note">'+esc(tr('Пока нет сыгранных матчей в этом сезоне.','No matches played this season yet.'))+'</div></div>';
-  return '<div class="price-breakdown">'+details.map(m=>{
-    const pts=m.points||{},parts=Object.entries(PT_LABELS).filter(([k])=>pts[k]).map(([k,l])=>tr(l[0],l[1])+' +'+pts[k]).join(' · ');
-    return '<div class="pbd-row" style="display:block"><div style="display:flex;justify-content:space-between;gap:8px"><span>'+esc((m.opponent||'')+(m.score?' · '+m.score:''))+'</span><b>'+(pts.total||0)+'</b></div>'
-      +(parts?'<div style="color:var(--muted);font-size:11px;margin-top:2px">'+esc(parts)+'</div>':'')+'</div>';
+  // Матч — строка: исход, соперник, счёт и итог очков справа; под ней —
+  // из чего итог сложился, короткими ярлычками. Так же, как в интерфейсе лиги.
+  return '<div class="fpm">'+details.map(m=>{
+    const pts=m.points||{},won=Boolean(pts.win||pts.technical);
+    const chips=Object.entries(PT_LABELS).filter(([k])=>pts[k]).map(([k,l])=>'<span class="fpm-chip">'+esc(tr(l[0],l[1]))+' <b>+'+esc(pts[k])+'</b></span>').join('');
+    return '<div class="fpm-row"><div class="fpm-top">'
+      +'<span class="fpm-res '+(won?'w':'l')+'">'+(won?'W':'L')+'</span>'
+      +'<span class="fpm-opp">'+esc(m.opponent||'')+'</span>'
+      +(m.score?'<span class="fpm-sc">'+esc(String(m.score).replace(/\s*\/\s*/g,'  '))+'</span>':'')
+      +'<span class="fpm-tot">'+esc(pts.total||0)+'<i>FP</i></span></div>'
+      +(chips?'<div class="fpm-chips">'+chips+'</div>':'')+'</div>';
   }).join('')+'</div>';
 }
 // Костас: клик по подсказке под именем (или по самому имени) в режиме выбора
