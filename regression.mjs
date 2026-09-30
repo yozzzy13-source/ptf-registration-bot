@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // In-memory Sheets and Telegram. No credentials, network, bot startup or writes
 // to real spreadsheets are involved. Run: node --experimental-vm-modules tests/regression.mjs
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let telegramFailureId='';
+let telegramFailureId='',telegramTransientId='',transientLeft=0;
 const tables = new Map(), writes = [], messages = [], routes = [], middleware = [], sheetEdits = [];
 const put = (id,title,rows) => tables.set(id+'|'+title,structuredClone(rows));
 put('crm','Applicants',[
@@ -65,7 +65,7 @@ const google={spreadsheets:{
   append:async({spreadsheetId,range,requestBody})=>{const r=rangeInfo(spreadsheetId,range);const rows=tables.get(r.key)||[];rows.push(...structuredClone(requestBody.values));tables.set(r.key,rows);return {data:{updates:{updatedRange:r.title+'!A'+rows.length}}}}
  }}};
 const context=vm.createContext({console,URL,URLSearchParams,Buffer,Date,Math,JSON,Intl,Set,Map,FormData,Blob,Uint8Array,
- process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',ADMIN_IDS:'99',NODE_ENV:'production'}},
+ process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',TOURNAMENTS_SPREADSHEET_ID:'trn',TOURNAMENTS_TEST_SPREADSHEET_ID:'trn-test',ADMIN_IDS:'99',BROADCAST_QUIET_HOURS:'off',NODE_ENV:'production'}},
  setTimeout:(fn)=>{queueMicrotask(fn);return 1},clearTimeout(){},setInterval:()=>({unref(){}}),
  fetch:()=>{throw Error('Unexpected network access')}
 });
@@ -74,10 +74,11 @@ function synthetic(key,values){const m=new vm.SyntheticModule(Object.keys(values
 synthetic(path.join(root,'google.js'),{sheets:()=>google});
 const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
-synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
+synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n==='sendMessage'&&String(args[0])===telegramTransientId&&transientLeft-->0)throw Error('sendMessage: {"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardContexts=new Map();
 const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
+const sourceLoads=new Map();
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
  if(modules.has(key))return modules.get(key);
@@ -85,9 +86,16 @@ async function getModule(spec,ref){
   const imported=await import(spec==='luxon'?pathToFileURL(path.join(root,'node_modules/luxon/build/node/luxon.js')).href:spec);
   return synthetic(key,imported);
  }
+ // Два модуля могут одновременно попросить один и тот же файл — без этой
+ // защиты тест получал бы две копии модуля (в бою ES-модуль всегда один).
+ if(sourceLoads.has(key))return sourceLoads.get(key);
+ const loading=(async()=>{
  const source=await fs.readFile(key,'utf8');
  const m=new vm.SourceTextModule(source,{context,identifier:key,initializeImportMeta(meta){meta.url='file:///'+key.replaceAll('\\','/')},importModuleDynamically:async(spec,ref)=>{const d=await getModule(spec,ref);if(d.status==='unlinked')await d.link(getModule);if(d.status==='linked')await d.evaluate();return d;}});
  modules.set(key,m);return m;
+ })();
+ sourceLoads.set(key,loading);
+ return loading;
 }
 async function load(name){const m=await getModule('./'+name,{identifier:path.join(root,'_test.js')});if(m.status==='unlinked')await m.link(getModule);if(m.status==='linked')await m.evaluate();return m.namespace;}
 const sheets=await load('sheets.js'),division=await load('division.js'),db=await load('matchesdb.js'),access=await load('access.js'),results=await load('results.js');
@@ -484,10 +492,58 @@ const preview=await request('post','/api/admin/broadcast-preview','99',{initData
 check(preview.body.ok&&preview.body.text==='Hello'&&preview.body.buttons[0].includes('Matches'),'Panel preview renders EN body and EN buttons');
 messages.length=0;const missing=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'',filters:{selected_ids:['1','2']}});
 check(!missing.body.ok&&!messages.some(m=>m.method==='sendMessage'&&['1','2'].includes(String(m.args[0]))),'Panel refuses all delivery if one recipient language is missing');
-put('crm','Broadcasts',[['broadcast_id','message_text','sent_count']]);put('crm','Broadcast Logs',[['broadcast_id','telegram_id','status','language']]);
+put('crm','Broadcasts',[['broadcast_id','created_at','message_text','recipients_count','sent_count','failed_count','status','notes']]);put('crm','Broadcast Logs',[['broadcast_id','telegram_id','name','telegram_username','status','sent_at','error','language','segment_filter']]);
 messages.length=0;const delivered=await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет {matches}',message_en:'Hello {matches}',filters:{selected_ids:['1','2']}});
-check(delivered.body.ok&&delivered.body.sent===2,'Bilingual panel broadcast reaches both language groups');
+const settle=async()=>{for(let i=0;i<50;i++)await new Promise(r=>setImmediate(r));await (await load('broadcast.js')).whenBroadcastsIdle()};
+check(delivered.body.ok&&delivered.body.queued&&delivered.body.recipients===2,'Panel broadcast is queued and answers at once');
+await settle();
 check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&messages.some(m=>String(m.args[0])==='2'&&m.args[1]==='Привет'),'Recipients receive only selected text, not both variants');
+{
+ // --- устойчивая очередь рассылок -------------------------------------------
+ const rowsOf=name=>{const t=tables.get('crm|'+name)||[];const h=t[0]||[];return t.slice(1).map(r=>Object.fromEntries(h.map((k,i)=>[k,r[i]])))};
+ const logs=rowsOf('Broadcast Logs'),summary=rowsOf('Broadcasts');
+ check(logs.length===2&&logs.every(r=>r.status==='sent'),'Результаты рассылки записаны в журнал (пачкой)');
+ check(summary.length===1&&summary[0].status==='sent'&&Number(summary[0].sent_count)===2&&Number(summary[0].recipients_count)===2,'Итоговая строка истории обновлена: 2 из 2');
+ check(messages.some(m=>String(m.args[0])==='99'&&String(m.args[1]).includes('Рассылка принята'))&&messages.some(m=>String(m.args[0])==='99'&&String(m.args[1]).includes('Рассылка завершена')),'Организатор получает «принята» и итог в чат с ботом');
+ check(!String((tables.get('crm|Settings')||[]).find(r=>r[0]==='broadcast_jobs')?.[1]||''),'После завершения очередь в Settings пуста');
+ // Один игрок заблокировал бота — остальным доходит, причина в итоге.
+ messages.length=0;telegramFailureId='2';
+ await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'Hello',filters:{selected_ids:['1','2']}});await settle();telegramFailureId='';
+ const logs2=rowsOf('Broadcast Logs');
+ check(messages.some(m=>String(m.args[0])==='1'&&m.args[1]==='Hello')&&logs2.some(r=>r.telegram_id==='2'&&r.status==='failed'&&/заблокирован/.test(r.error)),'Отказ одного получателя не останавливает остальных, причина понятна');
+ check(messages.some(m=>String(m.args[0])==='99'&&String(m.args[1]).includes('Не доставлено: <b>1</b>')),'В итоге видно, скольким не дошло');
+ // Временная ошибка (лимит Telegram) — повтор, а не «не доставлено».
+ messages.length=0;telegramTransientId='1';transientLeft=2;
+ await request('post','/api/admin/broadcast','99',{initData:adminInit,message_ru:'Привет',message_en:'Hello',filters:{selected_ids:['1']}});await settle();telegramTransientId='';
+ check(rowsOf('Broadcast Logs').filter(r=>r.telegram_id==='1'&&r.status==='sent').length>=2&&messages.filter(m=>m.method==='sendMessage'&&String(m.args[0])==='1'&&m.args[1]==='Hello').length===1,'Лимит Telegram: сообщение повторено и доставлено, без ложного «не доставлено»');
+ // Перезапуск: очередь из Settings продолжается с того же места.
+ const bc=await load('broadcast.js');
+ const saved={id:'resume_job',kind:'rating',params:{},contacts:[{telegram_id:'1',name:'Alice One',language:'en'},{telegram_id:'2',name:'Bob Two',language:'ru'}],next:1,sent:1,failed:0,failures:[],segment:'x',mediaType:'text',status:'running',createdAt:new Date().toISOString(),admin:{id:'99',name:'Admin',chatId:'99'},told:{}};
+ const st=tables.get('crm|Settings');const idx=st.findIndex(r=>r[0]==='broadcast_jobs');const row=['broadcast_jobs',JSON.stringify([saved])];if(idx>=0)st[idx]=row;else st.push(row);
+ messages.length=0;
+ const resumed=await bc.resumeBroadcasts();check(resumed===1,'После перезапуска найдена незаконченная рассылка');await settle();
+ check(!messages.some(m=>String(m.args[0])==='1'&&m.method==='sendMessage'&&m.args[1]!==undefined&&String(m.args[1]).includes('NTRP'))&&messages.some(m=>String(m.args[0])==='2'&&m.method==='sendMessage'),'Продолжение с места остановки: уже получившим повторно не шлём');
+ // Автоочистка журналов: старое сверху удаляется, заголовок и последние строки — нет.
+ const oldRow=i=>['b'+i,String(i),'N','u','sent','2026-01-01T10:00:00.000+07:00','','en','x'],newRow=i=>['c'+i,String(i),'N','u','sent','2026-09-28T10:00:00.000+07:00','','en','x'];
+ const logHead=['broadcast_id','telegram_id','name','telegram_username','status','sent_at','error','language','segment_filter'];
+ put('crm','Broadcast Logs',[logHead,...Array.from({length:70},(_,i)=>oldRow(i)),...Array.from({length:60},(_,i)=>newRow(i))]);
+ sheetEdits.length=0;
+ const cut=Date.parse('2026-08-01T00:00:00Z');
+ check(await sheets.deleteOldRows('Broadcast Logs','sent_at',cut,{keepAtLeast:50})===70,'Автоочистка удаляет только старые строки');
+ const del=sheetEdits.find(r=>r.deleteDimension)?.deleteDimension?.range;
+ check(del&&del.startIndex===1&&del.endIndex===71,'Удаляется один блок сразу под заголовком (строки 2–71), заголовок остаётся');
+ put('crm','Broadcast Logs',[logHead,...Array.from({length:60},(_,i)=>oldRow(i))]);sheetEdits.length=0;
+ check(await sheets.deleteOldRows('Broadcast Logs','sent_at',cut,{keepAtLeast:50})===10&&sheetEdits.some(r=>r.deleteDimension),'Последние 50 строк журнала не удаляются, даже если все старые');
+ put('crm','Broadcast Logs',[logHead,oldRow(1),['x','1','N','u','sent','','','en','x'],...Array.from({length:80},(_,i)=>oldRow(i+5))]);sheetEdits.length=0;
+ check(await sheets.deleteOldRows('Broadcast Logs','sent_at',cut,{keepAtLeast:50})===1,'Строка без даты останавливает очистку — лишнего не удаляем');
+ put('crm','Broadcast Logs',[logHead]);
+ const bsrc=await fs.readFile(path.join(root,'broadcast.js'),'utf8');
+ check(/catch \(e\) \{ console\.error\('broadcast: журнал не записан, повторим позже/.test(bsrc)&&/catch \(e\) \{ console\.error\('broadcast: не удалось сохранить прогресс/.test(bsrc),'Ошибка записи в таблицу (лимит Google) не обрывает рассылку');
+ check(/inQuiet\(win\)/.test(bsrc)&&/тихие часы|Тихие часы/i.test(bsrc),'Ночью рассылка на паузе и предупреждает организатора');
+ const ad=await fs.readFile(path.join(root,'admin.js'),'utf8'),ap=await fs.readFile(path.join(root,'adminPanel.js'),'utf8'),ix=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(!/for \(const c of contacts\)/.test(ad.slice(ad.indexOf('export async function executeBroadcast')))&&!/logBroadcastResult\(/.test(ap),'Цикл отправки по получателям больше не живёт внутри запроса');
+ check(/resumeBroadcasts\(\)/.test(ix)&&/process\.on\?\.\('SIGTERM'/.test(ix)&&/startLogCleanup\(\)/.test(ix),'Сервер продолжает очередь на старте, сохраняет прогресс при деплое и чистит журналы');
+}
 messages.length=0;
 messages.length=0;await flow.reviewTopup({telegramId:'1',approve:false});check(messages.some(m=>String(m.args[0])==='1'&&m.args[1].includes('Top-up not confirmed')),'Top-up rejection follows player language');
 const futureEvent={...event,date:'16.09.2099',title_ru:'Турнир',title_en:'Tournament',audience:'all'};
@@ -571,8 +627,85 @@ check(sheets.canonicalEventStatus('finished')==='archived'&&sheets.canonicalEven
 check(sheets.eventJoinable('open')&&sheets.eventJoinable('waitlist')&&!sheets.eventJoinable('live')&&!sheets.eventJoinable('closed'),'Заявку принимаем только в открытый набор и в лист ожидания');
 // Новичку без анкеты интерфейс лиги отвечает кодом, а не общей ошибкой:
 // по коду он показывает приглашение заполнить анкету.
+// Без анкеты интерфейс лиги больше не блокируется: человек видит всё открытое,
+// сверху — кнопка анкеты. Fantasy и личное закрыты.
 const invite = await request('get','/api/league/bootstrap','777');
-check(invite.code===403&&(invite.body?.code==='profile_required'||invite.body?.error==='profile_required'),'Без анкеты лига отдаёт код profile_required, а не переведённый текст');
+check(invite.code===200&&invite.body.guest===true&&invite.body.needs_profile===true&&!invite.body.tabs.includes('fantasy')&&invite.body.fantasy===null,'Без анкеты лига открыта гостем: кнопка анкеты, без Fantasy');
+check((await request('get','/api/league/wallet','777')).code===403,'Личное (касса) без анкеты по-прежнему закрыто');
+
+// --- Сайт лиги: гость без входа, вход через Telegram, кука, защита -----------
+{
+ const web=await load('webauth.js');
+ const bare=async(method,p,{query={},body={},headers={}}={})=>{
+  const route=routes.find(r=>r.method===method&&r.p===p);assert.ok(route,'route '+p);
+  const req={body:{...body},query:{...query},path:p,method:method.toUpperCase(),headers,secure:true};
+  const res={code:200,headers:{},cookies:[],status(n){this.code=n;return this},json(v){this.body=v;return this},set(){return this},send(v){this.body=v;return this},
+   append(k,v){if(k==='Set-Cookie')this.cookies.push(v);return this},redirect(c,u){this.code=c;this.location=u;return this},sendFile(f){this.file=f;return this}};
+  await web.webSessionMiddleware(req,res,()=>{});
+  const langMiddleware=middleware.find(x=>x[0]==='/api')[1];if(p.startsWith('/api/'))await langMiddleware(req,res,()=>{});
+  await route.h(req,res);return {req,res};
+ };
+ const anon=(await bare('get','/api/league/bootstrap',{query:{lang:'ru'}})).res;
+ check(anon.code===200&&anon.body.anonymous===true&&anon.body.user===null&&anon.body.lang==='ru','Сайт без входа: лига открыта гостю, язык из браузера');
+ check(!anon.body.tabs.includes('fantasy')&&anon.body.fantasy===null,'Гостю сайта Fantasy не отдаётся');
+ check((await bare('get','/api/league/division',{query:{letter:'C',season:'2'}})).res.code===200,'Гость сайта видит таблицу дивизиона');
+ check((await bare('get','/api/league/wallet')).res.code===400,'Гость сайта не видит личное');
+ check((await bare('get','/api/fantasy/bootstrap')).res.code!==200,'Гость сайта не попадает в Fantasy');
+ const sched=(await bare('get','/api/league/schedule')).res;
+ check(sched.code===200&&(sched.body.items||[]).every(i=>!i.p1.id&&!i.p2.id),'Гостю в расписании не отдаются Telegram ID игроков');
+ check((await bare('get','/')).res.file?.endsWith('league.html'),'Главная сайта — интерфейс лиги');
+
+ // Подпись Telegram Login считается ровно как в документации Telegram.
+ const signLogin=fields=>{
+  const check=Object.keys(fields).sort().map(k=>k+'='+fields[k]).join('\n');
+  const secret=crypto.createHash('sha256').update('test-token').digest();
+  return {...fields,hash:crypto.createHmac('sha256',secret).update(check).digest('hex')};
+ };
+ const now=Math.floor(Date.now()/1000);
+ const good=signLogin({id:'555001',first_name:'Web',last_name:'Visitor',username:'webvisitor',auth_date:String(now)});
+ check(web.verifyTelegramLogin(good).ok,'Верная подпись Telegram Login принимается');
+ check(!web.verifyTelegramLogin({...good,id:'555002'}).ok,'Подменённый id не проходит проверку');
+ check(!web.verifyTelegramLogin(signLogin({id:'555001',auth_date:String(now-3*86400)})).ok,'Старая ссылка входа (старше суток) не принимается');
+ check(web.safeNext('//evil.com')==='/'&&web.safeNext('https://evil.com')==='/'&&web.safeNext('/league?tab=div')==='/league?tab=div','После входа возвращаем только на свои страницы');
+
+ const bad=(await bare('get','/auth/telegram',{query:{...good,id:'1'}})).res;
+ check(bad.code===302&&/login=failed/.test(bad.location)&&!bad.cookies.length,'Неверный вход: без куки и с пометкой об ошибке');
+ const adminChatWas=await sheets.getSetting('admin_chat_id');await sheets.setSetting('admin_chat_id','-100777');
+ const login=(await bare('get','/auth/telegram',{query:{...good,next:'/?tab=div'}})).res;
+ check(login.code===302&&login.location==='/?tab=div'&&/ptf_web=/.test(login.cookies[0])&&/HttpOnly/.test(login.cookies[0])&&/SameSite=Lax/.test(login.cookies[0])&&/Secure/.test(login.cookies[0]),'Вход через Telegram ставит защищённую куку и возвращает на ту же страницу');
+ await settle();
+ const lead=(tables.get('crm|Applicants')||[]);const hdr=lead[0];
+ const row=lead.find(r=>String(r[hdr.indexOf('telegram_id')])==='555001');
+ check(Boolean(row),'Вошедший с сайта сразу появляется в Players list лидом');
+ check(messages.some(m=>/Новый лид/.test(JSON.stringify(m.args))&&/вошёл на сайт/.test(JSON.stringify(m.args))),'В админ-чат приходит карточка нового пользователя с сайта');
+
+ await sheets.setSetting('admin_chat_id',adminChatWas||'');
+ const cookie=login.cookies[0].split(';')[0];
+ const me=(await bare('get','/api/league/bootstrap',{headers:{cookie}})).res;
+ check(me.code===200&&me.body.anonymous===false&&String(me.body.user?.id)==='555001'&&me.body.needs_profile===true,'С кукой сайт узнаёт человека; без анкеты — кнопка анкеты');
+ const member=(await bare('get','/api/league/bootstrap',{headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('1'))}})).res;
+ check(member.code===200&&!member.body.guest&&String(member.body.user?.id)==='1','Игрок лиги на сайте получает свой полный вид');
+ const forged=(await bare('get','/api/league/bootstrap',{headers:{cookie:'ptf_web=1.9999999999999.abc'}})).res;
+ check(forged.body.anonymous===true,'Поддельная кука не даёт входа');
+ const crossSite=(await bare('post','/api/league/event-join',{body:{event_id:'x'},headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('1')),origin:'https://evil.test',host:'app.test'}})).req;
+ check(!crossSite.body.t,'Запрос с чужого сайта кукой не авторизуется');
+ const sameSite=(await bare('post','/api/league/event-join',{body:{event_id:'x'},headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('1')),origin:'https://app.test',host:'app.test'}})).req;
+ check(Boolean(sameSite.body.t),'Запрос со своей страницы кукой авторизуется');
+ const out=(await bare('get','/auth/logout')).res;
+ check(out.code===302&&/Max-Age=0/.test(out.cookies[0]),'Выход стирает куку');
+ {
+  const wwwHop=middleware.find(x=>typeof x[0]==='function'&&/www/.test(String(x[0])))[0];
+  let moved=null,passed=false;
+  wwwHop({headers:{host:'www.phukettennis.com'},method:'GET',originalUrl:'/?tab=div'},{redirect(c,u){moved=[c,u]}},()=>{passed=true});
+  check(moved&&moved[0]===301&&moved[1]==='https://phukettennis.com/?tab=div','Адрес с www перекидывается на основной домен с тем же путём');
+  passed=false;wwwHop({headers:{host:'phukettennis.com'},method:'GET',originalUrl:'/'},{redirect(){}},()=>{passed=true});
+  check(passed,'Основной домен открывается без перенаправления');
+ }
+ const lh=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(lh.includes('telegram-widget.js')&&lh.includes("data-request-access','write'")&&lh.includes('?start=profile'),'На сайте кнопка Telegram Login с правом писать и переход в бот на анкету');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/param === 'profile'/.test(botSrc)&&/🌐 <b>Сайт лиги<\/b>/.test(botSrc),'Бот понимает переход с сайта на анкету; сайт описан в админском /help');
+}
 const leagueHtml = await fs.readFile(path.join(root,'public/league.html'),'utf8');
 check(leagueHtml.includes('function renderInvite()')&&!/renderInvite[\s\S]{0,1200}Fantasy/.test(leagueHtml.split('function renderInvite()')[1]?.slice(0,1200)||''),'Экран приглашения есть и не рассказывает про Fantasy');
 const applyHtml = await fs.readFile(path.join(root,'public/apply.html'),'utf8');
@@ -780,11 +913,30 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(confirmed.length===2,'После встречного согласия собранных пар стало две');
 
  // Тестовый режим живёт в отдельных листах и не видит боевых данных.
- check(trn.sheetName('entries',true).endsWith(' TEST'),'Тестовые листы помечены суффиксом');
  const sandbox=await trn.createTournament({name:'Песочница',kind:'singles'},admin,true);
+ check(writes.some(w=>w.spreadsheetId==='trn-test'),'Тест пишет в отдельную тестовую таблицу');
+ check(!writes.some(w=>w.spreadsheetId==='crm'&&/Tournament/.test(w.range)),'Турниры не пишут в основную таблицу Players list');
+ check(writes.some(w=>w.spreadsheetId==='trn'),'Бой пишет в боевую таблицу турниров');
  check((await trn.listTournaments(true)).length===1,'В тестовом режиме свой список турниров');
  check((await trn.listTournaments(false)).every(x=>x.tournament_id!==sandbox.tournament_id),'Тестовый турнир не попал в боевой список');
  check((await trn.listTournaments(false)).length===3,'Боевой список не изменился от записей в тест');
+
+ // Перенос сезона: один дивизион — один турнир, группы как в лиге, без дублей.
+ const imp=await trn.importSeason('2',{},admin,true);
+ check(imp.created.length===3&&imp.created.map(c=>c.division).sort().join()==='A,C,W','Перенос сезона: по одному турниру на дивизион');
+ const byDiv=Object.fromEntries(imp.created.map(c=>[c.division,c]));
+ check(byDiv.A.entries===8&&byDiv.C.entries===4&&byDiv.W.entries===4,'В каждый турнир попали игроки только своего дивизиона');
+ const cEntries=await trn.listEntries(byDiv.C.tournament.tournament_id,true,false);
+ check(new Set(cEntries.map(e=>e.group)).size===2&&cEntries.every(e=>['1','2'].includes(String(e.group))),'Группы дивизиона C перенесены как в лиге (1 и 2)');
+ check(byDiv.C.tournament.playoff_type==='cross_groups'&&byDiv.A.tournament.playoff_type==='cross_1_4','Плей-офф: две группы — крест, одна — 1–4');
+ check((await trn.listEntries(byDiv.A.tournament.tournament_id,true,false)).every(e=>e.division==='Division A'&&e.group==='1'),'Дивизион без групп — одна группа, дивизион подписан верно');
+ const reimp=await trn.importSeason('2',{},admin,true);
+ check(reimp.created.length===0&&reimp.skipped.length===3,'Повторный перенос не плодит дубли');
+ const dbls=await trn.importSeason('2',{division:'A',kind:'doubles'},admin,true);
+ const dEntries=await trn.listEntries(dbls.tournament.tournament_id,true,false);
+ const dPairs=await trn.listPairs(dbls.tournament.tournament_id,true,false);
+ check(dEntries.length===4&&dPairs.length===4&&dEntries.every(e=>e.entrant_type==='pair'&&e.status==='accepted'),'Парный перенос: восемь игроков → четыре готовые пары-участника');
+ check(new Set(dPairs.flatMap(p=>[p.player_a_name,p.player_b_name])).size===8,'В парах каждый игрок встречается один раз');
 }
 
 
@@ -1599,6 +1751,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
  for(const k of ['button_maps','button_instagram','button_whatsapp','button_site'])check(lg.includes("partnerLabel('"+k+"'"),'Кнопка '+k+' в карточке партнёра');
  check(!/phone_label/.test(lg),'Номер телефона на экран больше не выводится');
+ check(/box\.innerHTML=partners\.map\(partnerCard\)\.join\(''\);/.test(lg),'На вкладке «Партнёры» нет вводной плашки — сразу карточки');
 }
 
 // --- Оформление описания партнёра из таблицы --------------------------------
@@ -1613,6 +1766,91 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/\.pt \.ptimg\{[^}]*object-fit:contain/.test(lg)&&!/\.pt \.ptimg\{[^}]*object-fit:cover/.test(lg),'Картинка партнёра показывается целиком, без обрезки');
  const src=await fs.readFile(path.join(root,'sheets.js'),'utf8');
  check(/textFormatRuns/.test(src)&&/falling back to plain text/.test(src),'Не удалось прочитать оформление — берётся простой текст');
+}
+
+// --- Главная: без Fantasy, тестовая главная с бегущими строками -------------
+{
+ check(sheets.partnerWhatsappNumber('66 0957912772')==='66957912772','Ноль после кода страны убирается — wa.me откроет чат');
+ check(sheets.partnerWhatsappNumber('660630135888')==='66630135888'&&sheets.partnerWhatsappNumber('6.60630135888E+11')==='66630135888','Номер-число и номер в виде 6.6E+11 тоже чинятся');
+ check(sheets.partnerWhatsappNumber('66 65 650 5195')==='66656505195','Правильный номер не трогаем');
+ const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ const home=lg.slice(lg.indexOf('function renderHome(){'),lg.indexOf('function renderHome2(){'));
+ check(!/homeFantasyBanner\(\)/.test(home),'Плашки Fantasy на главной больше нет');
+ check(!/'home2'/.test(lg),'Тестовая вкладка убрана — всё на настоящей главной');
+ check(/partnersStrip\(\)\+homeEvents\(\)\+leadersStrip\(\)\+championsStrip\(\)\+seasonCard\(\)\+promotionsStrip\(\)/.test(lg),'Порядок главной: партнёры, событие, лидеры, чемпионы, сезон, повышения');
+ check(/function mountMarquees/.test(lg)&&/mq-prom/.test(lg)&&/mq-ldr/.test(lg),'Лидеры, чемпионы, повышения и партнёры — бегущими строками');
+ check(/\(top\.points\|\|0\)>0/.test(lg),'Лидер без очков не показывается');
+ check(/class="live"><i class="ball">🎾<\/i>LIVE/.test(lg)&&/@keyframes ballPulse/.test(lg),'У сезона метка LIVE с пульсирующим мячиком');
+ check(/return e\.open_now&&!e\.past/.test(lg)&&/else if\(mode==='home'&&!openId\)renderHome\(\)/.test(lg),'Открытое событие поднимается на главную, как только загрузится');
+ check(!/pmq-cat/.test(lg),'В ленте партнёров только логотипы, без рамок и подписей');
+ check(/'Чемпионы сезона '\+s\.number:'Season '\+s\.number\+' Champions'/.test(lg),'Блок называется «Чемпионы сезона N»');
+ check(!/X\.champTag\)\+'<\/div>'/.test(lg)&&!/label\+' '\+X\.leaderTag/.test(lg),'В карточках только дивизион, без повторного «champion/лидер»');
+ check(/\(L\?'И ':'G '\)/.test(lg)&&/\(L\?'ОЧК ':'PTS '\)/.test(lg),'У лидеров коротко: игры · победы · очки');
+ check(/prefers-reduced-motion: reduce/.test(lg),'При «уменьшить движение» лента сама не едет');
+ check(/if\(m\.moved\)\{e\.stopPropagation\(\);e\.preventDefault\(\)/.test(lg),'Перетаскивание не срабатывает как нажатие');
+ check(/sz=\)w\\d\+\/,'\$1w400'\)/.test(lg),'В ленту идут уменьшенные логотипы');
+ check(/onclick="openPartner\('\+peak\+'\)"/.test(lg)&&/function openPartner\(i\)/.test(lg),'The Peak в блоке сезона ведёт на его карточку партнёра');
+ check(/sDatesV:'14 сен – 5 ноя'/.test(lg)&&/sSemiV:'7–8 ноя'/.test(lg),'Даты сезона короткие');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/is_admin: Boolean\(v\.isAdmin && !viewAs\)/.test(idx),'Лига знает, что открыл организатор; в режиме «глазами группы» — нет');
+}
+
+// --- «Ждут вашего действия» не повторяется после перезапуска -----------------
+{
+ const botSrc4=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/if\(!attentionCounts\.has\(id\)\)\{attentionCounts\.set\(id,n\);continue;\}/.test(botSrc4),'После перезапуска первое наблюдение запоминается молча — без повторного сообщения');
+ check(/for\(const id of ids\)if\(!attentionCounts\.has\(String\(id\)\)&&previous\[id\]!==undefined\)attentionCounts\.set/.test(botSrc4),'Настоящее изменение матча по-прежнему приносит сообщение');
+}
+
+// --- Подтверждение корта: понятно обеим сторонам, кнопка в приложении -----------
+{
+ const mt=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ const ix=await fs.readFile(path.join(root,'index.js'),'utf8');
+ const md=await import(pathToFileURL(path.join(root,'matchesdb.js')).href);
+ const m=await import(pathToFileURL(path.join(root,'matches.js')).href);
+ const now=Date.parse('2026-09-29T10:00:00+07:00');
+ check(m.deadlineLabel(Date.parse('2026-09-29T21:26:00+07:00'),'ru',now)==='сегодня до 21:26','Срок по-русски: «сегодня до 21:26»');
+ check(m.deadlineLabel(Date.parse('2026-10-01T13:00:00+07:00'),'en',now)==='by 13:00 on 1 Oct','Срок по-английски: «by 13:00 on 1 Oct»');
+ const slot={status:'accepted',court_pending_at:'2026-09-28T10:00:00+07:00'};
+ check(md.courtCloseAt(slot)>Date.parse(slot.court_pending_at),'Срок автоснятия считается от «ждём корт»');
+ check(md.courtCloseAt({...slot,court_confirmed_at:'x'})===0&&md.courtCloseAt({...slot,match_type:'manual'})===0,'После подтверждения корта и у ручных матчей срока нет');
+ const agreed=mt.slice(mt.indexOf('export async function notifyMatchAgreed'),mt.indexOf('export async function sendDirectChallenge'));
+ check(/match_court_ok:/.test(agreed)&&/не считается согласованным/.test(agreed)&&/снимется автоматически/.test(agreed),'«Матч согласован»: у автора кнопка «Корт подтвердил», объяснение и срок');
+ check(/Остался последний шаг/.test(agreed)&&/One step left/.test(agreed),'Сопернику объясняем, чего ждём');
+ check(!/до сегодня/.test(mt),'Нет корявого «до сегодня, 21:26»');
+ const stuck=mt.slice(mt.indexOf('export async function notifyStuckCourt'),mt.indexOf('export async function notifyStuckTimeChange'));
+ check(/stage==='d1'&&oppId/.test(stuck)&&/contactRow\(slot,oppId,lang\)/.test(stuck),'На последнем напоминании соперник тоже получает предупреждение с кнопкой «Написать»');
+ check(/app\.post\('\/api\/match\/court-confirm'/.test(ix)&&/notifyCourtConfirmed\(r\.slot\)/.test(ix),'Корт можно подтвердить из мини-приложения — уведомления те же');
+ check(/court_close_at: courtCloseAt\(s\)/.test(ix),'Карточка знает срок автоснятия');
+ check(/function confirmCourtApp/.test(mh)&&/canRetime\(s\)&&courtPending\(s\)\)b\+='<button class="mini primary" onclick="confirmCourtApp/.test(mh),'В «Моих матчах» у автора есть кнопка «Корт подтвердил»');
+ check(/courtMine:'Корт не подтверждён — ваше действие'/.test(mh)&&/courtWait:'Ждём подтверждения корта'/.test(mh),'На карточке видно, кто и что должен сделать с кортом');
+}
+
+// --- Английские кнопки у англоязычных игроков, понятные подсказки --------------
+{
+ const mt=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ const pf=await fs.readFile(path.join(root,'pairflow.js'),'utf8');
+ const bt=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ const map=JSON.parse(mt.match(/const MATCH_BUTTON_EN = (\{.*\});/)[1]);
+ const miss=[...mt.matchAll(/text\s*:\s*(['"`])([^'"`]*[А-Яа-яЁё][^'"`]*)\1/g)].map(m=>m[2]).filter(t=>!map[t]&&!/Создать 2 варианта|Добавить комментарий/.test(t));
+ check(!miss.length,'Каждая русская кнопка матчей имеет английский перевод'+(miss.length?': '+miss.join(', '):''));
+ const m=await import(pathToFileURL(path.join(root,'matches.js')).href);
+ const kb=m.timeChoiceKeyboard({challenge_id:'x',agreed_time:'10:00'},'en');
+ check(kb.inline_keyboard.at(-1)[0].text==='✖️ Cancel match','Выбор нового времени: кнопка отмены по-английски');
+ check(/timeChoiceKeyboard\(slot,lang\)/.test(bt),'Бот передаёт язык в выбор времени');
+ check(/async function langOf\(id\)/.test(pf)&&/'✅ Accept'/.test(pf)&&/'💳 I’ll pay'/.test(pf)&&/'👤 Invite someone else'/.test(pf),'Парный турнир: приглашение, отказ и оплата — на языке получателя');
+ const direct=mt.slice(mt.indexOf('export async function sendDirectChallenge'),mt.indexOf('export async function declineDirectChallenge'));
+ check(!/match_cancel:\$\{slot\.challenge_id\}` \}\]\];/.test(direct.split('const delivered')[0])&&/забронирует корт/.test(direct),'Получателю вызова — без «Отменить запрос», с подсказкой, кто бронирует корт');
+ check(/Вызвать другого игрока/.test(mt.slice(mt.indexOf('export async function declineDirectChallenge'))),'После отказа — кнопки «Вызвать другого» и «Мои матчи»');
+ check(/Отклик на ваше окно/.test(mt)&&!/твоё окно|Подтверди или предложи/.test(mt),'Отклик на окно — на «вы» и с подсказкой про корт');
+ const rem=mt.slice(mt.indexOf('export async function notifyMatchReminder'),mt.indexOf('export async function notifyDeadline'));
+ check(/courtRow/.test(rem)&&/снимется автоматически/.test(rem),'Напоминание о матче при неподтверждённом корте: кнопка и срок');
+ const acc=mt.slice(mt.indexOf('export async function notifyTimeChangeAccepted'),mt.indexOf('export async function notifyTimeChangeRejected'));
+ check(/match_court_ok:/.test(acc),'После переноса времени у автора есть «Корт подтвердил»');
+ const exp=mt.slice(mt.indexOf('export async function notifyNegotiationExpired'),mt.indexOf('export async function notifyStuckCourt'));
+ check(/scope==='court'&&!booker/.test(exp),'Снятие матча без корта: сопернику свой текст');
+ check(/Счёт вносит кто-то один из вас/.test(mt)&&/Only one of you needs to enter the score/.test(mt),'«Матч сыгран?» — счёт вносит один, второй подтверждает');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
