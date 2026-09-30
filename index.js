@@ -43,6 +43,14 @@ const __dirname = path.dirname(__filename);
 const UI_CODES = new Set(['profile_required']);
 
 const app = express();
+// Сайт живёт на одном адресе — без www. Для Telegram phukettennis.com и
+// www.phukettennis.com — два разных домена, а вход через Telegram привязан
+// к одному. Поэтому www сразу перекидываем на основной адрес с тем же путём.
+app.use((req, res, next) => {
+  const host = String(req.headers?.host || '');
+  if (!/^www\./i.test(host) || !['GET','HEAD'].includes(req.method)) return next();
+  res.redirect(301, `https://${host.replace(/^www\./i, '')}${req.originalUrl || req.url || '/'}`);
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 // Сайт лиги: вошедший через Telegram в браузере получает те же права, что и в
