@@ -627,8 +627,77 @@ check(sheets.canonicalEventStatus('finished')==='archived'&&sheets.canonicalEven
 check(sheets.eventJoinable('open')&&sheets.eventJoinable('waitlist')&&!sheets.eventJoinable('live')&&!sheets.eventJoinable('closed'),'Заявку принимаем только в открытый набор и в лист ожидания');
 // Новичку без анкеты интерфейс лиги отвечает кодом, а не общей ошибкой:
 // по коду он показывает приглашение заполнить анкету.
+// Без анкеты интерфейс лиги больше не блокируется: человек видит всё открытое,
+// сверху — кнопка анкеты. Fantasy и личное закрыты.
 const invite = await request('get','/api/league/bootstrap','777');
-check(invite.code===403&&(invite.body?.code==='profile_required'||invite.body?.error==='profile_required'),'Без анкеты лига отдаёт код profile_required, а не переведённый текст');
+check(invite.code===200&&invite.body.guest===true&&invite.body.needs_profile===true&&!invite.body.tabs.includes('fantasy')&&invite.body.fantasy===null,'Без анкеты лига открыта гостем: кнопка анкеты, без Fantasy');
+check((await request('get','/api/league/wallet','777')).code===403,'Личное (касса) без анкеты по-прежнему закрыто');
+
+// --- Сайт лиги: гость без входа, вход через Telegram, кука, защита -----------
+{
+ const web=await load('webauth.js');
+ const bare=async(method,p,{query={},body={},headers={}}={})=>{
+  const route=routes.find(r=>r.method===method&&r.p===p);assert.ok(route,'route '+p);
+  const req={body:{...body},query:{...query},path:p,method:method.toUpperCase(),headers,secure:true};
+  const res={code:200,headers:{},cookies:[],status(n){this.code=n;return this},json(v){this.body=v;return this},set(){return this},send(v){this.body=v;return this},
+   append(k,v){if(k==='Set-Cookie')this.cookies.push(v);return this},redirect(c,u){this.code=c;this.location=u;return this},sendFile(f){this.file=f;return this}};
+  await web.webSessionMiddleware(req,res,()=>{});
+  const langMiddleware=middleware.find(x=>x[0]==='/api')[1];if(p.startsWith('/api/'))await langMiddleware(req,res,()=>{});
+  await route.h(req,res);return {req,res};
+ };
+ const anon=(await bare('get','/api/league/bootstrap',{query:{lang:'ru'}})).res;
+ check(anon.code===200&&anon.body.anonymous===true&&anon.body.user===null&&anon.body.lang==='ru','Сайт без входа: лига открыта гостю, язык из браузера');
+ check(!anon.body.tabs.includes('fantasy')&&anon.body.fantasy===null,'Гостю сайта Fantasy не отдаётся');
+ check((await bare('get','/api/league/division',{query:{letter:'C',season:'2'}})).res.code===200,'Гость сайта видит таблицу дивизиона');
+ check((await bare('get','/api/league/wallet')).res.code===400,'Гость сайта не видит личное');
+ check((await bare('get','/api/fantasy/bootstrap')).res.code!==200,'Гость сайта не попадает в Fantasy');
+ const sched=(await bare('get','/api/league/schedule')).res;
+ check(sched.code===200&&(sched.body.items||[]).every(i=>!i.p1.id&&!i.p2.id),'Гостю в расписании не отдаются Telegram ID игроков');
+ check((await bare('get','/')).res.file?.endsWith('league.html'),'Главная сайта — интерфейс лиги');
+
+ // Подпись Telegram Login считается ровно как в документации Telegram.
+ const signLogin=fields=>{
+  const check=Object.keys(fields).sort().map(k=>k+'='+fields[k]).join('\n');
+  const secret=crypto.createHash('sha256').update('test-token').digest();
+  return {...fields,hash:crypto.createHmac('sha256',secret).update(check).digest('hex')};
+ };
+ const now=Math.floor(Date.now()/1000);
+ const good=signLogin({id:'555001',first_name:'Web',last_name:'Visitor',username:'webvisitor',auth_date:String(now)});
+ check(web.verifyTelegramLogin(good).ok,'Верная подпись Telegram Login принимается');
+ check(!web.verifyTelegramLogin({...good,id:'555002'}).ok,'Подменённый id не проходит проверку');
+ check(!web.verifyTelegramLogin(signLogin({id:'555001',auth_date:String(now-3*86400)})).ok,'Старая ссылка входа (старше суток) не принимается');
+ check(web.safeNext('//evil.com')==='/'&&web.safeNext('https://evil.com')==='/'&&web.safeNext('/league?tab=div')==='/league?tab=div','После входа возвращаем только на свои страницы');
+
+ const bad=(await bare('get','/auth/telegram',{query:{...good,id:'1'}})).res;
+ check(bad.code===302&&/login=failed/.test(bad.location)&&!bad.cookies.length,'Неверный вход: без куки и с пометкой об ошибке');
+ const adminChatWas=await sheets.getSetting('admin_chat_id');await sheets.setSetting('admin_chat_id','-100777');
+ const login=(await bare('get','/auth/telegram',{query:{...good,next:'/?tab=div'}})).res;
+ check(login.code===302&&login.location==='/?tab=div'&&/ptf_web=/.test(login.cookies[0])&&/HttpOnly/.test(login.cookies[0])&&/SameSite=Lax/.test(login.cookies[0])&&/Secure/.test(login.cookies[0]),'Вход через Telegram ставит защищённую куку и возвращает на ту же страницу');
+ await settle();
+ const lead=(tables.get('crm|Applicants')||[]);const hdr=lead[0];
+ const row=lead.find(r=>String(r[hdr.indexOf('telegram_id')])==='555001');
+ check(Boolean(row),'Вошедший с сайта сразу появляется в Players list лидом');
+ check(messages.some(m=>/Новый лид/.test(JSON.stringify(m.args))&&/вошёл на сайт/.test(JSON.stringify(m.args))),'В админ-чат приходит карточка нового пользователя с сайта');
+
+ await sheets.setSetting('admin_chat_id',adminChatWas||'');
+ const cookie=login.cookies[0].split(';')[0];
+ const me=(await bare('get','/api/league/bootstrap',{headers:{cookie}})).res;
+ check(me.code===200&&me.body.anonymous===false&&String(me.body.user?.id)==='555001'&&me.body.needs_profile===true,'С кукой сайт узнаёт человека; без анкеты — кнопка анкеты');
+ const member=(await bare('get','/api/league/bootstrap',{headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('1'))}})).res;
+ check(member.code===200&&!member.body.guest&&String(member.body.user?.id)==='1','Игрок лиги на сайте получает свой полный вид');
+ const forged=(await bare('get','/api/league/bootstrap',{headers:{cookie:'ptf_web=1.9999999999999.abc'}})).res;
+ check(forged.body.anonymous===true,'Поддельная кука не даёт входа');
+ const crossSite=(await bare('post','/api/league/event-join',{body:{event_id:'x'},headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('1')),origin:'https://evil.test',host:'app.test'}})).req;
+ check(!crossSite.body.t,'Запрос с чужого сайта кукой не авторизуется');
+ const sameSite=(await bare('post','/api/league/event-join',{body:{event_id:'x'},headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('1')),origin:'https://app.test',host:'app.test'}})).req;
+ check(Boolean(sameSite.body.t),'Запрос со своей страницы кукой авторизуется');
+ const out=(await bare('get','/auth/logout')).res;
+ check(out.code===302&&/Max-Age=0/.test(out.cookies[0]),'Выход стирает куку');
+ const lh=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(lh.includes('telegram-widget.js')&&lh.includes("data-request-access','write'")&&lh.includes('?start=profile'),'На сайте кнопка Telegram Login с правом писать и переход в бот на анкету');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/param === 'profile'/.test(botSrc)&&/🌐 <b>Сайт лиги<\/b>/.test(botSrc),'Бот понимает переход с сайта на анкету; сайт описан в админском /help');
+}
 const leagueHtml = await fs.readFile(path.join(root,'public/league.html'),'utf8');
 check(leagueHtml.includes('function renderInvite()')&&!/renderInvite[\s\S]{0,1200}Fantasy/.test(leagueHtml.split('function renderInvite()')[1]?.slice(0,1200)||''),'Экран приглашения есть и не рассказывает про Fantasy');
 const applyHtml = await fs.readFile(path.join(root,'public/apply.html'),'utf8');

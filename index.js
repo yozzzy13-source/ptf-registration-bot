@@ -32,6 +32,7 @@ import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarRea
 import { uiError } from './ui-errors.js';
 import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
 import { startLogCleanup } from './retention.js';
+import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +45,10 @@ const UI_CODES = new Set(['profile_required']);
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+// Сайт лиги: вошедший через Telegram в браузере получает те же права, что и в
+// мини-приложении. Прослойка стоит до всех /api — дальше вход с сайта ничем не
+// отличается от входа из Telegram.
+app.use(webSessionMiddleware);
 app.use('/public', express.static(path.join(__dirname, 'public')));
 // Resolve the saved language before responding, including validation failures.
 app.use('/api', async (req,res,next) => {
@@ -96,8 +101,21 @@ app.post('/api/ui-language', async (req,res) => {
   } catch (e) { console.error('ui-language save failed:', e.message); res.status(500).json({ ok:false, error:e.message }); }
 });
 
-app.get('/', (req, res) => res.send('PTF Registration Bot is running'));
 function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
+// Главная сайта — тот же интерфейс лиги, что и в мини-приложении. Страница сама
+// понимает, где её открыли: в Telegram или в обычном браузере.
+app.get('/', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
+app.get('/health', (req, res) => res.send('PTF Registration Bot is running'));
+// Вход на сайт через Telegram. Новый человек сразу появляется в Players list
+// лидом с пометкой «сайт», а в админ-чат приходит карточка — как при /start в боте.
+registerWebAuthRoutes(app, {
+  onLogin: async (user) => {
+    const { ensureApplicantLead } = await import('./sheets.js');
+    const { notifyNewLead } = await import('./admin.js');
+    const profile = await ensureApplicantLead({ ...user, source:'website' }).catch(e => { console.error('web lead:', e.message); return null; });
+    await notifyNewLead({ ...(profile || {}), ...user, telegram_id:user.id }, { reason:'website' });
+  }
+});
 app.get('/participants', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'participants.html')); });
 app.get('/match', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'match.html')); });
 app.get('/league', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
@@ -516,16 +534,29 @@ function webAppUser(initData, token = '') {
   return { ok:false, code:400, error:'Telegram WebApp user not found' };
 }
 
-async function leagueViewer(initData, token = '') {
+// Гость: открытая часть лиги без входа (сайт) или без анкеты. Видит витрину,
+// таблицы, гонку, события и расписание; Fantasy и личное — нет. Такой вид
+// отдают только читающие ручки, которые явно разрешили гостя.
+function guestViewer(user = null, profile = {}, lang = '') {
+  const l = ['ru','en'].includes(profile?.language) ? profile.language
+    : ['ru','en'].includes(lang) ? lang
+    : (String(user?.language_code || '').startsWith('ru') ? 'ru' : 'en');
+  return { ok:true, guest:true, anonymous:!user?.id, needsProfile:true,
+    user: user?.id ? user : { id:'' }, profile: profile || {}, lang:l, division:'', season:'', matchGroup:'',
+    canMatch:false, isAdmin:false, isLeagueMember:false, isPlayersMasterMember:false, profileCompleted:false };
+}
+async function leagueViewer(initData, token = '', { allowGuest = false, lang: langHint = '' } = {}) {
   const who = webAppUser(initData, token);
-  if (!who.ok) return who;
+  if (!who.ok) return allowGuest && who.code === 400 ? guestViewer(null, {}, langHint) : who;
   const user = who.user;
   const profile = await findApplicantByTelegramIdentity(user) || await findApplicantByTelegramId(user.id) || {};
   if (profile._rowNumber && user.id) await healApplicantId(profile, user.id);
   const lang = ['ru','en'].includes(profile.language) ? profile.language : (String(user.language_code || '').startsWith('ru') ? 'ru' : 'en');
   const league = await getPlayerLeagueInfo({ ...profile, telegram_id:user.id });
   const profileCompleted = isProfileCompleted(profile);
-  if (!league.member && !league.admin && !profileCompleted) return { ok:false, code:403, lang, error:'profile_required' };
+  if (!league.member && !league.admin && !profileCompleted) {
+    return allowGuest ? guestViewer(user, profile, langHint || lang) : { ok:false, code:403, lang, error:'profile_required' };
+  }
   return { ok:true, user, profile, lang, division:league.division || '', season:league.season || '',
     matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin,
     isLeagueMember:Boolean(league.member || league.admin), isPlayersMasterMember:Boolean(league.member), profileCompleted };
@@ -1153,7 +1184,7 @@ app.post('/api/match/manual', async (req,res)=>{
 // самого игрока. Записываться и платить он будет в боте — там кнопки и оплата.
 app.get('/api/league/events', async (req, res) => {
   try {
-    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const { eventsForViewer } = await import('./eventflow.js');
     const { getBalance } = await import('./events.js');
@@ -1436,7 +1467,7 @@ async function getLeagueSnapshot() {
 app.get('/api/league/bootstrap', async (req, res) => {
   const startedAt = Date.now();
   try {
-    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const { seasons, players, photoByName, matches, events, divisions, current } = await getLeagueSnapshot();
     // Партнёров держим отдельно от общего снимка: лист правится руками, и ждать
@@ -1448,7 +1479,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
     ]);
     // Нижнее меню зависит от того, кто смотрит: у гостя нет смысла в матчах и
     // расписании, у активного игрока — есть. Организатор видит всё.
-    const group = await playerGroup(v.user.id, v.profile).catch(() => 'guest');
+    const group = v.anonymous ? 'guest' : await playerGroup(v.user.id, v.profile).catch(() => 'guest');
     // Организатору отдаём всё, иначе он сам себе отрежет доступ. Но с ?as=<группа>
     // он может посмотреть приложение ровно так, как его видит эта группа.
     const asGroup = String(req.query.as || '').trim();
@@ -1456,7 +1487,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const tabs = (v.isAdmin && !viewAs)
       ? MINIAPP_TABS.slice()
       : await getGroupTabs(viewAs || group).catch(() => MINIAPP_TABS.slice());
-    const fantasyAccess = await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isPlayersMasterMember }).catch(() => ({ allowed:false }));
+    const fantasyAccess = v.guest ? { allowed:false } : await fantasyAccessFor({ telegramId:v.user.id, name:v.profile.name || '', username:v.profile.telegram_username || v.user.username || '', isAdmin:v.isAdmin, isLeagueMember:v.isPlayersMasterMember }).catch(() => ({ allowed:false }));
     // Fantasy — самая тяжёлая часть ответа: составы, цены, очки по всем игрокам
     // и чтение листа команд мимо кэша. Держать из-за неё закрытым весь интерфейс
     // незачем: по умолчанию не считаем, приложение рисуется сразу, а очки
@@ -1470,7 +1501,11 @@ app.get('/api/league/bootstrap', async (req, res) => {
     res.json({
       ok: true,
       lang: v.lang,
-      user: { id: v.user.id, name: v.profile.name || [v.user.first_name, v.user.last_name].filter(Boolean).join(' ') },
+      user: v.anonymous ? null : { id: v.user.id, name: v.profile.name || [v.user.first_name, v.user.last_name].filter(Boolean).join(' ') },
+      // Гость видит интерфейс целиком, но без Fantasy и личного; кнопка анкеты
+      // висит сверху. anonymous — зашёл на сайт без входа через Telegram.
+      guest: Boolean(v.guest), anonymous: Boolean(v.anonymous), needs_profile: Boolean(v.needsProfile),
+      bot_username: webBotName(),
       season: current ? current.number : (await getSetting('season_number').catch(() => '')),
       seasons,
       me_division: v.division || '',
@@ -1605,9 +1640,11 @@ app.get('/avatar/:id.png', async (req, res) => {
 // вещь операционная, поэтому уезжает только организатору.
 app.get('/api/league/schedule', async (req, res) => {
   try {
-    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const items = await agreedSchedule();
+    // Гостю сайта Telegram ID игроков ни к чему: имени и матча ему достаточно.
+    const items = (await agreedSchedule()).map(i => v.anonymous
+      ? { ...i, p1:{ ...i.p1, id:'' }, p2:{ ...i.p2, id:'' } } : i);
     const payload = {
       ok: true,
       now: Date.now(),
@@ -1726,7 +1763,7 @@ async function buildSeasonsSummary() {
 
 app.get('/api/league/seasons-summary', async (req, res) => {
   try {
-    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (seasonsSummaryCache.v && Date.now() - seasonsSummaryCache.t < SEASONS_SUMMARY_MS) {
       return res.json({ ok:true, seasons: seasonsSummaryCache.v });
@@ -1839,7 +1876,7 @@ app.get('/api/public/seasons', async (req, res) => {
 // чтобы стартовый экран не ждал чтения ещё четырёх таблиц.
 app.get('/api/league/division', async (req, res) => {
   try {
-    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
+    const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     const letter = String(req.query.letter || '');
     const season = String(req.query.season || '');
@@ -2136,7 +2173,7 @@ app.listen(PORT, async () => {
     if (BOT_TOKEN && PUBLIC_URL) {
       await setWebhook();
       await setCommands();
-      try { const me = await getMe(); setBotUsername(me?.username); setPairBotUsername(me?.username); } catch (e) { console.error('getMe failed:', e.message); }
+      try { const me = await getMe(); setBotUsername(me?.username); setPairBotUsername(me?.username); setWebBotName(me?.username); } catch (e) { console.error('getMe failed:', e.message); }
       console.log('Webhook and commands installed');
     }
   } catch (e) {

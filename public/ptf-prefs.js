@@ -16,7 +16,8 @@
   function get(k){try{return w.localStorage.getItem(k)||''}catch(e){return ''}}
   function put(k,v){try{w.localStorage.setItem(k,v)}catch(e){}}
   function tgLang(){
-    var code=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'';
+    // В браузере (сайт) Telegram языка не знает — берём язык браузера.
+    var code=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||(w.navigator&&(w.navigator.language||''))||'';
     return String(code).toLowerCase().indexOf('ru')===0?'ru':'en';
   }
   function savedLang(){var v=get(LK);return v==='ru'||v==='en'?v:''}

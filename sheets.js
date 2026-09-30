@@ -1409,7 +1409,7 @@ export async function ensureApplicantLead(user={}) {
     name, status: APPLICANT_STATUS.new, division: 'pending',
     telegram_id: telegramId, telegram_username: username, telegram: username ? `t.me/${username}` : '',
     language: ['ru','en'].includes(String(user.language || '').toLowerCase()) ? String(user.language).toLowerCase() : '',
-    source: 'telegram_lead', crm_tags: 'lead', profile_completed: 'no', selfie_status: 'optional_missing'
+    source: user.source === 'website' ? 'website_lead' : 'telegram_lead', crm_tags: user.source === 'website' ? 'lead,website' : 'lead', profile_completed: 'no', selfie_status: 'optional_missing'
   };
   await appendObject(SHEETS.applicants, newRow, { uniqueBy: 'telegram_id' });
   return { ...newRow, _rowNumber: null };

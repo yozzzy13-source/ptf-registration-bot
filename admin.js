@@ -257,7 +257,8 @@ const LEAD_REASONS = {
   start: 'запустил бота',
   language: 'выбрал язык',
   webapp: 'открыл приложение',
-  message: 'написал в бот'
+  message: 'написал в бот',
+  website: 'вошёл на сайт через Telegram'
 };
 
 export async function notifyNewLead(profile = {}, { reason = 'start' } = {}) {

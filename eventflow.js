@@ -1401,7 +1401,9 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false, i
   const out = [];
   for (const e of events) {
     if (e.audience === 'active' && !isActivePlayer) continue;
-    const signup = mine.find(s => s.event_id === e.event_id
+    // Пустой id — гость сайта: у него записей нет, даже если в листе есть
+    // строка без Telegram ID (добавленная организатором вручную).
+    const signup = telegramId && mine.find(s => s.event_id === e.event_id
       && String(s.telegram_id) === String(telegramId)
       && s.status !== SIGNUP_STATUS.cancelled) || null;
     // Событие «только по приглашению» для остальных просто не существует.

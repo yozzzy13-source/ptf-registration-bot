@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>PTF League</title>
+<title>Phuket Tennis Family — League</title>
+<meta name="description" content="Phuket Tennis Family: amateur tennis league in Phuket. Division tables, Yearly Race, players, match results and events." />
+<meta property="og:title" content="Phuket Tennis Family — League" />
+<meta property="og:description" content="Division tables, Yearly Race, players and match results of the PTF tennis league in Phuket." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="/public/img/ptf.png" />
+<meta name="theme-color" content="#0A0A0B" />
+<link rel="icon" href="/public/img/ptf.png" />
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="/public/ptf-prefs.js"></script>
 <style>
@@ -722,6 +729,32 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 .event-past{opacity:.7;border-style:dashed}.event-past h3{color:var(--dim)}
 
 .crosslist{display:grid;gap:8px;margin:0 0 18px}.crosscard{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:13px 14px}.crosspair{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:850}.crosspair span:nth-child(2){color:var(--gold);font-weight:950}.crossmeta{color:var(--muted);font-size:11px;margin-top:6px}.playgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:18px}.playstage{display:grid;gap:8px}.playtitle{color:var(--muted);font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.08em}
+/* Сайт: тот же интерфейс, но в браузере. Кнопка входа, полоса «что дальше»
+   и чуть шире колонка на компьютере — остальное как в мини-приложении. */
+.webauth{flex:0 0 auto}
+.webfoot{text-align:center;margin-top:22px}
+.webauth button{width:auto;margin:0;display:inline-block;border:1px solid var(--accLine);background:var(--accBg);color:var(--amber);border-radius:999px;
+  padding:7px 12px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}
+.webauth button.quiet{border-color:var(--line2);background:transparent;color:var(--mute)}
+.accbar{display:flex;align-items:center;gap:12px;background:linear-gradient(145deg,var(--accBg2),var(--surf) 70%);
+  border:1px solid var(--accLine);border-radius:16px;padding:12px 14px;margin:0 0 14px}
+.accbar .tx{flex:1;min-width:0;font-size:12.5px;line-height:1.45;color:var(--dim)}
+.accbar .tx b{display:block;color:var(--text);font-size:13.5px;margin-bottom:2px}
+.accbar button{flex:0 0 auto;width:auto;margin:0;display:inline-block;position:static;border:0;border-radius:12px;padding:10px 13px;font:inherit;font-size:12.5px;font-weight:900;
+  color:#1A1208;background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer;white-space:nowrap}
+.loginsheet{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}
+.loginsheet .box{width:100%;max-width:460px;background:var(--surf);border:1px solid var(--line);border-radius:20px 20px 0 0;
+  padding:22px 18px 28px;text-align:center}
+.loginsheet h3{font-size:18px;margin-bottom:8px}
+.loginsheet p{font-size:12.5px;color:var(--dim);line-height:1.5;margin-bottom:16px}
+.loginsheet .tgw{min-height:48px;display:flex;justify-content:center}
+.loginsheet .close{width:auto;display:inline-block;margin-top:16px;background:transparent;border:0;color:var(--mute);font:inherit;font-size:12px;cursor:pointer}
+@media (min-width:560px){.loginsheet{align-items:center}.loginsheet .box{border-radius:20px}}
+@media (min-width:900px){
+  .wrap{max-width:780px;padding-top:28px}
+  .tabs{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:1fr}
+  .tab{font-size:11.5px;padding:10px 4px}
+}
 </style>
 </head>
 <body>
@@ -732,9 +765,11 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
     <div><div class="eyebrow" id="eyebrow">Phuket Tennis Family</div><h1 id="title">Лига</h1></div>
     <div class="thsw" id="thSw"></div>
     <div id="walletChip" class="hidden"></div>
+    <div id="webAuth" class="webauth"></div>
     <div id="mePlate"></div>
   </div>
   <div id="walletPanel" class="hidden"></div>
+  <div id="accessBar"></div>
   <div class="tabs" id="tabs"></div>
   <div id="viewHome"></div>
   <div id="viewDiv" class="hidden"></div>
@@ -747,6 +782,7 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
   <div id="viewAbout" class="hidden"></div>
   <div id="viewCard" class="hidden"></div>
   <div class="navbot" id="navBot"></div>
+  <div class="webfoot webauth" id="webFoot"></div>
 </div>
 <div class="edge l off" id="edgeL" onclick="navStep(-1)"><i>‹</i></div>
 <div class="edge r off" id="edgeR" onclick="navStep(1)"><i>›</i></div>
@@ -759,6 +795,11 @@ var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var initData=(tg&&tg.initData)||'';
 var linkToken=new URLSearchParams(location.search).get('t')||'';
 var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
+// Открыто в обычном браузере, а не в Telegram: это сайт. Скрипт Telegram
+// подключён и здесь, но initData в браузере пустой.
+var IS_WEB=!initData&&!linkToken;
+var webGuest=false,needsProfile=false,webBot='';
+if(IS_WEB)document.documentElement.classList.add('web');
 var L=window.PTFPrefs?PTFPrefs.lang()==='ru':((tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user&&tg.initDataUnsafe.user.language_code)||'').toLowerCase().indexOf('ru')===0;
 
 var players=[],matches={},events=[],divisions=[],season='',me=null,meDivision='',fantasyData=null,fRank='teams',fanTeamOpen='',fantasyAllowed=false;
@@ -1467,10 +1508,17 @@ function renderNav(){
     +'<button onclick="navStep(1)"><span>'+esc(tabTitle(neighbour(1)))+'</span><i>›</i></button>';
 }
 function syncBack(){
+  // На сайте «назад» — это кнопка браузера: карточка игрока получает свою
+  // запись в истории, и «назад» возвращает на вкладку, а не уводит с сайта.
+  if(IS_WEB){
+    try{ if(openId&&!(history.state&&history.state.card))history.pushState({card:openId},''); }catch(e){}
+    return;
+  }
   if(!tg||!tg.BackButton)return;
   if(openId)tg.BackButton.show();else tg.BackButton.hide();
 }
 if(tg&&tg.BackButton&&tg.BackButton.onClick)tg.BackButton.onClick(function(){ if(openId)showTab(backTo) });
+if(IS_WEB)window.addEventListener('popstate',function(){ if(openId)showTab(backTo) });
 
 // ---------------------------------------------------------------- касса
 // Цифра баланса живёт в шапке и появляется только тогда, когда деньги на
@@ -2634,6 +2682,8 @@ function evPost(url,body,done){
     }).catch(function(){ if(done)done({ok:false,error:'network'}) });
 }
 function evJoin(id){
+  if(webGuest)return openLogin();
+  if(needsProfile)return openProfile();
   toast(X.evSending);
   evPost('/api/league/event-join',{event_id:id},function(j){
     toast(j&&j.ok?X.evJoined:(j&&j.error)||'…');
@@ -2683,7 +2733,67 @@ function toast(text){
   el.textContent=text;el.classList.add('on');
   clearTimeout(toastTimer);toastTimer=setTimeout(function(){el.classList.remove('on')},2600);
 }
-function openBot(){ if(tg&&tg.close)tg.close(); }
+function openBot(){
+  if(IS_WEB){ if(webBot)openLink('https://t.me/'+webBot); return; }
+  if(tg&&tg.close)tg.close();
+}
+// ------------------------------------------------------------- сайт: вход
+// Гость видит интерфейс целиком. Сверху — одна полоса с тем, что ему делать
+// дальше: войти через Telegram (сайт) или заполнить анкету (в боте).
+function renderAccess(){
+  var auth=$('webAuth'),bar=$('accessBar');
+  if(auth){
+    auth.innerHTML=IS_WEB&&webGuest?'<button onclick="openLogin()">'+esc(L?'Войти':'Log in')+'</button>':'';
+  }
+  // Выход — внизу страницы: в шапке у вошедшего уже стоит его карточка, и на
+  // телефоне третьей кнопке там тесно.
+  var foot=$('webFoot');
+  if(foot)foot.innerHTML=IS_WEB&&!webGuest?'<button class="quiet" onclick="logout()">'+esc(L?'Выйти из аккаунта':'Log out')+'</button>':'';
+  if(!bar)return;
+  if(webGuest){
+    bar.innerHTML='<div class="accbar"><div class="tx"><b>'+esc(L?'Вход через Telegram':'Log in with Telegram')+'</b>'
+      +esc(L?'Записаться на события, играть матчи и видеть свою карточку — после входа.':'Log in to join events, play matches and see your own card.')+'</div>'
+      +'<button onclick="openLogin()">'+esc(L?'Войти':'Log in')+'</button></div>';
+  } else if(needsProfile){
+    bar.innerHTML='<div class="accbar"><div class="tx"><b>'+esc(L?'Заполните анкету':'Complete your profile')+'</b>'
+      +esc(L?'Пара минут в Telegram — и можно вступать в лигу и записываться на события.':'A couple of minutes in Telegram — then you can join the league and events.')+'</div>'
+      +'<button onclick="openProfile()">'+esc(L?'Анкета':'Profile')+'</button></div>';
+  } else bar.innerHTML='';
+}
+function openProfile(){
+  if(IS_WEB){
+    if(webBot)openLink('https://t.me/'+webBot+'?start=profile');
+    else toast(L?'Откройте нашего бота в Telegram':'Open our bot in Telegram');
+    return;
+  }
+  location.href='/apply?mode=profile'+(tokQ||'');
+}
+// Официальная кнопка Telegram Login. После подтверждения Telegram вернёт
+// человека на /auth/telegram, сервер проверит подпись и вернёт сюда же.
+function openLogin(){
+  if(!IS_WEB)return;
+  var old=document.getElementById('loginSheet');if(old)old.remove();
+  var el=document.createElement('div');
+  el.id='loginSheet';el.className='loginsheet';
+  el.onclick=function(e){if(e.target===el)el.remove()};
+  el.innerHTML='<div class="box"><h3>'+esc(L?'Вход через Telegram':'Log in with Telegram')+'</h3>'
+    +'<p>'+esc(L?'Telegram спросит подтверждение. Отдельного пароля у сайта нет — вы тот же человек, что и в нашем боте.'
+                :'Telegram will ask you to confirm. The site has no password of its own — you are the same person as in our bot.')+'</p>'
+    +'<div class="tgw" id="tgWidget"></div>'
+    +'<button class="close" onclick="document.getElementById(\'loginSheet\').remove()">'+esc(L?'Закрыть':'Close')+'</button></div>';
+  document.body.appendChild(el);
+  if(!webBot){$('tgWidget').innerHTML='<div class="hint">'+esc(L?'Вход временно недоступен.':'Login is temporarily unavailable.')+'</div>';return}
+  var sc=document.createElement('script');
+  sc.async=true;sc.src='https://telegram.org/js/telegram-widget.js?22';
+  sc.setAttribute('data-telegram-login',webBot);
+  sc.setAttribute('data-size','large');
+  sc.setAttribute('data-radius','12');
+  sc.setAttribute('data-request-access','write');
+  sc.setAttribute('data-lang',L?'ru':'en');
+  sc.setAttribute('data-auth-url',location.origin+'/auth/telegram?next='+encodeURIComponent(location.pathname+location.search.replace(/[?&]login=failed/,'')));
+  $('tgWidget').appendChild(sc);
+}
+function logout(){ location.href='/auth/logout?next='+encodeURIComponent(location.pathname); }
 // ------------------------------------------------------------- партнёры
 // Всё содержимое вкладки лежит в таблице состава: лист Partners — сами партнёры,
 // лист Partners_Page — подписи самой страницы. Оба листа двуязычные, поэтому в
@@ -3143,7 +3253,7 @@ function loadFantasyLater(){
     })
     .catch(function(e){console.log('fantasy later:',e&&e.message)});
 }
-fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
+fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang='+(L?'ru':'en')+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
   .then(function(r){return r.json()}).then(function(j){
     if(j.lang){var lg=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;L=lg==='ru';X=L?T.ru:T.en;document.documentElement.lang=lg}
     if(!j.ok)throw new Error(j.code||j.error||(L?'Ошибка':'Error'));
@@ -3166,6 +3276,9 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+(asQ?'
     }
     if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy')
     isLeagueAdmin=Boolean(j.is_admin);
+    webGuest=Boolean(j.anonymous);needsProfile=Boolean(j.needs_profile);webBot=j.bot_username||'';
+    renderAccess();
+    if(IS_WEB&&/[?&]login=failed/.test(location.search))setTimeout(function(){toast(L?'Вход не удался — попробуйте ещё раз':'Login failed — please try again')},300);
     buildTabs();
     $('title').textContent=X.title;
     // Видно, что это чужой набор вкладок, а не поломка.

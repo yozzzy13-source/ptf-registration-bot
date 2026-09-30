@@ -469,6 +469,18 @@ async function sendProfileInvite(chatId, ru) {
     : '🎾 <b>The League interface opens after your profile.</b>\n\nIt takes a couple of minutes. After that you get:\n• the player showcase with cards and statistics\n• division tables and the Yearly Race\n• league match history\n• event applications and the next-season waitlist',
     { reply_markup: { inline_keyboard: [[{ text: ru ? '📝 Заполнить анкету' : '📝 Complete the profile', web_app: { url: `${PUBLIC_URL}/apply?mode=profile` } }]] } });
 }
+// Пришёл с сайта по кнопке «Заполнить анкету». Анкета уже есть — просто
+// говорим, что всё в порядке, и отдаём меню; нет — сразу кнопка анкеты.
+async function startProfileFromSite(chatId, lang, from) {
+  const l = fallbackLang(lang);
+  const ru = l === 'ru';
+  const profile = await findApplicantByTelegramId(from.id).catch(() => null);
+  if (!isProfileCompleted(profile)) return sendProfileInvite(chatId, ru);
+  await sendMessage(chatId, ru
+    ? '✅ Анкета уже заполнена. Обновите страницу сайта — всё, что вам доступно, уже открыто.'
+    : '✅ Your profile is already complete. Refresh the website — everything available to you is already open.');
+  return sendMain(chatId, l, from);
+}
 async function sendOpenApp(chatId, lang, key) {
   const l = fallbackLang(lang);
   const d = OPEN_APP[key];
@@ -613,6 +625,10 @@ const ADMIN_HELP_TAIL = {
     '• Позиции и таблица нигде не хранятся: они считаются из матчей при каждом открытии. Поэтому исправление счёта задним числом само чинит и таблицу, и сетку.',
     '• Снятие игрока и результат матча — разные вещи. Снятие меняет статус заявки; несыгранные матчи получают явный W/O, а сыгранные остаются как есть.',
     '• Парная запись идёт у игрока командой <code>/doubles</code>: можно записаться без партнёра, выбрать его из списка или позвать ссылкой. Отказ не убивает заявку.',
+    '', '🌐 <b>Сайт лиги</b>',
+    '• Главная страница сервера — это сайт: тот же интерфейс лиги, что в мини-приложении, но в браузере (телефон и компьютер).',
+    '• Без входа видно открытую часть: главная, таблицы, гонка, игроки, события, расписание. Fantasy и личное — только игрокам лиги.',
+    '• Вход — только через Telegram. Новый человек сразу появляется в Players list лидом («сайт»), а сюда приходит карточка. Анкета заполняется в боте: кнопка на сайте ведёт в бот.',
     '', '📊 <b>Дивизионы и результаты</b>',
     '• Дивизион игрока и список соперников берутся из таблицы дивизиона последнего сезона, лист <b>Division_Tracker</b>, список под заголовком «Player». Переносишь игрока — правишь только там.',
     '• Статус active/inactive — из анкеты. Нет active — матчи закрыты, даже если игрок есть в сетке.',
@@ -631,6 +647,10 @@ const ADMIN_HELP_TAIL = {
     '• Broadcasts can target an event: switch «To» to «By event», pick the event and who from it (all / playing / waitlist / unpaid). The counter shows the recipients before sending. Placeholders <code>{event}</code>, <code>{date}</code>, <code>{time}</code>, <code>{venue}</code> work in the text.',
     '• Balance: pick a player, then top up, charge or refund by buttons; a comment is required.',
     '• The «Buttons» tab shows what each player group sees, and lets you preview it without a second account.',
+    '', '🌐 <b>League website</b>',
+    '• The server home page is the website: the same league interface as the mini app, in a browser.',
+    '• Without login it shows the public part; Fantasy and personal sections are for league players only.',
+    '• Login is via Telegram only. A new visitor appears in Players list as a website lead and a card comes here. The profile is filled in the bot.',
     '', '📊 <b>Divisions and results</b>',
     '• A player’s division and opponents come from the latest season division sheet, tab <b>Division_Tracker</b>, the list under «Player».',
     '• Status active/inactive comes from the application. Without active, matches stay closed.',
@@ -1241,6 +1261,8 @@ export async function handleMessage(msg) {
     // Ссылка-приглашение в пару: t.me/бот?start=pair_<id приглашения>.
     if (param.startsWith('pair_')) return handlePairStart(chatId, from, lang, param.replace(/^pair_/, ''));
     if (param.startsWith('go_')) return openDestination(chatId, lang, from, param.replace(/^go_/, ''));
+    // С сайта: «Заполнить анкету» ведёт сюда — сразу кнопка анкеты, без меню.
+    if (param === 'profile' && isPrivate) return startProfileFromSite(chatId, lang, from);
     if (!isPrivate) return null;
     return sendMain(chatId, lang, from);
   }
@@ -1751,6 +1773,7 @@ export async function handleCallback(q) {
     await sendMessage(chatId, t(selected, 'language_saved'));
     const param = state?.pendingStartParam || '';
     if (param.startsWith('challenge_')) return handleChallengeStart(chatId, from, selected, param.replace('challenge_', ''));
+    if (param === 'profile') return startProfileFromSite(chatId, selected, from);
     return sendMain(chatId, selected, from);
   }
 
