@@ -35,6 +35,7 @@ import { uiError } from './ui-errors.js';
 import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
 import { startLogCleanup } from './retention.js';
 import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
+import { SEO_PAGES, seoLang, slugOf as seoSlug, divLabel as seoDivLabel, organizationLd, websiteLd, faqLd, personLd, eventsLd, ssrHtml, applySeo, robotsTxt, sitemapXml, webManifest, aboutSsr } from './seo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,71 +115,163 @@ app.post('/api/ui-language', async (req,res) => {
 function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
 // Главная сайта — тот же интерфейс лиги, что и в мини-приложении. Страница сама
 // понимает, где её открыли: в Telegram или в обычном браузере.
-app.get('/', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
 app.get('/health', (req, res) => res.send('PTF Registration Bot is running'));
-// Лендинг: что такое лига, как устроена и как вступить.
-app.get('/about', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'about.html')); });
-
-// Ссылки «поделиться»: /p/<имя игрока> и /d/<дивизион>. Открывают ту же
-// страницу лиги сразу на игроке или таблице, а для превью в мессенджерах
-// подставляют заголовок, описание и фото. Сами страницы ничем не отличаются.
-export const slugOf = (name = '') => String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-  .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
-let leagueHtmlCache = null;
-async function leagueHtml() {
-  if (!leagueHtmlCache) leagueHtmlCache = await fs.promises.readFile(path.join(__dirname, 'public', 'league.html'), 'utf8');
-  return leagueHtmlCache;
+// Живая часть сайта: галерея из папки «PTF Gallery» и лента Instagram.
+app.get('/api/public/gallery', async (req, res) => {
+  try {
+    const { getGallery } = await import('./gallery.js');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.json({ ok:true, ...(await getGallery()) });
+  } catch (e) { res.json({ ok:true, albums:[] }); }
+});
+app.get('/gallery/:id.jpg', async (req, res) => {
+  try {
+    const { galleryImage } = await import('./gallery.js');
+    const buf = await galleryImage(req.params.id, Number(req.query.w || 500));
+    if (!buf) return res.status(404).end();
+    res.set('Cache-Control', 'public, max-age=86400').type('image/jpeg').send(buf);
+  } catch (e) { console.error('gallery image:', e.message); res.status(404).end(); }
+});
+app.get('/api/public/instagram', async (req, res) => {
+  try {
+    const { recentPosts, IG_PROFILE_URL, IG_ACCOUNT } = await import('./instagram.js');
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({ ok:true, account:IG_ACCOUNT, profile_url:IG_PROFILE_URL, posts: await recentPosts(6) });
+  } catch (e) { res.json({ ok:true, posts:[] }); }
+});
+// ------------------------------------------------------------------ SEO
+// Каждая публичная страница сайта отдаётся с заголовком, описанием, превью,
+// структурированными данными и серверным текстом для поисковиков (см. seo.js).
+// Адреса: / /about /divisions /race /players /matches /events /tournaments
+// /partners, игрок /p/<имя>, дивизион /d/<буква>. Русская версия — ?lang=ru.
+const pageCache = new Map();
+async function pageHtml(file) {
+  if (!pageCache.has(file)) pageCache.set(file, await fs.promises.readFile(path.join(__dirname, 'public', file), 'utf8'));
+  return pageCache.get(file);
 }
-const escAttr = (v = '') => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-function withMeta(html, { title, description, image, url }) {
-  let out = html;
-  const set = (re, tag) => { out = re.test(out) ? out.replace(re, tag) : out.replace('</head>', tag + '\n</head>'); };
-  set(/<title>[^<]*<\/title>/, `<title>${escAttr(title)}</title>`);
-  set(/<meta property="og:title"[^>]*>/, `<meta property="og:title" content="${escAttr(title)}" />`);
-  set(/<meta property="og:description"[^>]*>/, `<meta property="og:description" content="${escAttr(description)}" />`);
-  set(/<meta name="description"[^>]*>/, `<meta name="description" content="${escAttr(description)}" />`);
-  if (image) set(/<meta property="og:image"[^>]*>/, `<meta property="og:image" content="${escAttr(image)}" />`);
-  set(/<meta property="og:url"[^>]*>/, `<meta property="og:url" content="${escAttr(url)}" />`);
-  return out;
-}
+export const slugOf = seoSlug;
 async function snapshotSoon(ms = 3500) {
   return Promise.race([getLeagueSnapshot(), new Promise(r => setTimeout(() => r(null), ms))]).catch(() => null);
 }
-app.get('/p/:slug', async (req, res) => {
+function divisionLabelFor(d = '') { return seoDivLabel(d) || 'Division'; }
+const siteHost = () => { try { return new URL(SITE_URL).host; } catch { return ''; } };
+const socialLinks = () => ({ instagram: 'https://www.instagram.com/phukettennisfamily/', telegram: webBotName() ? `https://t.me/${webBotName()}` : '' });
+const absImage = (src = '') => /^https?:/.test(src) ? src : (src ? `${PUBLIC_URL}${src.startsWith('/') ? '' : '/'}${src}` : '');
+async function seoEvents(lang) {
+  const out = [];
+  try {
+    for (const e of await getAllEvents().catch(() => [])) {
+      const name = lang === 'ru' ? (e.event_name_ru || e.event_name_en) : (e.event_name_en || e.event_name_ru);
+      if (!name) continue;
+      const start = String(e.start_date || '').trim(), end = String(e.end_date || '').trim();
+      out.push({ name, start: start && start !== 'None' ? start : '', end: end && end !== 'None' ? end : '', path:'/tournaments',
+        when: [start, end].filter(x => x && x !== 'None').map(x => String(x).slice(0, 10)).join(' — ') });
+    }
+  } catch (e) {}
+  try {
+    const { eventsForViewer } = await import('./eventflow.js');
+    for (const e of await eventsForViewer('', false, false).catch(() => [])) {
+      if (e.past) continue;
+      const name = lang === 'ru' ? (e.title_ru || e.title_en) : (e.title_en || e.title_ru);
+      out.push({ name, start: e.starts_at ? new Date(e.starts_at).toISOString() : '', place: e.place || '', path:'/events',
+        when: [e.date, e.time].filter(Boolean).join(' '), description: lang === 'ru' ? (e.description_ru || e.description_en) : (e.description_en || e.description_ru) });
+    }
+  } catch (e) {}
+  return out;
+}
+async function sendSeoPage(req, res, page, { player = null, division = '' } = {}) {
   noCache(res);
+  const lang = seoLang(req);
+  const site = SITE_URL;
+  const P = SEO_PAGES[page] || SEO_PAGES.home;
+  let [title, description] = lang === 'ru' ? P.ru : P.en;
+  let pathName = P.path, image = `${site}/public/img/og.png`, noindex = false;
+  const ld = [organizationLd(site, socialLinks())];
+  const snap = await snapshotSoon();
+  const players = (snap?.players || []).filter(x => String(x.name || '').trim());
+  const data = { players, divisions: snap?.divisions || [] };
+  if (page === 'home') ld.push(websiteLd(site));
+  if (['home', 'events', 'tournaments'].includes(page)) {
+    data.events = await seoEvents(lang);
+    ld.push(...eventsLd(site, data.events));
+  }
+  if (req.params?.slug !== undefined) {
+    pathName = `/p/${String(req.params.slug || '').toLowerCase()}`;
+    if (!player) noindex = true;
+    else {
+      const div = divisionLabelFor(player.division);
+      const stats = [div, Number(player.matches) ? (lang === 'ru' ? `${player.matches} матчей · ${player.wins || 0} побед` : `${player.matches} matches · ${player.wins || 0} wins`) : ''].filter(Boolean).join(' · ');
+      title = `${player.name} — Phuket Tennis Family`;
+      description = lang === 'ru' ? `${stats ? stats + '. ' : ''}Профиль игрока любительской теннисной лиги на Пхукете.` : `${stats ? stats + '. ' : ''}Player profile in the Phuket amateur tennis league.`;
+      pathName = `/p/${seoSlug(player.name)}`;
+      if (player.photo) image = absImage(player.photo);
+      data.player = player;
+      ld.push(personLd(site, { name: player.name, image: player.photo ? absImage(player.photo) : '', description: stats }));
+    }
+  }
+  if (division) {
+    pathName = `/d/${division}`;
+    title = `${divisionLabelFor(division)} — ${lang === 'ru' ? 'таблица' : 'standings'} · Phuket Tennis Family`;
+    description = lang === 'ru' ? `Таблица, результаты и плей-офф: ${divisionLabelFor(division)}, теннисная лига Пхукета.` : `Standings, results and playoffs of ${divisionLabelFor(division)} in the Phuket tennis league.`;
+    data.division = division;
+    try {
+      const season = snap?.current?.number || '';
+      const groups = await divisionGroups(division, season).catch(() => []);
+      const tables = [];
+      for (const g of (groups.length ? groups.map(x => x.group) : [''])) {
+        const t = await getDivisionTable(division, season, g).catch(() => null);
+        if (t?.ok) tables.push(...(t.players || []));
+      }
+      data.table = tables;
+    } catch (e) {}
+  }
+  const file = page === 'about' ? 'about.html' : 'league.html';
+  if (page === 'about') ld.push(faqLd(lang === 'ru' ? ABOUT_FAQ.ru : ABOUT_FAQ.en));
+  const html = await pageHtml(file);
+  res.type('html').send(applySeo(html, {
+    site, path: pathName, lang, title, description, image, ld, noindex,
+    ssr: file === 'league.html' ? ssrHtml({ page, lang, site, data }) : aboutSsr(lang, lang === 'ru' ? ABOUT_FAQ.ru : ABOUT_FAQ.en)
+  }));
+}
+// Вопросы-ответы с лендинга — ещё и для Google (FAQ в выдаче).
+const ABOUT_FAQ = {
+  en: [['What level do I need?', 'Any. Phuket Tennis Family is an amateur league: divisions are built by level, so you play people of your strength.'],
+       ['Do I need to be in Phuket for the full 2 months?', 'No. Just play your 7 matches before the final stage; you agree the time of each match with your opponent.'],
+       ['Who books and pays for the court?', 'For regular matches the players do; courts for semifinals and finals are included.'],
+       ['How do I join?', 'Log in with Telegram on phukettennis.com, fill in a short profile in our bot and choose a season or join the waitlist.']],
+  ru: [['Какой нужен уровень?', 'Любой. Phuket Tennis Family — любительская лига: дивизионы собираются по уровню, и вы играете с соперниками своей силы.'],
+       ['Нужно ли быть на Пхукете все 2 месяца?', 'Нет. Главное — сыграть свои 7 матчей до финальной стадии; время каждого матча вы согласуете с соперником сами.'],
+       ['Кто бронирует и оплачивает корт?', 'На матчи регулярки — игроки; корты на полуфиналы и финалы входят в участие.'],
+       ['Как вступить?', 'Войдите через Telegram на phukettennis.com, заполните короткую анкету в нашем боте и выберите сезон или лист ожидания.']]
+};
+app.get('/', (req, res) => sendSeoPage(req, res, 'home').catch(e => { console.error('seo home:', e.message); res.sendFile(path.join(__dirname, 'public', 'league.html')); }));
+app.get('/about', (req, res) => sendSeoPage(req, res, 'about').catch(e => { console.error('seo about:', e.message); res.sendFile(path.join(__dirname, 'public', 'about.html')); }));
+for (const [key, route] of [['div','/divisions'],['race','/race'],['players','/players'],['matches','/matches'],['events','/events'],['tournaments','/tournaments'],['partners','/partners']]) {
+  app.get(route, (req, res) => sendSeoPage(req, res, key).catch(e => { console.error('seo page:', e.message); res.sendFile(path.join(__dirname, 'public', 'league.html')); }));
+}
+app.get('/p/:slug', async (req, res) => {
   try {
     const snap = await snapshotSoon();
-    const p = (snap?.players || []).find(x => slugOf(x.name) === String(req.params.slug || '').toLowerCase());
-    const html = await leagueHtml();
-    if (!p) return res.type('html').send(html);
-    const div = String(p.division || '').trim();
-    const stats = [div ? divisionLabelFor(div) : '', Number(p.matches) ? `${p.matches} matches · ${p.wins || 0} wins` : '']
-      .filter(Boolean).join(' · ');
-    res.type('html').send(withMeta(html, {
-      title: `${p.name} — Phuket Tennis Family`,
-      description: stats ? `${stats}. Player profile in the PTF tennis league, Phuket.` : 'Player profile in the PTF tennis league, Phuket.',
-      image: /^https?:/.test(p.photo || '') ? p.photo : (p.photo ? PUBLIC_URL + p.photo : ''),
-      url: `${SITE_URL}/p/${slugOf(p.name)}`
-    }));
-  } catch (e) { console.error('share player page:', e.message); res.type('html').send(await leagueHtml()); }
+    const p = (snap?.players || []).find(x => seoSlug(x.name) === String(req.params.slug || '').toLowerCase());
+    await sendSeoPage(req, res, 'players', { player: p || null });
+  } catch (e) { console.error('share player page:', e.message); res.type('html').send(await pageHtml('league.html')); }
 });
 app.get('/d/:letter', async (req, res) => {
-  noCache(res);
   const letter = String(req.params.letter || '').toUpperCase().replace(/[^A-Z]/g, '');
-  const html = await leagueHtml();
-  if (!letter) return res.type('html').send(html);
-  res.type('html').send(withMeta(html, {
-    title: `${divisionLabelFor(letter)} — Phuket Tennis Family`,
-    description: `Standings, results and playoffs of ${divisionLabelFor(letter)} in the PTF tennis league, Phuket.`,
-    image: '', url: `${SITE_URL}/d/${letter}`
-  }));
+  try { await sendSeoPage(req, res, 'div', { division: letter }); }
+  catch (e) { console.error('share division page:', e.message); res.type('html').send(await pageHtml('league.html')); }
 });
-function divisionLabelFor(d = '') {
-  const k = String(d).replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
-  if (k === 'PRIME' || k === 'P') return 'Prime';
-  if (['W','WOMAN','WOMEN'].includes(k)) return 'Division W';
-  return k ? `Division ${k}` : 'Division';
-}
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send(robotsTxt(SITE_URL, String(req.headers?.host || '') === siteHost()));
+});
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const snap = await snapshotSoon(6000);
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.type('application/xml').send(sitemapXml(SITE_URL, { players: snap?.players || [], divisions: snap?.divisions || [] }));
+  } catch (e) { res.type('application/xml').send(sitemapXml(SITE_URL, {})); }
+});
+app.get('/site.webmanifest', (req, res) => { res.set('Cache-Control', 'public, max-age=86400'); res.type('application/manifest+json').send(JSON.stringify(webManifest())); });
 
 // Вход на сайт через Telegram. Новый человек сразу появляется в Players list
 // лидом с пометкой «сайт», а в админ-чат приходит карточка — как при /start в боте.
@@ -195,7 +288,9 @@ app.get('/match', (req, res) => { noCache(res); res.sendFile(path.join(__dirname
 app.get('/league', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'league.html')); });
 app.get('/fantasy', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'fantasy.html')); });
 // Турнирная админка — отдельное приложение, а не вкладка внутри админки.
-app.get('/tournaments', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'tournament.html')); });
+// Турнирная админка. Адрес /tournaments теперь у публичной вкладки «Турниры»
+// сайта, поэтому админка переехала на /tournament-admin.
+app.get('/tournament-admin', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'tournament.html')); });
 
 // --- Календарь -------------------------------------------------------------
 // /ics отдаёт сам файл события, /cal — страница мини-приложения с кнопкой:
@@ -1694,6 +1789,7 @@ app.post('/api/avatar/upload', async (req, res) => {
 // Картинка для витрины. Постоянный адрес: при перегенерации меняется
 // содержимое, а ссылка остаётся прежней.
 const avatarCache = new Map();
+const avatarFileOf = new Map();   // telegram id → file_id последней известной аватарки
 // Instagram не принимает файл — он скачивает картинку по ссылке. Держим её в
 // памяти полчаса и отдаём здесь; после публикации ссылка умирает сама.
 app.get('/ig/:id.jpg', (req, res) => {
@@ -1707,8 +1803,17 @@ app.get('/ig/:id.jpg', (req, res) => {
 app.get('/avatar/:id.png', async (req, res) => {
   try {
     const id = String(req.params.id || '').replace(/\.png$/, '');
-    const profile = await findApplicantByTelegramId(id);
-    const fileId = profile?.avatar_file_id || '';
+    // Витрина запрашивает аватарки пачкой. Если таблица сейчас не читается
+    // (лимит Google), берём файл, который уже знали для этого игрока.
+    let fileId = '';
+    try {
+      const profile = await findApplicantByTelegramId(id);
+      fileId = profile?.avatar_file_id || '';
+      avatarFileOf.set(id, fileId);
+    } catch (e) {
+      fileId = avatarFileOf.get(id) || '';
+      if (!fileId) throw e;
+    }
     if (!fileId) return res.status(404).send('no avatar');
     let hit = avatarCache.get(fileId);
     if (!hit) {
@@ -1890,6 +1995,22 @@ app.get('/api/public/seasons', async (req, res) => {
     // что стоит в строке события — там даты часто плановые.
     const history = await getLeagueMatchHistory().catch(() => new Map());
     const span = new Map();
+    // Сколько матчей сыграно и сколько игроков реально играло в сезоне — для
+    // счётчика на сайте. Один матч лежит в истории у обоих игроков, поэтому
+    // считаем по паре участников и дате, а не по строкам.
+    const playedMatches = new Map(), playedPlayers = new Map();
+    for (const [pid, list] of history.entries()) {
+      for (const m of list) {
+        const n = String(m.season || '').replace(/\D+/g, '');
+        if (!n) continue;
+        const me = String(byId.get(String(pid))?.name || pid).trim().toLowerCase();
+        const pair = [me, String(m.opponent || m.opponent_id || '').trim().toLowerCase()].sort().join('~');
+        if (!playedMatches.has(n)) playedMatches.set(n, new Set());
+        playedMatches.get(n).add(`${pair}|${String(m.date || '').slice(0, 10)}`);
+        if (!playedPlayers.has(n)) playedPlayers.set(n, new Set());
+        playedPlayers.get(n).add(String(pid));
+      }
+    }
     for (const list of history.values()) {
       for (const m of list) {
         const n = String(m.season || '').replace(/\D+/g, '');
@@ -1946,6 +2067,8 @@ app.get('/api/public/seasons', async (req, res) => {
         number: String(s.number), label: s.label, status: s.status,
         divisions: letters.length,
         players: players.length,
+        matches_played: playedMatches.get(String(s.number))?.size || 0,
+        players_played: playedPlayers.get(String(s.number))?.size || 0,
         players_list: players,
         weeks,
         finals,
@@ -2187,6 +2310,7 @@ app.listen(PORT, async () => {
   // раньше подхватывать очередь нельзя — получатели получили бы сообщение дважды.
   setTimeout(() => { resumeBroadcasts().catch(e => console.error('broadcast resume failed:', e.message)); }, 60 * 1000).unref?.();
   startLogCleanup();
+  import('./sheets.js').then(m => m.addNewTabOnce('tournaments')).then(done => { if (done) console.log('tabs: «Турниры» добавлены группам'); }).catch(e => console.error('tabs add:', e.message));
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);
   if (!BOT_TOKEN) console.warn('BOT_TOKEN is empty. Set it in Railway Variables.');

@@ -34,6 +34,9 @@
     opts=opts||{};
     var t=opts.token?('t='+encodeURIComponent(opts.token)):'';
     if(key==='mymatches')return '/match'+(t?'?'+t:'');
+    // На сайте у разделов чистые адреса (/race, /players…) — их индексирует Google.
+    var WEB={div:'/divisions',race:'/race',players:'/players',matches:'/matches',events:'/events',tournaments:'/tournaments',partners:'/partners'};
+    if(opts.web&&(key==='home'||WEB[key]))return key==='home'?'/':WEB[key];
     var base=opts.web?'/':'/league';
     var qs=[key&&key!=='home'?'tab='+key:'',t].filter(Boolean).join('&');
     return base+(qs?'?'+qs:'');

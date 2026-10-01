@@ -137,6 +137,21 @@ h2{font-size:22px;font-weight:900;letter-spacing:-.6px;margin:0 2px 14px;line-he
 .final{margin-top:30px;text-align:center;border:1px solid var(--accLine);border-radius:24px;padding:28px 20px;background:radial-gradient(100% 120% at 50% 0%,var(--accBg2),transparent 70%),var(--surf)}
 .final h2{margin:0 0 10px}
 .final p{font-size:14px;line-height:1.6;color:var(--dim);max-width:460px;margin:0 auto 18px}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.num{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:14px}
+.num .nh{font-size:10px;letter-spacing:1.6px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:9px}
+.num .nh em{font-style:normal;color:var(--amber);margin-left:4px}
+.num .nr{display:flex;gap:18px}.num .nr b{display:block;font-size:26px;font-weight:900;color:var(--amber);letter-spacing:-.8px}
+.num .nr span{font-size:11px;color:var(--dim);font-weight:700}
+.galt{font-size:13px;font-weight:800;margin:0 2px 8px}
+.gals{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px;margin-bottom:14px}
+.gals a{flex:0 0 auto;scroll-snap-align:start}.gals img{height:200px;width:auto;max-width:80vw;border-radius:14px;object-fit:cover;display:block}
+.igh{display:flex;align-items:center;justify-content:space-between;gap:12px}.igh p{font-size:12.5px;color:var(--dim);margin-top:3px}
+.igg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:14px}.igg a{display:block;aspect-ratio:1;border-radius:12px;overflow:hidden;background:var(--card2)}
+.igg img{width:100%;height:100%;object-fit:cover;display:block}
+.btn.sm{padding:10px 15px;font-size:13px}
+.cd.tgc{margin-top:18px;background:linear-gradient(160deg,rgba(127,182,232,.10),var(--surf) 60%);border-color:var(--linkLine)}
+.ssr{font-size:14px;line-height:1.6;color:var(--dim);padding:20px 0}.ssr h1{font-size:26px;color:var(--text);margin-bottom:10px}.ssr h2{font-size:18px;color:var(--text);margin:18px 0 6px}.ssr h3{font-size:14px;color:var(--text);margin:10px 0 2px}.ssr p{margin-bottom:8px}
 .foot{text-align:center;margin-top:24px;font-size:11.5px;color:var(--mute)}
 .thsw{margin-left:4px}
 @media (max-width:560px){
@@ -149,17 +164,17 @@ h2{font-size:22px;font-weight:900;letter-spacing:-.6px;margin:0 2px 14px;line-he
 </head>
 <body>
 <div class="grain"></div>
-<div class="wrap" id="app"></div>
+<div class="wrap" id="app"><!--SSR--></div>
 <script>
 (function(){
 var ru=window.PTFPrefs?PTFPrefs.lang()==='ru':String(navigator.language||'').toLowerCase().indexOf('ru')===0;
-var loggedIn=false,seasons=[],partners=[];
+var loggedIn=false,seasons=[],partners=[],gallery=[],ig=null,bot='';
 var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
 var ic=function(k){return window.PTFNav?PTFNav.icon(k):''};
 var T={
  ru:{open:'Открыть лигу',kick:'PHUKET TENNIS FAMILY · ТЕННИСНАЯ ЛИГА',
-  h1:'Играйте регулярно. <em>Растите</em> от сезона к сезону.',
-  lead:'Phuket Tennis Family — теннисная лига Пхукета для тех, кто хочет не просто иногда поиграть, а соревноваться с соперниками своего уровня, видеть свой прогресс и быть частью живого теннисного сообщества.',
+  h1:'Любительская теннисная лига <em>Пхукета</em>.',
+  lead:'Phuket Tennis Family — любительская лига для тех, кто хочет играть регулярно, соревноваться с соперниками своего уровня, видеть свой прогресс и быть частью живого теннисного сообщества. Уровень подбирается по вашим навыкам.',
   join:'Вступить в лигу',look:'Посмотреть лигу',
   sSeasons:'сезона',sPlayers:'игроков в сезоне',sDivs:'дивизионов',sLen:'месяца сезон',
   whyH:'Что внутри',why:[
@@ -190,11 +205,19 @@ var T={
        ['Нужно ли быть на Пхукете все 2 месяца?','Нет. Главное — успеть сыграть свои 7 матчей до финальной стадии. Время каждого матча вы согласуете с соперником сами.'],
        ['Кто бронирует и оплачивает корт?','На регулярку — сами игроки: бот подскажет, кто бронирует. Корты на полуфиналы и финалы входят в участие.'],
        ['На каком языке всё происходит?','Бот, приложение и сайт работают на русском и английском — выберите удобный.']],
+  moreH:'Не только лига',
+  more:[['events','Теннисные события','Турниры, встречи, открытие сезона, игровые вечера. Даже если сезон сейчас не для вас — заполните анкету в Telegram, чтобы первым узнавать о событиях.'],
+        ['tournaments','Живые финалы','Полуфиналы и финалы плей-офф играем вживую — собирается вся теннисная семья, болеем друг за друга.'],
+        ['fantasy','Ужин и награждение','После финалов — торжественный ужин: церемония награждения, кубки чемпионам и праздник всей лиги.'],
+        ['div','Места ограничены','Дивизионы и группы — по 8 игроков, поэтому набор в каждый сезон ограничен. Анкета заранее — лучший способ не пропустить старт.']],
+  numH:'PTF в цифрах',numP:'игроков',numM:'матчей',numS:'Сезон ',
+  galH:'Галерея',igH:'Instagram',igP:'Матчи, финалы и жизнь лиги — подписывайтесь, чтобы видеть всё первыми.',igB:'Подписаться',
+  tgH:'Всё важное — в Telegram',tgP:'Анонсы сезонов, набор, события и ваши матчи приходят в нашего бота. Войдите через Telegram — и уведомления будут приходить вам лично.',tgB:'Открыть бота',
   finalH:'Готовы к первому сезону?',finalP:'Войдите через Telegram, заполните анкету — и мы подберём вам дивизион и соперников вашего уровня.',
   foot:'Phuket Tennis Family · Пхукет, Таиланд'},
  en:{open:'Open the league',kick:'PHUKET TENNIS FAMILY · TENNIS LEAGUE',
-  h1:'Play regularly. <em>Grow</em> season after season.',
-  lead:'Phuket Tennis Family is Phuket’s tennis league for players who want more than the occasional hit: compete against opponents of your level, see your progress and be part of a living tennis community.',
+  h1:'Phuket’s amateur <em>tennis league</em>.',
+  lead:'Phuket Tennis Family is an amateur league for players who want to play regularly, compete against opponents of their level, see their progress and be part of a living tennis community. Your level is matched to your skills.',
   join:'Join the league',look:'Look around',
   sSeasons:'seasons',sPlayers:'players per season',sDivs:'divisions',sLen:'month season',
   whyH:'What’s inside',why:[
@@ -225,6 +248,14 @@ var T={
        ['Do I need to be in Phuket for the full 2 months?','No. Just play your 7 matches before the final stage. You agree the time of each match with your opponent.'],
        ['Who books and pays for the court?','For regular matches — the players; the bot tells you who books. Courts for semifinals and finals are included.'],
        ['What language is it in?','The bot, the app and the site work in English and Russian — pick either.']],
+  moreH:'More than a league',
+  more:[['events','Tennis events','Tournaments, meet-ups, season openers, social play. Even if a season isn’t for you right now, fill in the profile in Telegram to hear about events first.'],
+        ['tournaments','Live finals','Playoff semifinals and finals are played live — the whole tennis family comes to watch and cheer.'],
+        ['fantasy','Dinner and awards','After the finals comes an awards dinner: the ceremony, trophies for the champions and a celebration for the whole league.'],
+        ['div','Limited places','Divisions and groups have 8 players, so every season has limited places. Filling in the profile early is the best way not to miss the start.']],
+  numH:'PTF in numbers',numP:'players',numM:'matches',numS:'Season ',
+  galH:'Gallery',igH:'Instagram',igP:'Matches, finals and league life — follow to see it all first.',igB:'Follow',
+  tgH:'Everything important arrives in Telegram',tgP:'Season announcements, registration, events and your matches come through our bot. Log in with Telegram and the notifications come straight to you.',tgB:'Open the bot',
   finalH:'Ready for your first season?',finalP:'Log in with Telegram, fill in your profile — and we’ll find you a division and opponents of your level.',
   foot:'Phuket Tennis Family · Phuket, Thailand'}
 };
@@ -246,6 +277,12 @@ function render(){
     +'<div class="st"><b>'+(cur?cur.divisions:'—')+'</b><span>'+esc(X.sDivs)+'</span></div>'
     +'<div class="st"><b>2</b><span>'+esc(X.sLen)+'</span></div></div>';
   h+='<div class="sec-h">'+esc(X.whyH)+'</div><div class="cards">'+X.why.map(function(w){return '<div class="cd"><div class="ic">'+ic(w[0])+'</div><b>'+esc(w[1])+'</b><p>'+esc(w[2])+'</p></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.moreH)+'</div><div class="cards">'+X.more.map(function(w){return '<div class="cd"><div class="ic">'+ic(w[0])+'</div><b>'+esc(w[1])+'</b><p>'+esc(w[2])+'</p></div>'}).join('')+'</div>';
+  var played=seasons.filter(function(s){return s.players_played||s.matches_played});
+  if(played.length)h+='<div class="sec-h">'+esc(X.numH)+'</div><div class="nums">'+played.map(function(s){
+    return '<div class="num"><div class="nh">'+esc(X.numS+s.number)+(String(s.status||'').toLowerCase()==='active'||String(s.status||'').toLowerCase()==='live'?' <em>LIVE</em>':'')+'</div>'
+      +'<div class="nr"><div><b>'+esc(s.players_played||s.players||0)+'</b><span>'+esc(X.numP)+'</span></div><div><b>'+esc(s.matches_played||0)+'</b><span>'+esc(X.numM)+'</span></div></div></div>';
+  }).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.howH)+'</div><div class="flow">'+X.flow.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p>'+(i===3?'<div class="zones">'+X.zones.map(function(z,k){return '<div class="zn '+['up','stay','down'][k]+'"><b>'+esc(z[0])+'</b><span>'+esc(z[1])+'</span></div>'}).join('')+'</div>':'')+'</div></div>'}).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.raceH)+'</div><div class="cd"><div class="ic">'+ic('race')+'</div><p style="font-size:13.5px">'+esc(X.race)+'</p></div>';
   if(champs.length)h+='<div class="sec-h">'+esc(X.champsH)+'</div><div class="champs">'+champs.map(function(c){
@@ -256,8 +293,17 @@ function render(){
   if(partners.length)h+='<div class="sec-h">'+esc(X.partnersH)+'</div><div class="partners">'+partners.map(function(p){
     var c=p.category,cat=c==null?'':(typeof c==='string'?c:((ru?(c.ru||c.en):(c.en||c.ru))||''));
     return '<div class="pa">'+(p.photo?'<img src="'+esc(p.photo)+'" alt="" loading="lazy">':'')+'<div><b>'+esc(p.name)+'</b><span>'+esc(cat)+'</span></div></div>'}).join('')+'</div>';
+  var albums=gallery.filter(function(a){return (a.photos||[]).length});
+  if(albums.length)h+='<div class="sec-h">'+esc(X.galH)+'</div>'+albums.map(function(a){
+    return (a.title?'<div class="galt">'+esc(a.title)+'</div>':'')+'<div class="gals">'+a.photos.map(function(p){
+      return '<a href="/gallery/'+esc(p.id)+'.jpg?w=1600" target="_blank" rel="noopener"><img src="/gallery/'+esc(p.id)+'.jpg?w=500" alt="" loading="lazy" onerror="this.parentNode.remove()"></a>'}).join('')+'</div>'}).join('');
+  var igUrl=(ig&&ig.profile_url)||'https://www.instagram.com/phukettennisfamily/';
+  h+='<div class="sec-h">'+esc(X.igH)+'</div><div class="cd igc"><div class="igh"><div><b>@'+esc((ig&&ig.account)||'phukettennisfamily')+'</b><p>'+esc(X.igP)+'</p></div>'
+    +'<a class="btn pri sm" href="'+esc(igUrl)+'" target="_blank" rel="noopener">'+esc(X.igB)+'</a></div>'
+    +(((ig&&ig.posts)||[]).length?'<div class="igg">'+ig.posts.slice(0,6).map(function(p){return '<a href="'+esc(p.permalink)+'" target="_blank" rel="noopener"><img src="'+esc(p.image)+'" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></a>'}).join('')+'</div>':'')+'</div>';
   h+='<div class="sec-h">'+esc(X.joinH)+'</div><div class="flow">'+X.steps.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p></div></div>'}).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.faqH)+'</div><div class="faq">'+X.faq.map(function(f){return '<details><summary>'+esc(f[0])+'</summary><p>'+esc(f[1])+'</p></details>'}).join('')+'</div>';
+  if(bot)h+='<div class="cd tgc"><div class="ic">'+ic('events')+'</div><b>'+esc(X.tgH)+'</b><p>'+esc(X.tgP)+'</p><a class="btn sec sm" style="margin-top:12px" href="https://t.me/'+esc(bot)+'" target="_blank" rel="noopener">'+esc(X.tgB)+'</a></div>';
   h+='<section class="final"><h2>'+esc(X.finalH)+'</h2><p>'+esc(X.finalP)+'</p><a class="btn pri" href="'+joinHref+'">'+esc(joinText)+'</a></section>';
   h+='<div class="foot">'+esc(X.foot)+'</div>';
   document.getElementById('app').innerHTML=h;
@@ -268,8 +314,12 @@ render();
 Promise.all([
   fetch('/api/web/session',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}}),
   fetch('/api/public/seasons',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}}),
-  fetch('/api/league/bootstrap?lang='+(ru?'ru':'en'),{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}})
+  fetch('/api/league/bootstrap?lang='+(ru?'ru':'en'),{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}}),
+  fetch('/api/public/gallery',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}}),
+  fetch('/api/public/instagram',{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return {}})
 ]).then(function(r){
+  bot=(r[0]&&r[0].bot_username)||(r[2]&&r[2].bot_username)||'';
+  gallery=(r[3]&&r[3].albums)||[];ig=r[4]||null;
   loggedIn=Boolean(r[0]&&r[0].logged_in);
   seasons=((r[1]&&r[1].seasons)||[]).slice().sort(function(a,b){return Number(a.number)-Number(b.number)});
   partners=(r[2]&&r[2].partners)||[];

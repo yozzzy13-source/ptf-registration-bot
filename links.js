@@ -19,6 +19,7 @@ export const DESTINATIONS = [
   { code:'apply',        aliases:['заявка','записаться','join'],          ru:'🎾 Заявка на сезон',     en:'🎾 Join the season',    kind:'webapp',   path:'/apply?mode=event' },
   { code:'avatar',       aliases:['аватар','аватарка','селфи','photo'],     ru:'🖼 Сделать аватарку',    en:'🖼 Create my avatar',   kind:'webapp',   path:'/league?player=me' },
   { code:'rating',       aliases:['уровень','тест','ntrp','level'],        ru:'🎾 Указать уровень',     en:'🎾 Set my level',       kind:'webapp',   path:'/apply?mode=rating' },
+  { code:'waitlist',     aliases:['лист','ожидание','waiting'],          ru:'📝 Лист ожидания',       en:'📝 Join the waitlist',  kind:'webapp',   path:'/apply?mode=waitlist' },
   { code:'profile',      aliases:['анкета','профиль'],                    ru:'📝 Заполнить анкету',    en:'📝 Fill in the profile',kind:'webapp',   path:'/apply?mode=profile' },
   { code:'match',        aliases:['матчи','матч','matches'],              ru:'🎾 Матчи и вызовы',      en:'🎾 Matches & challenges',kind:'webapp',  path:'/match' },
   { code:'result',       aliases:['результат','счёт','счет','score'],     ru:'📊 Внести результат',    en:'📊 Submit a result',    kind:'webapp',   path:'/match?tab=res' },

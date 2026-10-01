@@ -7,10 +7,10 @@ import sharp from 'sharp';
 const red = await sharp({create:{width:400,height:400,channels:3,background:'#ef3434'}}).png().toBuffer();
 const blue = await sharp({create:{width:400,height:400,channels:3,background:'#3454ef'}}).png().toBuffer();
 const green = await sharp({create:{width:400,height:400,channels:4,background:'#24b56a'}}).png().toBuffer();
-let lookups = [], downloads = [], failAvatar = false, logoFiles = [];
+let lookups = [], downloads = [], failAvatar = false, logoFiles = [], quota = 0, masterDown = false;
 const sharpMock=(input,...args)=>sharp(typeof input==='string'&&input.includes('match-card-logos')?green:input,...args);
 sharpMock.strategy=sharp.strategy;
-const context = vm.createContext({Buffer,console,Map,process:{env:{}},fetch:async url=>{
+const context = vm.createContext({Buffer,console,Map,process:{env:{}},setTimeout:fn=>{queueMicrotask(fn);return 1},fetch:async url=>{
   downloads.push(url);
   assert.equal(url,'https://portraits.test/master.png');
   return {ok:true,arrayBuffer:async()=>blue};
@@ -24,8 +24,8 @@ const deps = {
     lookups.push(id); if(failAvatar)throw Error('Unavailable avatar');return {buffer:red};
   }}),
   './sheets.js':mock({
-    findApplicantByTelegramId:async id=>({avatar_file_id:id==='1'?'applicants-avatar':''}),
-    getMasterPhotos:async()=>new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']]),
+    findApplicantByTelegramId:async id=>{if(quota>0){quota--;throw Error('Quota exceeded for quota metric Read requests')}return {avatar_file_id:id==='1'?'applicants-avatar':id==='11'?'avatar-11':''}},
+    getMasterPhotos:async()=>{if(masterDown)throw Error('Quota exceeded (master)');return new Map([['Alice One','https://portraits.test/master.png'],['Bob Two','https://portraits.test/master.png']])},
     sameName:(a,b)=>String(a||'').trim().toLowerCase().replace(/[.\s]+/g,' ')===String(b||'').trim().toLowerCase().replace(/[.\s]+/g,' ')
   }),
   './sponsors.js':mock({ sponsorsAvailable:()=>false, sponsorStrip:async()=>null }),
@@ -77,6 +77,23 @@ const withoutFantasy=await card.renderInstagramMatchCard({
 });
 assert.deepEqual(instagram,withoutFantasy,'Unified card ignores Fantasy Points');
 assert.ok(!(await fs.readFile(new URL('../matchcard.js',import.meta.url),'utf8')).includes('>WINNER<'),'Winner label is absent');
+// Лимит Google во время рассылки: первая попытка найти фото падает, вторая
+// через пару секунд удаётся — карточка уходит с фото, без пометки админу.
+card.forgetPhotoCache();masterDown=true;quota=1;
+const retried=await card.renderMatchCard({...match,winner:'Retry Guy',winnerId:'11',loser:'Alice One',loserId:'1'});
+assert.deepEqual(await pixel(retried,225,420),[239,52,52],'Photo lookup is retried after a quota error');
+assert.ok(!retried.missingPhotos,'Successful retry leaves no warning');
+// Таблица недоступна совсем, но файл аватарки игрока уже знаем — берём его.
+card.forgetPhotoCache();quota=99;
+const known=await card.renderMatchCard({...match,winner:'Retry Guy',winnerId:'11',loser:'Alice One',loserId:'1'});
+assert.deepEqual(await pixel(known,225,420),[239,52,52],'Known avatar file is used when the sheet is unreachable');
+// Не знаем ничего и Google не отвечает — инициалы и причина для админа.
+card.forgetPhotoCache();quota=99;
+const missing=await card.renderMatchCard({...match,winner:'Nobody Known',winnerId:'12',loser:'Alice One',loserId:'1'});
+assert.equal(missing.missingPhotos?.length,1,'Card reports the player left without a photo');
+assert.equal(missing.missingPhotos[0].name,'Nobody Known');
+assert.match(missing.missingPhotos[0].reason,/Quota/);
+quota=0;masterDown=false;
 if(process.argv[2]) await fs.writeFile(process.argv[2],png);
 if(process.argv[3]) await fs.writeFile(process.argv[3],instagram);
-console.log('PASS: unified 1080x1148 match card, portrait fallbacks, no Fantasy Points or Winner label.');
+console.log('PASS: unified 1080x1148 match card, portrait fallbacks and quota retries, no Fantasy Points or Winner label.');

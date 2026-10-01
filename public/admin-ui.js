@@ -366,7 +366,7 @@ async function refundSent(id){
 // Две настройки в одном месте: вкладки внизу мини-приложения и кнопки под
 // сообщением бота. Одна группа на экране — на телефоне четыре колонки галочек
 // читать невозможно. Содержание кнопок не меняем, только видимость и порядок.
-const TAB_NAMES={home:AUI("Лига"),div:AUI("Дивизионы"),race:AUI("Гонка"),players:AUI("Игроки"),matches:AUI("Матчи"),events:AUI("События"),about:AUI("О лиге")};
+const TAB_NAMES={home:AUI("Лига"),div:AUI("Дивизионы"),race:AUI("Гонка"),players:AUI("Игроки"),matches:AUI("Матчи"),events:AUI("События"),tournaments:AUI("Турниры"),fantasy:AUI("Fantasy"),partners:AUI("Партнёры"),about:AUI("О лиге")};
 const BTN_NAMES={events:AUI("📆 События"),join_event:AUI("🎾 Заявка на событие"),matches:AUI("🎾 Мои матчи"),participants:AUI("👥 Состав"),league:AUI("🏆 Лига"),
   about:AUI("ℹ️ О лиге"),how:AUI("📖 Как работает лига"),yearly:AUI("⭐ Гонка года"),pass:AUI("💳 Оплатить взнос"),contact:AUI("💬 Связаться")};
 const GROUP_NAMES={active:AUI("Активные"),waitlist:AUI("Лист ожидания"),applied:AUI("Заявка без оплаты"),guest:AUI("Все остальные")};

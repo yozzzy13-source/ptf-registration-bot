@@ -632,6 +632,10 @@ const ADMIN_HELP_TAIL = {
     '• Новичку без входа сайт один раз показывает окно-знакомство с лигой; подробный лендинг — phukettennis.com/about.',
     '• У каждого игрока и дивизиона своя ссылка: phukettennis.com/p/имя и /d/буква — кнопка «Поделиться» на карточке и в таблице, превью с именем и фото.',
     '• «Мои матчи» — вкладка в общем меню у игроков лиги; тот же экран открывается и из бота.',
+    '• Галерея сайта — папка «PTF Gallery» в папке PTF на Диске: кидаешь фото (подпапка = альбом, например «Сезон 1 · Финалы»), через 10 минут они на сайте.',
+    '• Вкладка «Турниры»: идущий сезон, следующий (лист ожидания, берётся из листа Events) и прошедшие с чемпионами. Видимость — во вкладке «Кнопки» админки.',
+    '• На главной — «PTF в цифрах» (игроки и матчи по сезонам), лента Instagram и плашка Telegram-бота.',
+    '• Поиск Google: у разделов чистые адреса (/race, /players, /divisions, /events, /tournaments, /about), русская версия — ?lang=ru. Карта сайта — phukettennis.com/sitemap.xml, её сдают в Google Search Console.',
     '', '📊 <b>Дивизионы и результаты</b>',
     '• Дивизион игрока и список соперников берутся из таблицы дивизиона последнего сезона, лист <b>Division_Tracker</b>, список под заголовком «Player». Переносишь игрока — правишь только там.',
     '• Статус active/inactive — из анкеты. Нет active — матчи закрыты, даже если игрок есть в сетке.',
@@ -657,6 +661,10 @@ const ADMIN_HELP_TAIL = {
     '• A first-time visitor sees a short intro once; the full landing page is phukettennis.com/about.',
     '• Every player and division has its own link: /p/name and /d/letter, with a Share button and a preview.',
     '• «My matches» is a tab in the shared menu for league players; the bot opens the same screen.',
+    '• Site gallery: the «PTF Gallery» folder in the PTF Drive folder — drop photos there (subfolder = album), they appear within 10 minutes.',
+    '• The «Tournaments» tab: the running season, the next one (waitlist, from the Events sheet) and past seasons with champions.',
+    '• The home page shows «PTF in numbers», the Instagram feed and a Telegram bot card.',
+    '• Google search: sections have clean addresses (/race, /players, /divisions, /events, /tournaments, /about), Russian version via ?lang=ru. Sitemap: phukettennis.com/sitemap.xml — submit it in Google Search Console.',
     '', '📊 <b>Divisions and results</b>',
     '• A player’s division and opponents come from the latest season division sheet, tab <b>Division_Tracker</b>, the list under «Player».',
     '• Status active/inactive comes from the application. Without active, matches stay closed.',
@@ -1559,7 +1567,7 @@ function findConfirmedSlot(done, wanted) {
     // Турнирная админка: отдельное приложение, не вкладка внутри админки.
     if (text === '/tournaments') {
       return sendMessage(chatId, '<b>🏆 Турниры</b>\n\nСоздание турниров, заявки, группы, сетка плей-офф, правка результатов и парные заявки.\n\nПереключатель «Тест» в шапке пишет всё в листы с пометкой TEST — боевые таблицы при этом не меняются.', {
-        reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть админку турниров', web_app: { url: `${PUBLIC_URL}/tournaments` } }]] }
+        reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть админку турниров', web_app: { url: `${PUBLIC_URL}/tournament-admin` } }]] }
       });
     }
     // Выполняется прямо в той группе и теме, куда должны падать результаты.

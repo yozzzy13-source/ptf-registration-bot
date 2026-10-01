@@ -46,9 +46,13 @@ function rangeInfo(id,range){
  if(!m)throw Error('Unsupported range '+range);
  return {key:id+'|'+m[1],title:m[1],c1:col(m[2]),r1:Number(m[3]||1)-1,c2:col(m[4]||m[2]),r2:m[5]?Number(m[5])-1:(m[4]?Infinity:Number(m[3]||1)-1)};
 }
+// quotaKeys: листы, на которых Google «упёрся в лимит»; sheetReads — счётчик чтений.
+const quotaKeys=new Set(),sheetReads=[];
 async function get({spreadsheetId,range}){
  const r=rangeInfo(spreadsheetId,range),rows=tables.get(r.key);
- if(!rows)throw Error('Missing test sheet '+r.key);
+ sheetReads.push(r.key);
+ if(quotaKeys.has(r.key)||quotaKeys.has('*'))throw Error("Quota exceeded for quota metric 'Read requests'");
+ if(!rows)throw Error('Unable to parse range: '+range+' (missing test sheet '+r.key+')');
  return {data:{values:rows.slice(r.r1,Number.isFinite(r.r2)?r.r2+1:undefined).map(row=>row.slice(r.c1,r.c2+1))}};
 }
 async function update({spreadsheetId,range,requestBody}){
@@ -653,7 +657,8 @@ check((await request('get','/api/league/wallet','777')).code===403,'Личное
  check((await bare('get','/api/fantasy/bootstrap')).res.code!==200,'Гость сайта не попадает в Fantasy');
  const sched=(await bare('get','/api/league/schedule')).res;
  check(sched.code===200&&(sched.body.items||[]).every(i=>!i.p1.id&&!i.p2.id),'Гостю в расписании не отдаются Telegram ID игроков');
- check((await bare('get','/')).res.file?.endsWith('league.html'),'Главная сайта — интерфейс лиги');
+ const homePage=(await bare('get','/')).res;
+ check(/id="viewHome"/.test(homePage.body)&&/<title>Phuket Tennis Family — Amateur Tennis League in Phuket<\/title>/.test(homePage.body),'Главная сайта — интерфейс лиги с поисковым заголовком');
 
  // Подпись Telegram Login считается ровно как в документации Telegram.
  const signLogin=fields=>{
@@ -702,11 +707,26 @@ check((await request('get','/api/league/wallet','777')).code===403,'Личное
   check(passed,'Основной домен открывается без перенаправления');
  }
  // Лендинг, ссылки «поделиться» и общее меню.
- check((await bare('get','/about')).res.file?.endsWith('about.html'),'Страница «О лиге» открывается по /about');
+ const aboutPage=(await bare('get','/about')).res;
+ check(/<title>About the league — Phuket Tennis Family<\/title>/.test(aboutPage.body)&&/"@type":"FAQPage"/.test(aboutPage.body),'Страница «О лиге» открывается по /about и отдаёт вопросы-ответы для Google');
  const dreq=await (async()=>{const route=routes.find(r=>r.p==='/d/:letter');const res={set(){return this},type(){return this},send(v){this.body=v;return this}};await route.h({params:{letter:'c'},headers:{}},res);return res})();
- check(/<title>Division C — Phuket Tennis Family<\/title>/.test(dreq.body)&&/og:url" content="https:\/\/phukettennis.com\/d\/C"/.test(dreq.body),'Ссылка на дивизион отдаёт свой заголовок и адрес для превью');
+ check(/<title>Division C — standings · Phuket Tennis Family<\/title>/.test(dreq.body)&&/og:url" content="https:\/\/phukettennis.com\/d\/C"/.test(dreq.body),'Ссылка на дивизион отдаёт свой заголовок и адрес для превью');
  const preq=await (async()=>{const route=routes.find(r=>r.p==='/p/:slug');const res={set(){return this},type(){return this},send(v){this.body=v;return this}};await route.h({params:{slug:'alice-one'},headers:{}},res);return res})();
  check(/<title>Alice One — Phuket Tennis Family<\/title>/.test(preq.body)&&/og:url" content="https:\/\/phukettennis.com\/p\/alice-one"/.test(preq.body),'Ссылка на игрока отдаёт имя и адрес для превью');
+ // SEO: canonical, русская версия, разметка, серверный текст, robots и карта сайта.
+ check(/rel="canonical" href="https:\/\/phukettennis.com\/p\/alice-one"/.test(preq.body)&&/hreflang="ru"/.test(preq.body)&&/"@type":"ProfilePage"/.test(preq.body)&&/id="ssr"/.test(preq.body)&&/<h1>Alice One<\/h1>/.test(preq.body),'Страница игрока: главный адрес, русская версия, разметка профиля и текст для поисковика');
+ check(/"@type":"SportsOrganization"/.test(homePage.body)&&/"@type":"WebSite"/.test(homePage.body)&&/href="\/p\/alice-one"/.test(homePage.body),'Главная: разметка организации и сайта, ссылки на игроков прямо в HTML');
+ const nobody=await (async()=>{const route=routes.find(r=>r.p==='/p/:slug');const res={set(){return this},type(){return this},send(v){this.body=v;return this}};await route.h({params:{slug:'no-such-player'},headers:{}},res);return res})();
+ check(/name="robots" content="noindex"/.test(nobody.body),'Несуществующий игрок не попадает в поиск');
+ const ruPage=(await bare('get','/race',{query:{lang:'ru'}})).res;
+ check(/<html lang="ru"/.test(ruPage.body)&&/<title>Годовая гонка — Phuket Tennis Family<\/title>/.test(ruPage.body)&&/rel="canonical" href="https:\/\/phukettennis.com\/race\?lang=ru"/.test(ruPage.body),'Русская версия страницы: свой язык, заголовок и адрес');
+ const robotsSite=(await bare('get','/robots.txt',{headers:{host:'phukettennis.com'}})).res.body;
+ const robotsOther=(await bare('get','/robots.txt',{headers:{host:'app.test'}})).res.body;
+ check(/Sitemap: https:\/\/phukettennis.com\/sitemap.xml/.test(robotsSite)&&/Disallow: \/api\//.test(robotsSite)&&/Disallow: \/$/m.test(robotsOther),'robots.txt: сайт открыт для поиска, служебный адрес Railway — закрыт');
+ const sm=(await bare('get','/sitemap.xml')).res.body;
+ check(/<loc>https:\/\/phukettennis.com\/<\/loc>/.test(sm)&&/<loc>https:\/\/phukettennis.com\/p\/alice-one<\/loc>/.test(sm)&&/<loc>https:\/\/phukettennis.com\/about<\/loc>/.test(sm),'Карта сайта: главная, лендинг и страницы игроков');
+ check(routes.some(r=>r.p==='/tournament-admin')&&routes.some(r=>r.p==='/tournaments'),'Турнирная админка переехала на /tournament-admin, /tournaments — публичная вкладка');
+ check(JSON.parse((await bare('get','/site.webmanifest')).res.body).icons.length===2,'Есть манифест сайта с иконками');
  const navAnon=(await bare('get','/api/league/nav')).res;
  check(navAnon.code===200&&navAnon.body.anonymous===true&&!navAnon.body.tabs.includes('fantasy')&&navAnon.body.can_match===false,'Меню для гостя: без Fantasy и без «Моих матчей»');
  const navAdmin=(await bare('get','/api/league/nav',{headers:{cookie:'ptf_web='+encodeURIComponent(util.signWebAppToken('99'))}})).res;
@@ -716,6 +736,21 @@ check((await request('get','/api/league/wallet','777')).code===403,'Личное
  check(/tg\.platform==='unknown'/.test(mh)&&mh.includes('ptf-nav.js')&&mh.includes("id=\"mnav\""),'«Мои матчи» работают в браузере и показывают общее меню сайта');
  const ab=await fs.readFile(path.join(root,'public/about.html'),'utf8');
  check(ab.includes('/?join=1')&&ab.includes('Вступить в лигу')&&ab.includes('Join the league'),'Лендинг ведёт ко входу и есть на двух языках');
+ // Живая часть: галерея и Instagram не роняют страницу без подключений;
+ // сезоны отдают счётчики сыгранного; «Турниры» один раз добавляются группам.
+ check((await bare('get','/api/public/gallery')).res.body?.ok===true,'Галерея отвечает, даже если Диск недоступен');
+ const igRes=(await bare('get','/api/public/instagram')).res;
+ check(igRes.body?.ok===true&&Array.isArray(igRes.body.posts),'Лента Instagram отвечает, даже если Instagram не подключён');
+ const ps=(await bare('get','/api/public/seasons')).res;
+ check(ps.body?.ok&&(ps.body.seasons||[]).every(x=>'matches_played' in x&&'players_played' in x),'У сезонов есть счётчики: сколько игроков сыграло и сколько матчей');
+ await sheets.setSetting('tabs_guest','home,div,race,players,matches,events');
+ await sheets.setSetting('tabs_added_tournaments','');
+ check(await sheets.addNewTabOnce('tournaments')&&(await sheets.getSetting('tabs_guest'))==='home,div,race,players,matches,events,tournaments','Вкладка «Турниры» встаёт после «Событий» у групп с сохранённым меню');
+ check(!(await sheets.addNewTabOnce('tournaments')),'Вкладка добавляется один раз — дальше меню правит организатор');
+ await sheets.setSetting('tabs_guest','');
+ const lg2=await fs.readFile(path.join(root,'public/league.html'),'utf8');
+ check(lg2.includes('function evStatusOf(')&&lg2.includes('evc-past')&&lg2.includes('function renderTournaments(')&&lg2.includes('function galleryBlock('),'События — карточками со статусами, есть вкладка «Турниры» и галерея');
+ check(lg2.includes('function introLang(')&&lg2.includes('Любительская теннисная лига Пхукета')&&lg2.includes('class="go2" href="/about"'),'В окне-знакомстве выбор языка, «любительская лига» и заметная «Подробнее о лиге»');
  const lh=await fs.readFile(path.join(root,'public/league.html'),'utf8');
  check(lh.includes('function maybeIntro()')&&lh.includes('ptf_intro_seen')&&lh.includes('ptf-nav.js')&&lh.includes('function shareLink('),'На сайте: окно-знакомство для новых, значки меню, кнопки «поделиться»');
  check(lh.includes('telegram-widget.js')&&lh.includes("data-request-access','write'")&&lh.includes('?start=profile'),'На сайте кнопка Telegram Login с правом писать и переход в бот на анкету');
@@ -1793,7 +1828,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const home=lg.slice(lg.indexOf('function renderHome(){'),lg.indexOf('function renderHome2(){'));
  check(!/homeFantasyBanner\(\)/.test(home),'Плашки Fantasy на главной больше нет');
  check(!/'home2'/.test(lg),'Тестовая вкладка убрана — всё на настоящей главной');
- check(/partnersStrip\(\)\+homeEvents\(\)\+leadersStrip\(\)\+championsStrip\(\)\+seasonCard\(\)\+promotionsStrip\(\)/.test(lg),'Порядок главной: партнёры, событие, лидеры, чемпионы, сезон, повышения');
+ check(/partnersStrip\(\)\+homeEvents\(\)\+leadersStrip\(\)\+championsStrip\(\)\+seasonCard\(\)\+statsBlock\(\)\+promotionsStrip\(\)\+igBlock\(\)\+tgBlock\(\)/.test(lg),'Порядок главной: партнёры, событие, лидеры, чемпионы, сезон, цифры, повышения, Instagram, Telegram');
  check(/function mountMarquees/.test(lg)&&/mq-prom/.test(lg)&&/mq-ldr/.test(lg),'Лидеры, чемпионы, повышения и партнёры — бегущими строками');
  check(/\(top\.points\|\|0\)>0/.test(lg),'Лидер без очков не показывается');
  check(/class="live"><i class="ball">🎾<\/i>LIVE/.test(lg)&&/@keyframes ballPulse/.test(lg),'У сезона метка LIVE с пульсирующим мячиком');
@@ -1867,6 +1902,52 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const exp=mt.slice(mt.indexOf('export async function notifyNegotiationExpired'),mt.indexOf('export async function notifyStuckCourt'));
  check(/scope==='court'&&!booker/.test(exp),'Снятие матча без корта: сопернику свой текст');
  check(/Счёт вносит кто-то один из вас/.test(mt)&&/Only one of you needs to enter the score/.test(mt),'«Матч сыгран?» — счёт вносит один, второй подтверждает');
+}
+
+// --- Лимит Google (60 чтений в минуту): рассылка не должна ронять всё остальное ---
+{
+ const mt=await load('matches.js');
+ const src=await fs.readFile(path.join(root,'sheets.js'),'utf8');
+ const writeBodies=src.slice(src.indexOf('function forgetSheet'));
+ check(!/cache\.clear\(\)/.test(writeBodies.replace(/export function invalidateSheetCache\(\) \{ cache\.clear\(\); \}/,'')),'Запись в лист больше не сбрасывает кэш всех листов');
+ sheets.invalidateSheetCache();
+ await sheets.getSetting('season_number');
+ await sheets.findApplicantByTelegramId('3');
+ sheetReads.length=0;
+ await sheets.setSetting('rate_test','1');
+ await sheets.findApplicantByTelegramId('3');
+ check(!sheetReads.includes('crm|Applicants'),'Запись в Settings не заставляет перечитывать Applicants');
+ sheets.invalidateSheetCache();sheetReads.length=0;
+ await Promise.all([1,2,3,4,5].map(()=>sheets.findApplicantByTelegramId('3')));
+ check(sheetReads.filter(k=>k==='crm|Applicants').length===1,'Пять одновременных запросов к листу — одно чтение из Google');
+ sheets.invalidateSheetCache();quotaKeys.add('crm|Applicants');
+ const carol=await sheets.findApplicantByTelegramId('3').catch(()=>null);
+ check(carol?.name==='Carol Three','Лимит Google: анкета берётся из последнего удачного чтения');
+ const subs=await sheets.getAllBotSubscribers().catch(()=>null);
+ check(Array.isArray(subs)&&subs.some(p=>p.telegram_id==='3'),'Лимит Google: список подписчиков для рассылки берётся из последнего удачного');
+ quotaKeys.clear();
+ // Сбой без прошлой копии: пустота не запоминается на 5 минут.
+ sheets.invalidateLeagueCache();quotaKeys.add('*');
+ const photosDown=await sheets.getMasterPhotos().catch(()=>new Map());
+ quotaKeys.clear();
+ check(photosDown.size>0,'Фото из Players_Master переживают сбой Google (последняя удачная копия)');
+ check(/const cacheStamp = /.test(src)&&/FAILED_TTL_MS = 30_000/.test(src),'Пустой результат из-за сбоя живёт 30 секунд, а не 5 минут');
+ // Список подписчиков так и не прочитался — админ узнаёт, чей результат не разослан.
+ const adminChatWas=await sheets.getSetting('admin_chat_id');await sheets.setSetting('admin_chat_id','-100777');
+ const before=messages.length;let tries=0;
+ const list=await mt.__subscribersWithRetry({from_name:'Irina S',to_name:'Yana D',score:'6:3 6:4'},[0,0],async()=>{tries++;throw Error("Quota exceeded for quota metric 'Read requests'")});
+ await settle();
+ check(Array.isArray(list)&&!list.length&&tries===3,'Список подписчиков не читается: три попытки, рассылка не падает');
+ check(messages.slice(before).some(m=>/Результат не разослан в личку/.test(JSON.stringify(m.args))&&/Irina S/.test(JSON.stringify(m.args))),'Админ получает сообщение, чей результат не ушёл в личку');
+ tries=0;
+ const ok=await mt.__subscribersWithRetry({},[0,0],async()=>{if(++tries<2)throw Error('Quota exceeded');return [{telegram_id:'3'}]});
+ check(ok.length===1&&tries===2,'Вторая попытка удалась — рассылка идёт как обычно');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ const mtSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/avatarFileOf\.get\(id\)/.test(idx),'Аватарка на витрине отдаётся по известному файлу, если таблица не читается');
+ check(/missingPhotos/.test(mtSrc)&&/Карточка ушла без фото/.test(mtSrc),'Админ узнаёт, что карточка ушла без фото и почему');
+ check(/Результат не разослан в личку/.test(mtSrc)&&/SUBSCRIBER_RETRY_MS = \[30_000, 60_000, 120_000\]/.test(mtSrc),'Личная рассылка результата ждёт и повторяет, потом пишет админу');
+ await sheets.setSetting('admin_chat_id',adminChatWas||'');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

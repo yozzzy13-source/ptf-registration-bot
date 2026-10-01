@@ -19,6 +19,9 @@ export const PARTNERS_SPREADSHEET_ID = process.env.PARTNERS_SPREADSHEET_ID || '1
 // Адрес сайта лиги — для ссылок «поделиться» и превью. Мини-приложение живёт
 // на адресе сервиса (PUBLIC_URL), а люди видят и пересылают адрес сайта.
 export const SITE_URL = (process.env.SITE_URL || 'https://phukettennis.com').replace(/\/$/, '');
+// Галерея сайта: фото из папки «PTF Gallery» (папка PTF на Диске). Подпапки
+// становятся альбомами. Боту папка открыта только на чтение.
+export const GALLERY_FOLDER_ID = process.env.GALLERY_FOLDER_ID || '1mhKWteiLsc6hoNDpH3LxMdB3iKkHblAJ';
 export const TOURNAMENTS_SPREADSHEET_ID = process.env.TOURNAMENTS_SPREADSHEET_ID || '1VdFFzX0e0gp72WnJiRVJnPZiWEyRAoSAy8Me9joYtc0';
 export const TOURNAMENTS_TEST_SPREADSHEET_ID = process.env.TOURNAMENTS_TEST_SPREADSHEET_ID || '14pRVcvZMhZoRj1dvUotDM2Y-3lJnWPAaHOVWMqTqrZY';
 export const PARTICIPANTS_SHEET_ID = process.env.PARTICIPANTS_SHEET_ID || process.env.MANUAL_PARTICIPANTS_SHEET_ID || '1662536073';

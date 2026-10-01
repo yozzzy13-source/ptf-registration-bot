@@ -1149,6 +1149,14 @@ async function resultMedia(slot) {
     const { cardForSlot } = await import('./matchcard.js');
     const season = String(slot.season || await getSetting('season_number').catch(() => '') || '').trim();
     const buffer = await cardForSlot(slot, { winnerFirstScore, season });
+    // Фото не нашлось из-за сбоя (а не потому, что его нет) — карточка всё
+    // равно уходит, с инициалами, но админ должен об этом знать.
+    const missing = buffer?.missingPhotos || [];
+    if (missing.length) {
+      const list = missing.map(x => `• ${escapeHtml(x.name)} — ${escapeHtml(String(x.reason).slice(0, 160))}`).join('\n');
+      notifyAdmin(`<b>🖼 Карточка ушла без фото</b>\n\n${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}\n${list}\n\nЧаще всего это лимит запросов Google в момент рассылки. Пост в ленте можно перевыпустить с фото: <code>/fix_result номер_сообщения</code>.`)
+        .catch(e => console.error('missing photo notice failed:', e.message));
+    }
     return { buffer, season, kind:'card' };
   } catch (e) {
     console.error('match card failed:', e.message);
@@ -1240,6 +1248,27 @@ export async function archiveResultCard(slot, buffer) {
   }
 }
 
+// Список подписчиков для личной рассылки результата. Google иногда отвечает
+// «лимит запросов» (обычно когда параллельно идёт большая рассылка) — тогда
+// раньше личные сообщения молча не уходили никому. Теперь ждём и пробуем ещё
+// раз; если не вышло и после этого — пишем админу, чей результат не разослан.
+const SUBSCRIBER_RETRY_MS = [30_000, 60_000, 120_000];
+async function subscribersWithRetry(slot, delays = SUBSCRIBER_RETRY_MS, load = getAllBotSubscribers) {
+  let last = null;
+  for (let i = 0; i <= delays.length; i++) {
+    try { return await load(); }
+    catch (e) {
+      last = e;
+      console.warn(`results subscribers read failed (try ${i + 1}):`, e.message);
+      if (i < delays.length) await new Promise(r => setTimeout(r, delays[i]));
+    }
+  }
+  await notifyAdmin(`<b>⚠️ Результат не разослан в личку</b>\n\n${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}\nСчёт: <b>${escapeHtml(winnerFirstScore(slot))}</b>\n\nGoogle не отдал список игроков после ${delays.length + 1} попыток: ${escapeHtml(String(last?.message || '').slice(0, 200))}\nПост в общей группе ушёл. Личные сообщения участникам матча отправлены.`)
+    .catch(e => console.error('results retry notice failed:', e.message));
+  return [];
+}
+export const __subscribersWithRetry = subscribersWithRetry;
+
 export async function broadcastResult(slot) {
   const scope = await slotScope(slot);
   slot = {...slot,season:scope.season,group:scope.group};
@@ -1280,7 +1309,7 @@ export async function broadcastResult(slot) {
   try {
     // Копию, а не исходный массив: список подписчиков кешируется.
     const players = [], seen = new Set();
-    for (const p of await getAllBotSubscribers()) {
+    for (const p of await subscribersWithRetry(slot)) {
       if (!p?.telegram_id || seen.has(String(p.telegram_id))) continue;
       seen.add(String(p.telegram_id));
       players.push(p);

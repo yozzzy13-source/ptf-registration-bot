@@ -23,6 +23,10 @@
   function savedLang(){var v=get(LK);return v==='ru'||v==='en'?v:''}
 
   var theme=get(TK)==='light'?'light':'dark';
+  // ?lang=ru|en в адресе (ссылки из поиска на русскую/английскую версию)
+  // главнее всего остального и запоминается на устройстве.
+  var urlLang='';try{urlLang=(new URLSearchParams(w.location.search).get('lang')||'').toLowerCase()}catch(e){}
+  if(urlLang==='ru'||urlLang==='en')put(LK,urlLang);
   var lang=savedLang()||tgLang();
   var mounts=[];
 

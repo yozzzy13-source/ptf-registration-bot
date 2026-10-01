@@ -370,11 +370,29 @@ function parseForm(v) {
 }
 
 // Универсальное чтение листа «шапка + строки» из чужой таблицы.
+// Последнее удачное чтение каждого листа: если Google временно отказал
+// (лимит запросов, сетевой сбой), отдаём его, а не пустоту.
+const namedLastGood = new Map();
+const isMissingSheet = e => /unable to parse range|not found/i.test(String(e?.message || ''));
+// Кэши ниже помнят результат 5 минут. Пустоту из-за сбоя столько помнить
+// нельзя — раньше один отказ Google оставлял без фото и истории на 5 минут.
+// Такой результат живёт 30 секунд, потом читаем снова.
+const FAILED_TTL_MS = 30_000;
+const cacheStamp = (result, ttl = PROFILES_CACHE_MS) => result?.failed ? Date.now() - ttl + FAILED_TTL_MS : Date.now();
+
 async function readNamedSheet(spreadsheetId, titles, mustHaveHeader) {
+  let transient = null;
   for (const title of (Array.isArray(titles) ? titles : [titles])) {
+    const key = `${spreadsheetId}|${title}|${mustHaveHeader}`;
     let values;
     try { values = await valuesGetFromSpreadsheet(spreadsheetId, `'${title}'!A:BZ`); }
-    catch (e) { continue; }                       // листа с таким именем нет — пробуем следующее
+    catch (e) {
+      if (!isMissingSheet(e)) {                    // лист есть, но Google не ответил
+        if (namedLastGood.has(key)) { console.warn(`${title}: read failed, using last good copy:`, e.message); return namedLastGood.get(key); }
+        transient = transient || e;
+      }
+      continue;                                    // листа с таким именем нет — пробуем следующее
+    }
     const headerRowIndex = values.findIndex(r => (r || []).map(normalizeHeader).includes(mustHaveHeader));
     if (headerRowIndex < 0) continue;
     const headers = values[headerRowIndex].map(normalizeHeader);
@@ -385,9 +403,12 @@ async function readNamedSheet(spreadsheetId, titles, mustHaveHeader) {
       headers.forEach((h, i) => { if (h) o[h] = String(row[i] ?? '').trim(); });
       rows.push(o);
     }
-    return { headers, rows };
+    const out = { headers, rows };
+    namedLastGood.set(key, out);
+    return out;
   }
-  return { headers: [], rows: [] };
+  if (transient) console.warn('named sheet read failed:', transient.message);
+  return { headers: [], rows: [], failed: Boolean(transient) };
 }
 
 // История матчей: лист Match_History_All даёт по строке на игрока на матч,
@@ -395,7 +416,8 @@ async function readNamedSheet(spreadsheetId, titles, mustHaveHeader) {
 let historyCache = { t: 0, v: null };
 export async function getLeagueMatchHistory() {
   if (historyCache.v && Date.now() - historyCache.t < PROFILES_CACHE_MS) return historyCache.v;
-  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Match_History_All', 'player_id');
+  const src = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Match_History_All', 'player_id');
+  const { rows } = src;
   // Пустая колонка Competition встречается: матч записан, а подпись сезона в
   // строке таблицы дивизиона не стояла. Без сезона матч выпадал отовсюду — из
   // Fantasy, из истории дивизионов, из строки идущего сезона. Считаем такие
@@ -429,7 +451,7 @@ export async function getLeagueMatchHistory() {
   }
   // Свежие сверху: сортируем по номеру матча, он растёт со временем.
   for (const list of byPlayer.values()) list.sort((a, b) => Number(b.match_no || 0) - Number(a.match_no || 0));
-  historyCache = { t: Date.now(), v: byPlayer };
+  historyCache = { t: cacheStamp(src), v: byPlayer };
   return byPlayer;
 }
 
@@ -443,8 +465,11 @@ export async function getMasterPhotos() {
   if (masterPhotoCache.v && Date.now() - masterPhotoCache.t < PROFILES_CACHE_MS) return masterPhotoCache.v;
   const out = new Map();
   if (!DIVISIONS_SPREADSHEET_ID && !LEAGUE_RESULTS_SHEET_ID) return out;
-  const { rows } = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
-    .catch(() => ({ rows: [] }));
+  const found = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID, ['Players_Master', 'Players Master'], 'player_name')
+    .catch(() => ({ rows: [], failed: true }));
+  // Сбой без прошлой копии: старый список лучше пустого.
+  if (found.failed && masterPhotoCache.v) return masterPhotoCache.v;
+  const { rows } = found;
   // Колонку с фото ищем не по точному имени: в таблице она называлась и
   // player_photo, и photo_url, и просто «Фото». Берём первую подходящую, где
   // действительно лежит ссылка, и приводим её к виду, который покажет браузер.
@@ -461,7 +486,7 @@ export async function getMasterPhotos() {
     }
     if (url) out.set(name, url);
   }
-  masterPhotoCache = { t: Date.now(), v: out };
+  masterPhotoCache = { t: cacheStamp(found), v: out };
   return out;
 }
 
@@ -473,9 +498,11 @@ async function getSeasonPoints() {
   const byPlayer = new Map();
   let headers = [];
   let rows = [];
+  let pointsFailed = false;
   for (const spreadsheetId of new Set([DIVISIONS_SPREADSHEET_ID, LEAGUE_RESULTS_SHEET_ID].filter(Boolean))) {
     const found = await readNamedSheet(spreadsheetId,
-      ['Year ranking points input', 'Year ranking points'], 'player_id').catch(() => ({ headers: [], rows: [] }));
+      ['Year ranking points input', 'Year ranking points'], 'player_id').catch(() => ({ headers: [], rows: [], failed: true }));
+    if (found.failed) pointsFailed = true;
     if (found.headers.some(h => /^season_\d+$/.test(h))) {
       ({ headers, rows } = found);
       break;
@@ -493,7 +520,7 @@ async function getSeasonPoints() {
     }
     byPlayer.set(pid, map);
   }
-  seasonPointsCache = { t: Date.now(), v: byPlayer };
+  seasonPointsCache = { t: cacheStamp({ failed: pointsFailed && !rows.length }), v: byPlayer };
   return byPlayer;
 }
 
@@ -502,7 +529,8 @@ async function getSeasonPoints() {
 let seasonHistCache = { t: 0, v: null };
 async function getSeasonHistory() {
   if (seasonHistCache.v && Date.now() - seasonHistCache.t < PROFILES_CACHE_MS) return seasonHistCache.v;
-  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Season_History_All', 'player_id');
+  const src = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Season_History_All', 'player_id');
+  const { rows } = src;
   const byPlayer = new Map();
   for (const r of rows) {
     const pid = String(r.player_id || '').trim();
@@ -521,7 +549,7 @@ async function getSeasonHistory() {
     });
   }
   for (const list of byPlayer.values()) list.sort((a, b) => b.number - a.number);
-  seasonHistCache = { t: Date.now(), v: byPlayer };
+  seasonHistCache = { t: cacheStamp(src), v: byPlayer };
   return byPlayer;
 }
 
@@ -622,8 +650,9 @@ export async function getLeagueProfiles() {
 let achCache = { t: 0, v: null };
 export async function getLeagueAchievements() {
   if (achCache.v && Date.now() - achCache.t < PROFILES_CACHE_MS) return achCache.v;
-  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Achievements', 'player_id')
-    .catch(() => ({ rows: [] }));
+  const src = await readNamedSheet(WEBSITE_SPREADSHEET_ID, 'Achievements', 'player_id')
+    .catch(() => ({ rows: [], failed: true }));
+  const { rows } = src;
   const byPlayer = new Map();
   for (const r of rows) {
     const pid = String(r.player_id || '').trim();
@@ -640,7 +669,7 @@ export async function getLeagueAchievements() {
     });
   }
   for (const list of byPlayer.values()) list.sort((a, b) => (a.priority || 99) - (b.priority || 99));
-  achCache = { t: Date.now(), v: byPlayer };
+  achCache = { t: cacheStamp(src), v: byPlayer };
   return byPlayer;
 }
 
@@ -649,8 +678,9 @@ export async function getLeagueAchievements() {
 let eventsCache = { t: 0, v: null };
 export async function getLeagueEvents() {
   if (eventsCache.v && Date.now() - eventsCache.t < PROFILES_CACHE_MS) return eventsCache.v;
-  const { rows } = await readNamedSheet(WEBSITE_SPREADSHEET_ID,
-    ['Tournament_History_All', 'Events'], 'event_id').catch(() => ({ rows: [] }));
+  const src = await readNamedSheet(WEBSITE_SPREADSHEET_ID,
+    ['Tournament_History_All', 'Events'], 'event_id').catch(() => ({ rows: [], failed: true }));
+  const { rows } = src;
   const seen = new Map();
   for (const r of rows) {
     const id = String(r.event_id || '').trim();
@@ -677,7 +707,7 @@ export async function getLeagueEvents() {
     });
   }
   const out = [...seen.values()].sort((a, b) => String(b.start).localeCompare(String(a.start)));
-  eventsCache = { t: Date.now(), v: out };
+  eventsCache = { t: cacheStamp(src), v: out };
   return out;
 }
 
@@ -957,7 +987,7 @@ async function ensureSheetWithHeaders(sheetName, headers, sheetId=null) {
   const merged = [...current];
   for (const h of headers) if (!merged.includes(h)) merged.push(h);
   if (merged.length && merged.join('|') !== current.join('|')) await valuesUpdate(`'${sheetName}'!A1:${colToA1(merged.length)}1`, [merged]);
-  cache.clear();
+  forgetSheet(sheetName);
   return merged;
 }
 
@@ -977,17 +1007,46 @@ const extraSheetsReady = new Map();
 // нужна там, где таблицу правили руками и хотят увидеть результат сразу.
 export function invalidateSheetCache() { cache.clear(); }
 
-async function readSheet(sheetName) {
-  const values = await valuesGet(`'${sheetName}'!A:BZ`);
-  const headers = values[0] || [];
-  const rows = values.slice(1).map((r, idx) => {
-    const obj = { _rowNumber: idx + 2 };
-    headers.forEach((h, i) => obj[h] = r[i] ?? '');
-    return obj;
-  });
-  const out = { headers, rows, values };
-  cache.set(`rows:${sheetName}`, { t: Date.now(), v: out });
-  return out;
+// Запись в лист сбрасывает кэш ТОЛЬКО этого листа. Раньше любая запись
+// (журнал рассылки, настройка, лог) чистила кэш всех листов разом, и в
+// следующую секунду десятки запросов шли в Google заново — так бот упирался
+// в лимит «60 чтений в минуту», а карточки уходили без аватарок.
+const sheetGen = new Map();
+function forgetSheet(sheetName) { cache.delete(`rows:${sheetName}`); sheetGen.set(sheetName, (sheetGen.get(sheetName) || 0) + 1); }
+
+// Последнее удачное чтение каждого листа — запасной вариант, если Google
+// в эту минуту отвечает «лимит». Для показа данных чуть устаревшая копия
+// лучше ошибки. Для записей не используется: там нужна точная картина листа.
+const lastGood = new Map();
+// Одно чтение листа на всех: если лист уже читается, остальные ждут этот же
+// ответ, а не посылают в Google свои запросы (раньше 30 аватарок = 30 чтений).
+const reading = new Map();
+// shared=false — для записей: им нужно чтение, начатое строго после их
+// очереди, а не чужое, стартовавшее до предыдущей записи.
+function readSheet(sheetName, { shared = true } = {}) {
+  if (shared && reading.has(sheetName)) return reading.get(sheetName);
+  const gen = sheetGen.get(sheetName) || 0;
+  const task = (async () => {
+    const values = await valuesGet(`'${sheetName}'!A:BZ`);
+    const headers = values[0] || [];
+    const rows = values.slice(1).map((r, idx) => {
+      const obj = { _rowNumber: idx + 2 };
+      headers.forEach((h, i) => obj[h] = r[i] ?? '');
+      return obj;
+    });
+    const out = { headers, rows, values };
+    // Пока читали, в лист успели записать — такой ответ уже устарел, в кэш
+    // его не кладём (следующее обращение прочитает свежий).
+    if ((sheetGen.get(sheetName) || 0) === gen) {
+      cache.set(`rows:${sheetName}`, { t: Date.now(), v: out });
+      lastGood.set(sheetName, out);
+    }
+    return out;
+  })();
+  if (!shared) return task;
+  const tracked = task.finally(() => reading.delete(sheetName));
+  reading.set(sheetName, tracked);
+  return tracked;
 }
 // Фоновое обновление: результат никто не ждёт, ошибка только в лог — на руках
 // у человека остаются прошлые данные, и это лучше, чем ошибка на ровном месте.
@@ -1006,7 +1065,14 @@ export async function getRows(sheetName, { useCache=true } = {}) {
     if (Date.now() - c.t >= freshMsFor(sheetName)) refreshInBackground(sheetName);
     return c.v;
   }
-  return readSheet(sheetName);
+  if (!useCache) return readSheet(sheetName, { shared:false });
+  try { return await readSheet(sheetName); }
+  catch (e) {
+    const old = lastGood.get(sheetName);
+    if (!old) throw e;
+    console.warn(`лист ${sheetName}: Google не ответил (${String(e.message || '').slice(0, 60)}), отдаю последнюю копию`);
+    return old;
+  }
 }
 // Прогрев: вызывается на старте и по таймеру, чтобы первый живой запрос не
 // платил за чтение. Ошибки не мешают — просто прогреется в следующий раз.
@@ -1068,14 +1134,14 @@ export async function appendObject(sheetName, obj, { uniqueBy = '' } = {}) {
           if (String(merged[k] ?? '').trim() === '' && String(v ?? '').trim() !== '') merged[k] = v;
         }
         await write(twin._rowNumber, merged);
-        cache.clear();
+        forgetSheet(sheetName);
         return { ...merged, _rowNumber: twin._rowNumber, isNew: false };
       }
     }
     const target = values.length + 1;
     await ensureRowCapacity(sheetName, target);
     await write(target, obj);
-    cache.clear();
+    forgetSheet(sheetName);
     return { ...obj, _rowNumber: target, isNew: true };
   });
   appendQueue.set(sheetName, task);
@@ -1099,7 +1165,7 @@ export async function appendObjects(sheetName, list = []) {
       `'${sheetName}'!A${start}:${colToA1(headers.length)}${start + items.length - 1}`,
       items.map(obj => headers.map(h => obj[h] ?? ''))
     );
-    cache.clear();
+    forgetSheet(sheetName);
     return items.map((obj, i) => ({ ...obj, _rowNumber: start + i, isNew: true }));
   });
   appendQueue.set(sheetName, task);
@@ -1118,7 +1184,7 @@ export async function deleteRow(sheetName, rowNumber) {
     { deleteDimension: { range: { sheetId: props.sheetId, dimension: 'ROWS', startIndex: rowNumber - 1, endIndex: rowNumber } } }
   ] } });
   gridInfo.delete(sheetName);
-  cache.clear();
+  forgetSheet(sheetName);
   return true;
 }
 
@@ -1129,7 +1195,7 @@ export async function updateObjectByRow(sheetName, rowNumber, patch) {
   const values = headers.map(h => merged[h] ?? '');
   const endCol = colToA1(headers.length);
   await valuesUpdate(`'${sheetName}'!A${rowNumber}:${endCol}${rowNumber}`, [values]);
-  cache.clear();
+  forgetSheet(sheetName);
 }
 
 export async function getSetting(key) {
@@ -1651,7 +1717,7 @@ export async function markSelfieRequestedBatch(telegramIds = []) {
   }
   if (!data.length) return 0;
   await sheetsClient().spreadsheets.values.batchUpdate({ spreadsheetId: SPREADSHEET_ID, requestBody: { valueInputOption: 'USER_ENTERED', data } });
-  cache.clear();
+  forgetSheet(SHEETS.applicants);
   return data.length;
 }
 // Автоочистка журналов: удаляем старые строки с начала листа. Журналы пишутся
@@ -1677,7 +1743,7 @@ export async function deleteOldRows(sheetName, dateColumn, cutoffMs, { keepAtLea
     { deleteDimension: { range: { sheetId: props.sheetId, dimension: 'ROWS', startIndex: 1, endIndex: 1 + k } } }
   ] } });
   gridInfo.delete(sheetName);
-  cache.clear();
+  forgetSheet(sheetName);
   return k;
 }
 
@@ -1832,10 +1898,12 @@ export function sameName(a = '', b = '') {
 let masterPlayersCache = {t:0,rows:null};
 export async function getMasterPlayers() {
   if (masterPlayersCache.rows && Date.now()-masterPlayersCache.t < CACHE_MS) return masterPlayersCache.rows;
-  const { rows } = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID,
+  const src = await readNamedSheet(DIVISIONS_SPREADSHEET_ID || LEAGUE_RESULTS_SHEET_ID,
     ['Players_Master', 'Players Master'], 'player_name');
+  if (src.failed && masterPlayersCache.rows) return masterPlayersCache.rows;
+  const { rows } = src;
   const players = rows.filter(r => String(r.player_name || '').trim());
-  masterPlayersCache = {t:Date.now(),rows:players};
+  masterPlayersCache = {t:cacheStamp(src, CACHE_MS),rows:players};
   return players;
 }
 export async function getPlayerLeagueInfo(profile = {}) {
@@ -1879,7 +1947,10 @@ export async function isResultsMutedFor(telegramId) {
 }
 
 export async function getAllBotSubscribers() {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  // Свежий список; если Google сейчас не отвечает (лимит) — последний удачный.
+  // Разослать по списку минутной давности лучше, чем не разослать никому.
+  const { rows } = await getRows(SHEETS.applicants, { useCache:false })
+    .catch(e => { console.warn('subscribers: fresh read failed, using cached list:', e.message); return getRows(SHEETS.applicants); });
   const seen = new Set();
   const out = [];
   for (const r of rows) {
@@ -1945,7 +2016,27 @@ export async function playerGroup(telegramId, applicant = null) {
 // открывает приложение в пустоту.
 // «Расписание» слилось с «Матчами»: согласованные матчи теперь показываются
 // сверху той же вкладки, отдельного экрана для них больше нет.
-export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'fantasy', 'partners'];
+export const MINIAPP_TABS = ['home', 'div', 'race', 'players', 'matches', 'events', 'tournaments', 'fantasy', 'partners'];
+
+// Новая вкладка у групп, чей набор вкладок уже сохранён в Settings, сама не
+// появится — список там явный. Поэтому один раз при запуске дописываем её
+// после «Событий» (или «Матчей»); дальше организатор управляет ею во вкладке
+// «Кнопки» админки как любой другой. Флаг в Settings — чтобы не повторять.
+export async function addNewTabOnce(tab = 'tournaments') {
+  const flag = `tabs_added_${tab}`;
+  if (String(await getSetting(flag).catch(() => '')).trim() === 'yes') return false;
+  for (const group of PLAYER_GROUPS) {
+    const raw = String(await getSetting(tabsKey(group)).catch(() => '')).trim();
+    if (!raw || raw === NONE) continue;
+    const list = raw.split(',').map(x => x.trim()).filter(Boolean);
+    if (list.includes(tab)) continue;
+    const at = list.indexOf('events') >= 0 ? list.indexOf('events') + 1 : (list.indexOf('matches') >= 0 ? list.indexOf('matches') + 1 : list.length);
+    list.splice(at, 0, tab);
+    await setSetting(tabsKey(group), list.join(','), 'Вкладки мини-приложения для группы');
+  }
+  await setSetting(flag, 'yes', 'Вкладка добавлена всем группам один раз');
+  return true;
+}
 // Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.
 export const ALWAYS_TABS = [];
 const tabsKey = (group) => `tabs_${group}`;

@@ -347,16 +347,20 @@ async function fromUrl(url) {
 
 // Ищем фото игрока по цепочке. Ошибки не роняют карточку: не нашли — рисуем
 // инициалы, это лучше, чем не отправить ничего.
-async function playerPhoto({ telegramId = '', name = '', fresh = false } = {}) {
+// Какой файл аватарки у игрока — запоминаем, чтобы при сбое чтения таблицы
+// (лимит Google во время рассылки) всё равно найти фото.
+const knownAvatar = new Map();
+async function playerPhoto({ telegramId = '', name = '', fresh = false, report = null } = {}) {
   const key = `p:${telegramId || name.toLowerCase()}`;
-  
+  const fail = why => { if (report) report.errors.push(why); };
 
   if (telegramId) {
-    const row = await findApplicantByTelegramId(telegramId).catch(() => null);
-    const fileId = txt(row?.avatar_file_id);
+    const row = await findApplicantByTelegramId(telegramId).catch(e => { fail(`анкета: ${e.message}`); return undefined; });
+    if (row) knownAvatar.set(String(telegramId), txt(row.avatar_file_id));
+    const fileId = row !== undefined ? txt(row?.avatar_file_id) : (knownAvatar.get(String(telegramId)) || '');
     if (fileId) {
       if (!fresh && photoCache.has(fileId)) return photoCache.get(fileId);
-      const hit = await getFileBuffer(fileId).then(f => f.buffer).catch(e => { console.error(`card avatar for ${telegramId} failed:`, e.message); return null; });
+      const hit = await getFileBuffer(fileId).then(f => f.buffer).catch(e => { fail(`файл аватарки: ${e.message}`); console.error(`card avatar for ${telegramId} failed:`, e.message); return null; });
       if (hit) return remember(fileId, hit);
     }
   }
@@ -364,16 +368,32 @@ async function playerPhoto({ telegramId = '', name = '', fresh = false } = {}) {
   if (wanted) {
     // Имена сверяем терпимо — так же, как таблица дивизиона: «Yana D.» и
     // «Yana D», лишний пробел или регистр не должны оставлять карточку без фото.
-    const master = await getMasterPhotos().catch(() => new Map());
+    const master = await getMasterPhotos().catch(e => { fail(`Players_Master: ${e.message}`); return new Map(); });
     for (const [n, url] of master) {
       if (!url || !sameName(n, wanted)) continue;
       if (!fresh && photoCache.has(url)) return photoCache.get(url);
-      const hit = await fromUrl(url).catch(e => { console.error(`card photo for ${wanted} failed:`, e.message); return null; });
+      const hit = await fromUrl(url).catch(e => { fail(`фото по ссылке: ${e.message}`); console.error(`card photo for ${wanted} failed:`, e.message); return null; });
       if (hit) return remember(url, hit);
       break;
     }
   }
   return remember(key, null);
+}
+
+// Фото для карточки результата. Если найти не удалось из-за сбоя (а не потому,
+// что фото у игрока просто нет) — ещё одна попытка через пару секунд: лимит
+// Google минутный, и за это время он часто уже отпускает. Причину неудачи
+// возвращаем, чтобы админ узнал, что карточка ушла с инициалами.
+const PHOTO_RETRY_MS = 2500;
+async function cardPhoto(player) {
+  const report = { errors: [] };
+  const first = await playerPhoto({ ...player, report }).catch(e => { report.errors.push(e.message); return null; });
+  if (first || !report.errors.length) return { buffer: first, error: '' };
+  await new Promise(r => setTimeout(r, PHOTO_RETRY_MS));
+  const again = { errors: [] };
+  const second = await playerPhoto({ ...player, fresh: true, report: again }).catch(e => { again.errors.push(e.message); return null; });
+  if (second) return { buffer: second, error: '' };
+  return { buffer: null, error: again.errors[0] || report.errors[0] || 'неизвестно' };
 }
 
 export async function playerPhotoForPoster(player = {}) {
@@ -496,10 +516,13 @@ export async function renderInstagramMatchCard(match = {}) {
       font-weight="700" fill="${C.champ}" letter-spacing="3">${esc(m.label)}</text>` : ''}
   </svg>`;
 
-  const [wp, lp] = await Promise.all([
-    playerPhoto({ telegramId:match.winnerId, name:m.winner }).catch(() => null),
-    playerPhoto({ telegramId:match.loserId, name:m.loser }).catch(() => null)
+  const [wr, lr] = await Promise.all([
+    cardPhoto({ telegramId:match.winnerId, name:m.winner }),
+    cardPhoto({ telegramId:match.loserId, name:m.loser })
   ]);
+  const wp = wr.buffer, lp = lr.buffer;
+  const missingPhotos = [[m.winner, wr], [m.loser, lr]]
+    .filter(([, r]) => r.error).map(([name, r]) => ({ name, reason: r.error }));
   const [a, b] = await Promise.all([
     wp ? toCircle(wp, IR, FRAME.winner).catch(() => initialsCircle(m.winner, IR, FRAME.winner))
        : initialsCircle(m.winner, IR, FRAME.winner),
@@ -513,7 +536,11 @@ export async function renderInstagramMatchCard(match = {}) {
     { input:a, left:Math.round(centers[0].x - am.width / 2), top:Math.round(centers[0].y - am.height / 2) },
     { input:b, left:Math.round(centers[1].x - bm.width / 2), top:Math.round(centers[1].y - bm.height / 2) },
     ...logos
-  ]).png({ compressionLevel:6 }).toBuffer();
+  ]).png({ compressionLevel:6 }).toBuffer().then(buf => {
+    // Кто остался без фото из-за сбоя — пометка для рассылки (см. matches.js).
+    if (missingPhotos.length) buf.missingPhotos = missingPhotos;
+    return buf;
+  });
 }
 // Место «после» матча читаем прямо сейчас (это просто текущая таблица
 // дивизиона — она не протухает), а место «до», форму и очки Fantasy — из
@@ -619,3 +646,4 @@ function fmtDate(iso = '') {
 }
 
 export function forgetPhotoCache() { photoCache.clear(); }
+

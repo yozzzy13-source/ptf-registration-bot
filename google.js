@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { GOOGLE_CREDENTIALS } from './config.js';
 
 let sheetsClient = null;
+let driveClient = null;
 
 function getAuth() {
   if (!GOOGLE_CREDENTIALS) throw new Error('GOOGLE_CREDENTIALS env is empty');
@@ -13,7 +14,8 @@ function getAuth() {
     creds.client_email,
     null,
     creds.private_key,
-    ['https://www.googleapis.com/auth/spreadsheets']
+    // Диск — только чтение: галерея сайта берёт фото из папки «PTF Gallery».
+    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly']
   );
 }
 
@@ -63,4 +65,17 @@ function wrap(client) {
 export function sheets() {
   if (!sheetsClient) sheetsClient = wrap(google.sheets({ version: 'v4', auth: getAuth() }));
   return sheetsClient;
+}
+
+// Google Диск (только чтение). Сейчас им пользуется галерея сайта.
+export function drive() {
+  if (!driveClient) {
+    driveClient = google.drive({ version: 'v3', auth: getAuth() });
+    const files = driveClient.files;
+    for (const key of ['list', 'get']) {
+      const orig = files[key]?.bind(files);
+      if (orig) files[key] = (...args) => withRetry(orig, args);
+    }
+  }
+  return driveClient;
 }

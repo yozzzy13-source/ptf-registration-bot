@@ -754,6 +754,12 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
    и чуть шире колонка на компьютере — остальное как в мини-приложении. */
 .webauth{flex:0 0 auto}
 .webfoot{text-align:center;margin-top:22px}
+/* Серверный текст страницы для поисковиков: виден секунду, пока грузится
+   интерфейс, потом убирается. Оформлен просто, чтобы не мигал чужеродно. */
+.ssr{font-size:13px;line-height:1.6;color:var(--dim);padding:6px 2px 30px}
+.ssr h1{font-size:20px;color:var(--text);margin:6px 0 8px}.ssr h2{font-size:14px;color:var(--text);margin:14px 0 6px}
+.ssr a{color:var(--dim)}.ssr ul,.ssr ol{padding-left:18px}.ssr nav{margin-bottom:10px;font-size:12px}
+.ssr details{margin-top:8px}.ssr summary{cursor:pointer;color:var(--text);font-weight:700}
 .webauth button{width:auto;margin:0;display:inline-block;border:1px solid var(--accLine);background:var(--accBg);color:var(--amber);border-radius:999px;
   padding:7px 12px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;white-space:nowrap}
 .webauth button.quiet{border-color:var(--line2);background:transparent;color:var(--mute)}
@@ -793,13 +799,93 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 .intro .pt1 span{font-size:12px;line-height:1.45;color:var(--dim)}
 .intro .go{width:100%;margin:0;padding:15px;border:0;border-radius:15px;font:inherit;font-size:15.5px;font-weight:900;color:#1A1208;
   background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer}
-.intro .alt{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:12.5px}
+.intro .alt{display:flex;justify-content:center;gap:10px;margin-top:12px;font-size:12.5px}
+.intro .go2{display:block;text-align:center;margin-top:9px;padding:13px;border-radius:15px;border:1px solid var(--accLine);
+  background:var(--accBg);color:var(--amber);font-size:14.5px;font-weight:900;text-decoration:none}
+.intro .lng{width:auto;margin:0 0 12px;padding:6px 11px;border-radius:999px;border:1px solid var(--line2);background:var(--card2);
+  color:var(--dim);font:inherit;font-size:11.5px;font-weight:800;cursor:pointer}
 .intro .alt a{color:var(--dim);text-decoration:none;font-weight:700}
-.intro .alt a:last-child{color:var(--amber)}
 @media (min-width:560px){.intro{align-items:center}.intro .box{border-radius:22px}}
 .webfoot{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
 .webfoot a{display:inline-flex;align-items:center;border:1px solid var(--line2);border-radius:999px;padding:7px 12px;color:var(--mute);
   font-size:11.5px;font-weight:800;text-decoration:none}
+/* ---------- карточки событий ---------- */
+.evc{display:grid;grid-template-columns:58px minmax(0,1fr);gap:13px;background:var(--surf);border:1px solid var(--line);
+  border-radius:18px;padding:14px;margin-bottom:12px;box-shadow:inset 0 1px 0 var(--hair);position:relative;overflow:hidden}
+.evc:before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--line3)}
+.evc.st-open:before,.evc.st-mine:before{background:var(--win)}.evc.st-few:before,.evc.st-live:before{background:var(--amber)}
+.evc.st-full:before{background:var(--lose)}
+.evc-date{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;border-radius:14px;padding:9px 4px 8px;
+  background:var(--card2);border:1px solid var(--line2);height:max-content}
+.evc-date b{font-size:24px;font-weight:900;line-height:1;letter-spacing:-.8px}
+.evc-date span{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--amber);margin-top:3px}
+.evc-date i{font-style:normal;font-size:9.5px;font-weight:700;color:var(--mute);margin-top:3px;text-transform:uppercase}
+.evc-top{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:7px}
+.evs{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;border-radius:999px;padding:3px 9px;border:1px solid var(--line2);color:var(--mute);background:var(--card2)}
+.evs:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.evs.st-open,.evs.st-mine{color:var(--win);border-color:var(--winLine);background:var(--winBg)}
+.evs.st-few,.evs.st-live{color:var(--amber);border-color:var(--accLine);background:var(--accBg)}
+.evs.st-full{color:var(--lose);border-color:var(--loseLine);background:var(--loseBg)}
+.evc h3{font-size:16px;font-weight:850;letter-spacing:-.3px;line-height:1.25;margin:0 0 7px}
+.evc-meta{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:12px;color:var(--dim);margin-bottom:8px}
+.evc-desc{font-size:12.5px;line-height:1.55;color:var(--dim);margin-bottom:10px;white-space:pre-wrap}
+.evc-cap{display:flex;align-items:center;gap:10px;margin:6px 0 4px;font-size:11.5px;color:var(--mute)}
+.evc-cap .evc-bar{flex:1;height:5px;border-radius:3px;background:var(--line5);overflow:hidden}
+.evc-cap .evc-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--champ2),var(--amber))}
+.evc-cap b{color:var(--text)}
+.evc.st-done{opacity:.7}
+.evc-past{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px;margin-bottom:14px;-webkit-overflow-scrolling:touch}
+.evc.compact{flex:0 0 78%;max-width:300px;scroll-snap-align:start;margin:0;grid-template-columns:48px minmax(0,1fr);padding:12px}
+.evc.compact .evc-date b{font-size:19px}
+.evc.compact h3{font-size:13.5px;margin:6px 0 4px}
+/* ---------- PTF в цифрах ---------- */
+.pn-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.pn{background:var(--card2);border:1px solid var(--line2);border-radius:14px;padding:11px 12px}
+.pn.pn-on{border-color:var(--accLine);background:linear-gradient(160deg,var(--accBg),var(--card2))}
+.pn-h{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;font-weight:800;color:var(--mute);margin-bottom:8px}
+.pn-live{color:var(--amber);margin-left:4px}
+.pn-row{display:flex;gap:14px}
+.pn-row b{display:block;font-size:22px;font-weight:900;letter-spacing:-.6px;color:var(--amber)}
+.pn-row span{font-size:10.5px;color:var(--dim);font-weight:700}
+.pn-total{margin-top:10px;font-size:11.5px;color:var(--mute)}.pn-total b{color:var(--text)}
+/* ---------- соцсети ---------- */
+.soc-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.soc-h h3{margin-bottom:3px}
+.socbtn{width:auto;margin:0;padding:9px 14px;border-radius:12px;border:0;font:inherit;font-size:12.5px;font-weight:900;color:#1A1208;
+  background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer;white-space:nowrap}
+html[data-theme="light"] .socbtn{color:#fff}
+.socbtn.ghost{background:var(--card2);color:var(--text);border:1px solid var(--line)}
+.socbtn.wide{width:100%;margin-top:12px;padding:12px}
+.ig-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:12px}
+.ig-cell{position:relative;display:block;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--card2)}
+.ig-cell img{width:100%;height:100%;object-fit:cover;display:block}
+.ig-cell i{position:absolute;right:6px;top:5px;font-style:normal;font-size:11px;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.soc.tgc{background:linear-gradient(160deg,rgba(127,182,232,.10),var(--surf) 60%);border-color:var(--linkLine)}
+/* ---------- галерея ---------- */
+.gal{margin-bottom:14px}
+.gal-t{font-size:13px;font-weight:800;margin:0 2px 8px}
+.gal-strip{display:flex;gap:7px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.gal-strip img{flex:0 0 auto;height:170px;width:auto;max-width:78%;border-radius:12px;object-fit:cover;scroll-snap-align:start;cursor:zoom-in;background:var(--card2)}
+/* ---------- турниры ---------- */
+.trn-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.trn-st{font-size:10.5px;font-weight:900;letter-spacing:1px;text-transform:uppercase;border-radius:999px;padding:3px 9px;border:1px solid var(--line2);color:var(--mute)}
+.trn-st.live{color:var(--amber);border-color:var(--accLine);background:var(--accBg)}
+.trn-st.wait{color:var(--link);border-color:var(--linkLine)}
+.trn-d{font-size:11.5px;color:var(--mute);font-weight:700}
+.trn h3{font-size:17px;margin-bottom:9px}
+.trn.trn-live{border-color:var(--accLine);background:linear-gradient(160deg,var(--accBg),var(--surf) 55%)}
+.tr-stats{display:flex;gap:18px;margin:4px 0 12px}
+.tr-stats b{display:block;font-size:22px;font-weight:900;color:var(--amber);letter-spacing:-.5px}
+.tr-stats span{font-size:10.5px;color:var(--dim);font-weight:700}
+.trn-order{font-size:12.3px;line-height:1.55;color:var(--dim);background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:10px 12px;margin:10px 0 12px}
+.trn-order b{color:var(--text)}
+.trn-acts{display:flex;gap:8px;flex-wrap:wrap}
+.trn-champs{display:grid;gap:7px;margin:4px 0 12px}
+.trn-ch{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:8px 10px;cursor:pointer}
+.trn-ch .avr,.trn-ch .avph{width:40px;height:40px;flex:0 0 40px;font-size:11px;box-shadow:0 0 0 2px var(--goldRing)}
+.trn-ch b{display:block;font-size:13px}.trn-ch span{display:block;font-size:10.5px;color:var(--champ);font-weight:700}
+.trn-ch i{font-style:normal;font-size:11px;color:var(--dim)}
+@media (min-width:900px){.gal-strip img{height:220px}.evc.compact{flex-basis:32%}}
 /* Компьютер. Весь интерфейс рисуется в пикселях под телефон, поэтому на
    большом экране его целиком увеличиваем (zoom): буквы, аватарки, таблицы
    растут вместе и не ломают пропорции. Отдельно — то, что на широком экране
@@ -835,12 +921,14 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
   <div id="walletPanel" class="hidden"></div>
   <div id="accessBar"></div>
   <div class="tabs" id="tabs"></div>
+  <!--SSR-->
   <div id="viewHome"></div>
   <div id="viewDiv" class="hidden"></div>
   <div id="viewRace" class="hidden"></div>
   <div id="viewPlayers" class="hidden"></div>
   <div id="viewMatches" class="hidden"></div>
   <div id="viewEvents" class="hidden"></div>
+  <div id="viewTournaments" class="hidden"></div>
   <div id="viewFantasy" class="hidden"></div>
   <div id="viewPartners" class="hidden"></div>
   <div id="viewAbout" class="hidden"></div>
@@ -1225,17 +1313,17 @@ function pct(p){ var n=Number(String(p.win_rate||'').replace(',', '.').replace('
 // ожидания, заявка без оплаты, остальные). Главная есть всегда.
 // «Расписание» больше не отдельный экран: согласованные матчи живут сверху
 // вкладки «Матчи», прямо над историей.
-var ALL_VIEWS=['home','div','race','players','matches','events','fantasy','partners'];
+var ALL_VIEWS=['home','div','race','players','matches','events','tournaments','fantasy','partners'];
 var VIEWS=ALL_VIEWS.slice();
 var VIEW_ID={home:'viewHome',div:'viewDiv',race:'viewRace',players:'viewPlayers',
-matches:'viewMatches',events:'viewEvents',fantasy:'viewFantasy',partners:'viewPartners',about:'viewAbout'};
+matches:'viewMatches',events:'viewEvents',tournaments:'viewTournaments',fantasy:'viewFantasy',partners:'viewPartners',about:'viewAbout'};
 // «Мои матчи» — отдельный экран (/match) со своим меню, но в общем меню лиги
 // он стоит рядом с «Матчами», у игрока лиги и у организатора.
 var canMyMatches=false;
 function goMyMatches(){ location.href=window.PTFNav?PTFNav.hrefFor('mymatches',{token:linkToken}):'/match'+(linkToken?'?t='+encodeURIComponent(linkToken):''); }
 function buildTabs(){
   var byCode={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
-              matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout,mymatches:L?'Мои матчи':'My matches'};
+              matches:X.tMatches,events:X.tEvents,tournaments:L?'Турниры':'Tournaments',fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout,mymatches:L?'Мои матчи':'My matches'};
   var keys=VIEWS.slice();
   if(canMyMatches){var at=keys.indexOf('matches');keys.splice(at>=0?at+1:keys.length,0,'mymatches')}
   var ic=function(k){return window.PTFNav?PTFNav.icon(k):''};
@@ -1314,7 +1402,7 @@ function showTab(t){
   $('tabs').classList.remove('hidden');
   $('hdr').classList.remove('hidden');
   $('viewCard').classList.add('hidden');
-  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
+  var titles={home:X.title,div:X.tDiv,race:X.tRace,players:X.tPlayers,matches:X.tMatches,events:X.tEvents,tournaments:L?'Турниры':'Tournaments',fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
   $('title').textContent=titles[t]||X.title;
   if(t==='home')renderHome();
   else if(t==='div')renderDiv();
@@ -1322,6 +1410,7 @@ function showTab(t){
   else if(t==='players')renderPlayers();
   else if(t==='matches')renderFeed();
   else if(t==='events')renderEvents();
+  else if(t==='tournaments')renderTournaments();
   else if(t==='fantasy')renderFantasy();
   else if(t==='partners')renderPartners();
   else renderAbout();
@@ -1570,7 +1659,7 @@ function openAvatarFull(src){
 // работают как «назад к разделу», вперёд там некуда.
 function tabTitle(t){
   var titles={home:X.tHome,div:X.tDiv,race:X.tRace,players:X.tPlayers,
-              matches:X.tMatches,events:X.tEvents,fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
+              matches:X.tMatches,events:X.tEvents,tournaments:L?'Турниры':'Tournaments',fantasy:X.tFantasy,partners:X.tPartners,about:X.tAbout};
   return titles[t]||X.title;
 }
 function neighbour(step){
@@ -2066,7 +2155,8 @@ function leadersStrip(){
 function renderHome(){
   loadSummary();
   loadEvents();
-  $('viewHome').innerHTML=partnersStrip()+homeEvents()+leadersStrip()+championsStrip()+seasonCard()+promotionsStrip();
+  loadPublicExtras();
+  $('viewHome').innerHTML=partnersStrip()+homeEvents()+leadersStrip()+championsStrip()+seasonCard()+statsBlock()+promotionsStrip()+igBlock()+tgBlock();
   mountMarquees($('viewHome'));
 }
 
@@ -2705,43 +2795,66 @@ function dayLabel(v){
   var d=new Date(Date.UTC(+m[3],+m[2]-1,+m[1]));
   return DOW[L?0:1][d.getUTCDay()]+', '+m[1]+'.'+m[2];
 }
-function eventCard(e){
+// Карточка события: дата крупным блоком слева, статус цветной меткой, детали
+// строками, шкала мест и одна главная кнопка. Статусы: набор открыт, мест
+// мало, мест нет, набор закрыт, идёт сейчас, проведено.
+var MON=[['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'],['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']];
+function evStatusOf(e){
+  var now=Date.now();
+  if(e.past)return ['done',L?'Проведено':'Finished'];
+  if(e.starts_at&&now>=e.starts_at&&(!e.ends_at||now<e.ends_at))return ['live',L?'Идёт сейчас':'Live now'];
+  var mine=!!e.my_status&&e.my_status!=='cancelled';
+  if(mine)return ['mine',L?'Вы записаны':'You are in'];
+  if(e.capacity&&e.seats_left<=0)return ['full',L?'Мест нет':'Full'];
+  if(e.open_now&&e.capacity&&e.seats_left<=3)return ['few',L?'Мало мест':'Few spots left'];
+  if(e.open_now)return ['open',L?'Набор открыт':'Registration open'];
+  return ['closed',L?'Набор закрыт':'Registration closed'];
+}
+function eventCard(e,compact){
   if(e.ends_at&&Date.now()>=e.ends_at)e.past=true;
   if(e.starts_at&&Date.now()>=e.starts_at)e.open_now=false;
   var title=L?(e.title_ru||e.title_en):(e.title_en||e.title_ru);
   var desc=L?(e.description_ru||e.description_en):(e.description_en||e.description_ru);
-  var when=[dayLabel(e.date),e.time].filter(Boolean).join(' · ');
-  var rows='';
-  // Место ссылкой, если она задана: адрес отдельной строкой не дублируем.
-  if(e.place)rows+='<div class="hint">📍 '+(e.place_url
+  var dm=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(e.date||''));
+  var dd=dm?String(+dm[1]):'',mon=dm?MON[L?0:1][+dm[2]-1]:'';
+  var dow=dm?DOW[L?0:1][new Date(Date.UTC(+dm[3],+dm[2]-1,+dm[1])).getUTCDay()]:'';
+  var st=evStatusOf(e);
+  var meta=[];
+  if(e.time)meta.push('<span>🕔 '+esc(e.time)+'</span>');
+  if(e.place)meta.push('<span>📍 '+(e.place_url
     ? '<a class="lnk" href="'+esc(e.place_url)+'" onclick="event.preventDefault();openLink(\''+q(e.place_url)+'\')">'+esc(e.place)+'</a>'
-    : esc(e.place))+'</div>';
-  if(when)rows+='<div class="hint">📅 '+esc(when)+'</div>';
-  if(e.capacity)rows+='<div class="hint">👥 '+esc(X.evSpots)+': <b>'+(e.seats_left)+' / '+e.capacity+'</b></div>';
-  if(e.payment_required&&e.price_thb)rows+='<div class="hint">💳 '+esc(X.evPrice)+': <b>'+e.price_thb+' ฿</b>'
-    +(e.guests_allowed?' · '+esc(X.evGuest)+': <b>'+((e.guest_price_thb===null||e.guest_price_thb==='')?e.price_thb:e.guest_price_thb)+' ฿</b>':'')+'</div>';
-  if(e.signup_deadline)rows+='<div class="hint">⏳ '+esc(X.evUntil)+' '+esc(dayLabel(e.signup_deadline))+'</div>';
-  if(e.invite_only)rows+='<div class="hint">🔒 '+esc(X.evInviteOnly)+'</div>';
-  var badges=evStatusBadge(e);
+    : esc(e.place))+'</span>');
+  if(e.payment_required&&e.price_thb)meta.push('<span>💳 '+esc(e.price_thb)+' ฿'
+    +(e.guests_allowed?' · '+esc(X.evGuest)+' '+esc((e.guest_price_thb===null||e.guest_price_thb==='')?e.price_thb:e.guest_price_thb)+' ฿':'')+'</span>');
+  else if(!e.past)meta.push('<span>🎟 '+esc(L?'Бесплатно':'Free')+'</span>');
+  if(e.signup_deadline&&!e.past)meta.push('<span>⏳ '+esc(X.evUntil)+' '+esc(dayLabel(e.signup_deadline))+'</span>');
+  if(e.invite_only)meta.push('<span>🔒 '+esc(X.evInviteOnly)+'</span>');
+  var cap='';
+  if(e.capacity){
+    var taken=Math.max(0,Number(e.capacity)-Number(e.seats_left||0)),pct=Math.min(100,Math.round(taken/Number(e.capacity)*100));
+    cap='<div class="evc-cap"><div class="evc-bar"><i style="width:'+pct+'%"></i></div><span>'+esc(L?'Занято ':'Taken ')+'<b>'+taken+'</b> / '+esc(e.capacity)+'</span></div>';
+  }
   var mine=!!e.my_status&&e.my_status!=='cancelled';
-  var canJoin=!mine&&e.open_now;
-  var full=!mine&&e.capacity&&e.seats_left<=0;
-  var closed=!mine&&!e.open_now&&!full;
   var btn='';
-  if(e.past)btn='';
-  else if(canJoin)btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>';
-  else if(mine)btn='<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
-  else if(full)btn='<div class="hint" style="margin-top:11px;color:var(--lose)">'+esc(X.evFull)+'</div>';
-  else if(closed)btn='<div class="hint" style="margin-top:11px">'+esc(X.evClosed)+'</div>';
-  return '<div class="card'+(e.past?' event-past':'')+'">'
+  if(!e.past){
+    if(!mine&&e.open_now&&!(e.capacity&&e.seats_left<=0))btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>';
+    else if(mine)btn='<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
+  }
+  var badges=evStatusBadge(e);
+  if(compact){
+    return '<div class="evc compact st-'+st[0]+'"><div class="evc-date"><b>'+esc(dd||'—')+'</b><span>'+esc(mon)+'</span></div>'
+      +'<div class="evc-body"><span class="evs st-'+st[0]+'">'+esc(st[1])+'</span><h3>'+esc(title)+'</h3>'
+      +(e.place?'<div class="evc-meta"><span>📍 '+esc(e.place)+'</span></div>':'')+'</div></div>';
+  }
+  return '<div class="evc st-'+st[0]+'">'
+    +'<div class="evc-date"><b>'+esc(dd||'—')+'</b><span>'+esc(mon)+'</span>'+(dow?'<i>'+esc(dow)+'</i>':'')+'</div>'
+    +'<div class="evc-body">'
+    +'<div class="evc-top"><span class="evs st-'+st[0]+'">'+esc(st[1])+'</span>'+(badges&&!e.past?badges:'')+'</div>'
     +'<h3>'+esc(title)+'</h3>'
-    // Описание сразу под заголовком: сперва о чём событие, потом детали.
-    +(desc?'<div class="hint" style="margin:0 0 9px">'+esc(desc)+'</div>':'')
-    +(badges?'<div class="rw" style="margin-bottom:8px">'+badges+'</div>':'')
-    +rows
-    +btn
-    +evPeople(e)
-    +'</div>';
+    +(meta.length?'<div class="evc-meta">'+meta.join('')+'</div>':'')
+    +(desc?'<div class="evc-desc">'+esc(desc)+'</div>':'')
+    +cap+btn+evPeople(e)
+    +'</div></div>';
 }
 // Кто чего заплатил — дело организатора. Игрокам показываем только участие:
 // подтверждён, записался или ждёт места.
@@ -2915,7 +3028,10 @@ function syncUrl(){
   if(!IS_WEB)return;
   try{
     var want=openId&&byId(openId)?'/p/'+slugOf(byId(openId).name):(mode==='div'&&divLetter?'/d/'+divLetter:'/');
-    var full=want==='/'&&mode&&mode!=='home'?'/?tab='+mode:want;
+    var TAB_PATH={div:'/divisions',race:'/race',players:'/players',matches:'/matches',events:'/events',tournaments:'/tournaments',partners:'/partners'};
+    var full=want==='/'&&mode&&mode!=='home'?(TAB_PATH[mode]||'/?tab='+mode):want;
+    // Русская версия страницы — тот же адрес с ?lang=ru: так её видит и Google.
+    if(L)full+=(full.indexOf('?')<0?'?':'&')+'lang=ru';
     if(location.pathname+location.search!==full)history.replaceState(history.state,'',full);
   }catch(e){}
 }
@@ -2927,29 +3043,38 @@ function introSeen(){try{return localStorage.getItem('ptf_intro_seen')==='1'}cat
 function markIntro(){try{localStorage.setItem('ptf_intro_seen','1')}catch(e){}}
 function closeIntro(){markIntro();var el=document.getElementById('introSheet');if(el)el.remove()}
 function introJoin(){closeIntro();openLogin()}
+// Язык прямо в окне-знакомстве: телефон может быть на английском, а человек
+// говорит по-русски. Окно при этом не закрывается — после перезагрузки оно
+// покажется снова, уже на выбранном языке.
+function introLang(){
+  var next=L?'en':'ru';
+  if(window.PTFPrefs){PTFPrefs.setLang(next);(PTFPrefs.saved()||Promise.resolve()).then(function(){location.reload()})}
+  else location.reload();
+}
 function maybeIntro(){
   if(!IS_WEB||!webGuest||introSeen())return;
   if(wantJoin||loginFailed)return;
   var el=document.createElement('div');
   el.id='introSheet';el.className='intro';
   el.onclick=function(e){if(e.target===el)closeIntro()};
-  var pts=L?[['race','Сезоны по 2 месяца','7 матчей с соперниками своего уровня — время и корт выбираете сами'],
-             ['div','Дивизионы по уровню','8 игроков в дивизионе, лучшие поднимаются, таблица обновляется сразу после матча'],
-             ['tournaments','Плей-офф и годовая гонка','Топ-4 играют за титул, очки сезона идут в рейтинг года и отбор на Grand Final'],
-             ['players','Сообщество','Игроки, события, партнёры лиги — теннисная семья Пхукета']]
-            :[['race','2-month seasons','7 matches against players of your level — you pick the time and court'],
-             ['div','Level-based divisions','8 players per division, the best move up, the table updates right after each match'],
-             ['tournaments','Playoffs and the Yearly Race','The top 4 play for the title; season points count toward the year ranking and the Grand Final'],
-             ['players','Community','Players, events and league partners — Phuket’s tennis family']];
+  var pts=L?[['race','Сезоны по 2 месяца','7 матчей с соперниками вашего уровня — время и корт выбираете сами.'],
+             ['div','Уровень по вашим навыкам','Дивизионы по 8 игроков собираются по уровню, чтобы матчи были равными. Места в дивизионах ограничены.'],
+             ['tournaments','Живые финалы и ужин','Полуфиналы и финалы играем вживую всей теннисной семьёй, а потом празднуем на торжественном ужине с награждением.'],
+             ['events','Не только лига','Турниры, встречи и теннисные события. Не готовы к сезону — просто заполните анкету в Telegram, и вы будете в курсе всего.']]
+            :[['race','2-month seasons','7 matches against players of your level — you pick the time and court.'],
+             ['div','Matched to your skills','Divisions of 8 players are built by level, so matches are even. Places in divisions are limited.'],
+             ['tournaments','Live finals and a dinner','Semifinals and finals are played live with the whole tennis family, then we celebrate at an awards dinner.'],
+             ['events','More than a league','Tournaments, meet-ups and tennis events. Not ready for a season? Just fill in the profile in Telegram and stay in the loop.']];
   el.innerHTML='<div class="box"><button class="x" onclick="closeIntro()" aria-label="Close">✕</button>'
+    +'<button class="lng" onclick="introLang()">🌐 '+esc(L?'English':'Русский')+'</button>'
     +'<div class="kick">PHUKET TENNIS FAMILY</div>'
-    +'<h2>'+esc(L?'Теннисная лига Пхукета':'Phuket’s tennis league')+'</h2>'
-    +'<p class="lead">'+esc(L?'Регулярные матчи с соперниками своего уровня, живые таблицы и рост от сезона к сезону. Всё — в одном месте.'
-                            :'Regular matches against players of your level, live standings and progress from season to season. All in one place.')+'</p>'
+    +'<h2>'+esc(L?'Любительская теннисная лига Пхукета':'Phuket’s amateur tennis league')+'</h2>'
+    +'<p class="lead">'+esc(L?'Регулярные матчи с соперниками своего уровня, живые таблицы, финалы и теннисное сообщество. Вход — через Telegram: туда приходят анонсы, набор и ваши матчи.'
+                            :'Regular matches against players of your level, live standings, finals and a tennis community. You join through Telegram — announcements, registration and your matches arrive there.')+'</p>'
     +'<div class="pts">'+pts.map(function(x){return '<div class="pt1">'+(window.PTFNav?PTFNav.icon(x[0]):'')+'<div><b>'+esc(x[1])+'</b><span>'+esc(x[2])+'</span></div></div>'}).join('')+'</div>'
     +'<button class="go" onclick="introJoin()">'+esc(L?'Вступить в лигу':'Join the league')+'</button>'
-    +'<div class="alt"><a href="#" onclick="event.preventDefault();closeIntro()">'+esc(L?'Сначала посмотреть лигу':'Look around first')+'</a>'
-    +'<a href="/about">'+esc(L?'Подробнее о лиге':'More about the league')+'</a></div></div>';
+    +'<a class="go2" href="/about">'+esc(L?'Подробнее о лиге':'More about the league')+'</a>'
+    +'<div class="alt"><a href="#" onclick="event.preventDefault();closeIntro()">'+esc(L?'Сначала посмотреть лигу':'Look around first')+'</a></div></div>';
   document.body.appendChild(el);
 }
 // ------------------------------------------------------------- партнёры
@@ -3066,8 +3191,148 @@ function renderEvents(){
   var h='';
   if(evBalance>0)h+='<div class="card"><h3>'+esc(X.evDeposit)+'</h3><div class="stats">'
     +stt(X.evDeposit,evBalance+' ฿',true)+'</div></div>';
-  h+=evList.length?evList.map(eventCard).join(''):'<div class="empty">'+esc(X.noEvents)+'</div>';
+  // Сначала то, что впереди (по дате), прошедшие — лентой ниже, приглушённо.
+  evList.forEach(function(e){if(e.ends_at&&Date.now()>=e.ends_at)e.past=true});
+  var ahead=evList.filter(function(e){return !e.past}).sort(function(a,b){return (a.starts_at||Infinity)-(b.starts_at||Infinity)});
+  var gone=evList.filter(function(e){return e.past}).sort(function(a,b){return (b.starts_at||0)-(a.starts_at||0)});
+  h+=ahead.length?ahead.map(function(e){return eventCard(e)}).join(''):'<div class="empty">'+esc(X.noEvents)+'</div>';
+  if(gone.length)h+='<div class="lab">'+esc(L?'Прошедшие события':'Past events')+'<span class="dot"></span>'+gone.length+'</div>'
+    +'<div class="evc-past">'+gone.map(function(e){return eventCard(e,true)}).join('')+'</div>';
   $('viewEvents').innerHTML=h;
+}
+// ------------------------------------------- живая часть: цифры, фото, соцсети
+// Счётчик сезонов, галерея из папки «PTF Gallery», лента Instagram и плашка
+// Telegram-бота. Всё грузится одним заходом после основной витрины и никому
+// не мешает: не ответил источник — блока просто нет.
+var pubSeasons=null,pubIg=null,pubGallery=null,pubEvents=null,pubLoading=false;
+function loadPublicExtras(){
+  if(pubLoading)return;pubLoading=true;
+  var get=function(u){return fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null})};
+  Promise.all([get('/api/public/seasons'),get('/api/public/instagram'),get('/api/public/gallery'),
+    get('/api/bootstrap?initData='+encodeURIComponent(initData)+tokQ)]).then(function(r){
+    pubSeasons=(r[0]&&r[0].seasons)||[];pubIg=r[1]||{posts:[]};pubGallery=(r[2]&&r[2].albums)||[];
+    pubEvents=(r[3]&&(r[3].all_events||r[3].events))||[];
+    if(openId)return;
+    if(mode==='home')renderHome();else if(mode==='tournaments')renderTournaments();
+  });
+}
+function seasonNoOf(ev){
+  var m=String(ev.event_id||'').match(/(\d+)/)||String(ev.event_name_en||ev.event_name||'').match(/(\d+)/);
+  return m?String(m[1]):'';
+}
+function pubSeason(no){return (pubSeasons||[]).filter(function(s){return String(s.number)===String(no)})[0]||null}
+// «PTF в цифрах»: сколько игроков сыграло и сколько матчей — по каждому сезону.
+function statsBlock(){
+  var list=(pubSeasons||[]).filter(function(s){return s.players_played||s.matches_played||s.players})
+    .sort(function(a,b){return Number(a.number)-Number(b.number)});
+  if(!list.length)return '';
+  var live=String(season||'');
+  var tp=0,tm=0;list.forEach(function(s){tp+=Number(s.players_played||s.players||0);tm+=Number(s.matches_played||0)});
+  return '<div class="card ptfnum"><h3>'+esc(L?'PTF в цифрах':'PTF in numbers')+'</h3><div class="pn-grid">'
+    +list.map(function(s){
+      var isLive=String(s.number)===live&&String(s.status||'').toLowerCase()!=='finished';
+      return '<div class="pn'+(isLive?' pn-on':'')+'"><div class="pn-h">'+esc((L?'Сезон ':'Season ')+s.number)
+        +(isLive?' <span class="pn-live">LIVE</span>':'')+'</div>'
+        +'<div class="pn-row"><div><b>'+esc(s.players_played||s.players||0)+'</b><span>'+esc(L?'игроков':'players')+'</span></div>'
+        +'<div><b>'+esc(s.matches_played||0)+'</b><span>'+esc(L?'матчей':'matches')+'</span></div></div></div>';
+    }).join('')
+    +'</div><div class="pn-total">'+esc(L?'Всего за всё время: ':'All time: ')+'<b>'+tm+'</b> '+esc(L?'матчей':'matches')+'</div></div>';
+}
+function igBlock(){
+  var posts=(pubIg&&pubIg.posts)||[];
+  var url=(pubIg&&pubIg.profile_url)||'https://www.instagram.com/phukettennisfamily/';
+  var acc=(pubIg&&pubIg.account)||'phukettennisfamily';
+  return '<div class="card soc ig"><div class="soc-h"><div><h3>Instagram</h3><div class="hint">@'+esc(acc)+' · '
+      +esc(L?'матчи, финалы и жизнь лиги':'matches, finals and league life')+'</div></div>'
+    +'<button class="socbtn" onclick="openLink(\''+q(url)+'\')">'+esc(L?'Подписаться':'Follow')+'</button></div>'
+    +(posts.length?'<div class="ig-grid">'+posts.slice(0,6).map(function(p){
+      return '<a class="ig-cell" href="'+esc(p.permalink)+'" onclick="event.preventDefault();openLink(\''+q(p.permalink)+'\')">'
+        +'<img src="'+esc(p.image)+'" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentNode.remove()">'
+        +(p.video?'<i>▶</i>':'')+'</a>';
+    }).join('')+'</div>':'')+'</div>';
+}
+function tgBlock(){
+  if(!IS_WEB||!webBot)return '';
+  return '<div class="card soc tgc"><div class="soc-h"><div><h3>'+esc(L?'Наш Telegram-бот':'Our Telegram bot')+'</h3>'
+    +'<div class="hint">'+esc(L?'Анонсы сезонов, набор, события и ваши матчи — всё приходит туда первым. Подпишитесь, чтобы ничего не пропустить.'
+                              :'Season announcements, registration, events and your matches — it all arrives there first. Subscribe so you never miss a thing.')+'</div></div></div>'
+    +'<button class="socbtn wide" onclick="openLink(\'https://t.me/'+q(webBot)+'\')">'+esc(L?'Открыть бота в Telegram':'Open the bot in Telegram')+'</button></div>';
+}
+function galleryBlock(){
+  var albums=(pubGallery||[]).filter(function(a){return (a.photos||[]).length});
+  if(!albums.length)return '';
+  return '<div class="lab">'+esc(L?'Галерея':'Gallery')+'<span class="dot"></span>'+esc(L?'финалы, награждения, ужины':'finals, awards, dinners')+'</div>'
+    +albums.map(function(a){
+      return '<div class="gal">'+(a.title?'<div class="gal-t">'+esc(a.title)+'</div>':'')
+        +'<div class="gal-strip">'+a.photos.map(function(p){
+          return '<img src="/gallery/'+esc(p.id)+'.jpg?w=500" alt="" loading="lazy" onclick="openAvatarFull(\'/gallery/'+q(p.id)+'.jpg?w=1600\')" onerror="this.remove()">';
+        }).join('')+'</div></div>';
+    }).join('');
+}
+// ---------------------------------------------------------------- турниры
+// Сезоны лиги в одном месте: идущий, следующий (лист ожидания) и прошедшие с
+// чемпионами. Сюда же потом лягут парные турниры.
+function goWaitlist(){
+  if(IS_WEB){ if(webBot)openLink('https://t.me/'+webBot+'?start=go_waitlist'); return; }
+  location.href='/apply?mode=waitlist'+(tokQ||'');
+}
+function evName(ev){return L?(ev.event_name_ru||ev.event_name_en||ev.event_name||''):(ev.event_name_en||ev.event_name_ru||ev.event_name||'')}
+function evDesc(ev){return L?(ev.description_ru||ev.description_en||''):(ev.description_en||ev.description_ru||'')}
+function evDates(ev){
+  var f=function(d){var x=new Date(d);return isNaN(x.getTime())?String(d||''):x.toLocaleDateString(L?'ru-RU':'en-GB',{day:'numeric',month:'short'})};
+  return [ev.start_date,ev.end_date].filter(function(x){return x&&x!=='None'}).map(f).join(' — ');
+}
+function seasonStats(no){
+  var s=pubSeason(no);if(!s)return '';
+  var it=[[s.divisions,L?'дивизионов':'divisions'],[s.players_played||s.players,L?'игроков':'players'],[s.matches_played,L?'матчей':'matches']]
+    .filter(function(x){return Number(x[0])>0});
+  return it.length?'<div class="tr-stats">'+it.map(function(x){return '<div><b>'+esc(x[0])+'</b><span>'+esc(x[1])+'</span></div>'}).join('')+'</div>':'';
+}
+function renderTournaments(){
+  loadPublicExtras();
+  if(pubEvents===null){$('viewTournaments').innerHTML='<div class="empty">…</div>';return}
+  var league=pubEvents.filter(function(e){return !e.event_type||String(e.event_type).toLowerCase()==='league'});
+  var st=function(e){return String(e.status_code||e.status||'').toLowerCase()};
+  var live=league.filter(function(e){return st(e)==='live'});
+  var next=league.filter(function(e){return st(e)==='waitlist'||st(e)==='open'});
+  var past=league.filter(function(e){return st(e)==='archived'}).sort(function(a,b){return Number(seasonNoOf(b))-Number(seasonNoOf(a))});
+  var h='';
+  live.forEach(function(e){
+    var no=seasonNoOf(e);
+    h+='<div class="card trn trn-live"><div class="trn-top"><span class="trn-st live">● LIVE</span><span class="trn-d">'+esc(evDates(e))+'</span></div>'
+      +'<h3>'+esc(evName(e))+'</h3>'+seasonStats(no)
+      +'<div class="trn-acts"><button class="socbtn" onclick="openDivFrom(\''+q(no)+'\',\'\')">'+esc(L?'Таблицы дивизионов':'Division tables')+'</button>'
+      +'<button class="socbtn ghost" onclick="showTab(\'matches\')">'+esc(L?'Матчи':'Matches')+'</button></div></div>';
+  });
+  next.forEach(function(e){
+    var when=String(e.start_date||'');var dt=new Date(when);
+    var whenTxt=isNaN(dt.getTime())?when:evDates(e);
+    h+='<div class="card trn trn-next"><div class="trn-top"><span class="trn-st wait">'+esc(L?'Лист ожидания':'Waitlist')+'</span>'
+      +(whenTxt&&whenTxt!=='None'?'<span class="trn-d">'+esc((L?'Старт: ':'Starts: ')+whenTxt)+'</span>':'')+'</div>'
+      +'<h3>'+esc(evName(e))+'</h3>'
+      +(evDesc(e)?'<div class="hint">'+esc(evDesc(e))+'</div>':'')
+      +'<div class="trn-order"><b>'+esc(L?'Места ограничены: дивизионы по 8 игроков.':'Places are limited: 8 players per division.')+'</b> '
+      +esc(L?'О наборе сообщаем по очереди: сначала действующим игрокам, затем листу ожидания, затем новым игрокам.'
+            :'We announce registration in order: current players first, then the waitlist, then new players.')+'</div>'
+      +'<div class="trn-acts"><button class="socbtn" onclick="goWaitlist()">'+esc(L?'Встать в лист ожидания':'Join the waitlist')+'</button></div></div>';
+  });
+  if(past.length){
+    h+='<div class="lab">'+esc(L?'Прошедшие сезоны':'Past seasons')+'<span class="dot"></span></div>';
+    past.forEach(function(e){
+      var no=seasonNoOf(e),s=pubSeason(no),finals=(s&&s.finals)||[];
+      h+='<div class="card trn trn-past"><div class="trn-top"><span class="trn-st done">'+esc(L?'Завершён':'Finished')+'</span><span class="trn-d">'+esc(evDates(e))+'</span></div>'
+        +'<h3>'+esc(evName(e))+'</h3>'+seasonStats(no)
+        +(finals.length?'<div class="trn-champs">'+finals.map(function(f){
+          return '<div class="trn-ch" onclick="openPlayerByName(\''+q(f.champion.name)+'\',\'tournaments\')">'+av({name:f.champion.name,photo:f.champion.photo})
+            +'<div><b>'+esc(f.champion.name)+'</b><span>'+esc((f.title||('Division '+f.letter))+' · '+(L?'чемпион':'champion'))+'</span>'
+            +(f.score?'<i>'+esc(f.score)+'</i>':'')+'</div></div>';
+        }).join('')+'</div>':'')
+        +'<div class="trn-acts"><button class="socbtn ghost" onclick="openDivFrom(\''+q(no)+'\',\'\')">'+esc(L?'Таблицы сезона':'Season tables')+'</button></div></div>';
+    });
+  }
+  h+=galleryBlock();
+  if(!h)h='<div class="empty">'+esc(L?'Скоро здесь появятся сезоны и турниры.':'Seasons and tournaments will appear here soon.')+'</div>';
+  $('viewTournaments').innerHTML=h;
 }
 function renderAbout(){
   var rules=L?[
@@ -3435,6 +3700,7 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang
     }
     if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy')
     isLeagueAdmin=Boolean(j.is_admin);
+    var ssrEl=document.getElementById('ssr');if(ssrEl)ssrEl.remove();
     webGuest=Boolean(j.anonymous);needsProfile=Boolean(j.needs_profile);webBot=j.bot_username||'';
     canMyMatches=Boolean((j.can_match||j.is_admin)&&!j.guest);
     renderAccess();
@@ -3467,6 +3733,9 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang
     } catch(e){ /* мусорный startapp просто игнорируем */ }
     // Адреса сайта /d/<буква> и /p/<имя> — то же, что ?division= и ?player_name=.
     var pathDiv=(location.pathname.match(/^\/d\/([A-Za-z]+)/)||[])[1]||'';
+    // Чистые адреса сайта: /race, /players, /divisions… — то же, что ?tab=.
+    var PATH_TAB={'/divisions':'div','/race':'race','/players':'players','/matches':'matches','/events':'events','/tournaments':'tournaments','/partners':'partners'};
+    if(!qs.get('tab')&&PATH_TAB[location.pathname.replace(/\/$/,'')])qs.set('tab',PATH_TAB[location.pathname.replace(/\/$/,'')]);
     var pathPlayer=(location.pathname.match(/^\/p\/([^/?#]+)/)||[])[1]||'';
     if(pathDiv&&!qs.get('division'))qs.set('division',pathDiv);
     var wantDiv=(qs.get('division')||'').replace(/^(division|дивизион)\s*/i,'').trim().toUpperCase();

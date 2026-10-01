@@ -200,3 +200,31 @@ export async function refreshToken() {
   // руками — в окружение работающего процесса записать нельзя.
   return { ok: true, token: String(json.access_token || ''), expires_in: Number(json.expires_in || 0) };
 }
+
+// -------------------------------------------------- лента на сайте
+// Последние посты аккаунта для сайта: люди видят, что лига живая, и
+// подписываются. Тем же подключением, что и публикация. Держим час в памяти;
+// если Instagram не ответил — отдаём прошлую ленту или пустую, сайт не падает.
+let feedCache = { t: 0, v: null };
+const FEED_MS = 60 * 60 * 1000;
+export async function recentPosts(limit = 6) {
+  if (!instagramEnabled()) return [];
+  if (feedCache.v && Date.now() - feedCache.t < FEED_MS) return feedCache.v.slice(0, limit);
+  try {
+    const res = await call(`${USER_ID}/media`, { fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp', limit: 12 }, 'GET');
+    const list = (res?.data || []).map(m => ({
+      id: String(m.id),
+      image: m.media_type === 'VIDEO' ? (m.thumbnail_url || '') : (m.media_url || ''),
+      video: m.media_type === 'VIDEO',
+      permalink: m.permalink || IG_PROFILE_URL,
+      caption: String(m.caption || '').slice(0, 160),
+      at: m.timestamp || ''
+    })).filter(m => m.image);
+    feedCache = { t: Date.now(), v: list };
+    return list.slice(0, limit);
+  } catch (e) {
+    console.error('instagram feed:', e.message);
+    feedCache.t = Date.now() - FEED_MS + 5 * 60 * 1000;   // повторим через 5 минут
+    return (feedCache.v || []).slice(0, limit);
+  }
+}
