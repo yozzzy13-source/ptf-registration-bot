@@ -62,7 +62,7 @@ async function valuesUpdate(range, values) {
 }
 async function valuesAppend(range, values) {
   assertConfigured();
-  await sheetsClient().spreadsheets.values.append({
+  return sheetsClient().spreadsheets.values.append({
     spreadsheetId: MATCHES_SPREADSHEET_ID, range, valueInputOption: 'USER_ENTERED',
     insertDataOption: 'INSERT_ROWS', requestBody: { values }
   });
@@ -106,29 +106,100 @@ async function ensureSheet(title, headers) {
   return task;
 }
 
-async function readObjects(title, headers) {
+// ---------------------------------------------------------------------------
+// Копия листов в памяти.
+//
+// Раньше каждый поиск матча, каждое открытие «Моих матчей» и каждая проверка
+// значка «есть дела» (раз в 20 секунд с каждого открытого экрана) читали лист
+// Match Slots из Google заново. Это съедало минутный лимит Google, и в момент
+// внесения счёта чтение падало.
+//
+// Теперь лист читается не чаще раза в минуту, а всё остальное время отвечает
+// копия в памяти. Она не отстаёт от жизни: все изменения матчей идут через этот
+// же сервер, и каждая запись сразу правит и таблицу, и копию. Правку руками в
+// самой таблице бот увидит в течение минуты (MATCHES_CACHE_MS).
+// ---------------------------------------------------------------------------
+const objCache = new Map();     // лист → { t, rows }
+const objReading = new Map();   // лист → идущее чтение (чтобы не читать параллельно)
+const objGen = new Map();       // лист → номер изменения (чтение, начатое до записи, кэш не портит)
+const OBJ_TTL = () => {
+  const raw = process.env.MATCHES_CACHE_MS;
+  if (String(raw) === '0') return 0;   // 0 — без копии (тесты, отладка)
+  return Math.max(5_000, Number(raw || 60_000));
+};
+const cloneRows = rows => rows.map(r => ({ ...r }));
+const bumpGen = title => objGen.set(title, (objGen.get(title) || 0) + 1);
+export function forgetMatchesCache(title = '') { if (title) objCache.delete(title); else objCache.clear(); }
+
+function loadObjects(title) {
+  if (objReading.has(title)) return objReading.get(title);
+  const gen = objGen.get(title) || 0;
+  const task = (async () => {
+    const values = await valuesGet(`'${title}'!A:BZ`);
+    const head = values[0] || [];
+    const rows = values.slice(1).map((r, i) => {
+      const o = { _rowNumber: i + 2 };
+      head.forEach((h, k) => { o[h] = r[k] ?? ''; });
+      return o;
+    });
+    if ((objGen.get(title) || 0) === gen) objCache.set(title, { t: Date.now(), rows });
+    return rows;
+  })().finally(() => objReading.delete(title));
+  objReading.set(title, task);
+  return task;
+}
+
+async function readObjects(title, headers, { fresh = false } = {}) {
   await ensureSheet(title, headers);
-  const values = await valuesGet(`'${title}'!A:BZ`);
-  const head = values[0] || [];
-  return values.slice(1).map((r, i) => {
-    const o = { _rowNumber: i + 2 };
-    head.forEach((h, k) => { o[h] = r[k] ?? ''; });
-    return o;
-  });
+  const hit = objCache.get(title);
+  if (!fresh && hit && Date.now() - hit.t < OBJ_TTL()) return cloneRows(hit.rows);
+  try { return cloneRows(await loadObjects(title)); }
+  catch (e) {
+    // Google не ответил (лимит) — отдаём последнюю копию, а не ошибку.
+    if (hit) { console.warn(`${title}: чтение не удалось, беру копию из памяти:`, e.message); return cloneRows(hit.rows); }
+    throw e;
+  }
 }
 
 async function appendObject(title, headers, obj) {
   const head = await ensureSheet(title, headers);
-  await valuesAppend(`'${title}'!A:BZ`, [head.map(h => obj[h] ?? '')]);
+  const res = await valuesAppend(`'${title}'!A:BZ`, [head.map(h => obj[h] ?? '')]);
+  bumpGen(title);
+  // Новая строка сразу в копию: номер строки Google возвращает в ответе.
+  const range = String(res?.data?.updates?.updatedRange || '');
+  const rowNumber = Number((range.match(/![A-Z]+(\d+)/) || [])[1] || 0);
+  const hit = objCache.get(title);
+  if (hit && rowNumber) {
+    const row = { _rowNumber: rowNumber };
+    head.forEach(h => { row[h] = obj[h] ?? ''; });
+    hit.rows = hit.rows.filter(r => r._rowNumber !== rowNumber).concat(row);
+  } else if (hit) objCache.delete(title);
   if(title===MATCH_SHEETS.slots)emitMatchChange(null,obj);
 }
 
 async function updateRow(title, headers, rowNumber, patch) {
   const head = await ensureSheet(title, headers);
-  const rows = await readObjects(title, headers);
-  const current = rows.find(r => r._rowNumber === rowNumber) || {};
+  const end = colToA1(head.length);
+  // Строку, которую меняем, читаем свежей (один короткий запрос): организатор
+  // мог поправить её руками, и копия в памяти об этом ещё не знает. Не вышло
+  // прочитать — берём копию: сохранить счёт важнее.
+  let current = null;
+  try {
+    const r = (await valuesGet(`'${title}'!A${rowNumber}:${end}${rowNumber}`))[0] || [];
+    current = { _rowNumber: rowNumber };
+    head.forEach((h, k) => { current[h] = r[k] ?? ''; });
+  } catch (e) {
+    const rows = await readObjects(title, headers);
+    current = rows.find(r => r._rowNumber === rowNumber) || { _rowNumber: rowNumber };
+  }
   const merged = { ...current, ...patch };
-  await valuesUpdate(`'${title}'!A${rowNumber}:${colToA1(head.length)}${rowNumber}`, [head.map(h => merged[h] ?? '')]);
+  await valuesUpdate(`'${title}'!A${rowNumber}:${end}${rowNumber}`, [head.map(h => merged[h] ?? '')]);
+  bumpGen(title);
+  const hit = objCache.get(title);
+  if (hit) {
+    const i = hit.rows.findIndex(r => r._rowNumber === rowNumber);
+    if (i >= 0) hit.rows[i] = { ...merged, _rowNumber: rowNumber }; else objCache.delete(title);
+  }
   if(title===MATCH_SHEETS.slots)emitMatchChange(current,merged);
 }
 

@@ -10,7 +10,8 @@
 //
 // Окна не публикуются в общий чат: бот адресно рассылает их активным игрокам того же
 // дивизиона в личку. Данные и журнал живут в ОТДЕЛЬНОЙ таблице (matchesdb.js).
-import { sendMessage as telegramSendMessage, sendPhoto, sendPhotoBuffer, sendDocumentBuffer, editMessageMedia, deleteMessage, withBulkRetries } from './telegram.js';
+import { withPriority } from './google.js';
+import { sendMessage as telegramSendMessage, sendPhoto, sendPhotoBuffer, sendDocumentBuffer, editMessageMedia, deleteMessage, withBulkRetries, isChatDead } from './telegram.js';
 import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers, getWebsiteProfileUrl } from './sheets.js';
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
 import { findSlot, updateSlot, cellToList, logMatchEvent, awaitingSide, proposerSide, getCourts, courtCloseAt } from './matchesdb.js';
@@ -1269,7 +1270,10 @@ async function subscribersWithRetry(slot, delays = SUBSCRIBER_RETRY_MS, load = g
 }
 export const __subscribersWithRetry = subscribersWithRetry;
 
-export async function broadcastResult(slot) {
+// Рассылка результата — фон: она не должна отнимать лимит Google у тех, кто
+// прямо сейчас вносит или подтверждает счёт.
+export function broadcastResult(slot) { return withPriority('low', () => broadcastResultNow(slot)); }
+async function broadcastResultNow(slot) {
   const scope = await slotScope(slot);
   slot = {...slot,season:scope.season,group:scope.group};
   const cards = { ru: await feedCard(slot, 'ru'), en: await feedCard(slot, 'en') };
@@ -1325,10 +1329,18 @@ export async function broadcastResult(slot) {
     // Массовая часть: здесь ожидание лимитов включено — сообщения важнее скорости.
     await withBulkRetries(async () => {
     for (const p of players) {
+      // Заблокировал бота или удалил аккаунт — не тратим на него ни запроса.
+      if (isChatDead(p.telegram_id)) { failed++; continue; }
       const card = String(p.language || '').toLowerCase() === 'en' ? cards.en : cards.ru;
       const opts = { reply_markup: card.dm_reply_markup };
       try {
-        if (extraPhoto) await sendPhoto(p.telegram_id, extraPhoto).catch(e => console.error('extra match photo failed:', e.message));
+        if (extraPhoto) {
+          const gone = await sendPhoto(p.telegram_id, extraPhoto).then(() => false).catch(e => {
+            if (e?.telegram?.error_code === 403) return true;   // заблокировал — карточку тоже не шлём
+            console.error('extra match photo failed:', e.message); return false;
+          });
+          if (gone) { failed++; continue; }
+        }
         await sendWith(p.telegram_id, card.text, opts)
           .catch(() => sendMessage(p.telegram_id, card.text, opts));
         sent++;

@@ -392,21 +392,30 @@ export async function livePlaces(season = '') {
   const hit = placesCache.get(key);
   if (hit && Date.now() - hit.t < PLACES_CACHE_MS) return hit.v;
   const out = new Map();
+  let failed = false;
   try {
     for (const letter of await availableDivisions(season).catch(() => [])) {
       const groups = await divisionGroups(letter, season).catch(() => []);
-      for (const group of (groups.length ? groups : [''])) {
+      // divisionGroups отдаёт объекты { group, title } — нужен сам номер группы.
+      for (const group of (groups.length ? groups.map(g => String(g?.group ?? g)) : [''])) {
         const table = await getDivisionTable(letter, season, group).catch(() => null);
-        if (!table?.ok || !Array.isArray(table.table)) continue;
-        for (const row of table.table) {
+        // Таблица дивизиона отдаёт строки в поле players. Раньше здесь читалось
+        // несуществующее поле table, и живые места не находились никогда
+        // (в логах: «live places: rows=0»).
+        const list = Array.isArray(table?.players) ? table.players : (Array.isArray(table?.table) ? table.table : null);
+        if (!table?.ok || !list) { failed = true; continue; }
+        for (const row of list) {
           const name = norm(row.name);
           if (!name || out.has(name)) continue;
           out.set(name, { place: row.place, division: letter, group: group || '', matches: row.matches, wins: row.wins, losses: row.losses, points: row.points });
         }
       }
     }
-  } catch (e) { console.error('livePlaces failed:', e.message); }
-  placesCache.set(key, { t: Date.now(), v: out });
+  } catch (e) { failed = true; console.error('livePlaces failed:', e.message); }
+  // Часть таблиц не прочиталась (лимит Google) — прошлый полный результат
+  // лучше неполного, и неполный не запоминаем надолго.
+  if (failed && hit && hit.v.size > out.size) return hit.v;
+  placesCache.set(key, { t: failed ? Date.now() - PLACES_CACHE_MS + 15_000 : Date.now(), v: out });
   return out;
 }
 
@@ -423,6 +432,8 @@ export async function getDivisionTable(letter, season = '', group = '') {
   try { ({ rows } = await readMatchLog(spreadsheetId)); }
   catch (e) {
     console.error(`division ${key} read failed:`, e.message);
+    // Google не ответил (лимит) — показываем прошлую таблицу, а не пустоту.
+    if (hit) return hit.v;
     return { ok: false, reason: 'no_access', division: key };
   }
 

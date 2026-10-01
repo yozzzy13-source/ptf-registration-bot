@@ -8,6 +8,11 @@ const pairs = [
   ['division_required','Матчи станут доступны после включения в дивизион и группу.','Matches become available once you are assigned to a division and group.'],
   ['different_group','Матч доступен только игрокам одной группы дивизиона.','This match is only available to players in the same division group.'],
   ['not_a_player','Вы не участник этого матча.','You are not a player in this match.'],
+  ['Match not found','Матч не найден. Обновите экран.','Match not found. Refresh the screen.'],
+  ['Match is not agreed.','Матч не согласован: его сняли или отменили. Счёт можно внести только в согласованный матч — напишите организатору.','This match is not agreed (it was removed or cancelled). Scores go only into agreed matches — contact the organiser.'],
+  ['Result already confirmed.','Счёт этого матча уже подтверждён.','The score for this match is already confirmed.'],
+  ['Cannot save result','Счёт не сохранён. Попробуйте ещё раз или напишите организатору.','The score was not saved. Try again or contact the organiser.'],
+  ['Not your match.','Это не ваш матч.','This is not your match.'],
   ['Invalid Telegram initData','Откройте приложение заново из бота.','Reopen the app from the bot.'],
   ['Telegram WebApp user not found','Откройте приложение из личного чата с ботом.','Open the app from your private chat with the bot.'],
   ['Access denied','Нет доступа.','Access denied.'],
@@ -88,6 +93,11 @@ const scorePairs = [
 for (const [ru,en] of scorePairs) pairs.push([ru,ru,en]);
 export function uiError(value, lang = 'en') {
   const raw = String(value || '');
+  // Лимит Google Таблиц: сервер уже подождал и повторил — не вышло. Честно
+  // говорим, что делать, а не «обратитесь к организатору».
+  if (/Quota exceeded|rateLimitExceeded|Read requests per minute|Write requests per minute/i.test(raw)) {
+    return lang === 'ru' ? 'Таблицы Google сейчас перегружены — действие не выполнено. Повторите через минуту.' : 'Google Sheets is overloaded right now — nothing was saved. Please try again in a minute.';
+  }
   const found = pairs.find(p => p.includes(raw));
   if (found) return found[lang === 'ru' ? 1 : 2];
   const set = /^Сет ([123]): (.+)$/.exec(raw);

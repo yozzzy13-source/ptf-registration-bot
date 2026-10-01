@@ -81,9 +81,13 @@ function cookieFlags(req) {
 export function setSessionCookie(req, res, telegramId) {
   const tok = signWebAppToken(telegramId, SESSION_MS);
   res.append('Set-Cookie', `${WEB_COOKIE}=${encodeURIComponent(tok)}; Max-Age=${Math.floor(SESSION_MS / 1000)}; ${cookieFlags(req)}`);
+  // Подсказка для страницы «вошёл / гость» — по ней телефон выбирает свою
+  // сохранённую копию витрины. Секрета в ней нет, сам вход — в куке выше.
+  res.append('Set-Cookie', `ptf_web_in=1; Max-Age=${Math.floor(SESSION_MS / 1000)}; ${cookieFlags(req).replace('; HttpOnly', '')}`);
 }
 export function clearSessionCookie(req, res) {
   res.append('Set-Cookie', `${WEB_COOKIE}=; Max-Age=0; ${cookieFlags(req)}`);
+  res.append('Set-Cookie', `ptf_web_in=; Max-Age=0; ${cookieFlags(req).replace('; HttpOnly', '')}`);
 }
 
 // Запрос пришёл с этой же страницы? Для POST по куке это обязательно: чужой

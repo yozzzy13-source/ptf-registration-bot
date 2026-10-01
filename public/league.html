@@ -3023,7 +3023,7 @@ function openLogin(){
   sc.setAttribute('data-auth-url',location.origin+'/auth/telegram?next='+encodeURIComponent(location.pathname+location.search.replace(/[?&](login=failed|join=1)/g,'')));
   $('tgWidget').appendChild(sc);
 }
-function logout(){ location.href='/auth/logout?next='+encodeURIComponent(location.pathname); }
+function logout(){ try{Object.keys(localStorage).forEach(function(k){if(k.indexOf('ptf_boot_v1:')===0)localStorage.removeItem(k)})}catch(e){} try{document.cookie='ptf_web_in=; path=/; max-age=0'}catch(e){} location.href='/auth/logout?next='+encodeURIComponent(location.pathname); }
 // ------------------------------------------------------ ссылки «поделиться»
 // У каждого игрока и дивизиона свой адрес на сайте: /p/<имя> и /d/<буква>.
 // По такой ссылке открывается сразу нужная страница, а мессенджер подтягивает
@@ -3719,8 +3719,52 @@ function loadFantasyLater(){
     })
     .catch(function(e){console.log('fantasy later:',e&&e.message)});
 }
-fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang='+(L?'ru':'en')+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
-  .then(function(r){return r.json()}).then(function(j){
+// ------------------------------------------------ копия витрины в телефоне
+// Последний ответ сервера хранится в памяти телефона (localStorage). При
+// следующем открытии интерфейс рисуется из неё мгновенно, а свежие данные
+// приходят следом и тихо подменяют старые. Раньше каждое открытие ждало
+// сервер — а тот иногда ждал Google по 5–15 секунд.
+// Ключ — свой у каждого: в Telegram по id человека, на сайте — «вошёл / гость»
+// (подсказка-кука ptf_web_in ставится при входе, сама сессия в ней не лежит).
+function bootKey(anon){
+  var u=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user;
+  var id=(u&&u.id)||String(linkToken||'').split('.')[0]||'';
+  var who=IS_WEB?('web:'+(anon===undefined?(/(^|;\s*)ptf_web_in=1/.test(document.cookie)?'in':'guest'):(anon?'guest':'in'))):('tg:'+id);
+  return 'ptf_boot_v1:'+who;
+}
+function bootRead(){
+  if(asQ)return null;
+  try{var o=JSON.parse(localStorage.getItem(bootKey())||'null');if(!o||!o.j||!o.j.ok||Date.now()-o.t>3*864e5)return null;return o.j}catch(e){return null}
+}
+function bootSave(j){
+  if(asQ||!j||!j.ok)return;
+  if(IS_WEB){try{document.cookie=j.anonymous?'ptf_web_in=; path=/; max-age=0':'ptf_web_in=1; path=/; max-age=2592000; samesite=lax'}catch(e){}}
+  var k=bootKey(Boolean(j.anonymous));
+  try{localStorage.setItem(k,JSON.stringify({t:Date.now(),j:j}))}
+  catch(e){try{localStorage.removeItem(k)}catch(_){}}
+}
+// Свежие данные пришли поверх нарисованной копии: подменяем данные и
+// перерисовываем то, что человек видит прямо сейчас, ничего не сбрасывая.
+function bootRefresh(j){
+  if(j.lang){var lg=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;L=lg==='ru';X=L?T.ru:T.en;document.documentElement.lang=lg}
+  players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];partners=j.partners||[];partnerTexts=j.partner_texts||{};
+  if(j.fantasy)fantasyData=j.fantasy;
+  fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy||j.fantasy_deferred);
+  applyFantasyScores();
+  photoMap=j.photos||{};photoIdx=null;raceNoIdx=null;
+  season=j.season||'';me=j.user||null;meDivision=j.me_division||'';
+  seasons=(j.seasons||[]).map(function(s){return Object.assign({},s,{label:(L?'Сезон ':'Season ')+s.number})});
+  if(Array.isArray(j.tabs))VIEWS=j.tabs.filter(function(k){return ALL_VIEWS.indexOf(k)>=0});
+  if(fantasyData&&VIEWS.indexOf('fantasy')<0)VIEWS.push('fantasy');
+  isLeagueAdmin=Boolean(j.is_admin);
+  webGuest=Boolean(j.anonymous);needsProfile=Boolean(j.needs_profile);webBot=j.bot_username||'';
+  canMyMatches=Boolean((j.can_match||j.is_admin)&&!j.guest);
+  renderAccess();buildTabs();renderMePlate();
+  if(openId){var p=byId(openId);if(p)renderPlayer(p)}
+  else if(mode)showTab(mode);
+}
+var bootCached=bootRead(),bootShown=false;
+function bootApply(j){
     if(j.lang){var lg=window.PTFPrefs?PTFPrefs.resolveLang(j):j.lang;L=lg==='ru';X=L?T.ru:T.en;document.documentElement.lang=lg}
     if(!j.ok)throw new Error(j.code||j.error||(L?'Ошибка':'Error'));
     players=j.players||[];matches=j.matches||{};events=j.events||[];divisions=j.divisions||[];partners=j.partners||[];partnerTexts=j.partner_texts||{};fantasyData=j.fantasy||null;fantasyAllowed=Boolean(j.fantasy_allowed||j.fantasy||j.fantasy_deferred);
@@ -3809,7 +3853,15 @@ fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang
     // входа — короткое окно о лиге (один раз).
     if(IS_WEB&&webGuest&&wantJoin)setTimeout(openLogin,250);
     else setTimeout(maybeIntro,600);
+}
+if(bootCached){try{bootApply(bootCached);bootShown=true}catch(e){console.log('boot cache:',e&&e.message);bootShown=false}}
+fetch('/api/league/bootstrap?initData='+encodeURIComponent(initData)+tokQ+'&lang='+(L?'ru':'en')+(asQ?'&as='+encodeURIComponent(asQ):''),{cache:'no-store'})
+  .then(function(r){return r.json()}).then(function(j){
+    if(j&&j.ok)bootSave(j);
+    if(bootShown){if(j&&j.ok)bootRefresh(j);return}
+    bootApply(j);
   }).catch(function(e){
+    if(bootShown){console.log('boot refresh failed:',e&&e.message);return}
     if(String(e.message||'')==='profile_required')return renderInvite();
     $('viewHome').innerHTML='<div class="empty" style="color:var(--lose)">'+esc(e.message)+'</div>';
   });

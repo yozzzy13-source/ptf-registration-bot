@@ -1,10 +1,11 @@
 import express from 'express';
+import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { SITE_URL } from './config.js';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
-import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer } from './telegram.js';
+import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer, markChatAlive, deadChatsCount } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart, prepareAnnouncementForAdmin, rememberLang } from './bot.js';
 import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, setUserLanguage, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe, escapeHtml } from './util.js';
@@ -36,6 +37,7 @@ import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
 import { startLogCleanup } from './retention.js';
 import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
 import { syncWaitlistEntry, syncAllWaitlists } from './waitlistsync.js';
+import { withPriority, sheetsQueueStats } from './google.js';
 import { SEO_PAGES, seoLang, slugOf as seoSlug, divLabel as seoDivLabel, organizationLd, websiteLd, faqLd, personLd, eventsLd, ssrHtml, applySeo, robotsTxt, sitemapXml, webManifest, aboutSsr } from './seo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,6 +49,9 @@ const __dirname = path.dirname(__filename);
 const UI_CODES = new Set(['profile_required']);
 
 const app = express();
+// Сжатие: страница лиги ≈300 КБ превращается примерно в 60 КБ — на мобильном
+// интернете это разница в секунды.
+app.use(compression({ threshold: 1024 }));
 // Сайт живёт на одном адресе — без www. Для Telegram phukettennis.com и
 // www.phukettennis.com — два разных домена, а вход через Telegram привязан
 // к одному. Поэтому www сразу перекидываем на основной адрес с тем же путём.
@@ -61,7 +66,13 @@ app.use(express.urlencoded({ extended: true }));
 // мини-приложении. Прослойка стоит до всех /api — дальше вход с сайта ничем не
 // отличается от входа из Telegram.
 app.use(webSessionMiddleware);
-app.use('/public', express.static(path.join(__dirname, 'public')));
+// Очередь к Google Таблицам (google.js): действие человека — POST в /api и
+// кнопки/сообщения бота (/webhook) — идёт первым; открытие экранов — обычным
+// порядком; фон (таймеры, рассылки, пересборка витрины) — последним.
+app.use((req, res, next) => withPriority(req.method === 'POST' && (req.path.startsWith('/api/') || req.path === '/webhook') ? 'high' : 'normal', next));
+// Картинки меняются редко — неделю из памяти телефона. Скрипты и стили — с
+// проверкой «не изменилось?» (304), чтобы после выкладки сразу шли новые.
+app.use('/public', express.static(path.join(__dirname, 'public'), { setHeaders: (res, file) => res.set('Cache-Control', /\.(png|jpe?g|webp|gif|svg|ico|woff2?)$/i.test(file) ? 'public, max-age=604800, stale-while-revalidate=2592000' : 'no-cache') }));
 // Resolve the saved language before responding, including validation failures.
 app.use('/api', async (req,res,next) => {
   let lang = 'en', source = 'default';
@@ -113,7 +124,11 @@ app.post('/api/ui-language', async (req,res) => {
   } catch (e) { console.error('ui-language save failed:', e.message); res.status(500).json({ ok:false, error:e.message }); }
 });
 
-function noCache(res) { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); }
+// Страницы: телефон хранит копию, но каждый раз коротко спрашивает сервер
+// «не изменилось?». Не изменилось — ответ 304 без тела, страница открывается
+// из памяти телефона. Изменилось (новая выкладка) — приходит новая. Раньше
+// стояло no-store, и каждый заход заново качал страницу целиком (≈300 КБ).
+function noCache(res) { res.set('Cache-Control','no-cache'); }
 // Главная сайта — тот же интерфейс лиги, что и в мини-приложении. Страница сама
 // понимает, где её открыли: в Telegram или в обычном браузере.
 app.get('/health', (req, res) => res.send('PTF Registration Bot is running'));
@@ -366,7 +381,7 @@ document.getElementById('go').onclick=function(){
 };
 </script></body></html>`);
 });
-app.get('/apply', (req, res) => { res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma','no-cache'); res.set('Expires','0'); res.sendFile(path.join(__dirname, 'public', 'apply.html')); });
+app.get('/apply', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'apply.html')); });
 registerAdminRoutes(app);
 
 const seen = new Set();
@@ -379,6 +394,9 @@ app.post('/webhook', async (req, res) => {
       seen.add(update.update_id);
       if (seen.size > 2000) seen.clear();
     }
+    // Человек сам написал боту или нажал кнопку — значит, бот снова может ему писать.
+    const fromId = update.message?.from?.id || update.callback_query?.from?.id;
+    if (fromId) markChatAlive(fromId);
     // Замер — чтобы «кажется, тормозит» превратилось в цифры. В лог пишем
     // только то, что человек успевает заметить: всё, что дольше секунды.
     const started = Date.now();
@@ -627,7 +645,7 @@ app.post('/api/submit-application', async (req, res) => {
     // Ответ экрану — сразу, как только заявка записана. Сообщения в бот,
     // карточка админу, счёт и строка в списке участников уходят следом в фоне:
     // раньше экран ждал их все и «Отправить» висело по полминуты.
-    setImmediate(() => (async () => {
+    setImmediate(() => withPriority('low', async () => {
       // Do not spam admin topics when the same player presses submit again for the same event.
       // The row in Applications is updated, but the admin application card is sent only for a fresh application.
       if (!savedApplication.isUpdated) {
@@ -677,7 +695,7 @@ You can now join an open event.
 
 📸 Match posters and results go to our <a href="${IG_PROFILE_URL}">Instagram</a> — follow us to see your own matches there.`, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '🏆 Участвовать в событии' : '🏆 Join Event', web_app:{ url:`${PUBLIC_URL}/apply?mode=event` } } ],[ { text: lang === 'ru' ? '🏠 Главное меню' : '🏠 Main menu', callback_data:'main' } ]] } });
       if (isWaitEvent) await syncWaitlistEntry(event).catch(e => console.error('waitlist sync:', e.message));
-    })().catch(e => console.error('application follow-up failed:', e.message)));
+    }).catch(e => console.error('application follow-up failed:', e.message)));
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });
@@ -1281,7 +1299,7 @@ app.post('/api/match/result', async (req, res) => {
     const saved=v.isAdmin
       ?await submitResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload)
       :await submitResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload);
-    if(!saved.ok){const messages={not_found:'Match not found.',not_accepted:'Match is not agreed.',already_confirmed:'Result already confirmed.',not_a_player:'Not your match.'};return res.status(409).json({ok:false,error:messages[saved.reason]||'Cannot save result'})}
+    if(!saved.ok){const messages={not_found:'Match not found.',not_accepted:'Match is not agreed.',already_confirmed:'Result already confirmed.',not_a_player:'Not your match.',different_group:'different_group',league_access_denied:'league_access_denied',division_required:'division_required'};console.warn(`result not saved: ${b.challenge_id} — ${saved.reason}`);return res.status(409).json({ok:false,error:messages[saved.reason]||'Cannot save result'})}
     let confirmationDelivered=false;
     try { confirmationDelivered=Boolean(await notifyResultForVerification(saved.slot)); }
     catch(e) { console.error('notifyResultForVerification failed:',e.message); }
@@ -1290,7 +1308,14 @@ app.post('/api/match/result', async (req, res) => {
       :'The score was saved, but the message was not delivered. Your opponent can still confirm it in My matches.');
     res.json({ok:true,score:saved.slot.result_score,confirmation_delivered:confirmationDelivered,
       warning:[photo.warning,deliveryWarning].filter(Boolean).join(' ')});
-  }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
+  }catch(e){
+    console.error('match result failed:',e.message);
+    // Счёт не сохранился даже после ожидания — организатор узнаёт сразу, а не
+    // из жалобы игрока: можно внести вручную.
+    const b=req.body||{};
+    notifyAdmin(`<b>⚠️ Счёт не сохранился</b>\n\nМатч: <code>${escapeHtml(String(b.challenge_id||''))}</code>\nСчёт: ${escapeHtml(JSON.stringify(b.sets||[]).slice(0,200))}\nПричина: ${escapeHtml(String(e.message||'').slice(0,200))}\n\nИгрок видит просьбу повторить через минуту.`).catch(()=>{});
+    res.status(500).json({ok:false,error:e.message});
+  }
 });
 
 // Матч, сыгранный вне бота. Игрок выбирает соперника своей группы; организатор
@@ -1530,7 +1555,17 @@ app.post('/api/league/wallet-topup', async (req, res) => {
 // нужна, она была мгновенной.
 const LEAGUE_SNAPSHOT_MS = 10 * 60 * 1000;
 const leagueSnapshot = { t: 0, v: null, building: null };
-export function invalidateLeagueSnapshot() { leagueSnapshot.t = 0; leagueSnapshot.v = null; }
+// После результата снимок не выбрасываем: пока собирается новый (5–7 секунд
+// чтения таблиц), все видят прежний, а не ждут. Новый собирается сразу,
+// одним заходом, даже если сбросов пришло несколько подряд.
+let snapshotGen = 0, snapshotKick = null;
+export function invalidateLeagueSnapshot() {
+  leagueSnapshot.t = 0;
+  snapshotGen++;
+  if (snapshotKick) return;
+  snapshotKick = setTimeout(() => { snapshotKick = null; withPriority('normal', () => getLeagueSnapshot()).catch(() => {}); }, 3000);
+  snapshotKick.unref?.();
+}
 async function buildLeagueSnapshot() {
   const started = Date.now();
     const [rawPlayers, history, events, seasonList] = await Promise.all([
@@ -1642,8 +1677,11 @@ async function buildLeagueSnapshot() {
 async function getLeagueSnapshot() {
   const stale = !leagueSnapshot.v || Date.now() - leagueSnapshot.t >= LEAGUE_SNAPSHOT_MS;
   if (stale && !leagueSnapshot.building) {
-    leagueSnapshot.building = buildLeagueSnapshot()
-      .then(v => { leagueSnapshot.v = v; leagueSnapshot.t = Date.now(); return v; })
+    // Есть прошлый снимок — пересборка фоновая и не отнимает лимит у людей.
+    const gen = snapshotGen;
+    leagueSnapshot.building = withPriority(leagueSnapshot.v && leagueSnapshot.t ? 'low' : 'normal', buildLeagueSnapshot)
+      // Пока собирали, пришёл новый результат — снимок годится, но сразу устарел.
+      .then(v => { leagueSnapshot.v = v; leagueSnapshot.t = gen === snapshotGen ? Date.now() : 0; return v; })
       .finally(() => { leagueSnapshot.building = null; });
     leagueSnapshot.building.catch(e => console.error('league snapshot failed:', e.message));
   }
@@ -2319,7 +2357,9 @@ process.on?.('SIGTERM', async () => {
   process.exit(0);
 });
 
-app.listen(PORT, async () => {
+// Всё, что запускается здесь (таймеры, прогрев, рассылки), — фон: в очереди
+// к Google оно уступает действиям людей.
+app.listen(PORT, () => withPriority('low', async () => {
   setMatchChangeHandler(queueMatchAttention);
   // Снимок витрины лиги сбрасывается вместе с остальными кэшами — то есть сразу
   // после подтверждённого результата, а не по таймеру.
@@ -2359,6 +2399,7 @@ app.listen(PORT, async () => {
       .catch(e => console.error('waitlist sync:', e.message));
   }, 2 * 60 * 1000).unref?.();
   import('./sheets.js').then(m => m.addNewTabOnce('tournaments')).then(done => { if (done) console.log('tabs: «Турниры» добавлены группам'); }).catch(e => console.error('tabs add:', e.message));
+  import('./sheets.js').then(m => m.addTabToGroupOnce('partners', 'guest')).then(done => { if (done) console.log('tabs: «Партнёры» добавлены гостям'); }).catch(e => console.error('tabs add partners:', e.message));
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);
   if (!BOT_TOKEN) console.warn('BOT_TOKEN is empty. Set it in Railway Variables.');
@@ -2439,4 +2480,4 @@ app.listen(PORT, async () => {
   } catch (e) {
     console.error('Startup Telegram setup failed:', e.message);
   }
-});
+}));

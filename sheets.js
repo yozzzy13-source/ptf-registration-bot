@@ -1059,8 +1059,22 @@ function refreshInBackground(sheetName) {
     .finally(() => refreshing.delete(sheetName));
   refreshing.set(sheetName, task);
 }
-export async function getRows(sheetName, { useCache=true } = {}) {
+// maxAge — «копия не старше N мс». Для чтений, которым нужно почти свежее
+// (заявки, меню бота, подписчики): раньше они читали лист из Google при
+// каждом обращении и съедали минутный лимит. Свои записи бот видит сразу
+// (запись сбрасывает копию листа), правки руками в таблице — через maxAge.
+export async function getRows(sheetName, { useCache=true, maxAge=null } = {}) {
   const c = cache.get(`rows:${sheetName}`);
+  if (maxAge !== null && maxAge !== undefined) {
+    if (c && Date.now() - c.t < maxAge) return c.v;
+    try { return await readSheet(sheetName); }
+    catch (e) {
+      const old = lastGood.get(sheetName);
+      if (!old) throw e;
+      console.warn(`лист ${sheetName}: Google не ответил (${String(e.message || '').slice(0, 60)}), отдаю последнюю копию`);
+      return old;
+    }
+  }
   if (useCache && c) {
     // Свежее — отдаём молча; устаревшее — тоже отдаём сразу, но ставим в фон
     // перечитывание, чтобы следующий обращающийся получил новое.
@@ -1249,7 +1263,7 @@ export function eventJoinable(status = '') {
 // что уже прошло, чтобы он видел живую лигу, а не пустой экран.
 export async function getAllEvents() {
   // Свежий лист; если Google сейчас не отвечает (лимит) — последний удачный.
-  const { rows } = await getRows(SHEETS.events, { useCache:false })
+  const { rows } = await getRows(SHEETS.events, { maxAge:15_000 })
     .catch(e => { console.warn('events: fresh read failed, using cached:', e.message); return getRows(SHEETS.events); });
   return rows
     .filter(r => safe(r.event_id) || safe(r.event_name) || safe(r.event_name_en) || safe(r.event_name_ru))
@@ -1263,7 +1277,7 @@ export async function getActiveEvents() {
 }
 
 export async function getPaymentMethods() {
-  const { rows } = await getRows(SHEETS.paymentMethods, { useCache:false });
+  const { rows } = await getRows(SHEETS.paymentMethods, { maxAge:15_000 });
   return rows.filter(r => safe(r.status) === 'active');
 }
 
@@ -1320,8 +1334,8 @@ function applicantKey(row={}) {
 
 export async function getEventPlayers(event={}) {
   const [{ rows: applications }, { rows: applicants }] = await Promise.all([
-    getRows(SHEETS.applications, { useCache:false }),
-    getRows(SHEETS.applicants, { useCache:false })
+    getRows(SHEETS.applications, { maxAge:15_000 }),
+    getRows(SHEETS.applicants, { maxAge:15_000 })
   ]);
 
   const applicantsByKey = new Map();
@@ -1487,7 +1501,7 @@ export async function ensureApplicantLead(user={}) {
 
 export async function findApplicantByAdminTopicId(topicId) {
   await ensureApplicantAdminColumns();
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const { rows } = await getRows(SHEETS.applicants, { maxAge:15_000 });
   return rows.find(r => String(r.admin_topic_id || '') === String(topicId));
 }
 
@@ -1618,7 +1632,7 @@ export async function createApplication(app) {
 }
 
 export async function findApplicationByTelegramEvent(telegramId, eventId) {
-  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const { rows } = await getRows(SHEETS.applications, { maxAge:15_000 });
   return rows
     .filter(r => String(r.telegram_id) === String(telegramId) && String(r.event_id) === String(eventId))
     .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))[0] || null;
@@ -1626,14 +1640,14 @@ export async function findApplicationByTelegramEvent(telegramId, eventId) {
 
 
 export async function findLatestApplicationByTelegramId(telegramId) {
-  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const { rows } = await getRows(SHEETS.applications, { maxAge:15_000 });
   return rows
     .filter(r => String(r.telegram_id) === String(telegramId))
     .sort((a,b) => Number(b._rowNumber || 0) - Number(a._rowNumber || 0))[0] || null;
 }
 
 export async function findLatestPayableApplicationByTelegramId(telegramId) {
-  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const { rows } = await getRows(SHEETS.applications, { maxAge:15_000 });
   const statuses = new Set(['payment_required','waiting_payment','proof_received','approved']);
   return rows
     .filter(r => String(r.telegram_id) === String(telegramId))
@@ -1666,7 +1680,7 @@ export async function createOrUpdateApplication(app) {
 }
 
 export async function findApplication(applicationId) {
-  const { rows } = await getRows(SHEETS.applications, { useCache:false });
+  const { rows } = await getRows(SHEETS.applications, { maxAge:15_000 });
   return rows.find(r => r.application_id === applicationId);
 }
 
@@ -1794,7 +1808,7 @@ export function needsRatingCheck(row={}) {
 // scope: 'missing' — только те, у кого рейтинга нет;
 //        'recheck'  — плюс те, чью цифру организатор не подтверждал.
 export async function getMissingRatingContacts(scope='missing') {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const { rows } = await getRows(SHEETS.applicants, { maxAge:60_000 });
   const wanted = scope === 'recheck' ? needsRatingCheck : hasMissingRating;
   return rows.filter(r => {
     if (!r.telegram_id) return false;
@@ -1806,7 +1820,7 @@ export async function getMissingRatingContacts(scope='missing') {
 }
 
 export async function getSegmentContacts(segment='all') {
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false });
+  const { rows } = await getRows(SHEETS.applicants, { maxAge:60_000 });
   return rows.filter(r => {
     if (!r.telegram_id) return false;
     // Раньше статус сравнивался как есть: «Active» с большой буквы или с лишним
@@ -1841,7 +1855,7 @@ export async function createMatchChallenge(row) {
 }
 
 export async function findMatchChallenge(challengeId) {
-  const { rows } = await getRows(SHEETS.matchChallenges, { useCache:false });
+  const { rows } = await getRows(SHEETS.matchChallenges, { maxAge:15_000 });
   return rows.find(r => r.challenge_id === challengeId);
 }
 
@@ -1861,7 +1875,7 @@ export async function updateApplicantByTelegramId(telegramId, patch) {
 }
 
 export async function getAllApplicants() {
-  return (await getRows(SHEETS.applicants, { useCache:false })).rows;
+  return (await getRows(SHEETS.applicants, { maxAge:15_000 })).rows;
 }
 
 export async function markSelfieRequested(telegramId) {
@@ -1877,7 +1891,7 @@ export async function markSelfieRequested(telegramId) {
   return { ...found, selfie_status: found.selfie_status === 'received' ? 'received' : 'requested', selfie_requested_at: nowISO(), selfie_reminder_count: currentCount + 1 };
 }
 
-export async function getBotMenuRows(parent='main', language='en'){try{const {rows}=await getRows(SHEETS.botMenu,{useCache:false});const lang=language==='ru'?'ru':'en';return rows.filter(r=>String(r.status||'active').toLowerCase()==='active'&&String(r.parent||'main')===String(parent)&&String(r.language||'en')===lang).sort((a,b)=>Number(a.row||999)-Number(b.row||999)||Number(a.sort_order||999)-Number(b.sort_order||999));}catch(e){return []}}
+export async function getBotMenuRows(parent='main', language='en'){try{const {rows}=await getRows(SHEETS.botMenu,{maxAge:60_000});const lang=language==='ru'?'ru':'en';return rows.filter(r=>String(r.status||'active').toLowerCase()==='active'&&String(r.parent||'main')===String(parent)&&String(r.language||'en')===lang).sort((a,b)=>Number(a.row||999)-Number(b.row||999)||Number(a.sort_order||999)-Number(b.sort_order||999));}catch(e){return []}}
 
 
 // ===========================================================================
@@ -1953,7 +1967,7 @@ export async function isResultsMutedFor(telegramId) {
 export async function getAllBotSubscribers() {
   // Свежий список; если Google сейчас не отвечает (лимит) — последний удачный.
   // Разослать по списку минутной давности лучше, чем не разослать никому.
-  const { rows } = await getRows(SHEETS.applicants, { useCache:false })
+  const { rows } = await getRows(SHEETS.applicants, { maxAge:60_000 })
     .catch(e => { console.warn('subscribers: fresh read failed, using cached list:', e.message); return getRows(SHEETS.applicants); });
   const seen = new Set();
   const out = [];
@@ -2039,6 +2053,26 @@ export async function addNewTabOnce(tab = 'tournaments') {
     await setSetting(tabsKey(group), list.join(','), 'Вкладки мини-приложения для группы');
   }
   await setSetting(flag, 'yes', 'Вкладка добавлена всем группам один раз');
+  return true;
+}
+// Одна вкладка — одной группе, один раз (флаг в Settings). Так гостям
+// добавили «Партнёров»: список вкладок гостя был сохранён раньше, чем вкладка
+// появилась, и сама она туда не попадала. Убрать её потом можно в админке —
+// повторно бот её не вернёт.
+export async function addTabToGroupOnce(tab, group) {
+  const flag = `tabs_added_${tab}_${group}`;
+  if (String(await getSetting(flag).catch(() => '')).trim() === 'yes') return false;
+  const raw = String(await getSetting(tabsKey(group)).catch(() => '')).trim();
+  if (raw && raw !== NONE) {
+    const list = raw.split(',').map(x => x.trim()).filter(Boolean);
+    if (!list.includes(tab)) {
+      list.push(tab);
+      await setSetting(tabsKey(group), list.join(','), 'Вкладки мини-приложения для группы');
+    }
+  } else if (raw === NONE) {
+    await setSetting(tabsKey(group), tab, 'Вкладки мини-приложения для группы');
+  }
+  await setSetting(flag, 'yes', 'Вкладка добавлена группе один раз');
   return true;
 }
 // Неснимаемых вкладок нет: организатор решает сам, вплоть до пустого меню.

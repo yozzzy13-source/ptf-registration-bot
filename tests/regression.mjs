@@ -69,16 +69,18 @@ const google={spreadsheets:{
   append:async({spreadsheetId,range,requestBody})=>{const r=rangeInfo(spreadsheetId,range);const rows=tables.get(r.key)||[];rows.push(...structuredClone(requestBody.values));tables.set(r.key,rows);return {data:{updates:{updatedRange:r.title+'!A'+rows.length}}}}
  }}};
 const context=vm.createContext({console,URL,URLSearchParams,Buffer,Date,Math,JSON,Intl,Set,Map,FormData,Blob,Uint8Array,
- process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',TOURNAMENTS_SPREADSHEET_ID:'trn',TOURNAMENTS_TEST_SPREADSHEET_ID:'trn-test',ADMIN_IDS:'99',BROADCAST_QUIET_HOURS:'off',NODE_ENV:'production'}},
+ process:{env:{BOT_TOKEN:'test-token',PUBLIC_URL:'https://app.test',SPREADSHEET_ID:'crm',DIVISIONS_SPREADSHEET_ID:'master',LEAGUE_RESULTS_SHEET_ID:'master',MATCHES_SPREADSHEET_ID:'matches',TOURNAMENTS_SPREADSHEET_ID:'trn',TOURNAMENTS_TEST_SPREADSHEET_ID:'trn-test',ADMIN_IDS:'99',BROADCAST_QUIET_HOURS:'off',NODE_ENV:'production',MATCHES_CACHE_MS:'0'}},
  setTimeout:(fn)=>{queueMicrotask(fn);return 1},clearTimeout(){},setInterval:()=>({unref(){}}),
  fetch:()=>{throw Error('Unexpected network access')}
 });
 const modules=new Map();
 function synthetic(key,values){const m=new vm.SyntheticModule(Object.keys(values),function(){for(const[k,v]of Object.entries(values))this.setExport(k,v)},{context,identifier:key});modules.set(key,m);return m;}
-synthetic(path.join(root,'google.js'),{sheets:()=>google});
+const priorityLog=[];
+synthetic(path.join(root,'google.js'),{sheets:()=>google,withPriority:(p,fn)=>{priorityLog.push(p);return fn()},currentPriority:()=>'normal',sheetsQueueStats:()=>({read:{used:0,limit:55,waiting:0,paused:0},write:{used:0,limit:55,waiting:0,paused:0}}),isQuotaError:e=>/Quota exceeded/i.test(String(e?.message||''))});
 const telegramSource=await fs.readFile(path.join(root,'telegram.js'),'utf8');
 const telegramNames=[...telegramSource.matchAll(/export (?:async )?(?:function|const) (\w+)/g)].map(m=>m[1]);
-synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n==='sendMessage'&&String(args[0])===telegramTransientId&&transientLeft-->0)throw Error('sendMessage: {"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
+const telegramSync={isChatDead:()=>false,markChatAlive:()=>{},deadChatsCount:()=>0};
+synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,telegramSync[n]?telegramSync[n]:n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n==='sendMessage'&&String(args[0])===telegramTransientId&&transientLeft-->0)throw Error('sendMessage: {"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardContexts=new Map();
 const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
@@ -2007,7 +2009,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check((await wl.syncWaitlistSeason('4')).reason==='no_waitlist_event','Сезон без листа ожидания пропускается');
  const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
  check(/const clean = \(\{ telegram_id, \.\.\.p \}\) => p;/.test(idx),'telegram_id участников не уходит в браузер');
- check(/syncWaitlistEntry\(event\)/.test(idx)&&/setImmediate\(\(\) => \(async \(\) => \{/.test(idx),'Заявка: ответ экрану сразу, сообщения и перенос в список — в фоне');
+ check(/syncWaitlistEntry\(event\)/.test(idx)&&/setImmediate\(\(\) => withPriority\('low', async \(\) => \{/.test(idx),'Заявка: ответ экрану сразу, сообщения и перенос в список — в фоне');
  check(/keepStatus/.test(idx),'Игрок идущего сезона, вставший в лист следующего, остаётся active');
  const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
  check(/syncWaitlistEntry\(app\.event_id\)/.test(adm),'Отклонение заявки пересобирает список участников');
@@ -2064,6 +2066,59 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
  check(/get\('\/api\/public\/events'\)/.test(lg)&&/pubRetried=true;setTimeout\(loadPublicExtras,4000\)/.test(lg),'Вкладка «Турниры» берёт события из открытой ручки и переспрашивает при сбое');
  check(/sessionStorage\.getItem\('ptf_intro_seen'\)/.test(lg)&&/Seasons and the waitlist/.test(lg),'Знакомство гостю — при каждом заходе на сайт, со ссылкой на сезоны и лист ожидания');
+}
+
+// --- Скорость: матчи в памяти, живые места, меньше чтений Google ---------------
+{
+ const mdb=await load('matchesdb.js');
+ context.process.env.MATCHES_CACHE_MS='60000';
+ mdb.forgetMatchesCache();
+ sheetReads.length=0;
+ const a1=await mdb.allSlots();const a2=await mdb.allSlots();await mdb.findSlot('nope');
+ check(sheetReads.filter(k=>k==='matches|Match Slots').length===1,'Матчи читаются из Google один раз, дальше — из памяти');
+ const created=await mdb.createSlot({challenge_id:'cache_test_1',status:'open',match_type:'open',division:'C',from_telegram_id:'3',from_name:'Carol Three',dates:'2026-10-10',time_from:'10:00',time_to:'12:00',courts:'Court A'}).catch(e=>({err:e.message}));
+ const id=created?.challenge_id;
+ sheetReads.length=0;
+ const found=id?await mdb.findSlot(id):null;
+ check(Boolean(found)&&!sheetReads.includes('matches|Match Slots'),'Новый матч сразу виден из памяти, без чтения листа');
+ if(found){
+  sheetReads.length=0;
+  await mdb.updateSlot(id,{status:'cancelled'});
+  const after=await mdb.findSlot(id);
+  check(after.status==='cancelled'&&sheetReads.filter(k=>k==='matches|Match Slots').length===1,'Запись правит и таблицу, и память (читается только сама строка)');
+  const row=tables.get('matches|Match Slots').find(r=>r.includes(id));
+  check(row&&row.includes('cancelled'),'Изменение действительно записано в таблицу');
+ }
+ // Google не ответил — копия из памяти вместо ошибки.
+ mdb.forgetMatchesCache();await mdb.allSlots();
+ context.process.env.MATCHES_CACHE_MS='5000';
+ const ttlHack=Date.now;
+ quotaKeys.add('matches|Match Slots');
+ Date.now=()=>ttlHack()+10*60*1000;
+ const fallback=await mdb.allSlots().catch(()=>null);
+ Date.now=ttlHack;quotaKeys.clear();
+ check(Array.isArray(fallback),'Лимит Google: матчи отдаются из памяти, внесение счёта не падает');
+ context.process.env.MATCHES_CACHE_MS='0';mdb.forgetMatchesCache();
+ const dv=await load('division.js');
+ dv.invalidateDivisionCache?.();
+ const places=await dv.livePlaces('2');
+ check(places.size>0,'Живые места из таблиц дивизионов находятся (раньше rows=0 из-за неверного поля)');
+ const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/BUTTON_USER_PRIVACY_RESTRICTED/.test(tg)&&/function withoutUserButtons/.test(tg),'Кнопка-профиль под запретом приватности — сообщение уходит без неё');
+ check(/deadChats\.set\(target/.test(tg)&&/известно заранее, запрос не отправлялся/.test(tg),'Заблокировавшим бота повторно не пишем');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/app\.use\(compression\(/.test(idx)&&/function noCache\(res\) \{ res\.set\('Cache-Control','no-cache'\); \}/.test(idx),'Сжатие страниц и кэш с проверкой (304) вместо no-store');
+ check(/withPriority\(req\.method === 'POST'/.test(idx)&&/app\.listen\(PORT, \(\) => withPriority\('low'/.test(idx),'Действия людей — первыми, фон — последним');
+ check(/addTabToGroupOnce\('partners', 'guest'\)/.test(idx),'Гостям один раз добавляется вкладка «Партнёры»');
+ const sh=await fs.readFile(path.join(root,'sheets.js'),'utf8');
+ check(/getRows\(SHEETS\.botMenu,\{maxAge:60_000\}\)/.test(sh)&&/export async function findLatestApplicationByTelegramId\(telegramId\) \{\n  const \{ rows \} = await getRows\(SHEETS\.applications, \{ maxAge:15_000 \}\)/.test(sh),'Меню бота и заявки больше не читаются из Google на каждое открытие');
+ const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ check(/function bootRead\(\)/.test(lg)&&/function bootRefresh\(j\)/.test(lg)&&/if\(bootShown\)\{if\(j&&j\.ok\)bootRefresh\(j\);return\}/.test(lg),'Лига открывается из памяти телефона и тихо обновляется');
+ const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/setInterval\(pollAttention,45000\)/.test(mh)&&/Google Sheets is busy/.test(mh),'«Мои матчи»: значок реже, при занятом Google — «сохраняем…»');
+ const ue=await load('ui-errors.js');
+ check(/перегружены/.test(ue.uiError("Quota exceeded for quota metric 'Read requests'",'ru')),'Лимит Google — понятное сообщение, а не «обратитесь к организатору»');
+ check(/не согласован/.test(ue.uiError('Match is not agreed.','ru')),'Матч не согласован — человек видит причину');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

@@ -13,6 +13,7 @@
 //  • результаты пишутся в журнал пачками, а не по одному;
 //  • временные ошибки (лимиты Telegram, сеть) — повтор позже, а не «не доставлено»;
 //  • итог приходит организатору в чат с ботом.
+import { withPriority } from './google.js';
 import { sendMessage as tgSend, withBulkRetries } from './telegram.js';
 import { SHEETS } from './config.js';
 import { getRows, setSetting, logBroadcast, logBroadcastResults, updateBroadcastSummary } from './sheets.js';
@@ -148,7 +149,8 @@ export async function enqueueBroadcast({ kind, params = {}, recipients = [], seg
 export function pump() {
   if (pumping || stopping) return;
   pumping = true;
-  (async () => {
+  // Рассылка — фон: в очереди к Google Таблицам она уступает действиям людей.
+  withPriority('low', async () => {
     try {
       while (!stopping) {
         const job = jobs.find(j => j.status === 'running');
@@ -162,7 +164,7 @@ export function pump() {
       // Что-то могло прийти, пока цикл заканчивался.
       if (!stopping && jobs.some(j => j.status === 'running')) setTimeout(pump, 5000);
     }
-  })();
+  });
 }
 
 async function waitForDay(job) {

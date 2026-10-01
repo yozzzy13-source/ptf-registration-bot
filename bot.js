@@ -691,6 +691,7 @@ const ADMIN_HELP_TAIL = {
     '• Галерея сайта — папка «PTF Gallery» в папке PTF на Диске: кидаешь фото (подпапка = альбом, например «Сезон 1 · Финалы»), через 10 минут они на сайте.',
     '• Вкладка «Турниры»: идущий сезон, следующий (лист ожидания, берётся из листа Events) и прошедшие с чемпионами. Видимость — во вкладке «Кнопки» админки.',
     '• На главной — «PTF в цифрах» (игроки и матчи по сезонам, свежий сезон первым), лента Instagram и плашка Telegram-бота.',
+    '• Скорость и лимит Google: бот ходит в Google Таблицы через очередь — не больше 55 запросов в минуту (лимит Google — 60). Первыми идут действия игроков (счёт, заявки, кнопки), потом экраны, потом фон (рассылки, пересборка витрины). Матчи бот держит в памяти и сверяет с таблицей раз в минуту — правку руками в Match Slots он увидит в течение минуты. Сайт и мини-приложение открываются из памяти телефона и тут же подтягивают свежее. Нагрузка сейчас: <code>/load</code>.',
     '• Лист ожидания → «Short Players list»: каждая заявка в лист ожидания сразу ложится строкой во вкладку сезона (в названии — номер сезона, например «Season 3»): имя, ntrp из анкеты, статус waitlist. Дивизион ставишь сам, ntrp правишь сам — бот это не перезаписывает. Порядок: сначала игроки лиги, дальше по дате заявки. Отклонил заявку — строка уходит. Справа служебные колонки telegram_id, applied_at, league_player — их не трогать. Сверить вручную: <code>/waitlist_sync</code>.',
     '• Поиск Google: у разделов чистые адреса (/race, /players, /divisions, /events, /tournaments, /about), русская версия — ?lang=ru. Карта сайта — phukettennis.com/sitemap.xml, её сдают в Google Search Console.',
     '', '📊 <b>Дивизионы и результаты</b>',
@@ -721,6 +722,7 @@ const ADMIN_HELP_TAIL = {
     '• Site gallery: the «PTF Gallery» folder in the PTF Drive folder — drop photos there (subfolder = album), they appear within 10 minutes.',
     '• The «Tournaments» tab: the running season, the next one (waitlist, from the Events sheet) and past seasons with champions.',
     '• The home page shows «PTF in numbers» (newest season first), the Instagram feed and a Telegram bot card.',
+    '• Speed and the Google limit: the bot reaches Google Sheets through a queue — at most 55 requests a minute (Google allows 60). Players’ actions go first (scores, applications, buttons), then screens, then background work (broadcasts, showcase rebuilds). Matches are kept in memory and re-checked against the sheet every minute — a manual edit in Match Slots shows up within a minute. The site and mini app open from the phone’s memory and refresh right after. Current load: <code>/load</code>.',
     '• Waitlist → «Short Players list»: every waitlist application lands as a row in the season tab (the tab name contains the season number, e.g. «Season 3»): name, ntrp from the profile, status waitlist. You set the division and calibrate ntrp — the bot never overwrites them. Order: league players first, then by application date. A rejected application removes the row. The service columns telegram_id, applied_at, league_player on the right must stay. Re-check by hand: <code>/waitlist_sync</code>.',
     '• Google search: sections have clean addresses (/race, /players, /divisions, /events, /tournaments, /about), Russian version via ?lang=ru. Sitemap: phukettennis.com/sitemap.xml — submit it in Google Search Console.',
     '', '📊 <b>Divisions and results</b>',
@@ -1494,6 +1496,17 @@ function findConfirmedSlot(done, wanted) {
         await previewResultPost(slot, chatId, { withButtons: msg.chat?.type === 'private' });
         return;
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    if (text === '/load') {
+      // Нагрузка на Google Таблицы прямо сейчас: сколько запросов ушло за
+      // минуту из лимита, сколько ждут в очереди, стоит ли пауза после «лимита».
+      const { sheetsQueueStats } = await import('./google.js');
+      const { deadChatsCount } = await import('./telegram.js');
+      const q = sheetsQueueStats();
+      const row = (t, x) => `${t}: <b>${x.used}</b> из ${x.limit} за минуту · в очереди ${x.waiting}${x.paused ? ` · пауза ${Math.ceil(x.paused / 1000)} с` : ''}`;
+      return sendMessage(chatId, '📊 <b>Нагрузка на Google Таблицы</b>\n\n' + row('Чтения', q.read) + '\n' + row('Записи', q.write)
+        + `\n\nЗаблокировали бота (с последнего перезапуска): <b>${deadChatsCount()}</b> — им бот больше не пишет, пока они сами не напишут ему.`
+        + '\n\n<i>Очередь пропускает первыми действия игроков (счёт, заявки, кнопки), потом экраны, потом фон — рассылки и пересборку витрины.</i>');
     }
     if (text === '/waitlist_sync') {
       // Сверить лист ожидания с таблицей участников прямо сейчас.

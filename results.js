@@ -7,7 +7,7 @@
 //
 // Если LEAGUE_RESULTS_SHEET_ID не задан, запись пропускается: результат всё равно
 // сохранён в таблице матчей, ничего не теряется.
-import { sheets as sheetsClient } from './google.js';
+import { sheets as sheetsClient, withPriority } from './google.js';
 import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, TIMEZONE } from './config.js';
 import { scoreValues, detectSet3Mode, reverseScore, cellToScore, formatScore } from './tennis.js';
 import { divisionSheetId, divisionLetter, getDivisionTable, recentFormBefore, playerFormAcrossSeasons } from './division.js';
@@ -534,31 +534,39 @@ async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed
 //
 // dryRun отдаёт список найденного, ничего не трогая: сначала смотрим глазами,
 // потом включаем.
+let importCellsCache = { t: 0, v: null };
 export async function pokeProfileImports({ dryRun = false } = {}) {
   const { WEBSITE_SPREADSHEET_ID } = await import('./config.js');
   if (!WEBSITE_SPREADSHEET_ID) return { ok: false, reason: 'no_sheet' };
   const api = sheetsClient();
-  const meta = await api.spreadsheets.get({ spreadsheetId: WEBSITE_SPREADSHEET_ID, fields: 'sheets.properties(title,sheetId)' });
-  const titles = (meta.data.sheets || []).map(x => x.properties?.title).filter(Boolean);
-  const found = [];
-  for (const title of titles) {
-    let values = [];
+  // Где лежат формулы IMPORTRANGE, не меняется — ищем раз в 6 часов и одним
+  // запросом на все листы (раньше — запрос на каждый лист после каждого счёта).
+  let found = (!dryRun && importCellsCache.v && Date.now() - importCellsCache.t < 6 * 3600_000) ? importCellsCache.v : null;
+  if (!found) {
+    found = [];
+    const meta = await api.spreadsheets.get({ spreadsheetId: WEBSITE_SPREADSHEET_ID, fields: 'sheets.properties(title,sheetId)' });
+    const titles = (meta.data.sheets || []).map(x => x.properties?.title).filter(Boolean);
+    let ranges = [];
     try {
-      const res = await api.spreadsheets.values.get({
+      const res = await api.spreadsheets.values.batchGet({
         spreadsheetId: WEBSITE_SPREADSHEET_ID,
-        range: `'${title}'!A1:Z60`,
+        ranges: titles.map(t => `'${t}'!A1:Z60`),
         valueRenderOption: 'FORMULA'
       });
-      values = res.data.values || [];
-    } catch { continue; }
-    for (let r = 0; r < values.length; r++) {
-      const row = values[r] || [];
-      for (let c = 0; c < row.length; c++) {
-        const cell = String(row[c] ?? '');
-        if (!/^=.*IMPORTRANGE/i.test(cell)) continue;
-        found.push({ sheet: title, a1: `'${title}'!${colLetter(c + 1)}${r + 1}`, formula: cell });
+      ranges = res.data.valueRanges || [];
+    } catch (e) { console.error('profile refresh scan failed:', e.message); ranges = []; }
+    titles.forEach((title, i) => {
+      const values = ranges[i]?.values || [];
+      for (let r = 0; r < values.length; r++) {
+        const row = values[r] || [];
+        for (let c = 0; c < row.length; c++) {
+          const cell = String(row[c] ?? '');
+          if (!/^=.*IMPORTRANGE/i.test(cell)) continue;
+          found.push({ sheet: title, a1: `'${title}'!${colLetter(c + 1)}${r + 1}`, formula: cell });
+        }
       }
-    }
+    });
+    if (ranges.length) importCellsCache = { t: Date.now(), v: found };
   }
   if (dryRun || !found.length) return { ok: true, dryRun: true, cells: found };
   let poked = 0;
@@ -593,7 +601,9 @@ export async function refreshAfterResult() {
   scheduleCache.clear();
   try {
     const mode = String(await getSetting('PROFILE_REFRESH').catch(() => '') || '').trim().toLowerCase();
-    if (['1','on','yes','true'].includes(mode)) await pokeProfileImports();
+    // Пересчёт формул витрины — фон: человеку, нажавшему «Подтвердить», его
+    // ждать незачем, а лимит Google он ест заметно.
+    if (['1','on','yes','true'].includes(mode)) withPriority('low', () => pokeProfileImports()).catch(e => console.error('profile refresh failed:', e.message));
   } catch (e) { console.error('profile refresh failed:', e.message); }
 }
 

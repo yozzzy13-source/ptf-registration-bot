@@ -442,7 +442,9 @@ function pollAttention(){
   if(changed&&['mine','open','res'].includes(mode)&&!document.querySelector('.modal')&&!retimeId&&!resultMode)load(true);
  }).catch(function(){});
 }
-setInterval(pollAttention,20000);
+// Раз в 45 секунд (было 20): значок «есть дела» сервер теперь отдаёт из памяти,
+// но лишние запросы всё равно ни к чему.
+setInterval(pollAttention,45000);
 document.addEventListener('visibilitychange',function(){if(!document.hidden)pollAttention()});
 
 // Кого ещё не сыграл в дивизионе — главное, что игроку нужно видеть в лиге.
@@ -1230,11 +1232,14 @@ function submitResult(id,btn){
   var res=$('rRes');res.className='res';var sets=collectSets('r');
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
   btn.disabled=true;res.textContent=X.sending;
+  // Если Google сейчас занят, сервер ждёт и повторяет сам (до минуты) — счёт
+  // не потеряется. Человеку важно видеть, что процесс идёт, а не завис.
+  var slowT=setTimeout(function(){if(btn.disabled)res.textContent=L?'⏳ Таблицы Google заняты — сохраняем, не закрывайте экран…':'⏳ Google Sheets is busy — saving, please keep this screen open…'},6000);
   fetch('/api/match/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,challenge_id:id,kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim(),
     points_from:$('rPts1')?$('rPts1').value:'',points_to:$('rPts2')?$('rPts2').value:''
-  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;selWinner='';resPhoto='';resultSlotId='';load(true)})
-  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  })}).then(function(r){return r.json()}).then(function(j){clearTimeout(slowT);btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;selWinner='';resPhoto='';resultSlotId='';load(true)})
+  .catch(function(e){clearTimeout(slowT);btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
 }
 // Свой поиск вместо браузерного списка: тот на телефоне вываливался весь
 // сразу, закрывал соседние поля, не давал клавиатуре открыться и никак не

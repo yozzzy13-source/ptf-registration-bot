@@ -60,10 +60,56 @@ async function callWithRetry(doRequest, method) {
   return json;
 }
 
+// Кто заблокировал бота или удалил аккаунт. Писать им бесполезно: каждая
+// такая попытка — лишний запрос и строка ошибки в логах, а при рассылке
+// результата их было по два на человека (фото + карточка). Помним в памяти:
+// после перезапуска сервера каждый такой человек стоит одну неудачную попытку.
+// Написал боту сам — снова живой (markChatAlive в обработчике входящих).
+const deadChats = new Map();   // chat_id → причина
+const DEAD_RE = /bot was blocked by the user|user is deactivated|bot was kicked|chat not found|bot can't initiate conversation/i;
+export const isChatDead = chatId => deadChats.has(String(chatId));
+export const markChatAlive = chatId => { deadChats.delete(String(chatId)); };
+export const deadChatsCount = () => deadChats.size;
+const SEND_METHODS = /^(send|copyMessage|forwardMessage)/;
+
+// Кнопка-ссылка на профиль человека (tg://user?id=…) не проходит, если у него
+// в Telegram закрыта приватность: Telegram отвечает
+// BUTTON_USER_PRIVACY_RESTRICTED и не отправляет сообщение вовсе. Тогда шлём
+// то же сообщение без таких кнопок — сам текст важнее кнопки.
+function withoutUserButtons(payload) {
+  const kb = payload?.reply_markup?.inline_keyboard;
+  if (!Array.isArray(kb)) return null;
+  const userBtn = b => /^tg:\/\/user/i.test(String(b?.url || '')) || b?.user_id !== undefined;
+  const rows = kb.map(r => (r || []).filter(b => !userBtn(b))).filter(r => r.length);
+  if (rows.length === kb.length && rows.every((r, i) => r.length === kb[i].length)) {
+    const { reply_markup, ...rest } = payload;   // таких кнопок не нашли — шлём без клавиатуры
+    return rest;
+  }
+  return { ...payload, reply_markup: rows.length ? { ...payload.reply_markup, inline_keyboard: rows } : undefined };
+}
+
 async function call(method, payload = {}) {
   if (!BOT_TOKEN) throw new Error('BOT_TOKEN env is empty');
-  const normalized = normalizePayload(payload);
+  let normalized = normalizePayload(payload);
+  const target = String(normalized.chat_id ?? '');
+  if (SEND_METHODS.test(method) && target && !target.startsWith('-') && deadChats.has(target)) {
+    const json = { ok:false, error_code:403, description:`Forbidden: ${deadChats.get(target)} (известно заранее, запрос не отправлялся)` };
+    const err = new Error(`${method}: ${JSON.stringify(json)}`);
+    err.telegram = json;
+    throw err;
+  }
   let json = await callWithRetry(() => rawCall(method, normalized), method);
+  if (json && json.ok === false && /BUTTON_USER_PRIVACY_RESTRICTED/i.test(String(json.description || ''))) {
+    const lighter = withoutUserButtons(normalized);
+    if (lighter) {
+      console.warn(`${method}: кнопка-профиль закрыта приватностью получателя, отправляю без неё`);
+      normalized = lighter;
+      json = await callWithRetry(() => rawCall(method, normalized), method);
+    }
+  }
+  if (json && json.ok === false && json.error_code === 403 && target && !target.startsWith('-') && DEAD_RE.test(String(json.description || ''))) {
+    deadChats.set(target, String(json.description || '').replace(/^Forbidden:\s*/i, ''));
+  }
 
   // Telegram group -> supergroup migration.
   // Without this retry, admin notifications can break the whole WebApp submit flow.
@@ -287,6 +333,9 @@ export const ADMIN_COMMAND_LIST = [
   { cmd:'admin',        group:'Панель и рассылки', short:'Админ-панель',
     short_en:'Admin panel', help_en:'admin panel: players, filters, broadcasts, events (edit and delete), balances, manual refunds', help:'админ-панель: игроки, фильтры, рассылки, события (правка и удаление), балансы, ручные возвраты, кнопки меню по группам' },
   { cmd:'stats',        group:'Лига', short:'Статистика', short_en:'Stats', help_en:'applications, payments and statuses at a glance', help:'заявки, оплаты, статусы' },
+  { cmd:'load', group:'Настройка', short:'Нагрузка на Google Таблицы', short_en:'Google Sheets load',
+    help:'сколько запросов к Google Таблицам ушло за последнюю минуту из лимита, сколько ждут в очереди и сколько людей заблокировали бота',
+    help_en:'how many Google Sheets requests went out in the last minute against the limit, how many are queued, and how many people blocked the bot' },
   { cmd:'waitlist_sync', group:'Лига', short:'Лист ожидания → участники', short_en:'Waitlist → participants',
     help:'сверить лист ожидания с таблицей «Short Players list»: добавить новых, убрать отменённых, расставить по очереди (игроки лиги, затем по дате). Обычно это происходит само при каждой заявке',
     help_en:'sync the waitlist with the «Short Players list» sheet: add new people, drop cancelled ones, order the queue (league players, then by date). Normally this happens by itself on every application' },
