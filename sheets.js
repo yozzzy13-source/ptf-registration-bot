@@ -214,7 +214,9 @@ function parseParticipantRows(values=[], headerRowIndex=0) {
     // telegram_id из таблицы участников (если колонка заведена) — точная привязка вместо
     // сопоставления по имени. В WebApp не отдаётся: остаётся только на сервере.
     const telegramId = firstNonEmpty(raw, ['telegram_id','telegramid','tg_id','telegram']).replace(/^https?:\/\/t\.me\//,'').replace(/^@/,'');
-    players.push({ rowNumber: r + 1, name, division: normalizeDivisionName(divisionRaw), division_raw: divisionRaw, rating, status, telegram_id: /^\d+$/.test(telegramId) ? telegramId : '', fields });
+    // Отметка «играл в лиге» — её ставит перенос листа ожидания (waitlistsync.js).
+    const leaguePlayer = /^(yes|да|1|true|y)$/i.test(firstNonEmpty(raw, ['league_player']));
+    players.push({ rowNumber: r + 1, name, division: normalizeDivisionName(divisionRaw), division_raw: divisionRaw, rating, status, telegram_id: /^\d+$/.test(telegramId) ? telegramId : '', league_player: leaguePlayer, fields });
   }
   return players;
 }
@@ -1246,7 +1248,9 @@ export function eventJoinable(status = '') {
 // Все события с приведённым статусом — для витрины: новичку показываем и то,
 // что уже прошло, чтобы он видел живую лигу, а не пустой экран.
 export async function getAllEvents() {
-  const { rows } = await getRows(SHEETS.events, { useCache:false });
+  // Свежий лист; если Google сейчас не отвечает (лимит) — последний удачный.
+  const { rows } = await getRows(SHEETS.events, { useCache:false })
+    .catch(e => { console.warn('events: fresh read failed, using cached:', e.message); return getRows(SHEETS.events); });
   return rows
     .filter(r => safe(r.event_id) || safe(r.event_name) || safe(r.event_name_en) || safe(r.event_name_ru))
     .filter(r => !['hidden','draft','no','false','0'].includes(safe(r.visible).toLowerCase()) && safe(r.status).toLowerCase() !== 'hidden')

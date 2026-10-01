@@ -35,6 +35,7 @@ import { uiError } from './ui-errors.js';
 import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
 import { startLogCleanup } from './retention.js';
 import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
+import { syncWaitlistEntry, syncAllWaitlists } from './waitlistsync.js';
 import { SEO_PAGES, seoLang, slugOf as seoSlug, divLabel as seoDivLabel, organizationLd, websiteLd, faqLd, personLd, eventsLd, ssrHtml, applySeo, robotsTxt, sitemapXml, webManifest, aboutSsr } from './seo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -420,8 +421,11 @@ async function participantsPayload(user=null, season='') {
   }
   if (!lang) lang = String(user?.language_code || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
   const data = await getManualParticipants(season);
-  const players = (data.players || []).map((p, idx) => ({ n: idx + 1, ...p }));
-  return { ok:true, lang, season: data.season || '', sheet: data.sheet || '', total: players.length, totals: data.totals, note: data.note, divisions: data.divisions, groups: data.groups, players };
+  // telegram_id игроков в браузер не отдаём: он нужен только серверу.
+  const clean = ({ telegram_id, ...p }) => p;
+  const players = (data.players || []).map((p, idx) => ({ n: idx + 1, ...clean(p) }));
+  const groups = (data.groups || []).map(g => ({ ...g, players: (g.players || []).map(clean) }));
+  return { ok:true, lang, season: data.season || '', sheet: data.sheet || '', total: players.length, totals: data.totals, note: data.note, divisions: data.divisions, groups, players };
 }
 
 app.get('/api/participants', async (req, res) => {
@@ -537,7 +541,9 @@ app.post('/api/submit-application', async (req, res) => {
     const username = user.username || '';
     const existingProfile = await findApplicantByTelegramIdentity(user);
     const lang = ['ru','en'].includes(String(existingProfile?.language || '').toLowerCase()) ? String(existingProfile.language).toLowerCase() : 'en';
-    const eventOnlyWithProfile = mode === 'event' && isProfileCompleted(existingProfile);
+    // Лист ожидания с готовой анкетой — та же заявка на событие: анкету не трогаем.
+    const eventOnlyWithProfile = (mode === 'event' || mode === 'waitlist') && isProfileCompleted(existingProfile);
+    const isWaitEvent = String(event?.status_code || event?.status || '').toLowerCase() === 'waitlist';
     const effectiveProfile = eventOnlyWithProfile ? {
       name: existingProfile.name,
       ntrp: existingProfile.ntrp,
@@ -563,10 +569,13 @@ app.post('/api/submit-application', async (req, res) => {
     const applicationStatus = event ? (paymentRequired ? 'waiting_payment' : 'application_received') : 'waitlist';
     const paymentStatus = paymentRequired ? 'payment_required' : 'not_required';
 
+    // Игрок идущего сезона встаёт в лист следующего — его статус «active» не
+    // понижаем до «waitlist»: он всё ещё играет.
+    const keepStatus = isWaitEvent && /^(active|confirmed|approved|paid|payment|waiting_payment)$/i.test(String(existingProfile?.status || '').trim());
     const applicant = await upsertApplicant({
       name: fullName,
       ntrp: racketRating,
-      status: applicationStatus,
+      status: keepStatus ? existingProfile.status : applicationStatus,
       experience: safe(effectiveProfile.experience),
       gender: safe(effectiveProfile.gender),
       age: safe(effectiveProfile.age),
@@ -614,26 +623,31 @@ app.post('/api/submit-application', async (req, res) => {
     };
     const savedApplication = await createOrUpdateApplication(appRow);
     appRow.application_id = savedApplication.application_id || applicationId;
-    // Do not spam admin topics when the same player presses submit again for the same event.
-    // The row in Applications is updated, but the admin application card is sent only for a fresh application.
-    if (!savedApplication.isUpdated) {
-      try {
-        await notifyNewApplication(appRow, applicant);
-      } catch (notifyError) {
-        // Do not block player registration/payment if the admin chat is misconfigured or migrated.
-        console.error('notifyNewApplication failed:', notifyError.message);
+    res.json({ ok:true, application_id:appRow.application_id, event:eventName, price_thb:priceThb, price_usdt:priceUsdt, payment_required:paymentRequired, application_status: applicationStatus, payment_status: paymentStatus });
+    // Ответ экрану — сразу, как только заявка записана. Сообщения в бот,
+    // карточка админу, счёт и строка в списке участников уходят следом в фоне:
+    // раньше экран ждал их все и «Отправить» висело по полминуты.
+    setImmediate(() => (async () => {
+      // Do not spam admin topics when the same player presses submit again for the same event.
+      // The row in Applications is updated, but the admin application card is sent only for a fresh application.
+      if (!savedApplication.isUpdated) {
+        try {
+          await notifyNewApplication(appRow, applicant);
+        } catch (notifyError) {
+          // Do not block player registration/payment if the admin chat is misconfigured or migrated.
+          console.error('notifyNewApplication failed:', notifyError.message);
+        }
       }
-    }
-    // Рубильник автосчёта: когда он выключен, игрок не получает реквизиты сразу —
-    // сначала организатор смотрит, есть ли место, и жмёт «Выставить счёт» в топике.
-    // Саму ветку оплаты не трогаем: она запускается тем же sendPaymentStart, просто позже.
-    const autoInvoice = await paymentAutoOn().catch(() => true);
-    if (isEventApplication && paymentRequired && !autoInvoice) {
-      await sendMessage(user.id, lang === 'ru'
-        ? `✅ Заявка на «${eventName}» принята.\n\nОплата пока не открыта: проверяем свободные места в дивизионе. Как только место подтвердится, пришлю счёт сюда же — обычно в течение дня.\n\nМесто закрепляется только после оплаты.`
-        : `✅ Your application for “${eventName}” has been received.\n\nPayment is not open yet: we are checking free spots in the division. As soon as a spot is confirmed, I will send the invoice right here — usually within a day.\n\nThe spot is secured only after payment.`);
-    } else if (isEventApplication && paymentRequired) {
-      await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.
+      // Рубильник автосчёта: когда он выключен, игрок не получает реквизиты сразу —
+      // сначала организатор смотрит, есть ли место, и жмёт «Выставить счёт» в топике.
+      // Саму ветку оплаты не трогаем: она запускается тем же sendPaymentStart, просто позже.
+      const autoInvoice = await paymentAutoOn().catch(() => true);
+      if (isEventApplication && paymentRequired && !autoInvoice) {
+        await sendMessage(user.id, lang === 'ru'
+          ? `✅ Заявка на «${eventName}» принята.\n\nОплата пока не открыта: проверяем свободные места в дивизионе. Как только место подтвердится, пришлю счёт сюда же — обычно в течение дня.\n\nМесто закрепляется только после оплаты.`
+          : `✅ Your application for “${eventName}” has been received.\n\nPayment is not open yet: we are checking free spots in the division. As soon as a spot is confirmed, I will send the invoice right here — usually within a day.\n\nThe spot is secured only after payment.`);
+      } else if (isEventApplication && paymentRequired) {
+        await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}.
 
 <b>Следующий шаг — оплата участия.</b>
 
@@ -646,10 +660,14 @@ app.post('/api/submit-application', async (req, res) => {
 ⚠️ An unpaid application is not an active season entry. Applications with confirmed payment will be processed first.
 
 Please choose a payment method below.`);
-      await sendPaymentStart(user.id, lang, appRow.application_id);
-    } else if (isEventApplication) {
-      await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}. Детали подтверждения участия будут отправлены через Telegram-бота.` : `✅ Your event application has been saved: ${eventName}. Participation confirmation details will be sent through the Telegram bot.`);
-    } else await sendMessage(user.id, lang === 'ru' ? `✅ Анкета сохранена в системе PTF.
+        await sendPaymentStart(user.id, lang, appRow.application_id);
+      } else if (isEventApplication && isWaitEvent) {
+        await sendMessage(user.id, lang === 'ru'
+          ? `📝 Вы в листе ожидания: <b>${escapeHtml(eventName)}</b>.\n\nКогда откроется набор, мы напишем вам здесь раньше остальных. Порядок в листе: сначала игроки, которые уже играли в лиге, дальше — по дате заявки. Места ограничены: 8 в каждом дивизионе.`
+          : `📝 You are on the waitlist: <b>${escapeHtml(eventName)}</b>.\n\nWhen registration opens, we will message you here before everyone else. Order on the list: players who have already played in the league first, then by application date. Places are limited: 8 per division.`);
+      } else if (isEventApplication) {
+        await sendMessage(user.id, lang === 'ru' ? `✅ Заявка на событие сохранена: ${eventName}. Детали подтверждения участия будут отправлены через Telegram-бота.` : `✅ Your event application has been saved: ${eventName}. Participation confirmation details will be sent through the Telegram bot.`);
+      } else await sendMessage(user.id, lang === 'ru' ? `✅ Анкета сохранена в системе PTF.
 
 Теперь вы можете подать заявку в открытое событие.
 
@@ -658,8 +676,8 @@ Please choose a payment method below.`);
 You can now join an open event.
 
 📸 Match posters and results go to our <a href="${IG_PROFILE_URL}">Instagram</a> — follow us to see your own matches there.`, { reply_markup:{ inline_keyboard:[[ { text: lang === 'ru' ? '🏆 Участвовать в событии' : '🏆 Join Event', web_app:{ url:`${PUBLIC_URL}/apply?mode=event` } } ],[ { text: lang === 'ru' ? '🏠 Главное меню' : '🏠 Main menu', callback_data:'main' } ]] } });
-
-    res.json({ ok:true, application_id:appRow.application_id, event:eventName, price_thb:priceThb, price_usdt:priceUsdt, payment_required:paymentRequired, application_status: applicationStatus, payment_status: paymentStatus });
+      if (isWaitEvent) await syncWaitlistEntry(event).catch(e => console.error('waitlist sync:', e.message));
+    })().catch(e => console.error('application follow-up failed:', e.message)));
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok:false, error:e.message });
@@ -1975,6 +1993,26 @@ app.get('/api/league/seasons-summary', async (req, res) => {
 // это и есть то, ради чего человек анкету заполняет. Считаем из тех же данных,
 // что и сама лига, и держим ответ в кеше: экран открывают часто, а меняется он
 // раз в сезон.
+// События лиги для сайта (вкладка «Турниры», главная) — без входа. Только то,
+// что и так видно всем: названия, даты, статус, описание. Держим в кеше пару
+// минут: страницу открывают часто, а лист Events меняется редко.
+let publicEventsCache = { t: 0, v: null };
+const PUBLIC_EVENT_FIELDS = ['event_id','event_type','event_name','event_name_en','event_name_ru','status','status_code','joinable',
+  'start_date','end_date','description_en','description_ru','sort_order'];
+app.get('/api/public/events', async (req, res) => {
+  try {
+    if (!publicEventsCache.v || Date.now() - publicEventsCache.t > 2 * 60 * 1000) {
+      const all = await getAllEvents();
+      publicEventsCache = { t: Date.now(), v: all.map(e => Object.fromEntries(PUBLIC_EVENT_FIELDS.map(k => [k, e[k] ?? '']))) };
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok:true, events: publicEventsCache.v });
+  } catch (e) {
+    console.error('public events failed:', e.message);
+    if (publicEventsCache.v) return res.json({ ok:true, events: publicEventsCache.v, stale:true });
+    res.json({ ok:false, events: [] });
+  }
+});
 let publicSeasonsCache = { t: 0, v: null };
 const PUBLIC_SEASONS_MS = 10 * 60 * 1000;
 app.get('/api/public/seasons', async (req, res) => {
@@ -2057,7 +2095,10 @@ app.get('/api/public/seasons', async (req, res) => {
           score: String(final?.score || final?.display || '')
         });
       }
-      const sp = span.get(String(s.number));
+      // Длительность по сыгранным матчам — только у завершённого сезона. У
+      // идущего это «сколько недель уже прошло» (выходило 2–3 недели вместо 8);
+      // для него экраны считают длительность по датам события.
+      const sp = String(s.status || '').toLowerCase() === 'finished' ? span.get(String(s.number)) : null;
       const weeks = sp ? Math.max(1, Math.round((sp.to - sp.from) / 6048e5)) : 0;
       const players = (roster?.players || []).map(p => {
         const hit = byName.get(String(p.name || '').trim().toLowerCase());
@@ -2310,6 +2351,13 @@ app.listen(PORT, async () => {
   // раньше подхватывать очередь нельзя — получатели получили бы сообщение дважды.
   setTimeout(() => { resumeBroadcasts().catch(e => console.error('broadcast resume failed:', e.message)); }, 60 * 1000).unref?.();
   startLogCleanup();
+  // Лист ожидания → таблица участников: при запуске сверяем целиком (так
+  // переносятся и заявки, поданные до этой функции). Через 2 минуты, когда
+  // схлынет стартовая волна чтений таблиц.
+  setTimeout(() => {
+    syncAllWaitlists().then(r => r.forEach(x => console.log(`waitlist sync s${x.season}:`, x.ok ? `${x.waitlist} в листе → «${x.tab}»` : x.reason)))
+      .catch(e => console.error('waitlist sync:', e.message));
+  }, 2 * 60 * 1000).unref?.();
   import('./sheets.js').then(m => m.addNewTabOnce('tournaments')).then(done => { if (done) console.log('tabs: «Турниры» добавлены группам'); }).catch(e => console.error('tabs add:', e.message));
   console.log(`PTF Registration Bot listening on ${PORT}`);
   console.log(`Spreadsheet: ${SPREADSHEET_ID}`);

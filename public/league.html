@@ -725,6 +725,9 @@ border:1px solid #3A2F1E;display:flex;align-items:center;justify-content:center;
   align-items:center;justify-content:center;font-family:inherit}
 .thsw button.on{background:var(--accBg);color:var(--amber);box-shadow:0 0 0 1px var(--accLine) inset}
 .hdr .meplate .t1{max-width:88px}
+/* Узкий телефон: шапка не должна вылезать за экран (длинный заголовок вроде
+   «Tournaments» + переключатель + плашка игрока давали прокрутку вбок). */
+@media (max-width:440px){.hdr{flex-wrap:wrap;row-gap:8px}.hdr h1{font-size:20px}}
 
 html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturate(.6)}
 .fanmeta{display:inline-block;margin-top:7px;font-size:10.5px;color:var(--mute);font-weight:600;border:1px solid var(--line2);border-radius:8px;padding:4px 8px}.fanhero{position:relative;overflow:hidden;padding:18px;background:linear-gradient(145deg,var(--accBg2),var(--surf) 62%)}.fanhero:after{content:'PTF';position:absolute;right:-7px;bottom:-28px;font-size:82px;font-weight:950;color:rgba(222,154,74,.06)}.fanhero h3{font-size:23px;margin:0 0 7px}.fanhero p{max-width:420px;color:var(--dim);line-height:1.5;margin:0;position:relative;z-index:1}.fanmark{width:50px;height:50px;border-radius:16px;background:linear-gradient(145deg,var(--amber2),var(--amber));display:flex;align-items:center;justify-content:center;color:#17110a;font-size:24px;margin-bottom:13px}.fanseg{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:12px 0}.fanseg button{margin:0;padding:10px}.fanseg button.on{border-color:var(--accLine);background:var(--accBg);color:var(--amber)}.fanrank{display:grid;grid-template-columns:28px 40px minmax(0,1fr) auto;gap:9px;align-items:center;padding:11px 2px;border-bottom:1px solid var(--line2);cursor:pointer}.fanrank:last-child{border-bottom:0}.fanrank .avr,.fanrank .avph{width:40px;height:40px;font-size:11px}.fanplace{text-align:center;font-size:15px;font-weight:900}.fanpts{font-size:15px;font-weight:900;color:var(--amber)}.fanopen{position:relative;z-index:1;margin-top:14px}.fanpreview{margin-top:12px;color:var(--amber);font-size:11px;font-weight:750}
@@ -881,8 +884,19 @@ html[data-theme="light"] .socbtn{color:#fff}
 .trn-order b{color:var(--text)}
 .trn-acts{display:flex;gap:8px;flex-wrap:wrap}
 .trn-champs{display:grid;gap:7px;margin:4px 0 12px}
-.trn-ch{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:8px 10px;cursor:pointer}
+.trn-ch{display:flex;align-items:center;gap:10px;background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:8px 10px}
+.trn-w,.trn-ru{display:flex;align-items:center;gap:10px;cursor:pointer;min-width:0}
+.trn-w{flex:1 1 auto}
+.trn-ru{flex:0 1 46%;justify-content:flex-end;text-align:right}
 .trn-ch .avr,.trn-ch .avph{width:40px;height:40px;flex:0 0 40px;font-size:11px;box-shadow:0 0 0 2px var(--goldRing)}
+.trn-ru .avr,.trn-ru .avph{width:34px;height:34px;flex:0 0 34px;box-shadow:0 0 0 2px var(--silver)}
+.trn-ru b{font-size:12.5px!important;color:var(--dim)}.trn-ru span{color:var(--silver)!important}
+.trn.trn-next{padding:12px 14px;display:flex;align-items:center;gap:12px;justify-content:space-between}
+.trn-nx{min-width:0}
+.trn-nx-t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.trn-nx-t b{font-size:14px}
+.trn-nx-s{font-size:11.5px;color:var(--dim);margin-top:4px;line-height:1.45}
+.socbtn.sm{flex:0 0 auto;padding:8px 12px;font-size:12px}
 .trn-ch b{display:block;font-size:13px}.trn-ch span{display:block;font-size:10.5px;color:var(--champ);font-weight:700}
 .trn-ch i{font-style:normal;font-size:11px;color:var(--dim)}
 @media (min-width:900px){.gal-strip img{height:220px}.evc.compact{flex-basis:32%}}
@@ -901,6 +915,17 @@ html[data-theme="light"] .socbtn{color:#fff}
   .pt:has(>.ptimg){display:grid;grid-template-columns:230px minmax(0,1fr)}
   .pt .ptimg{width:230px;height:100%;min-height:230px;max-height:none;border-bottom:0;border-right:1px solid var(--line2);padding:14px}
   .pt .ptbody{padding:16px 18px}
+  /* Страница игрока: на широком экране фото не растягиваем на всю ширину
+     (оно обрезалось и мылилось) — квадрат в настоящих пропорциях слева,
+     имя, ярлыки и цифры справа. Ярлыки больше не лежат поверх фото. */
+  .hero{display:grid;grid-template-columns:232px minmax(0,1fr);gap:20px;padding:18px;align-items:start}
+  .hero .hph{position:relative;cursor:zoom-in}
+  .hero .hph .avr,.hero .hph .avph{width:232px;height:232px;max-height:none;border-radius:16px;
+    border:1px solid var(--line2);object-position:50% 50%}
+  .hero .vign,.hero .fade{display:none}
+  .hero .info{margin-top:0;padding:2px 0 0}
+  .hero h2{font-size:26px}
+  .hero .avbtn{top:28px;right:auto;left:202px}
 }
 @media (min-width:1200px){
   .wrap{zoom:1.22}
@@ -3039,8 +3064,11 @@ function syncUrl(){
 // Короткое окно для того, кто впервые пришёл на сайт без входа: что это за
 // лига и как в неё попасть. Закрывается одним нажатием и больше не показывается;
 // вошедшим не показывается никогда. Подробности — на странице /about.
-function introSeen(){try{return localStorage.getItem('ptf_intro_seen')==='1'}catch(e){return true}}
-function markIntro(){try{localStorage.setItem('ptf_intro_seen','1')}catch(e){}}
+// Гостю окно-знакомство показываем при каждом заходе на сайт (новая сессия
+// браузера), а не один раз навсегда. Внутри одного захода, закрыв окно,
+// человек его больше не видит — даже при переходах между разделами.
+function introSeen(){try{return sessionStorage.getItem('ptf_intro_seen')==='1'}catch(e){return false}}
+function markIntro(){try{sessionStorage.setItem('ptf_intro_seen','1')}catch(e){}}
 function closeIntro(){markIntro();var el=document.getElementById('introSheet');if(el)el.remove()}
 function introJoin(){closeIntro();openLogin()}
 // Язык прямо в окне-знакомстве: телефон может быть на английском, а человек
@@ -3074,6 +3102,7 @@ function maybeIntro(){
     +'<div class="pts">'+pts.map(function(x){return '<div class="pt1">'+(window.PTFNav?PTFNav.icon(x[0]):'')+'<div><b>'+esc(x[1])+'</b><span>'+esc(x[2])+'</span></div></div>'}).join('')+'</div>'
     +'<button class="go" onclick="introJoin()">'+esc(L?'Вступить в лигу':'Join the league')+'</button>'
     +'<a class="go2" href="/about">'+esc(L?'Подробнее о лиге':'More about the league')+'</a>'
+    +'<a class="go2" href="/tournaments" onclick="event.preventDefault();closeIntro();showTab(\'tournaments\')">'+esc(L?'Сезоны и запись в лист ожидания':'Seasons and the waitlist')+'</a>'
     +'<div class="alt"><a href="#" onclick="event.preventDefault();closeIntro()">'+esc(L?'Сначала посмотреть лигу':'Look around first')+'</a></div></div>';
   document.body.appendChild(el);
 }
@@ -3204,14 +3233,17 @@ function renderEvents(){
 // Счётчик сезонов, галерея из папки «PTF Gallery», лента Instagram и плашка
 // Telegram-бота. Всё грузится одним заходом после основной витрины и никому
 // не мешает: не ответил источник — блока просто нет.
-var pubSeasons=null,pubIg=null,pubGallery=null,pubEvents=null,pubLoading=false;
+var pubSeasons=null,pubIg=null,pubGallery=null,pubEvents=null,pubLoading=false,pubRetried=false;
 function loadPublicExtras(){
   if(pubLoading)return;pubLoading=true;
   var get=function(u){return fetch(u,{cache:'no-store'}).then(function(r){return r.json()}).catch(function(){return null})};
   Promise.all([get('/api/public/seasons'),get('/api/public/instagram'),get('/api/public/gallery'),
-    get('/api/bootstrap?initData='+encodeURIComponent(initData)+tokQ)]).then(function(r){
+    get('/api/public/events')]).then(function(r){
     pubSeasons=(r[0]&&r[0].seasons)||[];pubIg=r[1]||{posts:[]};pubGallery=(r[2]&&r[2].albums)||[];
-    pubEvents=(r[3]&&(r[3].all_events||r[3].events))||[];
+    pubEvents=(r[3]&&r[3].events)||[];
+    // Источник не ответил (например, лимит Google) — через несколько секунд
+    // пробуем ещё раз, а не оставляем пустую страницу до перезагрузки.
+    if(!(r[3]&&r[3].ok)||!(r[0]&&r[0].ok)){pubLoading=false;if(!pubRetried){pubRetried=true;setTimeout(loadPublicExtras,4000)}}
     if(openId)return;
     if(mode==='home')renderHome();else if(mode==='tournaments')renderTournaments();
   });
@@ -3223,17 +3255,19 @@ function seasonNoOf(ev){
 function pubSeason(no){return (pubSeasons||[]).filter(function(s){return String(s.number)===String(no)})[0]||null}
 // «PTF в цифрах»: сколько игроков сыграло и сколько матчей — по каждому сезону.
 function statsBlock(){
+  // Свежий сезон — первым, слева направо: 3 → 2 → 1.
   var list=(pubSeasons||[]).filter(function(s){return s.players_played||s.matches_played||s.players})
-    .sort(function(a,b){return Number(a.number)-Number(b.number)});
+    .sort(function(a,b){return Number(b.number)-Number(a.number)});
   if(!list.length)return '';
   var live=String(season||'');
-  var tp=0,tm=0;list.forEach(function(s){tp+=Number(s.players_played||s.players||0);tm+=Number(s.matches_played||0)});
+  // Игроки сезона — весь состав дивизионов, а не только те, кто уже сыграл.
+  var tp=0,tm=0;list.forEach(function(s){tp+=Number(s.players||s.players_played||0);tm+=Number(s.matches_played||0)});
   return '<div class="card ptfnum"><h3>'+esc(L?'PTF в цифрах':'PTF in numbers')+'</h3><div class="pn-grid">'
     +list.map(function(s){
       var isLive=String(s.number)===live&&String(s.status||'').toLowerCase()!=='finished';
       return '<div class="pn'+(isLive?' pn-on':'')+'"><div class="pn-h">'+esc((L?'Сезон ':'Season ')+s.number)
         +(isLive?' <span class="pn-live">LIVE</span>':'')+'</div>'
-        +'<div class="pn-row"><div><b>'+esc(s.players_played||s.players||0)+'</b><span>'+esc(L?'игроков':'players')+'</span></div>'
+        +'<div class="pn-row"><div><b>'+esc(s.players||s.players_played||0)+'</b><span>'+esc(L?'игроков':'players')+'</span></div>'
         +'<div><b>'+esc(s.matches_played||0)+'</b><span>'+esc(L?'матчей':'matches')+'</span></div></div></div>';
     }).join('')
     +'</div><div class="pn-total">'+esc(L?'Всего за всё время: ':'All time: ')+'<b>'+tm+'</b> '+esc(L?'матчей':'matches')+'</div></div>';
@@ -3284,7 +3318,7 @@ function evDates(ev){
 }
 function seasonStats(no){
   var s=pubSeason(no);if(!s)return '';
-  var it=[[s.divisions,L?'дивизионов':'divisions'],[s.players_played||s.players,L?'игроков':'players'],[s.matches_played,L?'матчей':'matches']]
+  var it=[[s.divisions,L?'дивизионов':'divisions'],[s.players||s.players_played,L?'игроков':'players'],[s.matches_played,L?'матчей':'matches']]
     .filter(function(x){return Number(x[0])>0});
   return it.length?'<div class="tr-stats">'+it.map(function(x){return '<div><b>'+esc(x[0])+'</b><span>'+esc(x[1])+'</span></div>'}).join('')+'</div>':'';
 }
@@ -3297,24 +3331,25 @@ function renderTournaments(){
   var next=league.filter(function(e){return st(e)==='waitlist'||st(e)==='open'});
   var past=league.filter(function(e){return st(e)==='archived'}).sort(function(a,b){return Number(seasonNoOf(b))-Number(seasonNoOf(a))});
   var h='';
+  // Следующий сезон (лист ожидания) — сверху, но скромной плашкой: фокус
+  // страницы остаётся на идущем сезоне.
+  next.forEach(function(e){
+    var when=String(e.start_date||'');var dt=new Date(when);
+    var whenTxt=isNaN(dt.getTime())?when:evDates(e);
+    h+='<div class="card trn trn-next"><div class="trn-nx">'
+      +'<div class="trn-nx-t"><span class="trn-st wait">'+esc(L?'Лист ожидания':'Waitlist')+'</span>'
+      +'<b>'+esc(evName(e))+'</b>'
+      +(whenTxt&&whenTxt!=='None'?'<span class="trn-d">'+esc((L?'Старт: ':'Starts: ')+whenTxt)+'</span>':'')+'</div>'
+      +'<div class="trn-nx-s">'+esc(L?'8 мест в дивизионе. Игроки лиги — в приоритете, дальше по дате заявки.'
+                                    :'8 places per division. League players come first, then by application date.')+'</div></div>'
+      +'<button class="socbtn sm" onclick="goWaitlist()">'+esc(L?'В лист ожидания':'Join the waitlist')+'</button></div>';
+  });
   live.forEach(function(e){
     var no=seasonNoOf(e);
     h+='<div class="card trn trn-live"><div class="trn-top"><span class="trn-st live">● LIVE</span><span class="trn-d">'+esc(evDates(e))+'</span></div>'
       +'<h3>'+esc(evName(e))+'</h3>'+seasonStats(no)
       +'<div class="trn-acts"><button class="socbtn" onclick="openDivFrom(\''+q(no)+'\',\'\')">'+esc(L?'Таблицы дивизионов':'Division tables')+'</button>'
       +'<button class="socbtn ghost" onclick="showTab(\'matches\')">'+esc(L?'Матчи':'Matches')+'</button></div></div>';
-  });
-  next.forEach(function(e){
-    var when=String(e.start_date||'');var dt=new Date(when);
-    var whenTxt=isNaN(dt.getTime())?when:evDates(e);
-    h+='<div class="card trn trn-next"><div class="trn-top"><span class="trn-st wait">'+esc(L?'Лист ожидания':'Waitlist')+'</span>'
-      +(whenTxt&&whenTxt!=='None'?'<span class="trn-d">'+esc((L?'Старт: ':'Starts: ')+whenTxt)+'</span>':'')+'</div>'
-      +'<h3>'+esc(evName(e))+'</h3>'
-      +(evDesc(e)?'<div class="hint">'+esc(evDesc(e))+'</div>':'')
-      +'<div class="trn-order"><b>'+esc(L?'Места ограничены: дивизионы по 8 игроков.':'Places are limited: 8 players per division.')+'</b> '
-      +esc(L?'О наборе сообщаем по очереди: сначала действующим игрокам, затем листу ожидания, затем новым игрокам.'
-            :'We announce registration in order: current players first, then the waitlist, then new players.')+'</div>'
-      +'<div class="trn-acts"><button class="socbtn" onclick="goWaitlist()">'+esc(L?'Встать в лист ожидания':'Join the waitlist')+'</button></div></div>';
   });
   if(past.length){
     h+='<div class="lab">'+esc(L?'Прошедшие сезоны':'Past seasons')+'<span class="dot"></span></div>';
@@ -3323,9 +3358,14 @@ function renderTournaments(){
       h+='<div class="card trn trn-past"><div class="trn-top"><span class="trn-st done">'+esc(L?'Завершён':'Finished')+'</span><span class="trn-d">'+esc(evDates(e))+'</span></div>'
         +'<h3>'+esc(evName(e))+'</h3>'+seasonStats(no)
         +(finals.length?'<div class="trn-champs">'+finals.map(function(f){
-          return '<div class="trn-ch" onclick="openPlayerByName(\''+q(f.champion.name)+'\',\'tournaments\')">'+av({name:f.champion.name,photo:f.champion.photo})
+          // Справа — соперник по финалу в серебряной рамке: видно, что у
+          // сезона были не только чемпионы.
+          var ru=f.runner_up&&f.runner_up.name?f.runner_up:null;
+          return '<div class="trn-ch"><div class="trn-w" onclick="openPlayerByName(\''+q(f.champion.name)+'\',\'tournaments\')">'+av({name:f.champion.name,photo:f.champion.photo})
             +'<div><b>'+esc(f.champion.name)+'</b><span>'+esc((f.title||('Division '+f.letter))+' · '+(L?'чемпион':'champion'))+'</span>'
-            +(f.score?'<i>'+esc(f.score)+'</i>':'')+'</div></div>';
+            +(f.score?'<i>'+esc(f.score)+'</i>':'')+'</div></div>'
+            +(ru?'<div class="trn-ru" onclick="openPlayerByName(\''+q(ru.name)+'\',\'tournaments\')"><div><b>'+esc(ru.name)+'</b><span>Runner-up</span></div>'
+              +av({name:ru.name,photo:ru.photo})+'</div>':'')+'</div>';
         }).join('')+'</div>':'')
         +'<div class="trn-acts"><button class="socbtn ghost" onclick="openDivFrom(\''+q(no)+'\',\'\')">'+esc(L?'Таблицы сезона':'Season tables')+'</button></div></div>';
     });
@@ -3420,6 +3460,8 @@ function openPlayer(id,from){
   openId=String(id);
   if(from)backTo=from;
   allMatches=false;fanBlockOpen=false;
+  // В шапке — «Игрок», а не название вкладки, с которой пришли.
+  $('title').textContent=L?'Игрок':'Player';
   renderPlayer(p);
   ALL_VIEWS.forEach(function(k){$(VIEW_ID[k]).classList.add('hidden')});
   $('tabs').classList.add('hidden');
@@ -3501,7 +3543,7 @@ function renderPlayer(p){
   // Панель загрузки фото — над самой фотографией: иначе её не видно без прокрутки.
   h+=avatarBlock(p);
   h+='<div class="hero">'
-    +'<div onclick="openAvatarFull(\''+q(p.photo||'')+'\')">'+av(p)+'</div>'
+    +'<div class="hph" onclick="openAvatarFull(\''+q(p.photo||'')+'\')">'+av(p)+'</div>'
     +'<div class="vign t"></div><div class="vign b"></div>'
     +avatarButton(p)+'<div class="fade"></div><div class="info">'
     +'<h2>'+esc(p.name)+'</h2>'

@@ -65,6 +65,8 @@ button{border-radius:14px;padding:13px 16px;font-size:16px;margin-top:12px}
 .level-test{padding:12px;border-radius:15px;background:var(--card2)}
 .checkbox{font-size:13px}
 .participant-card,.inline-btn{border-radius:13px}
+.evact{margin-top:12px}.evact.go{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#1A1208;border:0}
+html[data-theme="light"] .evact.go{color:#fff}
 /* --- Светлая тема «Court» — та же, что в лиге и матчах. Включается общим
    переключателем ☾/☀ (public/ptf-prefs.js). --- */
 html[data-theme="light"]{--card:#FFFFFF;--card2:#EBF0EA;--text:#16211A;--muted:#7E8B82;--dim:#4C5A50;
@@ -267,7 +269,29 @@ function fillCountryList(){
   dl.innerHTML=list.map(c=>'<option value="'+esc(c)+'"></option>').join('');
   if(input&&!input.placeholder)input.placeholder=L[lang].countryPick;
 }
-function applyLang(){const x=L[lang],wait=mode==='waitlist';$('progress').textContent=x.progressIntro;$('title').textContent=wait?(lang==='ru'?'Лист ожидания следующего сезона 🎾':'Next-season waitlist 🎾'):(mode==='event'?x.titleEvent:(mode==='rating'?x.ratingUpdateTitle:x.titleProfile));$('intro').textContent=wait?(lang==='ru'?'Заполните анкету для листа ожидания следующего сезона. Места в каждом сезоне ограничены: участники листа получают информацию о наборе и приоритет раньше других.':'Complete your profile for the next-season waitlist. Every season has limited places: waitlist players receive registration updates and priority first.'):(mode==='event'?(profileCompleted?x.alreadyProfile:x.introEvent):(mode==='rating'?x.ratingUpdateIntro:x.introProfile));$('startBtn2').textContent=$('startBtn').textContent=mode==='event'?x.startEvent:(mode==='rating'?x.ratingSave:x.startProfile);$('progress2').textContent=mode==='rating'?'':x.progressProfile;$('progress3').textContent=x.progressEvent;$('profileTitle').textContent=mode==='rating'?x.ratingUpdateTitle:x.profileTitle;$('nameLabel').textContent=x.name;$('nameHint').textContent=x.nameHint;$('genderLabel').textContent=x.gender;$('ageLabel').textContent=x.age;$('countryLabel').textContent=x.country;$('experienceLabel').textContent=x.experience;$('experienceHint').textContent=x.experienceHint;$('ntrpLabel').textContent=x.ntrp;$('ntrpUnknownText').textContent=x.ntrpUnknown;$('whatsappLabel').textContent=x.whatsapp;$('instagramLabel').textContent=x.instagram;$('instagramHint').textContent=x.instagramHint;$('consentLabel').textContent=x.consentLabel;$('consentHint').textContent=x.consentHint;$('photoConsent').options[1].textContent=x.consentYes;$('photoConsent').options[2].textContent=x.consentNo;toggleInstagram();$('notesLabel').textContent=x.notes;$('divisionNote').textContent=x.divisionNote;$('nextEventBtn').textContent=mode==='rating'?x.ratingSave:x.next;$('backIntroBtn').textContent=x.back;$('eventTitle').textContent=x.eventTitle;$('eventHint').textContent=mode==='event'?(profileCompleted?x.eventHintFound:x.eventHintEvent):x.eventHintProfile;$('submitBtn').textContent=x.submit;$('backBtn').textContent=x.back;$('doneTitle').textContent=x.doneTitle;$('doneText').textContent=x.doneText;$('closeBtn').textContent=x.close;$('openLeagueBtn').textContent=x.openLeague;$('openLeagueBtn').classList.toggle('hidden',!(profileCompleted||profileSaved));$('ratingTestIntro').textContent=x.ratingTestIntro;$('calcRatingBtn').textContent=x.ratingCalc;renderRatingTest();fillAgeOptions();fillCountryList();applyRatingOnlyMode()}
+// Лист ожидания. Человек должен с первого экрана понимать, что это, зачем и
+// что нажать. Сезон в листе выбираем за него: он один, искать его не нужно.
+function waitEvents(){return events.filter(ev=>evStatus(ev)==='waitlist'&&!isNo(ev.selectable)&&ev.joinable!==false)}
+function preselectWait(){if(mode==='waitlist'){const w=waitEvents();if(w.length&&!w.some(ev=>ev.event_id===selectedEvent))selectedEvent=w[0].event_id}}
+function waitIntroText(){
+  const ru=lang==='ru';
+  const base=ru?'Сезон лиги идёт два месяца, мест — 8 в каждом дивизионе. Лист ожидания — это очередь на следующий сезон: о наборе вы узнаете раньше остальных. Порядок: сначала игроки, которые уже играли в лиге, дальше — по дате заявки.'
+    :'A league season runs for two months with 8 places per division. The waitlist is the queue for the next season: you hear about registration before everyone else. Order: players who have already played in the league first, then by application date.';
+  const next=profileCompleted
+    ?(ru?' Ваша анкета уже есть — нажмите «Встать в лист ожидания» и отправьте заявку.':' Your profile is already here — tap «Join the waitlist» and submit.')
+    :(ru?' Шаг 1 — короткая анкета (пара минут), шаг 2 — отправить заявку.':' Step 1 — a short profile (a couple of minutes), step 2 — submit the application.');
+  return base+next;
+}
+function startLabel(){
+  const x=L[lang],ru=lang==='ru';
+  if(mode==='rating')return x.ratingSave;
+  if(mode==='waitlist')return profileCompleted?(ru?'📝 Встать в лист ожидания':'📝 Join the waitlist'):(ru?'Заполнить анкету':'Fill in the profile');
+  if(profileCompleted)return ru?'Выбрать событие':'Choose an event';
+  return mode==='event'?x.startEvent:x.startProfile;
+}
+// Кнопка на карточке события в шапке: лист ожидания / открытый набор.
+function startFor(id,status){selectedEvent=id;mode=status==='waitlist'?'waitlist':'event';applyLang();renderIntro();$('startBtn').click()}
+function applyLang(){const x=L[lang],wait=mode==='waitlist';$('progress').textContent=x.progressIntro;$('title').textContent=wait?(lang==='ru'?'Лист ожидания следующего сезона 🎾':'Next-season waitlist 🎾'):(mode==='event'?x.titleEvent:(mode==='rating'?x.ratingUpdateTitle:x.titleProfile));$('intro').textContent=wait?waitIntroText():(mode==='event'?(profileCompleted?x.alreadyProfile:x.introEvent):(mode==='rating'?x.ratingUpdateIntro:x.introProfile));$('startBtn2').textContent=$('startBtn').textContent=startLabel();$('progress2').textContent=mode==='rating'?'':x.progressProfile;$('progress3').textContent=x.progressEvent;$('profileTitle').textContent=mode==='rating'?x.ratingUpdateTitle:x.profileTitle;$('nameLabel').textContent=x.name;$('nameHint').textContent=x.nameHint;$('genderLabel').textContent=x.gender;$('ageLabel').textContent=x.age;$('countryLabel').textContent=x.country;$('experienceLabel').textContent=x.experience;$('experienceHint').textContent=x.experienceHint;$('ntrpLabel').textContent=x.ntrp;$('ntrpUnknownText').textContent=x.ntrpUnknown;$('whatsappLabel').textContent=x.whatsapp;$('instagramLabel').textContent=x.instagram;$('instagramHint').textContent=x.instagramHint;$('consentLabel').textContent=x.consentLabel;$('consentHint').textContent=x.consentHint;$('photoConsent').options[1].textContent=x.consentYes;$('photoConsent').options[2].textContent=x.consentNo;toggleInstagram();$('notesLabel').textContent=x.notes;$('divisionNote').textContent=x.divisionNote;$('nextEventBtn').textContent=mode==='rating'?x.ratingSave:x.next;$('backIntroBtn').textContent=x.back;$('eventTitle').textContent=x.eventTitle;$('eventHint').textContent=wait&&waitEvents().length?(lang==='ru'?'Сезон уже выбран. Проверьте и нажмите «Отправить» — вы в листе ожидания.':'The season is already selected. Check it and tap «Submit» — you are on the waitlist.'):(mode==='event'?(profileCompleted?x.eventHintFound:x.eventHintEvent):x.eventHintProfile);$('submitBtn').textContent=x.submit;$('backBtn').textContent=x.back;$('doneTitle').textContent=x.doneTitle;$('doneText').textContent=x.doneText;$('closeBtn').textContent=x.close;$('openLeagueBtn').textContent=x.openLeague;$('openLeagueBtn').classList.toggle('hidden',!(profileCompleted||profileSaved));$('ratingTestIntro').textContent=x.ratingTestIntro;$('calcRatingBtn').textContent=x.ratingCalc;renderRatingTest();fillAgeOptions();fillCountryList();applyRatingOnlyMode()}
 function setDisplay(id, display){const el=$(id); if(el) el.style.display=display}
 // Ник спрашиваем только у тех, кто согласился: иначе поле выглядит как
 // требование к человеку, который только что отказался.
@@ -310,7 +334,12 @@ function introEventCard(ev,past){
   const note=s==='waitlist'?x.waitNote:'';
   const no=seasonNoOf(ev),info=seasonInfo[no]||null;
   // Длительность — по реально сыгранным матчам сезона, а не по плановым датам.
-  const weeks=Number(info?.weeks||0);
+  // У идущего сезона сервер длительность не даёт — считаем по датам события.
+  let weeks=Number(info?.weeks||0);
+  if(!weeks&&ev.start_date&&ev.end_date){
+    const a=new Date(ev.start_date),b=new Date(ev.end_date);
+    if(!isNaN(a.getTime())&&!isNaN(b.getTime()))weeks=Math.max(1,Math.round((b-a)/6048e5));
+  }
   const players=Number(info?.players||0),divs=Number(info?.divisions||0);
   const roster=(info&&info.players_list)||[];
   const tiles=(divs||players||weeks)?('<div class="stiles">'
@@ -327,14 +356,27 @@ function introEventCard(ev,past){
     +(rosterOpen===no&&roster.length?rosterList(roster):'')
     +(finals.length?'<div class="grp2">'+esc(x.grpFinals)+'</div>'+finals.map(finalCard).join(''):'')
     +(note?'<div class="small" style="margin-top:8px">'+esc(note)+'</div>':'')
+    +cardAction(ev,s,past)
     +'</div>';
+}
+// Действие прямо на карточке: идущий сезон — в таблицы лиги, лист ожидания и
+// открытый набор — к заявке. Раньше карточки были просто текстом, и было
+// непонятно, что нажимать.
+function cardAction(ev,s,past){
+  if(past)return '';
+  const ru=lang==='ru';
+  if(s==='live')return '<button type="button" class="inline-btn evact" onclick="goto(\'/league?tab=div\')">'+esc(ru?'📊 Таблицы лиги':'📊 League tables')+'</button>';
+  if((s==='waitlist'||s==='open')&&events.some(e=>e.event_id===ev.event_id))
+    return '<button type="button" class="inline-btn evact go" onclick="startFor(\''+esc(ev.event_id)+'\',\''+s+'\')">'+esc(s==='waitlist'?(ru?'📝 Встать в лист ожидания':'📝 Join the waitlist'):(ru?'🎾 Подать заявку':'🎾 Apply'))+'</button>';
+  return '';
 }
 function renderIntro(){
   const lead=$('introLead'),box=$('introEvents'),x=L[lang];
   if(!lead||!box)return;
   if(mode==='rating'){lead.innerHTML='';box.innerHTML='';return}
-  lead.innerHTML='<div class="lead"><h3>'+esc(profileCompleted?x.leadDone:x.leadTitle)+'</h3>'
-    +'<p>'+esc(profileCompleted?x.leadDoneText:x.leadText)+'</p>'
+  const waitDone=mode==='waitlist'&&profileCompleted;
+  lead.innerHTML='<div class="lead"><h3>'+esc(waitDone?(lang==='ru'?'Анкета уже есть ✅':'Your profile is ready ✅'):(profileCompleted?x.leadDone:x.leadTitle))+'</h3>'
+    +'<p>'+esc(waitDone?(lang==='ru'?'Осталось одно действие: нажмите «Встать в лист ожидания» и затем «Отправить».':'One step left: tap «Join the waitlist», then «Submit».'):(profileCompleted?x.leadDoneText:x.leadText))+'</p>'
     +(profileCompleted?'':'<ul class="perks">'+x.perks.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul>')
     +'</div>';
   const list=(allEvents.length?allEvents:events);
@@ -351,13 +393,15 @@ function renderIntro(){
   box.innerHTML=h;
 }
 function renderEvents(){const box=$('events');box.innerHTML='';const x=L[lang];if(mode==='waitlist'){const note=document.createElement('div');note.className='event active';note.innerHTML='<div class="event-title">📝 '+(lang==='ru'?'Лист ожидания':'Waitlist')+'</div><div class="small">'+(lang==='ru'?'Вы записываетесь не в текущий сезон. Мы сообщим о следующем наборе одним из первых; места ограничены.':'You are joining the waitlist, not the current season. We will notify you early when the next season opens; places are limited.')+'</div>';box.appendChild(note)}else if(mode!=='event'){const profileOnly=document.createElement('div');profileOnly.className='event'+(selectedEvent===''?' active':'');profileOnly.innerHTML=`<div class="event-title">${esc(x.profileOnly)}</div><div class="small">${esc(x.profileOnlyText)}</div>`;profileOnly.onclick=()=>{selectedEvent='';renderEvents()};box.appendChild(profileOnly)}
-  if(!events.length){const empty=document.createElement('p');empty.className='small';empty.textContent=x.noEvents;box.appendChild(empty)}
-  events.forEach(ev=>{const name=eventName(ev);const desc=eventDesc(ev);const status=evStatus(ev);const selectable=!isNo(ev.selectable)&&(ev.joinable!==false)&&status!=='live'&&status!=='archived';const div=document.createElement('div');div.className='event'+(selectedEvent===ev.event_id?' active':'')+(selectable?'':' muted');const price=eventPriceHtml(ev);const count=Number(ev.applications_count||ev.players_count||0);const stats=`<div class="statline">${esc(x.applications)}: ${esc(count)}</div>`;div.innerHTML=`<div class="event-title">${esc(name)}</div><div class="small">${esc(desc||'')}</div><div style="margin-top:10px">${eventBadges(ev,status)}</div>${price}${stats}<div class="event-actions"><button type="button" class="inline-btn" data-event-id="${esc(ev.event_id)}">${esc(x.viewPlayers)}</button></div>`;div.onclick=()=>{if(!selectable)return;selectedEvent=ev.event_id;renderEvents()};div.querySelector('button[data-event-id]').onclick=(e)=>{e.stopPropagation();openParticipantsPage(ev)};box.appendChild(div)})}
+  // В листе ожидания показываем только сезон листа — он уже выбран.
+  const shown=mode==='waitlist'&&waitEvents().length?waitEvents():events;
+  if(!shown.length){const empty=document.createElement('p');empty.className='small';empty.textContent=x.noEvents;box.appendChild(empty)}
+  shown.forEach(ev=>{const name=eventName(ev);const desc=eventDesc(ev);const status=evStatus(ev);const selectable=!isNo(ev.selectable)&&(ev.joinable!==false)&&status!=='live'&&status!=='archived';const div=document.createElement('div');div.className='event'+(selectedEvent===ev.event_id?' active':'')+(selectable?'':' muted');const price=eventPriceHtml(ev);const count=Number(ev.applications_count||ev.players_count||0);const stats=`<div class="statline">${esc(x.applications)}: ${esc(count)}</div>`;div.innerHTML=`<div class="event-title">${esc(name)}</div><div class="small">${esc(desc||'')}</div><div style="margin-top:10px">${eventBadges(ev,status)}</div>${price}${stats}<div class="event-actions"><button type="button" class="inline-btn" data-event-id="${esc(ev.event_id)}">${esc(x.viewPlayers)}</button></div>`;div.onclick=()=>{if(!selectable)return;selectedEvent=ev.event_id;renderEvents()};div.querySelector('button[data-event-id]').onclick=(e)=>{e.stopPropagation();openParticipantsPage(ev)};box.appendChild(div)})}
 function openParticipantsPage(ev){
   // Состав смотрим того сезона, к которому относится событие: у сезона 3
   // своя вкладка, и пустой список там — это нормально, состав ещё собирают.
   const no=ev?seasonNoOf(ev):'';
-  goto('/participants?back=event'+(no?'&season='+encodeURIComponent(no):''));
+  goto('/participants?back=event&mode='+encodeURIComponent(mode==='waitlist'?'waitlist':'event')+(no?'&season='+encodeURIComponent(no):''));
 }
 // Цифры прошлых сезонов и чемпионы: они и продают участие лучше любого текста.
 async function loadSeasonInfo(){
@@ -381,14 +425,14 @@ function fillProfile(a){
 }
 function profileFromForm(){let rating=$('ntrp').value.trim();let source='player';if($('ntrpUnknown').checked){const calc=calculateRating();if(calc){rating=calc;source='test'}}return {name:$('name').value.trim(),gender:$('gender').value,age:$('age').value.trim(),country_of_origin:$('country').value.trim(),experience:$('experience').value.trim(),ntrp:rating,ntrp_source:source,ntrp_unknown:false,racket_rating:rating,whatsapp:$('whatsapp').value.trim(),photo_publication_consent:$('photoConsent').value,instagram:$('photoConsent').value==='NO'?'':$('instagram').value.trim(),notes:$('notes').value.trim()}}
 function validateProfile(profile){const missing=[];if(!profile.name)missing.push(L[lang].name);if(!profile.gender)missing.push(L[lang].gender);if(!profile.country_of_origin)missing.push(L[lang].country);if(!profile.experience)missing.push(L[lang].experience);if(!profile.ntrp || ['unknown','не знаю','n/a','na','-'].includes(String(profile.ntrp).trim().toLowerCase()))missing.push(L[lang].ntrp);if(!profile.whatsapp)missing.push(L[lang].whatsapp);return missing}
-async function saveProfileAndContinue(){const p=profileFromForm();if(mode==='rating'){if(!p.ntrp){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].ratingTestRequired;return}try{const r=await fetch('/api/update-rating',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,t:linkToken,rating:p.ntrp,ntrp_source:p.ntrp_source})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Save error');$('doneTitle').textContent=L[lang].doneTitle;$('doneText').textContent=L[lang].ratingSaved;$('doneActionBtn').classList.add('hidden');show('stepDone')}catch(e){$('profileMsg').className='error';$('profileMsg').textContent=e.message}return}const missing=validateProfile(p);if(missing.length){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].requiredBase+missing.join(', ');return}try{const r=await fetch('/api/save-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,t:linkToken,profile:p})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Save error');profileSaved=true;profileCompleted=true;existingProfile=j.applicant||existingProfile;$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].profileSaved;renderEvents();show('stepEvent')}catch(e){$('profileMsg').className='error';$('profileMsg').textContent=e.message}}
+async function saveProfileAndContinue(){const p=profileFromForm();if(mode==='rating'){if(!p.ntrp){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].ratingTestRequired;return}try{const r=await fetch('/api/update-rating',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,t:linkToken,rating:p.ntrp,ntrp_source:p.ntrp_source})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Save error');$('doneTitle').textContent=L[lang].doneTitle;$('doneText').textContent=L[lang].ratingSaved;$('doneActionBtn').classList.add('hidden');show('stepDone')}catch(e){$('profileMsg').className='error';$('profileMsg').textContent=e.message}return}const missing=validateProfile(p);if(missing.length){$('profileMsg').className='error';$('profileMsg').textContent=L[lang].requiredBase+missing.join(', ');return}try{const r=await fetch('/api/save-profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,t:linkToken,profile:p})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Save error');profileSaved=true;profileCompleted=true;existingProfile=j.applicant||existingProfile;$('profileMsg').className='ok';$('profileMsg').textContent=L[lang].profileSaved;preselectWait();applyLang();renderEvents();show('stepEvent')}catch(e){$('profileMsg').className='error';$('profileMsg').textContent=e.message}}
 async function submitApplication(){const p=profileFromForm();if(!profileCompleted&&!profileSaved){const missing=validateProfile(p);if(missing.length){$('msg').className='error';$('msg').textContent=L[lang].requiredBase+missing.join(', ');return}}if(mode==='event'&&!selectedEvent){$('msg').className='error';$('msg').textContent=lang==='ru'?'Пожалуйста, выберите событие.':'Please choose an event.';return}try{$('msg').textContent='';const r=await fetch('/api/submit-application',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData,t:linkToken,profile:p,event_id:selectedEvent,mode})});const j=await r.json();if(!j.ok)throw new Error(j.error||'Submit error');
     if(selectedEvent && j.payment_required){
       $('doneTitle').textContent=lang==='ru'?'Оплата участия':'Payment required';
       $('doneText').textContent=lang==='ru'?'Заявка на событие сохранена. Следующий шаг — оплата участия. Вернитесь в чат Telegram-бота и выберите способ оплаты. Неоплаченная заявка не является активным участием. Оплаченные заявки будут рассматриваться в первую очередь.':'Your event application has been saved. Next step — participation payment. Return to the Telegram bot chat and choose a payment method. An unpaid application is not an active entry. Paid applications will be processed first.';
     } else {
       $('doneTitle').textContent=L[lang].doneTitle;
-      $('doneText').textContent=selectedEvent?L[lang].doneTextEvent:(mode==='waitlist'?(lang==='ru'?'Вы в листе ожидания следующего сезона. Мы сообщим о наборе одним из первых; места ограничены.':'You are on the next-season waitlist. We will notify you early when registration opens; places are limited.'):(lang==='ru'?'Анкета сохранена в системе PTF. Теперь вы можете подать заявку в открытое событие.':'Your profile has been saved in the PTF system. You can now join an open event.'));
+      $('doneText').textContent=mode==='waitlist'?(lang==='ru'?'Вы в листе ожидания следующего сезона. Когда откроется набор, мы напишем вам в Telegram раньше остальных. Места ограничены: 8 в каждом дивизионе.':'You are on the next-season waitlist. When registration opens, we will message you in Telegram before everyone else. Places are limited: 8 per division.'):selectedEvent?L[lang].doneTextEvent:(mode==='waitlist'?(lang==='ru'?'Вы в листе ожидания следующего сезона. Мы сообщим о наборе одним из первых; места ограничены.':'You are on the next-season waitlist. We will notify you early when registration opens; places are limited.'):(lang==='ru'?'Анкета сохранена в системе PTF. Теперь вы можете подать заявку в открытое событие.':'Your profile has been saved in the PTF system. You can now join an open event.'));
     }
     $('doneActionBtn').textContent=L[lang].joinEventNow;
     $('doneActionBtn').classList.toggle('hidden', Boolean(selectedEvent));
@@ -397,10 +441,12 @@ $('gender').onchange=()=>{$('ageWrap').style.display=$('gender').value==='female
 $('ntrpUnknown').onchange=()=>{$('ratingTest').classList.toggle('hidden',!$('ntrpUnknown').checked);if($('ntrpUnknown').checked){$('ntrp').value='';renderRatingTest();}};
 $('calcRatingBtn').onclick=updateRatingFromTest;
 $('startBtn2').onclick=()=>$('startBtn').click();
-$('startBtn').onclick=()=>{if(mode==='rating'){show('stepProfile');applyRatingOnlyMode()}else if(profileCompleted){mode='event';applyLang();show('stepEvent');renderEvents()}else show('stepProfile')};
+// С готовой анкетой — сразу к заявке. Режим листа ожидания не меняем на
+// «событие»: раньше после «Назад» кнопка превращалась в «Continue».
+$('startBtn').onclick=()=>{if(mode==='rating'){show('stepProfile');applyRatingOnlyMode()}else if(profileCompleted){if(mode!=='waitlist')mode='event';preselectWait();applyLang();show('stepEvent');renderEvents()}else show('stepProfile')};
 $('nextEventBtn').onclick=saveProfileAndContinue;
 $('submitBtn').onclick=submitApplication;
-$('backBtn').onclick=()=>{if(mode==='event')show('stepIntro');else show('stepProfile')};
+$('backBtn').onclick=()=>{if(profileSaved)show('stepProfile');else{applyLang();renderIntro();show('stepIntro')}};
 $('backIntroBtn').onclick=()=>show('stepIntro');
 $('doneActionBtn').onclick=()=>{selectedEvent='';mode='event';show('stepEvent');renderEvents()};
 $('openLeagueBtn').onclick=()=>goto('/league');

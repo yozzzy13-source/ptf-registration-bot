@@ -278,10 +278,10 @@ function render(){
     +'<div class="st"><b>2</b><span>'+esc(X.sLen)+'</span></div></div>';
   h+='<div class="sec-h">'+esc(X.whyH)+'</div><div class="cards">'+X.why.map(function(w){return '<div class="cd"><div class="ic">'+ic(w[0])+'</div><b>'+esc(w[1])+'</b><p>'+esc(w[2])+'</p></div>'}).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.moreH)+'</div><div class="cards">'+X.more.map(function(w){return '<div class="cd"><div class="ic">'+ic(w[0])+'</div><b>'+esc(w[1])+'</b><p>'+esc(w[2])+'</p></div>'}).join('')+'</div>';
-  var played=seasons.filter(function(s){return s.players_played||s.matches_played});
+  var played=seasons.filter(function(s){return s.players||s.players_played||s.matches_played}).slice().reverse(); // свежий сезон первым
   if(played.length)h+='<div class="sec-h">'+esc(X.numH)+'</div><div class="nums">'+played.map(function(s){
     return '<div class="num"><div class="nh">'+esc(X.numS+s.number)+(String(s.status||'').toLowerCase()==='active'||String(s.status||'').toLowerCase()==='live'?' <em>LIVE</em>':'')+'</div>'
-      +'<div class="nr"><div><b>'+esc(s.players_played||s.players||0)+'</b><span>'+esc(X.numP)+'</span></div><div><b>'+esc(s.matches_played||0)+'</b><span>'+esc(X.numM)+'</span></div></div></div>';
+      +'<div class="nr"><div><b>'+esc(s.players||s.players_played||0)+'</b><span>'+esc(X.numP)+'</span></div><div><b>'+esc(s.matches_played||0)+'</b><span>'+esc(X.numM)+'</span></div></div></div>';
   }).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.howH)+'</div><div class="flow">'+X.flow.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p>'+(i===3?'<div class="zones">'+X.zones.map(function(z,k){return '<div class="zn '+['up','stay','down'][k]+'"><b>'+esc(z[0])+'</b><span>'+esc(z[1])+'</span></div>'}).join('')+'</div>':'')+'</div></div>'}).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.raceH)+'</div><div class="cd"><div class="ic">'+ic('race')+'</div><p style="font-size:13.5px">'+esc(X.race)+'</p></div>';

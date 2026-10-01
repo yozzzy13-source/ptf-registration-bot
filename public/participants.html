@@ -102,6 +102,8 @@
     .thsw button.on{background:rgba(239,95,0,.14);color:var(--accent2);box-shadow:0 0 0 1px rgba(239,95,0,.4) inset}
     html[data-theme="light"] .thsw button{background:transparent}
     html[data-theme="light"] .thsw button.on{background:var(--accBg);color:var(--accent);box-shadow:0 0 0 1px var(--accLine) inset}
+    .qsub{padding:8px 14px 10px;font-size:12px;line-height:1.45;color:var(--muted)}
+    .lgp{display:inline-block;margin:3px 0 0 38px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.02em;color:var(--accent);border:1px solid var(--accent)}
   </style>
 </head>
 <body>
@@ -121,8 +123,8 @@ var tokQ=linkToken?('&t='+encodeURIComponent(linkToken)):'';
 let lang=window.PTFPrefs?PTFPrefs.lang():((tg?.initDataUnsafe?.user?.language_code||'').toLowerCase().startsWith('ru')?'ru':'en');
 let lastData=null;
 const L={
-  ru:{title:'Список участников',sub:'Актуальный состав дивизионов. Список обновляется организатором вручную.',loading:'Загружаем список…',empty:'Список участников пока пуст.',total:'Всего',active:'Active',waitlist:'Waitlist',overview:'Заполненность дивизионов',unassigned:'Без дивизиона',noPlayers:'Пока нет игроков',free:'Свободно мест:',full:'дивизион заполнен',over:'больше лимита',close:'Главное меню',back:'⬅️ Назад к событию',apply:'🏆 Участвовать в событии',updated:'Данные из таблицы участников PTF'},
-  en:{title:'Participants List',sub:'Current division lineups. The list is maintained manually by the organizer.',loading:'Loading list…',empty:'The participants list is empty.',total:'Total',active:'Active',waitlist:'Waitlist',overview:'Division fill',unassigned:'No division yet',noPlayers:'No players yet',free:'Spots left:',full:'division is full',over:'over the limit',close:'Main menu',back:'⬅️ Back to event',apply:'🏆 Join event',updated:'Data from the PTF participants sheet'}
+  ru:{title:'Список участников',sub:'Актуальный состав дивизионов. Список обновляется организатором вручную.',loading:'Загружаем список…',empty:'Список участников пока пуст.',total:'Всего',active:'Active',waitlist:'Waitlist',overview:'Заполненность дивизионов',unassigned:'Без дивизиона',noPlayers:'Пока нет игроков',free:'Свободно мест:',full:'дивизион заполнен',over:'больше лимита',close:'Главное меню',back:'⬅️ Назад к событию',queue:'Лист ожидания',queueSub:'Порядок: сначала игроки лиги, дальше — по дате заявки. Дивизионы организатор сформирует позже.',leaguePl:'Игрок лиги',apply:'🏆 Участвовать в событии',updated:'Данные из таблицы участников PTF'},
+  en:{title:'Participants List',sub:'Current division lineups. The list is maintained manually by the organizer.',loading:'Loading list…',empty:'The participants list is empty.',total:'Total',active:'Active',waitlist:'Waitlist',overview:'Division fill',unassigned:'No division yet',noPlayers:'No players yet',free:'Spots left:',full:'division is full',over:'over the limit',close:'Main menu',back:'⬅️ Back to event',queue:'Waitlist',queueSub:'Order: league players first, then by application date. The organizer will form divisions later.',leaguePl:'League player',apply:'🏆 Join event',updated:'Data from the PTF participants sheet'}
 };
 const $=id=>document.getElementById(id);
 const backTo=new URLSearchParams(location.search).get('back')||'';
@@ -132,7 +134,7 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&
 const DIV_COLORS={'PRIME':'var(--prime)','Division A':'var(--divA)','Division B':'var(--divB)','Division C':'var(--divC)','Division D':'var(--divD)','Division Woman':'var(--divW)'};
 function divColor(name){return DIV_COLORS[name]||'var(--accent2)'}
 function divLabel(name){if(!name)return L[lang].unassigned; if(lang==='ru'){if(name==='Division Woman')return 'Дивизион Woman'; return name.replace(/^Division\s+/,'Дивизион ')} return name}
-function applyLang(){$('title').textContent=L[lang].title;$('sub').textContent=L[lang].sub;$('closeBtn').textContent=backTo==='event'?L[lang].back:L[lang].close;$('applyBtn').textContent=L[lang].apply;$('applyBtn').classList.toggle('hidden',backTo!=='event');$('foot').textContent=L[lang].updated;const ld=$('loading');if(ld)ld.textContent=L[lang].loading}
+function applyLang(){$('title').textContent=L[lang].title;$('sub').textContent=L[lang].sub;$('closeBtn').textContent=backTo==='event'?L[lang].back:L[lang].close;$('applyBtn').textContent=(new URLSearchParams(location.search).get('mode')==='waitlist')?(lang==='ru'?'📝 Встать в лист ожидания':'📝 Join the waitlist'):L[lang].apply;$('applyBtn').classList.toggle('hidden',backTo!=='event');$('foot').textContent=L[lang].updated;const ld=$('loading');if(ld)ld.textContent=L[lang].loading}
 function capPill(g){if(!g.size)return `<span class="pill">${g.count}</span>`;const cls=g.count>g.size?'over':(g.count>=g.size?'full':'');return `<span class="pill cap ${cls}">${g.count} / ${g.size}</span>`}
 function bar(g){if(!g.size)return `<span class="pill">${g.count}</span>`;const pct=Math.min(100,Math.round(g.count/g.size*100));const cls=g.count>g.size?'over':(g.count>=g.size?'full':'');return `<div class="bar"><i class="${cls}" style="width:${pct}%"></i><span>${g.count} / ${g.size}</span></div>`}
 function initials(name){return String(name||'').split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0].toUpperCase()).join('')}
@@ -149,9 +151,25 @@ function render(data){
   let html='';
   if(data.note) html+=`<div class="note">${esc(data.note)}</div>`;
   html+=`<div class="totals"><div class="tot"><small>${x.total}</small><b>${t.total}</b></div><div class="tot active"><small>${x.active}</small><b>${t.active}</b></div><div class="tot waitlist"><small>${x.waitlist}</small><b>${t.waitlist}</b></div></div>`;
-  const sized=groups.filter(g=>!g.unassigned);
+  // Лист ожидания — те, кому дивизион ещё не назначен. Показываем первым и по
+  // порядку очереди. Пустые дивизионы при этом не рисуем: пока никто не
+  // распределён, это шесть одинаковых «0 / 8».
+  const queue=groups.filter(g=>g.unassigned)[0];
+  const anyAssigned=groups.some(g=>!g.unassigned&&g.players.length);
+  if(queue&&queue.players.length){
+    html+=`<div class="div"><div class="div-head" style="border-left-color:var(--accent2)"><div class="div-title">${esc(x.queue)}</div><div class="div-meta"><span class="pill">${queue.players.length}</span></div></div>`
+      +`<div class="qsub">${esc(x.queueSub)}</div><table><tbody>`
+      +queue.players.map((p,i)=>`<tr><td class="n">${i+1}</td><td class="name">${playerCell(p)}${p.league_player?`<span class="lgp">${esc(x.leaguePl)}</span>`:''}</td><td class="rating ${p.rating?'':'unk'}">${esc(p.rating||'?')}</td><td class="status">${statusPill(p.status)}</td></tr>`).join('')
+      +'</tbody></table></div>';
+  }
+  const sized=anyAssigned?groups.filter(g=>!g.unassigned):[];
+  if(!sized.length&&!(queue&&queue.players.length)){
+    const soon=data.season?(lang==='ru'?`Состав сезона ${data.season} ещё собирается. Встаньте в лист ожидания — узнаете о наборе первым.`
+                                        :`The season ${data.season} line-up is still being assembled. Join the waitlist to hear about it first.`):x.empty;
+    html+=`<p class="sub">${esc(soon)}</p>`;
+  }
   if(sized.length){html+=`<div class="overview"><h3>${esc(x.overview)}</h3>`+sized.map(g=>`<div class="ov-row"><div class="ov-name"><span class="dot" style="background:${divColor(g.division)}"></span>${esc(divLabel(g.division))}</div>${bar(g)}</div>`).join('')+`</div>`}
-  for(const g of groups){
+  for(const g of sized){
     const free=g.size?g.size-g.count:0;
     html+=`<div class="div"><div class="div-head" style="border-left-color:${divColor(g.division)}"><div class="div-title">${esc(divLabel(g.division))}</div><div class="div-meta">${g.active?`<span class="pill" style="color:#dfffee">${x.active}: ${g.active}</span>`:''}${g.waitlist?`<span class="pill" style="color:#ffe9a8">${x.waitlist}: ${g.waitlist}</span>`:''}${capPill(g)}</div></div><table><tbody>`;
     if(!g.players.length) html+=`<tr class="empty-row"><td colspan="4">${esc(x.noPlayers)}</td></tr>`;
@@ -176,8 +194,10 @@ async function load(){
   }catch(e){$('content').innerHTML=`<p class="error">${esc(e.message)}</p>`}
 }
 document.addEventListener('click',e=>{const a=e.target.closest('a.pname');if(!a)return;e.preventDefault();const url=a.dataset.url;if(tg?.openLink)tg.openLink(url);else window.open(url,'_blank');});
-$('closeBtn').onclick=()=>{if(backTo==='event')goto('/apply?mode=event');else if(tg)tg.close();else location.href='/'};
-$('applyBtn').onclick=()=>{goto('/apply?mode=event')};
+// Назад — туда, откуда пришли: из листа ожидания возвращаемся в лист ожидания.
+const fromMode=(new URLSearchParams(location.search).get('mode')||'event').replace(/[^a-z]/g,'')||'event';
+$('closeBtn').onclick=()=>{if(backTo==='event')goto('/apply?mode='+fromMode);else if(tg)tg.close();else location.href='/'};
+$('applyBtn').onclick=()=>{goto('/apply?mode='+fromMode)};
 // Тема и язык — общий переключатель; язык меняем на месте, без перезагрузки.
 if(window.PTFPrefs)PTFPrefs.mount($('thSw'),{onLang:v=>{lang=v;applyLang();if(lastData)render(lastData);}});
 load();

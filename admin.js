@@ -1763,6 +1763,10 @@ Come join us — that is where it all happens: finding hitting partners, sharing
 
 export async function setApplicationStatus({ chatId, applicationId, status }) {
   const app = await updateApplication(applicationId, { application_status: status, reviewed_at: nowISO() });
+  // Заявка в лист ожидания отклонена/возвращена — список участников сезона
+  // пересобирается: строка уходит или возвращается.
+  if (app?.event_id) import('./waitlistsync.js').then(m => m.syncWaitlistEntry(app.event_id))
+    .catch(e => console.error('waitlist sync after status:', e.message));
   if (!app) return sendMessage(chatId, 'Application not found.');
   await updateApplicantStatusByTelegramId(app.telegram_id, status === 'confirmed' ? 'active' : status);
   const lang = (await findApplicantByTelegramId(app.telegram_id))?.language || 'en';

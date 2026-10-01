@@ -1950,4 +1950,120 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  await sheets.setSetting('admin_chat_id',adminChatWas||'');
 }
 
+// --- Лист ожидания → таблица участников («Short Players list», вкладка сезона) ---
+{
+ const PID='161O5DWEJU-ik3XoDaUjWeTlm7T2Je98IFd_-DFhRBu8',WID='1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY';
+ const saved={ev:tables.get('crm|Events'),apps:tables.get('crm|Applications'),appl:structuredClone(tables.get('crm|Applicants')),prof:tables.get(WID+'|Frontend_Profile_All')};
+ put('crm','Events',[['event_id','event_name_en','status','event_type'],['league_s2','League Season 2','live','league'],['league_s3','League Season 3','waitlist','league']]);
+ put('crm','Applications',[['application_id','telegram_id','player_name','event_id','application_status','submitted_at'],
+  ['a1','6','Out Sider','league_s3','application_received','2026-09-01T10:00:00Z'],
+  ['a2','4','Dan Four','league_s3','application_received','2026-09-20T10:00:00Z'],
+  ['a3','3','Carol Three','league_s3','rejected','2026-08-01T10:00:00Z'],
+  ['a4','9','Wendy Three','league_s2','application_received','2026-07-01T10:00:00Z']]);
+ const ap=tables.get('crm|Applicants');ap[0].push('ntrp');ap.forEach((r,i)=>{if(i)r[ap[0].length-1]={'4':'4.0','6':'3.0','10':'2.5'}[r[0]]||''});
+ put(WID,'Frontend_Profile_All',[['player_id','player_name','matches_played','seasons_played'],['1','Dan Four','7','1'],['2','Out Sider','0','0']]);
+ const tpl=[['The division has not yet been formed.'],[''],['','Players','Division Size'],['PRIME','0','8'],['Division A','0','8'],['Division B','0','8'],['Division C','0','8'],['Division D','0','8'],['Division Woman','0','16'],[''],['Name','ntrp','Division','status']];
+ put(PID,'Season 3',[...structuredClone(tpl),['Manual Guy','3.5','','waitlist']]);
+ put(PID,'Short (копия) 1',[...structuredClone(tpl),['Season Two Player','4.0','Division A','active']]);
+ const shortBefore=JSON.stringify(tables.get(PID+'|Short (копия) 1'));
+ sheets.invalidateSheetCache();sheets.invalidateLeagueCache();
+ const wl=await load('waitlistsync.js');
+ const tab=()=>tables.get(PID+'|Season 3');
+ const rowOf=(n)=>tab()[10+n]||[];
+ let r=await wl.syncWaitlistSeason('3');
+ check(r.ok&&r.waitlist===2&&r.tab==='Season 3','Лист ожидания сезона 3 переносится во вкладку «Season 3»');
+ check(tab()[10].slice(4,7).join('|')==='telegram_id|applied_at|league_player','Справа дописаны служебные колонки telegram_id, applied_at, league_player');
+ check(rowOf(1)[0]==='Dan Four'&&rowOf(1)[1]==='4.0'&&rowOf(1)[3]==='waitlist'&&rowOf(1)[4]==='4'&&rowOf(1)[6]==='yes','Игрок лиги — первым, рейтинг из анкеты, статус waitlist');
+ check(rowOf(2)[0]==='Out Sider'&&rowOf(2)[6]==='','Новичок — после игроков лиги, хоть и подал заявку раньше');
+ check(rowOf(3)[0]==='Manual Guy'&&!rowOf(3)[4],'Строка, вписанная руками, сохраняется в конце');
+ check(!tab().some(x=>x[0]==='Carol Three'),'Отклонённая заявка в список не попадает');
+ check(!tab().some(x=>x[0]==='Wendy Three'),'Заявка в идущий сезон (не лист ожидания) в список не попадает');
+ check(tab()[3][1]==='0'&&tab()[0][0]==='The division has not yet been formed.','Сводка над таблицей не тронута');
+ check(JSON.stringify(tables.get(PID+'|Short (копия) 1'))===shortBefore,'Вкладка другого сезона не тронута');
+ // Организатор поставил дивизион и откалибровал рейтинг; пришла новая заявка.
+ rowOf(1)[1]='4.5';rowOf(1)[2]='Division A';
+ tables.get('crm|Applications').push(['a5','10','Wendy Four','league_s3','application_received','2026-08-15T10:00:00Z']);
+ sheets.invalidateSheetCache();
+ r=await wl.syncWaitlistSeason('3');
+ check(rowOf(1)[0]==='Dan Four'&&rowOf(1)[1]==='4.5'&&rowOf(1)[2]==='Division A','Правки организатора (рейтинг, дивизион) не перезаписываются');
+ check(rowOf(2)[0]==='Wendy Four'&&rowOf(3)[0]==='Out Sider'&&rowOf(4)[0]==='Manual Guy','Новички — по дате заявки');
+ // Заявку отменили — строка уходит, хвост очищается.
+ tables.get('crm|Applications').find(x=>x[0]==='a1')[4]='cancelled';
+ sheets.invalidateSheetCache();
+ r=await wl.syncWaitlistSeason('3');
+ check(r.waitlist===2&&!tab().some(x=>x[0]==='Out Sider')&&rowOf(3)[0]==='Manual Guy'&&!rowOf(4).some(Boolean),'Отменённая заявка удаляется из списка, лишняя строка очищается');
+ const twice=JSON.stringify(tab());await wl.syncWaitlistSeason('3');
+ check(JSON.stringify(tab())===twice,'Повторная сверка ничего не меняет');
+ // Участники сезона: отметка «игрок лиги» доходит до экрана.
+ const part=await sheets.getManualParticipants('3');
+ check(part.players.find(p=>p.name==='Dan Four')?.league_player===true&&part.players.find(p=>p.name==='Wendy Four')?.league_player===false,'Экран участников знает, кто игрок лиги');
+ // Нет вкладки сезона — ничего не пишем в чужую.
+ put('crm','Events',[['event_id','event_name_en','status','event_type'],['league_s5','League Season 5','waitlist','league']]);
+ tables.get('crm|Applications').push(['a6','4','Dan Four','league_s5','application_received','2026-09-25T10:00:00Z']);
+ sheets.invalidateSheetCache();
+ const before3=JSON.stringify(tab());
+ const all=await wl.syncAllWaitlists();
+ check(all.length===1&&all[0].reason==='no_tab'&&JSON.stringify(tab())===before3&&JSON.stringify(tables.get(PID+'|Short (копия) 1'))===shortBefore,'Нет вкладки с номером сезона — ничего не пишем в чужие вкладки');
+ check((await wl.syncWaitlistSeason('4')).reason==='no_waitlist_event','Сезон без листа ожидания пропускается');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/const clean = \(\{ telegram_id, \.\.\.p \}\) => p;/.test(idx),'telegram_id участников не уходит в браузер');
+ check(/syncWaitlistEntry\(event\)/.test(idx)&&/setImmediate\(\(\) => \(async \(\) => \{/.test(idx),'Заявка: ответ экрану сразу, сообщения и перенос в список — в фоне');
+ check(/keepStatus/.test(idx),'Игрок идущего сезона, вставший в лист следующего, остаётся active');
+ const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
+ check(/syncWaitlistEntry\(app\.event_id\)/.test(adm),'Отклонение заявки пересобирает список участников');
+ check(/cmd:'waitlist_sync', group:'Лига'/.test(telegramSource)&&/text === '\/waitlist_sync'/.test(await fs.readFile(path.join(root,'bot.js'),'utf8')),'Команда /waitlist_sync — в списке команд и в /help');
+ // вернуть как было
+ if(saved.ev)tables.set('crm|Events',saved.ev);else tables.delete('crm|Events');
+ tables.set('crm|Applications',saved.apps);tables.set('crm|Applicants',saved.appl);
+ if(saved.prof)tables.set(WID+'|Frontend_Profile_All',saved.prof);
+ sheets.invalidateSheetCache();sheets.invalidateLeagueCache();
+}
+
+// --- Сайт: страница игрока, сезоны, лист ожидания в мини-приложении и боте ---
+{
+ const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ check(/\.hero\{display:grid;grid-template-columns:232px minmax\(0,1fr\)/.test(lg)&&/class="hph"/.test(lg),'Компьютер: фото игрока квадратом слева, данные справа, ярлыки не на фото');
+ check(/\$\('title'\)\.textContent=L\?'Игрок':'Player';/.test(lg),'В шапке страницы игрока — «Игрок», а не название прошлой вкладки');
+ check(/Number\(b\.number\)-Number\(a\.number\)/.test(lg.slice(lg.indexOf('function statsBlock'))),'«PTF в цифрах»: свежий сезон первым');
+ check(/s\.players\|\|s\.players_played/.test(lg)&&!/s\.players_played\|\|s\.players\b/.test(lg),'Игроки сезона — весь состав, а не только сыгравшие');
+ const trn=lg.slice(lg.indexOf('function renderTournaments'),lg.indexOf('function renderAbout'));
+ check(trn.indexOf('next.forEach')<trn.indexOf('live.forEach')&&/trn-nx/.test(trn),'Турниры: лист ожидания сверху скромной плашкой, фокус на идущем сезоне');
+ check(/Runner-up/.test(trn)&&/trn-ru/.test(trn),'Турниры: финалист в серебряной рамке рядом с чемпионом');
+ const idx=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/=== 'finished' \? span\.get/.test(idx),'Длительность по матчам — только у завершённого сезона');
+ const ab=await fs.readFile(path.join(root,'public','about.html'),'utf8');
+ check(/s\.players\|\|s\.players_played\|\|0/.test(ab)&&/\.slice\(\)\.reverse\(\); \/\/ свежий сезон первым/.test(ab),'Лендинг: игроки — весь состав, свежий сезон первым');
+ const apx=await fs.readFile(path.join(root,'public','apply.html'),'utf8');
+ check(/if\(mode!=='waitlist'\)mode='event';preselectWait\(\)/.test(apx),'Лист ожидания: «Start profile → Continue» больше не путается');
+ check(/function cardAction/.test(apx)&&/League tables/.test(apx)&&/startFor\(/.test(apx),'Карточки событий кликабельны: таблицы лиги / встать в лист ожидания');
+ check(/function waitIntroText/.test(apx)&&/8 places per division/.test(apx),'Экран листа ожидания объясняет, что это и что нажать');
+ check(/!weeks&&ev\.start_date&&ev\.end_date/.test(apx),'Мини-приложение: длительность идущего сезона по датам события');
+ const pt=await fs.readFile(path.join(root,'public','participants.html'),'utf8');
+ check(/queueSub/.test(pt)&&/league_player/.test(pt)&&/fromMode/.test(pt),'Экран участников: очередь листа ожидания с отметкой «игрок лиги», «Назад» возвращает в лист');
+ const bt=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/async function sendWaitlistInvite/.test(bt)&&/dest\.code === 'waitlist'/.test(bt),'Бот: развёрнутое сообщение про лист ожидания');
+ check(/if \(param\) return handleStartParam\(chatId, selected, from, param/.test(bt),'Бот: после выбора языка ссылка с сайта не теряется');
+}
+
+// --- Гость сайта: сезоны и турниры видны без входа, знакомство при каждом заходе ---
+{
+ const route=routes.find(r=>r.method==='get'&&r.p==='/api/public/events');
+ check(Boolean(route),'Есть открытая ручка событий для сайта');
+ put('crm','Events',[['event_id','event_name_en','status','event_type','price_thb','payment_link'],['league_s3','League Season 3','waitlist','league','3000','secret-link']]);
+ sheets.invalidateSheetCache();
+ const res={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this},set(){return this}};
+ await route.h({query:{},headers:{}},res);
+ check(res.body.ok&&res.body.events.length===1&&res.body.events[0].status_code==='waitlist','Гость видит события лиги без входа');
+ check(!('payment_link' in res.body.events[0])&&!('price_thb' in res.body.events[0]),'Гостю уходят только открытые поля события');
+ quotaKeys.add('crm|Events');
+ const res2={code:200,status(n){this.code=n;return this},json(v){this.body=v;return this},set(){return this}};
+ await route.h({query:{},headers:{}},res2);
+ quotaKeys.clear();
+ check(res2.body.ok&&res2.body.events.length===1,'Лимит Google: события берутся из кеша, вкладка не пустеет');
+ tables.delete('crm|Events');sheets.invalidateSheetCache();
+ const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ check(/get\('\/api\/public\/events'\)/.test(lg)&&/pubRetried=true;setTimeout\(loadPublicExtras,4000\)/.test(lg),'Вкладка «Турниры» берёт события из открытой ручки и переспрашивает при сбое');
+ check(/sessionStorage\.getItem\('ptf_intro_seen'\)/.test(lg)&&/Seasons and the waitlist/.test(lg),'Знакомство гостю — при каждом заходе на сайт, со ссылкой на сезоны и лист ожидания');
+}
+
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

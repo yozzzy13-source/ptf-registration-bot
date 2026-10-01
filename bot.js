@@ -416,6 +416,30 @@ async function syncUserCommands(chatId, lang, { active=false, admin=false } = {}
   } catch (e) { console.error('setChatCommands failed:', e.message); }
 }
 
+// Параметр ссылки /start (откуда человек пришёл). Вынесено в функцию, чтобы
+// разобрать его и после выбора языка: раньше при первом касании бот спрашивал
+// язык и забывал, куда человек шёл (например, в лист ожидания с сайта).
+async function handleStartParam(chatId, lang, from, param = '', isPrivate = true) {
+  if (param.startsWith('challenge_')) return handleChallengeStart(chatId, from, lang, param.replace('challenge_', ''));
+  // Ссылка «Играю» из чата дивизиона: открываем мини-приложение сразу на этой заявке.
+  if (param.startsWith('match_')) {
+    const slotId = param.replace(/^match_/, '');
+    return sendMessage(chatId, lang === 'ru'
+      ? '🎾 Выберите удобные дату и корт из предложенных соперником.'
+      : '🎾 Pick a date and court from what your opponent offered.', {
+      reply_markup: { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Выбрать и принять' : '🎾 Choose and accept', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slotId)}` } }]] }
+    });
+  }
+  // Ссылка-раздел из рассылки: t.me/бот?start=go_<код>.
+  // Ссылка-приглашение в пару: t.me/бот?start=pair_<id приглашения>.
+  if (param.startsWith('pair_')) return handlePairStart(chatId, from, lang, param.replace(/^pair_/, ''));
+  if (param.startsWith('go_')) return openDestination(chatId, lang, from, param.replace(/^go_/, ''));
+  // С сайта: «Заполнить анкету» ведёт сюда — сразу кнопка анкеты, без меню.
+  if (param === 'profile' && isPrivate) return startProfileFromSite(chatId, lang, from);
+  if (!isPrivate) return null;
+  return sendMain(chatId, lang, from);
+}
+
 // /match, /result, /book — прямой вход в нужную вкладку мини-приложения.
 // Доступны только активным игрокам состава: остальным кнопка всё равно не откроется.
 // Ссылка-раздел (t.me/бот?start=go_<код>) разворачивается в нужный экран.
@@ -425,6 +449,7 @@ async function openDestination(chatId, lang, from, code) {
   const dest = findDestination(code);
   if (!dest) return sendMain(chatId, lang, from);
   const l = fallbackLang(lang);
+  if (dest.code === 'waitlist') return sendWaitlistInvite(chatId, l, from);
   if (dest.kind === 'callback') {
     if (dest.action === 'payment_entry') return sendPaymentEntry(chatId, from, l);
     if (dest.action === 'contact') {
@@ -481,8 +506,39 @@ async function startProfileFromSite(chatId, lang, from) {
     : '✅ Your profile is already complete. Refresh the website — everything available to you is already open.');
   return sendMain(chatId, l, from);
 }
+// Лист ожидания: человек приходит сюда с сайта или из меню и должен сразу
+// понять, что это, зачем и что от него нужно. Шаги зависят от того, есть ли
+// уже анкета: с анкетой — сразу выбор сезона.
+async function sendWaitlistInvite(chatId, lang, from) {
+  const l = fallbackLang(lang);
+  const ru = l === 'ru';
+  let hasProfile = false;
+  try { hasProfile = isProfileCompleted(await findApplicantByTelegramId(from?.id ?? chatId)); }
+  catch (e) { console.error('waitlist profile check failed:', e.message); }
+  const steps = ru
+    ? (hasProfile
+      ? ['Нажмите кнопку ниже.', 'Ваша анкета уже есть — сразу выберите сезон в листе ожидания.', 'Нажмите «Отправить» — и вы в листе.']
+      : ['Нажмите кнопку ниже.', 'Заполните короткую анкету — пара минут.', 'Выберите сезон в листе ожидания и нажмите «Отправить».'])
+    : (hasProfile
+      ? ['Tap the button below.', 'Your profile is already there — just pick the season in the waitlist.', 'Tap «Submit» — you are on the list.']
+      : ['Tap the button below.', 'Fill in a short profile — a couple of minutes.', 'Pick the season in the waitlist and tap «Submit».']);
+  const text = ru
+    ? '📝 <b>Лист ожидания следующего сезона</b>\n\n'
+      + 'Сезон лиги идёт два месяца, места ограничены: <b>8 игроков в дивизионе</b>. Лист ожидания — это очередь на следующий сезон. Когда откроется набор, участники листа узнают о нём раньше остальных.\n\n'
+      + 'Порядок в листе: сначала те, кто уже играл в лиге, дальше — по дате заявки.\n\n'
+      + '<b>Что сделать:</b>\n' + steps.map((x, i) => `${i + 1}. ${x}`).join('\n')
+    : '📝 <b>Next-season waitlist</b>\n\n'
+      + 'A league season runs for two months and places are limited: <b>8 players per division</b>. The waitlist is the queue for the next season. When registration opens, waitlist players hear about it before everyone else.\n\n'
+      + 'Order on the list: players who have already played in the league first, then by application date.\n\n'
+      + '<b>What to do:</b>\n' + steps.map((x, i) => `${i + 1}. ${x}`).join('\n');
+  return sendMessage(chatId, text, { reply_markup: { inline_keyboard: [
+    [{ text: ru ? '📝 Встать в лист ожидания' : '📝 Join the waitlist', web_app: { url: `${PUBLIC_URL}/apply?mode=waitlist` } }],
+    [{ text: t(l, 'main_menu'), callback_data: 'main' }]
+  ] } });
+}
 async function sendOpenApp(chatId, lang, key) {
   const l = fallbackLang(lang);
+  if (key === 'waitlist') return sendWaitlistInvite(chatId, l, { id: chatId });
   const d = OPEN_APP[key];
   if (!d) return sendMain(chatId, l, null);
   const ru = l === 'ru';
@@ -634,7 +690,8 @@ const ADMIN_HELP_TAIL = {
     '• «Мои матчи» — вкладка в общем меню у игроков лиги; тот же экран открывается и из бота.',
     '• Галерея сайта — папка «PTF Gallery» в папке PTF на Диске: кидаешь фото (подпапка = альбом, например «Сезон 1 · Финалы»), через 10 минут они на сайте.',
     '• Вкладка «Турниры»: идущий сезон, следующий (лист ожидания, берётся из листа Events) и прошедшие с чемпионами. Видимость — во вкладке «Кнопки» админки.',
-    '• На главной — «PTF в цифрах» (игроки и матчи по сезонам), лента Instagram и плашка Telegram-бота.',
+    '• На главной — «PTF в цифрах» (игроки и матчи по сезонам, свежий сезон первым), лента Instagram и плашка Telegram-бота.',
+    '• Лист ожидания → «Short Players list»: каждая заявка в лист ожидания сразу ложится строкой во вкладку сезона (в названии — номер сезона, например «Season 3»): имя, ntrp из анкеты, статус waitlist. Дивизион ставишь сам, ntrp правишь сам — бот это не перезаписывает. Порядок: сначала игроки лиги, дальше по дате заявки. Отклонил заявку — строка уходит. Справа служебные колонки telegram_id, applied_at, league_player — их не трогать. Сверить вручную: <code>/waitlist_sync</code>.',
     '• Поиск Google: у разделов чистые адреса (/race, /players, /divisions, /events, /tournaments, /about), русская версия — ?lang=ru. Карта сайта — phukettennis.com/sitemap.xml, её сдают в Google Search Console.',
     '', '📊 <b>Дивизионы и результаты</b>',
     '• Дивизион игрока и список соперников берутся из таблицы дивизиона последнего сезона, лист <b>Division_Tracker</b>, список под заголовком «Player». Переносишь игрока — правишь только там.',
@@ -663,7 +720,8 @@ const ADMIN_HELP_TAIL = {
     '• «My matches» is a tab in the shared menu for league players; the bot opens the same screen.',
     '• Site gallery: the «PTF Gallery» folder in the PTF Drive folder — drop photos there (subfolder = album), they appear within 10 minutes.',
     '• The «Tournaments» tab: the running season, the next one (waitlist, from the Events sheet) and past seasons with champions.',
-    '• The home page shows «PTF in numbers», the Instagram feed and a Telegram bot card.',
+    '• The home page shows «PTF in numbers» (newest season first), the Instagram feed and a Telegram bot card.',
+    '• Waitlist → «Short Players list»: every waitlist application lands as a row in the season tab (the tab name contains the season number, e.g. «Season 3»): name, ntrp from the profile, status waitlist. You set the division and calibrate ntrp — the bot never overwrites them. Order: league players first, then by application date. A rejected application removes the row. The service columns telegram_id, applied_at, league_player on the right must stay. Re-check by hand: <code>/waitlist_sync</code>.',
     '• Google search: sections have clean addresses (/race, /players, /divisions, /events, /tournaments, /about), Russian version via ?lang=ru. Sitemap: phukettennis.com/sitemap.xml — submit it in Google Search Console.',
     '', '📊 <b>Divisions and results</b>',
     '• A player’s division and opponents come from the latest season division sheet, tab <b>Division_Tracker</b>, the list under «Player».',
@@ -1261,24 +1319,7 @@ export async function handleMessage(msg) {
       userState.set(String(chatId), { mode:'awaiting_language', pendingStartParam:param });
       return sendLanguageChoice(chatId);
     }
-    if (param.startsWith('challenge_')) return handleChallengeStart(chatId, from, lang, param.replace('challenge_', ''));
-    // Ссылка «Играю» из чата дивизиона: открываем мини-приложение сразу на этой заявке.
-    if (param.startsWith('match_')) {
-      const slotId = param.replace(/^match_/, '');
-      return sendMessage(chatId, lang === 'ru'
-        ? '🎾 Выберите удобные дату и корт из предложенных соперником.'
-        : '🎾 Pick a date and court from what your opponent offered.', {
-        reply_markup: { inline_keyboard: [[{ text: lang === 'ru' ? '🎾 Выбрать и принять' : '🎾 Choose and accept', web_app: { url: `${PUBLIC_URL}/match?slot=${encodeURIComponent(slotId)}` } }]] }
-      });
-    }
-    // Ссылка-раздел из рассылки: t.me/бот?start=go_<код>.
-    // Ссылка-приглашение в пару: t.me/бот?start=pair_<id приглашения>.
-    if (param.startsWith('pair_')) return handlePairStart(chatId, from, lang, param.replace(/^pair_/, ''));
-    if (param.startsWith('go_')) return openDestination(chatId, lang, from, param.replace(/^go_/, ''));
-    // С сайта: «Заполнить анкету» ведёт сюда — сразу кнопка анкеты, без меню.
-    if (param === 'profile' && isPrivate) return startProfileFromSite(chatId, lang, from);
-    if (!isPrivate) return null;
-    return sendMain(chatId, lang, from);
+    return handleStartParam(chatId, lang, from, param, isPrivate);
   }
 
   if (text === '/language' && isPrivate) return sendLanguageChoice(chatId);
@@ -1452,6 +1493,18 @@ function findConfirmedSlot(done, wanted) {
         await sendMessage(chatId, `🧪 Предпросмотр: <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>. Никому, кроме вас, это не уходит.`);
         await previewResultPost(slot, chatId, { withButtons: msg.chat?.type === 'private' });
         return;
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    if (text === '/waitlist_sync') {
+      // Сверить лист ожидания с таблицей участников прямо сейчас.
+      try {
+        const { syncAllWaitlists } = await import('./waitlistsync.js');
+        const res = await syncAllWaitlists();
+        if (!res.length) return sendMessage(chatId, 'Открытого листа ожидания нет: в листе Events нет события со статусом waitlist.');
+        const why = { no_tab:'нет вкладки с номером сезона в «Short Players list»', no_waitlist_event:'нет события листа ожидания', no_season:'не понял номер сезона' };
+        return sendMessage(chatId, '📝 <b>Лист ожидания → список участников</b>\n\n' + res.map(r => r.ok
+          ? `Сезон ${escapeHtml(r.season)}: в листе <b>${r.waitlist}</b> → вкладка «${escapeHtml(r.tab)}»${r.manual ? `, ещё ${r.manual} вписаны вручную` : ''}`
+          : `Сезон ${escapeHtml(r.season)}: ⛔ ${escapeHtml(why[r.reason] || r.reason)}`).join('\n'));
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
     if (text.startsWith('/fix_result')) {
@@ -1786,8 +1839,7 @@ export async function handleCallback(q) {
     userState.delete(String(chatId));
     await sendMessage(chatId, t(selected, 'language_saved'));
     const param = state?.pendingStartParam || '';
-    if (param.startsWith('challenge_')) return handleChallengeStart(chatId, from, selected, param.replace('challenge_', ''));
-    if (param === 'profile') return startProfileFromSite(chatId, selected, from);
+    if (param) return handleStartParam(chatId, selected, from, param, msg.chat.type === 'private');
     return sendMain(chatId, selected, from);
   }
 
