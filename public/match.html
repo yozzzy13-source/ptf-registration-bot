@@ -769,6 +769,13 @@ function matchEnded(s){
   var wait=Math.min(Number(resultAfterMin)||90,Number(s.duration_min||matchDuration)||120);
   return start+wait*60000<=Date.now();
 }
+// День матча уже начался (00:00 по Пхукету): сыграли раньше времени — счёт
+// можно внести сразу, не дожидаясь конца брони.
+function matchDayStarted(s){
+  var d=String(s.agreed_date||'');
+  var day=Date.parse(d+'T00:00:00+07:00');
+  return Number.isFinite(day)&&day<=Date.now();
+}
 function canRetime(s){return String(s.from_telegram_id)===String(me&&me.id)}
 function agreedActions(s,opp){
   var b='<div class="acts">';
@@ -787,6 +794,7 @@ function agreedActions(s,opp){
     else b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';
     return b+'</div>';
   }
+  if(matchDayStarted(s)&&!st&&amPlayer(s))b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';
   if(canRetime(s)&&!s.court_confirmed_at&&!pendingTime(s))b+='<button class="mini'+(courtPending(s)?'':' primary')+'" onclick="bookingHelper(\''+esc(s.challenge_id)+'\',this)">'+esc(L?'📲 Забронировать корт':'📲 Book court')+'</button>';
   if(canRetime(s)&&courtPending(s))b+='<button class="mini primary" onclick="confirmCourtApp(\''+esc(s.challenge_id)+'\',this)">'+esc(X.courtBtn)+'</button>';
   if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';
