@@ -2151,6 +2151,12 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
  check(/function matchDayStarted\(s\)/.test(mh)&&/if\(matchDayStarted\(s\)&&!st&&amPlayer\(s\)\)/.test(mh),'«Мои матчи»: кнопка счёта в день матча, бронь и перенос при этом не пропадают');
  check(/cmd:'match_check'/.test(telegramSource),'/match_check — в меню команд и в /help');
+ // «9:00» без нуля (так время показывает Google Таблица) — реальный случай Banatskiy/Pierre.
+ const nine={challenge_id:'nine_test',status:'accepted',from_telegram_id:'3',to_telegram_id:'4',from_name:'Carol Three',to_name:'Dan Four',agreed_date:'2026-10-02',agreed_time:'9:00',time_from:'9:00',duration_min:'120',court_confirmed_at:'x'};
+ check(mdb.slotStartMs(nine)===Date.parse('2026-10-02T09:00:00+07:00'),'Время «9:00» без нуля понимается: напоминания и счёт работают');
+ check(mdb.resultOpenMs(nine,90)===Date.parse('2026-10-02T10:30:00+07:00'),'Приглашение внести счёт для «9:00» — в 10:30');
+ check(/function hhmm\(t\)/.test(mh)&&/var d=matchDay\(s\),t=hhmm\(/.test(mh),'«Мои матчи»: кнопка счёта не теряется из-за «9:00»');
+ check(/\.tabs\.subtabs\{flex-wrap:nowrap;overflow-x:auto/.test(mh),'Вкладки «Моих матчей» не обрезаются при крупном шрифте');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
