@@ -342,7 +342,10 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 
 /* Партнёры: карточка с обложкой, описанием и кнопками связи. Список приходит
    из листа Partners — верстка не знает, сколько их и какие они. */
-.pt{border:1px solid var(--line2);border-radius:16px;background:var(--card2);overflow:hidden;margin-bottom:11px}
+/* Карточка партнёра — только div.pt. Раньше правило .pt цепляло и очки в
+   таблицах (<span class="pt">): у них появлялись рамка, фон и отступ снизу,
+   отчего число «прыгало» вверх. */
+div.pt{border:1px solid var(--line2);border-radius:16px;background:var(--card2);overflow:hidden;margin-bottom:11px}
 /* Картинка партнёра — целиком, без обрезки: у логотипов важны края. Любая
    пропорция вписывается по ширине карточки; слишком высокая упирается в
    потолок и центрируется, по бокам остаются поля фона. */
@@ -778,6 +781,20 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 .loginsheet h3{font-size:18px;margin-bottom:8px}
 .loginsheet p{font-size:12.5px;color:var(--dim);line-height:1.5;margin-bottom:16px}
 .loginsheet .tgw{min-height:48px;display:flex;justify-content:center}
+/* Окно-пояснение к ярлыку (badgeInfo). */
+.infosheet .box{position:relative;text-align:left}
+.infosheet .ix{position:absolute;top:12px;right:12px;width:30px;height:30px;margin:0;padding:0;border-radius:50%;border:1px solid var(--line2);background:var(--card2);color:var(--dim);font-size:13px;cursor:pointer}
+.infosheet .ihead{display:flex;align-items:center;gap:12px;margin:0 36px 12px 0}
+.infosheet .iic{width:42px;height:42px;flex:0 0 42px;border-radius:13px;background:var(--card2);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:21px}
+.infosheet h3{margin:0;font-size:17px}
+.infosheet .isub{font-size:11.5px;color:var(--mute);margin-top:2px}
+.infosheet .ibody p{font-size:13px;color:var(--text);line-height:1.55;margin:0 0 10px}
+.infosheet .ibody p.imute{color:var(--dim);font-size:12px}
+.infosheet .iline{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line2)}
+.infosheet .iline b{display:block;font-size:13px}.infosheet .iline span{font-size:11.5px;color:var(--dim)}
+.infosheet .iacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.tapb{cursor:pointer}
+.flagimg{width:18px;height:13px;border-radius:2px;object-fit:cover;vertical-align:-1px;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
 .loginsheet .close{width:auto;display:inline-block;margin-top:16px;background:transparent;border:0;color:var(--mute);font:inherit;font-size:12px;cursor:pointer}
 @media (min-width:560px){.loginsheet{align-items:center}.loginsheet .box{border-radius:20px}}
 .sharebtn{display:inline-flex;align-items:center;gap:6px;width:auto;margin:0;padding:7px 12px;border-radius:999px;
@@ -857,6 +874,8 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
 .socbtn{width:auto;margin:0;padding:9px 14px;border-radius:12px;border:0;font:inherit;font-size:12.5px;font-weight:900;color:#1A1208;
   background:linear-gradient(135deg,var(--amber),var(--amber2));cursor:pointer;white-space:nowrap}
 html[data-theme="light"] .socbtn{color:#fff}
+/* Светлая тема: у второстепенной кнопки фон светлый — белый текст на нём терялся. */
+html[data-theme="light"] .socbtn.ghost{color:var(--text)}
 .socbtn.ghost{background:var(--card2);color:var(--text);border:1px solid var(--line)}
 .socbtn.wide{width:100%;margin-top:12px;padding:12px}
 .ig-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:12px}
@@ -877,7 +896,9 @@ html[data-theme="light"] .socbtn{color:#fff}
 .trn-d{font-size:11.5px;color:var(--mute);font-weight:700}
 .trn h3{font-size:17px;margin-bottom:9px}
 .trn.trn-live{border-color:var(--accLine);background:linear-gradient(160deg,var(--accBg),var(--surf) 55%)}
-.tr-stats{display:flex;gap:18px;margin:4px 0 12px}
+.tr-stats{display:flex;gap:8px;margin:4px 0 12px}
+/* Цифры сезона — каждая в своей рамке, чтобы выделялись. */
+.tr-stats>div{flex:0 1 auto;min-width:78px;padding:8px 12px;border:1px solid var(--line2);border-radius:12px;background:var(--card2)}
 .tr-stats b{display:block;font-size:22px;font-weight:900;color:var(--amber);letter-spacing:-.5px}
 .tr-stats span{font-size:10.5px;color:var(--dim);font-weight:700}
 .trn-order{font-size:12.3px;line-height:1.55;color:var(--dim);background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:10px 12px;margin:10px 0 12px}
@@ -912,7 +933,7 @@ html[data-theme="light"] .socbtn{color:#fff}
   .tabs.five{grid-template-columns:none}
   .tabs.five .tab{font-size:11.5px}
   .grid{grid-template-columns:repeat(3,1fr)}
-  .pt:has(>.ptimg){display:grid;grid-template-columns:230px minmax(0,1fr)}
+  div.pt:has(>.ptimg){display:grid;grid-template-columns:230px minmax(0,1fr)}
   .pt .ptimg{width:230px;height:100%;min-height:230px;max-height:none;border-bottom:0;border-right:1px solid var(--line2);padding:14px}
   .pt .ptbody{padding:16px 18px}
   /* Страница игрока: на широком экране фото не растягиваем на всю ширину
@@ -1313,8 +1334,14 @@ function flag(c){
     var head=v.split(/[(\/,|–—]/)[0].trim();
     if(head&&head!==v)code=COUNTRY_CODES[head];
   }
-  return flagOfCode(code||v)||'🌍';
+  var emoji=flagOfCode(code||v);
+  if(!emoji)return '🌍';
+  // Windows не рисует эмодзи-флаги — показывает две буквы («JP»). Там вместо
+  // эмодзи — маленькая картинка флага; на телефонах и Mac остаётся эмодзи.
+  if(NO_FLAG_EMOJI)return '<img class="flagimg" src="https://flagcdn.com/w40/'+String(code||v).toLowerCase()+'.png" alt="'+esc(String(code||v).toUpperCase())+'" loading="lazy" onerror="this.replaceWith(document.createTextNode(\'🌍\'))">';
+  return emoji;
 }
+var NO_FLAG_EMOJI=/Windows/i.test(navigator.userAgent||'')&&!/Firefox/i.test(navigator.userAgent||'');
 // Иконка достижения по его типу.
 function achIcon(a){
   var t=String((a&&(a.type||a.title))||'').toLowerCase();
@@ -2464,7 +2491,7 @@ function achBadges(p,cls){
   var list=(p.achievements||[]).slice(0,3);
   if(!list.length)return '';
   return '<div class="'+(cls||'ach')+'">'+list.map(function(a,i){
-    return '<span onclick="event.stopPropagation();toggleAch(\''+q(p.id)+'\',\''+i+'\')">'+achIcon(a)+'</span>';
+    return '<span onclick="event.stopPropagation();badgeInfo(\'ach\',\''+q(p.id)+'\','+i+')">'+achIcon(a)+'</span>';
   }).join('')+'</div>';
 }
 function toggleAch(id,i){
@@ -2483,7 +2510,7 @@ function achNote(p){
 function playerRow(p){
   var w=pct(p);
   return '<div class="pr" onclick="openPlayer(\''+q(p.id)+'\',\'players\')"><div class="top">'
-    +'<div class="ph">'+av(p)+'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p)+'</div>'
+    +'<div class="ph">'+av(p)+'<div class="rankb tapb" onclick="event.stopPropagation();badgeInfo(\'race\',\''+q(p.id)+'\')">#'+(raceNo(p)||'—')+'</div>'+achBadges(p)+'</div>'
     +'<div><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
     +'<div class="rw">'+divChip(p.division,p.division_position)+statusBadge(p)+'</div>'
     +'<div class="meta">'+(p.ntrp?'<span>'+esc(X.ntrp)+' <b>'+esc(p.ntrp)+'</b></span>':'')
@@ -2502,7 +2529,7 @@ function playerRow(p){
 function playerTile(p){
   var w=pct(p);
   return '<div class="pc" onclick="openPlayer(\''+q(p.id)+'\',\'players\')">'+av(p)
-    +'<div class="rankb">#'+(raceNo(p)||'—')+'</div>'+achBadges(p,'ach2')
+    +'<div class="rankb tapb" onclick="event.stopPropagation();badgeInfo(\'race\',\''+q(p.id)+'\')">#'+(raceNo(p)||'—')+'</div>'+achBadges(p,'ach2')
     +'<div class="bd"><div class="nm">'+esc(p.name)+myFantasyMarks(p.name)+'</div>'
     +'<div class="rw">'+divChip(p.division,p.division_position)+'</div>'
     +'<div class="mt2">'+(p.nationality?flag(p.nationality)+' ':'')
@@ -2514,6 +2541,76 @@ function playerTile(p){
     +'</div></div>';
 }
 
+// ------------------------------------------------- пояснения к ярлыкам
+// Любой ярлык на карточке и плитке игрока нажимается и объясняет себя в
+// небольшом окне: что это, откуда цифра и куда перейти дальше.
+function closeInfo(){var el=document.getElementById('infoSheet');if(el)el.remove()}
+function infoSheet(icon,title,sub,body,actions){
+  closeInfo();
+  var el=document.createElement('div');
+  el.id='infoSheet';el.className='loginsheet infosheet';
+  el.onclick=function(e){if(e.target===el)closeInfo()};
+  el.innerHTML='<div class="box"><button class="ix" onclick="closeInfo()" aria-label="Close">✕</button>'
+    +'<div class="ihead">'+(icon?'<div class="iic">'+icon+'</div>':'')+'<div><h3>'+esc(title)+'</h3>'+(sub?'<div class="isub">'+esc(sub)+'</div>':'')+'</div></div>'
+    +'<div class="ibody">'+body+'</div>'
+    +((actions||[]).length?'<div class="iacts">'+actions.map(function(a){return '<button class="socbtn'+(a.ghost?' ghost':'')+'" onclick="closeInfo();'+a.js+'">'+esc(a.label)+'</button>'}).join('')+'</div>':'')
+    +'</div>';
+  document.body.appendChild(el);
+}
+function achMeaning(a){
+  var t=String((a&&(a.type||a.title))||'').toLowerCase();
+  if(/champion|чемпион|winner/.test(t))return L?'Победитель плей-офф своего дивизиона в этом сезоне.':'Won the playoff of their division that season.';
+  if(/runner|second|финал|2nd/.test(t))return L?'Финалист плей-офф: дошёл до финала своего дивизиона.':'Playoff finalist: reached the final of their division.';
+  if(/promotion|повышен|up/.test(t))return L?'По итогам сезона перешёл в дивизион выше.':'Moved up a division after the season.';
+  if(/relegation|вылет|down/.test(t))return L?'По итогам сезона перешёл в дивизион ниже.':'Moved down a division after the season.';
+  if(/undefeated|streak|серия/.test(t))return L?'Серия побед подряд.':'A winning streak.';
+  return '';
+}
+function badgeInfo(kind,id,i){
+  var p=byId(id);if(!p)return;
+  var nm=esc(p.name);
+  if(kind==='div'){
+    var pos=p.division_position;
+    infoSheet('🎾',divLabel(p.division)+(pos?' · #'+pos:''),p.name,
+      '<p>'+(L?'Дивизион, в котором '+nm+' играет в текущем сезоне'+(pos?', и место в таблице прямо сейчас — <b>'+esc(pos)+'</b>.':'.')
+              :'The division '+nm+' plays in this season'+(pos?', and the current place in its table — <b>'+esc(pos)+'</b>.':'.'))+'</p>'
+      +'<p class="imute">'+esc(L?'Места 1–2 — повышение, 1–4 — плей-офф, 5–6 остаются, 7–8 — вылет.':'Places 1–2 promote, 1–4 reach the playoff, 5–6 stay, 7–8 relegate.')+'</p>',
+      [{label:L?'Открыть таблицу':'Open the table',js:'openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')'}]);
+  }else if(kind==='race'){
+    var r=raceNo(p);
+    infoSheet('📈',(L?'Гонка':'Race')+(r?' #'+r:''),p.name,
+      '<p>'+(L?'Место в годовой гонке — Year Ranking Points (YRP). Очки приносит каждый сезон: чем выше дивизион и итоговое место, тем больше.'
+              :'Place in the yearly race — Year Ranking Points (YRP). Every season adds points: the higher the division and final place, the more.')+'</p>'
+      +'<p>'+(L?'У '+nm+' сейчас <b>'+esc(p.points||0)+' YRP</b>.':nm+' has <b>'+esc(p.points||0)+' YRP</b> now.')+'</p>'
+      +'<p class="imute">'+esc(L?'По гонке отбираются участники Grand Final — главного турнира года.':'The race decides who plays the Grand Final — the main event of the year.')+'</p>',
+      VIEWS.indexOf('race')>=0?[{label:L?'Открыть гонку':'Open the race',js:'showTab(\'race\')'}]:[]);
+  }else if(kind==='fantasy'){
+    var f=fantasyPlayer(p);if(!f)return;
+    infoSheet('✨','Fantasy #'+f.place,p.name,
+      '<p>'+(L?'Место в рейтинге Fantasy: <b>'+esc(f.points)+' FP</b>, игрока выбрали в <b>'+esc(f.teams)+'</b> '+(f.teams==1?'команду':'команд')+'.'
+              :'Fantasy ranking: <b>'+esc(f.points)+' FP</b>, picked in <b>'+esc(f.teams)+'</b> team'+(f.teams==1?'':'s')+'.')+'</p>'
+      +'<p class="imute">'+esc(L?'Fantasy — игра поверх лиги: собираете команду из игроков, и они приносят очки за свои победы, сеты и геймы.':'Fantasy is a game on top of the league: build a team of players, and they score points for their wins, sets and games.')+'</p>',
+      VIEWS.indexOf('fantasy')>=0?[{label:L?'Открыть Fantasy':'Open Fantasy',js:'showTab(\'fantasy\')'}]:[]);
+  }else if(kind==='status'){
+    var act=isActive(p);
+    infoSheet(act?'🟢':'⚪',act?X.active:X.inactive,p.name,
+      '<p>'+esc(act?(L?'Играет в текущем сезоне лиги: можно вызвать на матч в своём дивизионе.':'Plays in the current league season: can be challenged within their division.')
+                  :(L?'Сейчас не в составе текущего сезона. История матчей, очки и достижения сохраняются.':'Not in the current season line-up. Match history, points and achievements are kept.'))+'</p>',[]);
+  }else if(kind==='form'){
+    var last=(matches[String(p.id)]||[]).slice(0,5);
+    infoSheet('📊',L?'Форма':'Form',p.name,
+      '<p class="imute">'+esc(L?'Последние матчи — свежий слева.':'Latest matches — the newest on the left.')+'</p>'
+      +(last.length?last.map(function(m){
+        var w=m.result==='WIN';
+        return '<div class="iline"><span class="fm '+(w?'w':'l')+'">'+(w?'W':'L')+'</span><div><b>'+esc(m.opponent||'—')+'</b><span>'+esc([m.score,matchDate(m.date)].filter(Boolean).join(' · '))+'</span></div></div>';
+      }).join(''):'<p>'+esc(L?'Матчей пока нет.':'No matches yet.')+'</p>'),[]);
+  }else if(kind==='ach'){
+    var a=(p.achievements||[])[Number(i)||0];if(!a)return;
+    var mean=achMeaning(a);
+    infoSheet(achIcon(a),a.title||a.type,[p.name,achSub(a)].filter(Boolean).join(' · '),
+      mean?'<p>'+esc(mean)+'</p>':'',[]);
+  }
+}
 // ---------------------------------------------------------------- дивизион
 // Сезоны разведены: у прошедших есть таблицы, у будущего пока только заглушка.
 function seasonOf(n){ return seasons.filter(function(s){return String(s.number)===String(n)})[0]||null }
@@ -3547,18 +3644,18 @@ function renderPlayer(p){
     +'<div class="vign t"></div><div class="vign b"></div>'
     +avatarButton(p)+'<div class="fade"></div><div class="info">'
     +'<h2>'+esc(p.name)+'</h2>'
-    +'<div class="row"><span onclick="event.stopPropagation();openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')">'
+    +'<div class="row"><span class="tapb" onclick="event.stopPropagation();badgeInfo(\'div\',\''+q(p.id)+'\')">'
       +divChip(p.division, p.division_position)+'</span>'
-      +(raceNo(p)?'<span class="badge g">'+esc(X.tRace)+' #'+raceNo(p)+'</span>':'')
-      +(fp?'<span class="badge fanpos" onclick="event.stopPropagation();showTab(\'fantasy\')">✨ Fantasy #'+esc(fp.place)+'</span>':'')
-      +statusBadge(p)+'</div>'
-    +(p.form&&p.form.length?'<div class="fline"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
+      +(raceNo(p)?'<span class="badge g tapb" onclick="event.stopPropagation();badgeInfo(\'race\',\''+q(p.id)+'\')">'+esc(X.tRace)+' #'+raceNo(p)+'</span>':'')
+      +(fp?'<span class="badge fanpos tapb" onclick="event.stopPropagation();badgeInfo(\'fantasy\',\''+q(p.id)+'\')">✨ Fantasy #'+esc(fp.place)+'</span>':'')
+      +'<span class="tapb" onclick="event.stopPropagation();badgeInfo(\'status\',\''+q(p.id)+'\')">'+statusBadge(p)+'</span></div>'
+    +(p.form&&p.form.length?'<div class="fline tapb" onclick="event.stopPropagation();badgeInfo(\'form\',\''+q(p.id)+'\')"><span class="lb">'+(L?'Форма':'Form')+'</span>'+formRow(p.form)+'</div>':'')
     +'<div class="stats">'
       +stt(X.sPoints,p.points||'',true,'yrp')+stt(X.sMatches,p.matches||'','','matches')
       +(fp?stt(X.fantasyPoints,fp.points,true,'fp'):'')
       +stt(X.sWL,(p.wins||0)+'–'+(p.losses||0),'','wl')+stt(X.sWR,w+'%','','wr')
       +stt(X.ntrp,p.ntrp||'','','ntrp')+stt(X.exp,p.experience||'','','exp')
-      +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+p.nationality:''),'','country')
+      +stt(L?'Страна':'Country',flag(p.nationality)+(p.nationality?' '+esc(p.nationality):''),'','country',true)
     +'</div>'+statNote()+'</div></div>';
 
   var byTable=seasonPlacesOf(p.name,p.id);
@@ -3591,9 +3688,9 @@ function renderPlayer(p){
 
   var ach=p.achievements||[];
   h+='<div class="card"><h3>'+esc(X.ach)+'</h3>';
-  h+=ach.length?ach.map(function(a){
+  h+=ach.length?ach.map(function(a,i){
     var sub=achSub(a);
-    return '<div class="aline"><div class="ic">'+achIcon(a)+'</div><div><div class="tx">'+esc(a.title||a.type)+'</div>'
+    return '<div class="aline tapb" onclick="badgeInfo(\'ach\',\''+q(p.id)+'\','+i+')"><div class="ic">'+achIcon(a)+'</div><div><div class="tx">'+esc(a.title||a.type)+'</div>'
       +(sub?'<div class="dt">'+esc(sub)+'</div>':'')+'</div></div>';
   }).join(''):'<div class="hint">'+esc(X.noAch)+'</div>';
   h+='</div>';
@@ -3634,11 +3731,11 @@ var STAT_HELP={
   country:['Страна, откуда игрок.','Where the player is from.']
 };
 function toggleStat(key){ openStat=(openStat===key?'':key); renderPlayer(byId(openId)); }
-function stt(k,v,acc,key){
+function stt(k,v,acc,key,raw){
   if(v===''||v===null||v===undefined)return '';
   var on=key&&openStat===key;
   return '<div class="stt'+(on?' on':'')+(key?' tap':'')+'"'+(key?' onclick="toggleStat(\''+q(key)+'\')"':'')
-    +'><div class="k">'+esc(k)+(key?' <i class="qm">?</i>':'')+'</div><div class="v'+(acc?' a':'')+'">'+esc(v)+'</div></div>';
+    +'><div class="k">'+esc(k)+(key?' <i class="qm">?</i>':'')+'</div><div class="v'+(acc?' a':'')+'">'+(raw?v:esc(v))+'</div></div>';
 }
 function statNote(){
   if(!openStat||!STAT_HELP[openStat])return '';
