@@ -1304,7 +1304,9 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const at=m=>start+m*60000;
  const prompted=async m=>(await db.listMatchesNeedingResultPrompt(at(m))).some(x=>x.challenge_id==='win2h');
  const tasked=async m=>(await db.listResultTasks('1',at(m))).some(x=>x.challenge_id==='win2h');
- check(!await prompted(89)&&!await tasked(89),'До порога нет ни приглашения, ни задачи');
+ check(!await prompted(89),'До порога приглашения нет');
+ check(await tasked(89)&&await tasked(-60),'Но внести счёт можно уже в день матча — сыграли раньше времени');
+ check(!await tasked(-12*60),'До дня матча кнопки счёта нет');
  check(await prompted(91),'После порога приглашение уходит');
  check(await tasked(91),'И в тот же момент матч появляется в списке «внести результат»');
  // Старое поведение: приглашение есть, а задачи нет. Проверяем, что окна больше нет.
@@ -2119,6 +2121,36 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const ue=await load('ui-errors.js');
  check(/перегружены/.test(ue.uiError("Quota exceeded for quota metric 'Read requests'",'ru')),'Лимит Google — понятное сообщение, а не «обратитесь к организатору»');
  check(/не согласован/.test(ue.uiError('Match is not agreed.','ru')),'Матч не согласован — человек видит причину');
+}
+
+// --- Флаги на Windows и пояснения к ярлыкам игрока ---------------------------
+{
+ const lg=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ check(/var NO_FLAG_EMOJI=\/Windows\/i/.test(lg)&&/flagcdn\.com\/w40\//.test(lg),'Windows: флаг картинкой вместо двух букв');
+ check(/stt\(L\?'Страна':'Country',flag\(p\.nationality\)\+\(p\.nationality\?' '\+esc\(p\.nationality\):''\),'','country',true\)/.test(lg),'Плашка «Страна» показывает картинку флага, а не её код');
+ check(/function badgeInfo\(kind,id,i\)/.test(lg)&&['div','race','fantasy','status','form','ach'].every(k=>lg.includes("kind==='"+k+"'")),'Каждый ярлык игрока объясняет себя во всплывающем окне');
+ check(/badgeInfo\(\\'race\\',\\''\+q\(p\.id\)\+'\\'\)">#'/.test(lg)&&/badgeInfo\(\\'ach\\',\\''\+q\(p\.id\)\+'\\','\+i\+'\)">'\+achIcon\(a\)/.test(lg),'На плитках кликабельны место в гонке и значки достижений');
+}
+
+// --- Дата матча в любом виде, счёт с начала дня матча, /match_check ----------------
+{
+ const mdb=await load('matchesdb.js');
+ check(mdb.normDate('02.10.2026')==='2026-10-02'&&mdb.normDate('10/2/2026')==='2026-10-02'&&mdb.normDate('46297')==='2026-10-02'&&mdb.normDate('2026-10-2')==='2026-10-02','Дата матча понимается в любом виде (02.10.2026, 10/2/2026, число Google)');
+ check(mdb.normTime('5:30 PM')==='17:30'&&mdb.normTime('0.7083333')==='17:00'&&mdb.normTime('17:00:00')==='17:00','Время матча понимается в любом виде');
+ const today=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);
+ const tmpl={challenge_id:'day_test_1',status:'accepted',from_telegram_id:'3',to_telegram_id:'4',from_name:'Carol Three',to_name:'Dan Four',agreed_date:today.split('-').reverse().join('.'),agreed_time:'23:30',court_confirmed_at:'x',duration_min:'120'};
+ await mdb.createSlot(tmpl);
+ const tasks=await mdb.listResultTasks('3');
+ check(tasks.some(t=>t.challenge_id==='day_test_1'&&t.agreed_date===today),'Счёт можно внести с начала дня матча, даже если назначенное время ещё впереди; дата в «02.10.2026» читается');
+ const later=await mdb.listMatchesNeedingResultPrompt();
+ check(!later.some(t=>t.challenge_id==='day_test_1'),'Приглашение «внесите счёт» всё равно приходит только после матча');
+ const lines=await mdb.explainSlot((await mdb.findSlot('day_test_1')));
+ check(lines.some(l=>/Кнопка счёта: есть/.test(l))&&lines.some(l=>/Приглашение внести счёт: придёт/.test(l)),'/match_check объясняет, что видит бот');
+ const broken=await mdb.explainSlot({status:'accepted',agreed_date:'когда-нибудь',agreed_time:'вечером'});
+ check(broken.some(l=>/не понимает дату/.test(l)),'/match_check говорит, если дата матча непонятна');
+ const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/function matchDayStarted\(s\)/.test(mh)&&/if\(matchDayStarted\(s\)&&!st&&amPlayer\(s\)\)/.test(mh),'«Мои матчи»: кнопка счёта в день матча, бронь и перенос при этом не пропадают');
+ check(/cmd:'match_check'/.test(telegramSource),'/match_check — в меню команд и в /help');
 }
 
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
