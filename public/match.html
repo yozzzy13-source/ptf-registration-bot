@@ -169,7 +169,12 @@ html[data-theme="light"] .hdr .logo img{filter:invert(1) brightness(.28) saturat
    видно, что это вторая ступень, а не ещё одно меню того же уровня. */
 .tabs.subtabs{gap:4px;padding:5px;border:1px solid var(--line2);border-radius:14px;background:var(--card2);
   top:0;margin:0 0 14px;box-shadow:0 10px 14px -10px var(--bg)}
-.tabs.subtabs .tab{flex:1 1 0;border:0;background:transparent;border-radius:10px;padding:9px 4px;font-size:12px;white-space:nowrap}
+.tabs.subtabs .tab{flex:1 0 auto;min-width:max-content;border:0;background:transparent;border-radius:10px;padding:9px 10px;font-size:12px;white-space:nowrap}
+/* Крупный шрифт в настройках телефона или длинные русские подписи: раньше
+   надписи обрезались («списание», «Результ»). Теперь вкладки шириной по
+   тексту, а если не влезают — ряд листается пальцем. */
+.tabs.subtabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.tabs.subtabs::-webkit-scrollbar{display:none}
 .tabs.subtabs .tab.on{background:var(--card);color:var(--accent);box-shadow:0 0 0 1px var(--accLine) inset}
 .sub{font-size:12.5px;margin:0 2px 10px}
 /* Карточки — та же рука, что в лиге: светлая кромка сверху, мягкие углы. */
@@ -762,8 +767,12 @@ function canConfirmResult(s){
   if(byOrganiser(s))return !alreadyConfirmed(s);
   return String(s.result_by)!==String(me&&me.id);
 }
+// Дата и время матча в виде, который понимает Date.parse: «9:00» → «09:00».
+// Из-за «9:00» без нуля кнопка «внести счёт» не появлялась вовсе.
+function hhmm(t){var m=String(t||'').trim().match(/^(\d{1,2})[:.](\d{2})/);return m?(m[1].length<2?'0'+m[1]:m[1])+':'+m[2]:'00:00'}
+function matchDay(s){var d=String(s.agreed_date||(Array.isArray(s.dates)?s.dates[0]:String(s.dates||'').split(',')[0])||'').trim();var m=d.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);return m?m[3]+'-'+('0'+m[2]).slice(-2)+'-'+('0'+m[1]).slice(-2):d}
 function matchEnded(s){
-  var d=String(s.agreed_date||''),t=String(s.agreed_time||s.time_from||'00:00');
+  var d=matchDay(s),t=hhmm(s.agreed_time||s.time_from||'00:00');
   var start=Date.parse(d+'T'+t+':00+07:00');
   if(!Number.isFinite(start))return false;
   var wait=Math.min(Number(resultAfterMin)||90,Number(s.duration_min||matchDuration)||120);
@@ -772,7 +781,7 @@ function matchEnded(s){
 // День матча уже начался (00:00 по Пхукету): сыграли раньше времени — счёт
 // можно внести сразу, не дожидаясь конца брони.
 function matchDayStarted(s){
-  var d=String(s.agreed_date||'');
+  var d=matchDay(s);
   var day=Date.parse(d+'T00:00:00+07:00');
   return Number.isFinite(day)&&day<=Date.now();
 }
