@@ -485,14 +485,14 @@ export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {})
 // --- выборки ----------------------------------------------------------------
 function lastDateMillis(slot = {}) {
   const dates = cellToList(slot.dates);
-  const last = dates[dates.length - 1] || '';
-  const t = String(slot.time_to || slot.time_from || '23:59');
+  const last = normDate(dates[dates.length - 1] || '');
+  const t = normTime(slot.time_to || slot.time_from || '23:59') || '23:59';
   const ms = Date.parse(`${last}T${t}:00+07:00`);
   return Number.isNaN(ms) ? 0 : ms;
 }
 function firstDateMillis(slot = {}) {
   const dates = cellToList(slot.dates);
-  const ms = Date.parse(`${dates[0] || ''}T${slot.time_from || '00:00'}:00+07:00`);
+  const ms = Date.parse(`${normDate(dates[0] || '')}T${normTime(slot.time_from || '00:00') || '00:00'}:00+07:00`);
   return Number.isNaN(ms) ? 0 : ms;
 }
 export function isSlotPast(slot = {}) {
@@ -657,8 +657,10 @@ export async function confirmCourt(challengeId, actor = {}) {
 // Единая точка расчёта начала и конца: дальше от неё зависят напоминания,
 // проверка накладок и автозакрытие протухших окон.
 export function slotStartMs(slot) {
-  const date = slot.agreed_date || cellToList(slot.dates)[0] || '';
-  const time = slot.agreed_time || slot.time_from || '00:00';
+  // «9:00» вместо «09:00» (так время показывает Google Таблица) раньше
+  // ломало разбор: ни напоминаний, ни кнопки счёта, ни приглашения.
+  const date = normDate(slot.agreed_date || cellToList(slot.dates)[0] || '');
+  const time = normTime(slot.agreed_time || slot.time_from || '00:00') || '00:00';
   const ms = Date.parse(`${date}T${time}:00+07:00`);
   return Number.isNaN(ms) ? null : ms;
 }
@@ -774,8 +776,8 @@ export function matchDayStartMs(slot = {}) {
   return Number.isNaN(ms) ? null : ms;
 }
 export function resultOpenMs(slot = {}, delayMin = RESULT_PROMPT_AFTER_MIN) {
-  const start = Date.parse(`${slot.agreed_date}T${slot.agreed_time || slot.time_from || '00:00'}:00+07:00`);
-  if (Number.isNaN(start)) return null;
+  const start = slotStartMs(slot);
+  if (start === null) return null;
   const duration = Number(slot.duration_min || 120) || 120;
   return start + Math.min(Number(delayMin) || RESULT_PROMPT_AFTER_MIN, duration) * 60000;
 }
