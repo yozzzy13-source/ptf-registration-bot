@@ -131,6 +131,64 @@ const cloneRows = rows => rows.map(r => ({ ...r }));
 const bumpGen = title => objGen.set(title, (objGen.get(title) || 0) + 1);
 export function forgetMatchesCache(title = '') { if (title) objCache.delete(title); else objCache.clear(); }
 
+// ---------------------------------------------------------------------------
+// Даты и время матча — в одном виде (2026-10-02, 17:00), как бы они ни лежали
+// в таблице. Бот сам пишет их так, но после правки руками или когда Google
+// Таблица переформатирует дату под свой язык («02.10.2026», «10/2/2026», число
+// 46297), бот переставал понимать время матча: не было ни напоминаний, ни
+// кнопки «внести счёт». Теперь такие значения приводятся к одному виду при
+// чтении, а при следующей записи строки ложатся в таблицу уже правильно.
+// ---------------------------------------------------------------------------
+const pad2 = n => String(n).padStart(2, '0');
+export function normDate(value = '') {
+  const v = String(value ?? '').trim();
+  if (!v) return '';
+  let m;
+  if ((m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/))) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  if ((m = v.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/))) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+  if ((m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/))) {
+    // Через косую черту Google пишет по-американски: месяц/день. Если первое
+    // число больше 12, это точно день.
+    let [d, mo] = Number(m[1]) > 12 ? [m[1], m[2]] : [m[2], m[1]];
+    return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad2(mo)}-${pad2(d)}`;
+  }
+  if (/^\d{5}(\.\d+)?$/.test(v)) {             // «серийный номер» даты Google
+    const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(Number(v)) * 86400000);
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  }
+  const t = Date.parse(v);
+  if (!Number.isNaN(t) && /[a-zа-я]/i.test(v)) {   // «2 Oct 2026», «Oct 2, 2026»
+    const d = new Date(t + 12 * 3600000);
+    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+  }
+  return v;
+}
+export function normTime(value = '') {
+  const v = String(value ?? '').trim();
+  if (!v) return '';
+  let m;
+  if ((m = v.match(/^(\d{1,2})[:.](\d{2})(?::\d{2})?\s*([ap]\.?m\.?)?$/i))) {
+    let h = Number(m[1]);
+    const pm = /^p/i.test(m[3] || ''), am = /^a/i.test(m[3] || '');
+    if (pm && h < 12) h += 12;
+    if (am && h === 12) h = 0;
+    if (h > 23 || Number(m[2]) > 59) return v;
+    return `${pad2(h)}:${m[2]}`;
+  }
+  if (/^0?\.\d+$/.test(v)) {                     // доля суток: 0.7083 = 17:00
+    const mins = Math.round(Number(v) * 1440);
+    return `${pad2(Math.floor(mins / 60) % 24)}:${pad2(mins % 60)}`;
+  }
+  return v;
+}
+function normalizeSlotRow(row) {
+  if (!row) return row;
+  if (row.agreed_date) row.agreed_date = normDate(row.agreed_date);
+  for (const k of ['agreed_time', 'time_from', 'time_to']) if (row[k]) row[k] = normTime(row[k]);
+  if (row.dates) row.dates = cellToList(row.dates).map(normDate).join(', ');
+  return row;
+}
+
 function loadObjects(title) {
   if (objReading.has(title)) return objReading.get(title);
   const gen = objGen.get(title) || 0;
@@ -140,7 +198,7 @@ function loadObjects(title) {
     const rows = values.slice(1).map((r, i) => {
       const o = { _rowNumber: i + 2 };
       head.forEach((h, k) => { o[h] = r[k] ?? ''; });
-      return o;
+      return title === MATCH_SHEETS.slots ? normalizeSlotRow(o) : o;
     });
     if ((objGen.get(title) || 0) === gen) objCache.set(title, { t: Date.now(), rows });
     return rows;
@@ -188,6 +246,7 @@ async function updateRow(title, headers, rowNumber, patch) {
     const r = (await valuesGet(`'${title}'!A${rowNumber}:${end}${rowNumber}`))[0] || [];
     current = { _rowNumber: rowNumber };
     head.forEach((h, k) => { current[h] = r[k] ?? ''; });
+    if (title === MATCH_SHEETS.slots) normalizeSlotRow(current);
   } catch (e) {
     const rows = await readObjects(title, headers);
     current = rows.find(r => r._rowNumber === rowNumber) || { _rowNumber: rowNumber };
@@ -708,6 +767,12 @@ export async function resultPromptDelayMin() {
 // эти три расходились, человек получал приглашение и упирался в пустой экран.
 // Для короткой брони берём её длительность: ждать 90 минут после часовой игры
 // незачем.
+// Начало дня матча (00:00 по Пхукету).
+export function matchDayStartMs(slot = {}) {
+  const d = normDate(slot.agreed_date || cellToList(slot.dates)[0] || '');
+  const ms = Date.parse(`${d}T00:00:00+07:00`);
+  return Number.isNaN(ms) ? null : ms;
+}
 export function resultOpenMs(slot = {}, delayMin = RESULT_PROMPT_AFTER_MIN) {
   const start = Date.parse(`${slot.agreed_date}T${slot.agreed_time || slot.time_from || '00:00'}:00+07:00`);
   if (Number.isNaN(start)) return null;
@@ -768,6 +833,44 @@ export function remindersDue(slot, now = Date.now(), win = nightWindowCache.v) {
   return '';
 }
 function timeZoneOf() { return TIMEZONE; }
+
+// Разбор матча для организатора (/match_check): что бот видит и почему нет
+// напоминания или кнопки «внести счёт». Возвращает строки обычного текста.
+export async function explainSlot(slot, now = Date.now()) {
+  const delay = await resultPromptDelayMin().catch(() => RESULT_PROMPT_AFTER_MIN);
+  const win = await nightWindow().catch(() => null);
+  const fmt = ms => ms ? new Intl.DateTimeFormat('ru-RU', { timeZone: TIMEZONE, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(ms)) : '—';
+  const status = String(slot.status || '').toLowerCase();
+  const rs = String(slot.result_status || '').toLowerCase();
+  const start = slotStartMs(slot), day = matchDayStartMs(slot), open = resultOpenMs(slot, delay);
+  const sent = String(slot.reminder_sent || '').split(',').filter(Boolean);
+  const out = [];
+  out.push(`Статус: ${status || '—'}${rs ? ` · счёт: ${rs}` : ''}`);
+  out.push(`Дата и время: ${slot.agreed_date || '—'} ${slot.agreed_time || slot.time_from || ''}`.trim());
+  if (start === null) out.push('⛔ Бот не понимает дату/время матча — ни напоминаний, ни кнопки счёта. Проверьте agreed_date и agreed_time в Match Slots.');
+  else out.push(`Начало: ${fmt(start)} (Пхукет)`);
+  out.push(`Корт подтверждён: ${slot.court_confirmed_at ? 'да' : (slot.match_type === 'manual' ? 'не нужно (матч вне бота)' : 'нет')}`);
+  if (slot.time_change) out.push('⏳ Висит предложение перенести время — пока его не примут/отклонят, приглашение внести счёт не приходит.');
+  // Кнопка «внести счёт»
+  if (status !== 'accepted') out.push('Кнопка счёта: нет — матч не в статусе accepted (не согласован, снят или отменён).');
+  else if (rs === 'confirmed') out.push('Кнопка счёта: нет — счёт уже подтверждён.');
+  else if (rs === 'pending') out.push('Кнопка счёта: счёт внесён и ждёт подтверждения второй стороны.');
+  else if (day === null) out.push('Кнопка счёта: нет — непонятна дата матча.');
+  else out.push(`Кнопка счёта: ${now >= day ? 'есть' : 'появится ' + fmt(day)}`);
+  // Приглашение внести счёт
+  if (slot.result_prompt_sent_at) out.push(`Приглашение внести счёт: отправлено ${fmt(Date.parse(slot.result_prompt_sent_at))}`);
+  else if (status === 'accepted' && !rs && open !== null) {
+    const blockers = [slot.time_change ? 'перенос времени' : '', (!slot.court_confirmed_at && slot.match_type !== 'manual') ? 'корт не подтверждён' : ''].filter(Boolean);
+    out.push(blockers.length ? `Приглашение внести счёт: не придёт, пока ${blockers.join(' и ')}` : `Приглашение внести счёт: ${now > open ? 'уйдёт при ближайшей проверке (раз в 15 минут)' : 'придёт ' + fmt(open)}`);
+  }
+  // Напоминания до матча
+  if (start !== null && status === 'accepted') {
+    const due = remindersDue(slot, now, win);
+    out.push(`Напоминания до матча: отправлены ${sent.length ? sent.join(', ') : 'нет'}${due ? ` · сейчас должно уйти: ${due}` : ''}`);
+    if (!sent.length && start < now) out.push('Напоминаний не было: матч согласовали позже окон «накануне вечером», «за сутки» и «за 3 часа», либо окна пришлись на тихие ночные часы.');
+  }
+  return out;
+}
 
 export async function listMatchesNeedingReminder(now = Date.now()) {
   const rows = await allSlots();
@@ -1159,10 +1262,12 @@ export async function listResultTasks(telegramId, now = Date.now()) {
     if (st === 'confirmed') return false;
     if (st === 'unfinished') return true;        // reminders pause, score entry stays available
     if (st === 'pending') return true;           // ждёт подтверждения одной из сторон
-    // Тот же порог, что у приглашения: иначе бот зовёт вносить счёт, а список
-    // пуст, потому что матч «ещё идёт» по длительности брони.
-    const open = resultOpenMs(r, delay);
-    return open !== null && now > open;
+    // Внести счёт можно с начала дня матча: сыграли раньше времени — не надо
+    // ждать полтора часа после назначенного начала. Соперник счёт всё равно
+    // подтверждает. Приглашение «внесите счёт» по-прежнему приходит позже
+    // (resultOpenMs), а здесь — только доступность кнопки.
+    const day = matchDayStartMs(r);
+    return day !== null && now >= day;
   }).sort((a, b) => String(b.agreed_date).localeCompare(String(a.agreed_date)));
 }
 

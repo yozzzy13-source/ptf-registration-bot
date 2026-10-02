@@ -691,6 +691,7 @@ const ADMIN_HELP_TAIL = {
     '• Галерея сайта — папка «PTF Gallery» в папке PTF на Диске: кидаешь фото (подпапка = альбом, например «Сезон 1 · Финалы»), через 10 минут они на сайте.',
     '• Вкладка «Турниры»: идущий сезон, следующий (лист ожидания, берётся из листа Events) и прошедшие с чемпионами. Видимость — во вкладке «Кнопки» админки.',
     '• На главной — «PTF в цифрах» (игроки и матчи по сезонам, свежий сезон первым), лента Instagram и плашка Telegram-бота.',
+    '• Счёт матча можно вносить с начала дня матча (сыграли раньше — не ждите). Приглашение «внесите счёт» приходит через 1,5 часа после начала. Почему по матчу нет напоминания или кнопки счёта — <code>/match_check имя</code>.',
     '• Скорость и лимит Google: бот ходит в Google Таблицы через очередь — не больше 55 запросов в минуту (лимит Google — 60). Первыми идут действия игроков (счёт, заявки, кнопки), потом экраны, потом фон (рассылки, пересборка витрины). Матчи бот держит в памяти и сверяет с таблицей раз в минуту — правку руками в Match Slots он увидит в течение минуты. Сайт и мини-приложение открываются из памяти телефона и тут же подтягивают свежее. Нагрузка сейчас: <code>/load</code>.',
     '• Лист ожидания → «Short Players list»: каждая заявка в лист ожидания сразу ложится строкой во вкладку сезона (в названии — номер сезона, например «Season 3»): имя, ntrp из анкеты, статус waitlist. Дивизион ставишь сам, ntrp правишь сам — бот это не перезаписывает. Порядок: сначала игроки лиги, дальше по дате заявки. Отклонил заявку — строка уходит. Справа служебные колонки telegram_id, applied_at, league_player — их не трогать. Сверить вручную: <code>/waitlist_sync</code>.',
     '• Поиск Google: у разделов чистые адреса (/race, /players, /divisions, /events, /tournaments, /about), русская версия — ?lang=ru. Карта сайта — phukettennis.com/sitemap.xml, её сдают в Google Search Console.',
@@ -722,6 +723,7 @@ const ADMIN_HELP_TAIL = {
     '• Site gallery: the «PTF Gallery» folder in the PTF Drive folder — drop photos there (subfolder = album), they appear within 10 minutes.',
     '• The «Tournaments» tab: the running season, the next one (waitlist, from the Events sheet) and past seasons with champions.',
     '• The home page shows «PTF in numbers» (newest season first), the Instagram feed and a Telegram bot card.',
+    '• A match score can be entered from the start of the match day (played early — no need to wait). The «enter the score» invite still comes 1.5 hours after the start. Why a match has no reminder or score button — <code>/match_check name</code>.',
     '• Speed and the Google limit: the bot reaches Google Sheets through a queue — at most 55 requests a minute (Google allows 60). Players’ actions go first (scores, applications, buttons), then screens, then background work (broadcasts, showcase rebuilds). Matches are kept in memory and re-checked against the sheet every minute — a manual edit in Match Slots shows up within a minute. The site and mini app open from the phone’s memory and refresh right after. Current load: <code>/load</code>.',
     '• Waitlist → «Short Players list»: every waitlist application lands as a row in the season tab (the tab name contains the season number, e.g. «Season 3»): name, ntrp from the profile, status waitlist. You set the division and calibrate ntrp — the bot never overwrites them. Order: league players first, then by application date. A rejected application removes the row. The service columns telegram_id, applied_at, league_player on the right must stay. Re-check by hand: <code>/waitlist_sync</code>.',
     '• Google search: sections have clean addresses (/race, /players, /divisions, /events, /tournaments, /about), Russian version via ?lang=ru. Sitemap: phukettennis.com/sitemap.xml — submit it in Google Search Console.',
@@ -1495,6 +1497,25 @@ function findConfirmedSlot(done, wanted) {
         await sendMessage(chatId, `🧪 Предпросмотр: <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>. Никому, кроме вас, это не уходит.`);
         await previewResultPost(slot, chatId, { withButtons: msg.chat?.type === 'private' });
         return;
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    if (text.startsWith('/match_check')) {
+      // Почему по матчу нет напоминания или кнопки «внести счёт».
+      const wanted = text.split(/\s+/).slice(1).join(' ').trim();
+      if (!wanted) return sendMessage(chatId, 'Как пользоваться: <code>/match_check имя</code> — имя или фамилия любого из игроков (можно часть). Покажу его несыгранные матчи и что бот по ним видит.');
+      try {
+        const { explainSlot } = await import('./matchesdb.js');
+        const low = wanted.toLowerCase();
+        const rows = (await allSlots()).filter(r => ['accepted','pending','open'].includes(String(r.status || '').toLowerCase())
+          && String(r.result_status || '').toLowerCase() !== 'confirmed'
+          && (String(r.challenge_id) === wanted || String(r.from_name || '').toLowerCase().includes(low) || String(r.to_name || '').toLowerCase().includes(low)));
+        if (!rows.length) return sendMessage(chatId, `По «${escapeHtml(wanted)}» несыгранных матчей не нашёл.`);
+        const blocks = [];
+        for (const r of rows.slice(-5)) {
+          const lines = await explainSlot(r);
+          blocks.push(`<b>${escapeHtml(r.from_name || '?')} — ${escapeHtml(r.to_name || '?')}</b>\n<code>${escapeHtml(r.challenge_id)}</code>\n` + lines.map(l => '• ' + escapeHtml(l)).join('\n'));
+        }
+        return sendMessage(chatId, '🔎 <b>Проверка матчей</b>\n\n' + blocks.join('\n\n'));
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
     if (text === '/load') {
