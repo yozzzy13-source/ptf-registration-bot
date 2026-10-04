@@ -149,5 +149,22 @@ settings.set('FANTASY_TEST_ENTRY_OPEN','on');
 settings.set('FANTASY_BUDGET','');settings.set('FANTASY_TEAM_SIZE','');settings.set('FANTASY_TRANSFERS','');
 const defaults=await f.getFantasyBootstrap('1','Player 0','en','test');
 check(defaults.budget===88&&defaults.roster_size===8&&defaults.transfers===2,'Blank Settings use existing defaults');
+settings.set('FANTASY_BUDGET','88');settings.set('FANTASY_TEAM_SIZE','8');settings.set('FANTASY_TRANSFERS','2');
+// Замена в женском дивизионе: игрок W:2 снялся (0 очков), на его место в группу
+// пришла новая. Бесплатная замена — даже при выключенном окне и исчерпанном лимите,
+// но только на игрока той же группы.
+const newcomer={name:'Player 12',letter:'W',group:'2'};
+roster=roster.filter(p=>p.name!=='Player 3').concat(newcomer);originalRoster.push(newcomer);profiles.push({id:'13',name:'Player 12'});
+await f.buildFantasyCatalog({mode:'test',fresh:true});
+settings.set('FANTASY_TEST_ENTRY_OPEN','off');
+const swap=await f.getFantasyBootstrap('1','Player 0','en','test');
+check(!swap.transfers_open&&swap.teams[1].transfers_used>=2&&swap.teams[1].free_transfer_keys.includes(squad[3]),'Withdrawn W player offers free transfer with window closed and limit used');
+check(swap.teams[1].free_transfer_pools[squad[3]]==='W:2','Free transfer remembers the group');
+const in12=swap.players.find(p=>p.name==='Player 12').key;
+await rejects(()=>f.transferFantasyPlayer('1',{team_slot:2,player_out_key:squad[3],player_in_key:swap.players.find(p=>p.name==='Player 11').key},'en','test'),'Free W transfer to another group rejected');
+const wSwap=await f.transferFantasyPlayer('1',{team_slot:2,player_out_key:squad[3],player_in_key:in12},'en','test');
+check(wSwap.forced&&wSwap.team.picks.some(p=>(p.key||p)===in12)&&wSwap.team.transfers_used===2,'Free W transfer to same group succeeds without spending a transfer');
+await rejects(()=>f.transferFantasyPlayer('1',{team_slot:2,player_out_key:in12,player_in_key:squad[3]},'en','test'),'Paid transfers still closed');
+settings.set('FANTASY_TEST_ENTRY_OPEN','on');
 console.log('PASS: '+checks+' Fantasy flow checks; all Sheets writes mocked.');
 
