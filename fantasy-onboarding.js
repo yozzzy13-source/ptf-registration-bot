@@ -1,6 +1,11 @@
+
 import {assignSlots, selectionIssue, deadlineReached, seasonFinished} from './fantasy-model.js';
 
-const tg=window.Telegram?.WebApp;
+let tg=window.Telegram?.WebApp;
+// В обычном браузере (сайт) Telegram-кнопки «назад» нет и его окна не работают —
+// там показываем свою строку «‹ Лига / ‹ Назад» над шапкой.
+if(tg&&(!tg.platform||tg.platform==='unknown')&&!tg.initData)tg=null;
+const IN_TG=Boolean(tg);
 try { tg?.ready(); tg?.expand(); } catch {}
 const initData=tg?.initData||'', token=new URLSearchParams(location.search).get('t')||'';
 const app=document.getElementById('app');
@@ -71,7 +76,8 @@ function progress() {
   return '<ol class="progress" aria-label="'+tr('Шаги создания команды','Team creation steps')+'">'+labels.map((label,i)=>'<li '+(i===step?'aria-current="step"':'')+' class="'+(i===step?'on':i<step?'done':'')+'"><b>'+(i<step?'✓':i+1)+'</b><span>'+label+'</span></li>').join('')+'</ol>';
 }
 function header() {
-  return '<div class="top"><div><div class="eyebrow">Phuket Tennis Family</div><h1>Fantasy</h1><div class="sub">'+tr('Сезон','Season')+' '+esc(D.season)+'</div></div><div class="theme">'+button('☾','dark','')+button('☀','light','')+button(ru?'EN':'RU','language','')+'</div></div>'+
+  const web=IN_TG?'':'<div class="webnav"><a href="/?tab=fantasy">‹ '+tr('Лига','League')+'</a>'+(view!=='home'?button('‹ '+tr('Назад','Back'),'back','webback'):'')+'</div>';
+  return web+'<div class="top"><div><div class="eyebrow">Phuket Tennis Family</div><h1>Fantasy</h1><div class="sub">'+tr('Сезон','Season')+' '+esc(D.season)+'</div></div><div class="theme">'+button('☾','dark','')+button('☀','light','')+button(ru?'EN':'RU','language','')+'</div></div>'+
     (D.banner?'<div class="banner">'+esc(D.is_test?tr('TEST · тестовые команды','TEST · test squads'):D.banner)+'</div>':'')+
     '<nav class="tabs">'+[['home',tr('Главная','Home')],['players',tr('Игроки','Players')],['table',tr('Рейтинг','Standings')],['rules',tr('Правила','Rules')]].map(([v,label])=>button(label,v,'tab '+(view===v?'on':''))).join('')+'</nav>';
 }
@@ -158,12 +164,17 @@ const errors={
   full:['Все 8 мест заполнены. Сначала уберите игрока.','All 8 places are filled. Remove a player first.'],
   quota:['Квота заполнена: выберите игрока для свободного слота.','Quota filled: choose a player for an empty slot.'],
   slot:['Игрок не подходит текущему слоту. Выберите игрока из указанного фильтра.','This player does not fit the current slot. Choose from the slot filter.'],
-  budget:['Не хватает бюджета. Выберите игрока дешевле или измените состав.','Not enough budget. Choose a cheaper player or edit the squad.']
+  budget:['Не хватает бюджета. Выберите игрока дешевле или измените состав.','Not enough budget. Choose a cheaper player or edit the squad.'],
+  samepool:['Бесплатная замена — только на игрока той же группы.','A free transfer must be a player from the same group.']
 };
 function issueText(issue) {return errors[issue]?.[ru?0:1]||issue;}
 function selectionError(key) {
   if(transferOut) {
     const keys=draft().picks.filter(k=>k!==transferOut);
+    // Бесплатная замена выбывшего — только на игрока той же группы.
+    const t=team(),freePool=(t?.free_transfer_keys||[]).includes(transferOut)?(t.free_transfer_pools||{})[transferOut]:'';
+    // Для групп C и W — та же группа; Prime/A/B и свободный слот проверяет обычная логика слотов.
+    if(freePool&&/^[CW]/i.test(freePool)&&player(key)?.pool!==freePool)return 'samepool';
     return selectionIssue(keys,key,D.players,D.budget,D.max_per_pool);
   }
   return selectionIssue(draft().picks,key,D.players,D.budget,D.max_per_pool,assignSlots(draft().picks,D.players).slots.findIndex(s=>!s.key));
@@ -296,7 +307,11 @@ function wizardView() {
 }
 function canTransfer(key,n=slot) {
   const t=team(n);
-  return deadlineReached(D)&&!seasonFinished(D)&&D.transfers_open&&t?.status==='locked'&&(Number(t.transfers_used)<D.transfers||(t.free_transfer_keys||[]).includes(key));
+  if(!(deadlineReached(D)&&!seasonFinished(D)&&t?.status==='locked'))return false;
+  // Выбывший из лиги игрок без очков меняется бесплатно всегда, даже когда
+  // обычные замены закрыты или лимит исчерпан.
+  if((t.free_transfer_keys||[]).includes(key))return true;
+  return Boolean(D.transfers_open)&&Number(t.transfers_used)<D.transfers;
 }
 function teamView() {
   const t=team();
