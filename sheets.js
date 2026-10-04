@@ -2250,11 +2250,8 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
   }
   // Add only the pre-approved W1/W2 opponents. The rest of each group
   // remains isolated, and inactive players are still filtered exactly as above.
-  const crossPairs=[
-    ['Olga Sauer','Masha Geveling'],['Olga Sauer','Yana D'],['Marina Banatskaia','Elena Ian'],['Marina Banatskaia','Irina Strembitska'],
-    ['Daria Kozitskaya','Tatiana Sokolova'],['Daria Kozitskaya','Xenia Hors'],['Hyunjung Moon','Masha Geveling'],['Hyunjung Moon','Irina Strembitska'],
-    ['Anna Ermolina','Elena Ian'],['Anna Ermolina','Yana D'],['Maria Evangelista','Tatiana Sokolova'],['Maria Evangelista','Xenia Hors']
-  ];
+  // Пары — общий список из access.js, с учётом замен игроков в группах.
+  const crossPairs=letter==='W'?(await (await import('./access.js')).resolveWCrossPairs(season).catch(()=>({pairs:[]}))).pairs:[];
   if(letter==='W'&&String(group||'')){
     const mine=applicants.find(a=>String(a.telegram_id)===String(excludeTelegramId));
     const wanted=crossPairs.flatMap(([a,b])=>sameName(a,mine?.name)?[b]:sameName(b,mine?.name)?[a]:[]);

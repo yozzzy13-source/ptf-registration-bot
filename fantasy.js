@@ -196,6 +196,17 @@ async function seasonMatchCount(name,season){
  for(const m of history.get(String(p.id))||[]){if(String(parseSeasonNumber(m.season,m.competition)||'')!==String(season))continue;seen.add(t(m.match_no)+'|'+nk(m.opponent)+'|'+t(m.date)+'|'+t(m.score))}
  return seen.size;
 }
+// Игрок выбыл из лиги (его больше нет в составе сезона) и очков не набрал —
+// его можно заменить бесплатно, на любого игрока той же группы, в любой
+// момент соревнования: даже когда обычные замены закрыты или лимит исчерпан.
+// Так организатор меняет игрока в дивизионе (Анна → Аксинья), а Fantasy-
+// команды не остаются с «мёртвым» местом.
+async function isFreeOut(catalog,pick,pointMap=null){
+ if(!pick?.key||catalog.players.some(x=>x.key===pick.key))return false;
+ const pts=pointMap?.get?.(pick.key);
+ if(pts&&!Number(pts.total||0))return true;
+ return (await seasonMatchCount(pick.name,catalog.season))===0;
+}
 async function fantasyMode(){const v=(await setting('FANTASY_MODE','fantasy_mode')).toLowerCase();return v==='live'?'live':(v==='off'||v==='closed')?'closed':'test'}
 async function fantasySwitchOpen(mode){
  const v=(await setting(mode==='live'?'FANTASY_ENTRY_OPEN':'FANTASY_TEST_ENTRY_OPEN',mode==='live'?'fantasy_entry_open':'fantasy_test_entry_open')).toLowerCase();
@@ -281,7 +292,10 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
   points:leaderboard.find(x=>x.team_id===row.team_id)?.points??teamScore(row).total,
   // Черновик очки набирает, но в рейтинг не попадает, пока его не подтвердили.
   in_standings:String(row.status||'')==='locked',
-  free_transfer_keys:transfersOpen?await Promise.all(js(row.picks_json,[]).filter(p=>!catalog.players.some(x=>x.key===p.key)).map(async p=>(await seasonMatchCount(p.name,catalog.season))===0?p.key:null)).then(keys=>keys.filter(Boolean)):[]
+  // Бесплатная замена выбывшего доступна всё соревнование — не только когда
+  // открыты обычные замены.
+  free_transfer_keys:(locked&&!seasonFinished)?await Promise.all(js(row.picks_json,[]).map(async p=>(await isFreeOut(catalog,p,pointMap))?p.key:null)).then(keys=>keys.filter(Boolean)):[],
+  free_transfer_pools:Object.fromEntries(js(row.picks_json,[]).map(p=>[p.key,p.pool||'']))
  })));
  const banner=mode==='test'?(lang==='ru'?'TEST: составы и рейтинг не переносятся в основную лигу.':'TEST: squads and standings do not carry into the live league.'):'';
  const rules={...RULES[lang],
@@ -312,13 +326,21 @@ export async function saveFantasyTeam(id,owner,input={},lang='en',mode='test'){
 export async function transferFantasyPlayer(id,input={},lang='en',mode='test'){
  const c=await buildFantasyCatalog({lang,mode});
  if(deadlinePassed(c.seasonEndAt))throw failure('fantasy_season_finished',lang);
- if(!await fantasyEntryOpen(mode,{afterDeadline:true}))throw failure('fantasy_preview_only',lang,403);
  const use=storeFor(mode),row=await findTeam(id,c.season,mode,Number(input.team_slot||1));if(!row||row.status!=='locked')throw failure('fantasy_team_not_locked',lang);
  if(!deadlinePassed(c.entryDeadline))throw failure('fantasy_invalid_transfer',lang);
  const picks=js(row.picks_json,[]),outKey=t(input.player_out_key),inKey=t(input.player_in_key),old=picks.find(p=>p.key===outKey),incoming=c.players.find(p=>p.key===inKey);
  if(!old||!incoming||picks.some(p=>p.key===inKey))throw failure('fantasy_invalid_transfer',lang);
- const removed=!c.players.some(p=>p.key===outKey),forced=removed&&(await seasonMatchCount(old.name,c.season))===0,used=n(row.transfers_used);if(!forced&&used>=c.transfers)throw failure('fantasy_no_transfers_left',lang);
- const next=picks.map(p=>p.key===outKey?{key:incoming.key,name:incoming.name,pool:incoming.pool,price:incoming.price}:p),captain=outKey===row.captain_key?(t(input.captain_key)||incoming.key):row.captain_key,vice=outKey===row.vice_key?(t(input.vice_key)||incoming.key):row.vice_key,v=validateFantasySelection({picks:next,captain_key:captain,vice_key:vice},c,{complete:true,lang});
+ // Выбывший без очков: замена бесплатная, без окна обычных замен, но только
+ // на игрока той же группы — место в составе остаётся тем же.
+ const forced=await isFreeOut(c,old,await scores(c,[old]).catch(()=>null)),used=n(row.transfers_used);
+ if(forced&&/^[CW]/i.test(String(old.pool||''))&&incoming.pool!==old.pool){const e=Error(lang==='ru'?'Бесплатная замена — только на игрока той же группы ('+old.pool+').':'A free transfer must be a player from the same group ('+old.pool+').');e.code=400;throw e}
+ if(!forced&&!await fantasyEntryOpen(mode,{afterDeadline:true}))throw failure('fantasy_preview_only',lang,403);
+ if(!forced&&used>=c.transfers)throw failure('fantasy_no_transfers_left',lang);
+ const next=picks.map(p=>p.key===outKey?{key:incoming.key,name:incoming.name,pool:incoming.pool,price:incoming.price}:p),captain=outKey===row.captain_key?(t(input.captain_key)||incoming.key):row.captain_key,vice=outKey===row.vice_key?(t(input.vice_key)||incoming.key):row.vice_key,
+  // Если в команде несколько выбывших, остальные пока остаются в составе как были:
+  // замена одного не должна упираться в то, что второй тоже не в ростере.
+  kept=next.filter(p=>p.key&&!c.players.some(x=>x.key===p.key)).map(p=>({...p,price:n(p.price)})),
+  v=validateFantasySelection({picks:next,captain_key:captain,vice_key:vice},kept.length?{...c,players:[...c.players,...kept]}:c,{complete:true,lang});
  if(!v.ok){const e=Error(v.errors.join(' '));e.code=400;throw e}
  const now=nowISO(),usedNext=forced?used:used+1;await appendObject(use.transfers,{transfer_id:uid('ft'),team_id:row.team_id,telegram_id:String(id),season:c.season,player_out_key:old.key,player_out_name:old.name,player_in_key:incoming.key,player_in_name:incoming.name,price_out:old.price,price_in:incoming.price,forced:forced?'yes':'no',created_at:now});
  await updateObjectByRow(use.teams,row._rowNumber,{picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext,updated_at:now});

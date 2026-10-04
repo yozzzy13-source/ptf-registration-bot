@@ -12,7 +12,7 @@ import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, 
 import { scoreValues, detectSet3Mode, reverseScore, cellToScore, formatScore } from './tennis.js';
 import { divisionSheetId, divisionLetter, getDivisionTable, recentFormBefore, playerFormAcrossSeasons } from './division.js';
 import { getLeagueProfiles, getSetting, sameName } from './sheets.js';
-import { slotScope, sameScope } from './access.js';
+import { slotScope, sameScope, resolveWCrossPairs } from './access.js';
 import { rememberCardContext } from './matchcard.js';
 
 const DATA_START_ROW = 2;
@@ -22,11 +22,7 @@ const CROSS_GROUP_SHEET = 'Cross_Group_Match_Log';
 const CROSS_GROUP_HEADERS = ['match_id','season','division','player_1_group','player_1','player_2_group','player_2','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
 const PLAYOFF_SHEET = 'Playoff';
 const PLAYOFF_HEADERS = ['match_id','season','division','stage','slot','player_1','player_2','player_1_group','player_2_group','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
-const W_CROSS_SCHEDULE=[
- ['Olga Sauer','Masha Geveling'],['Olga Sauer','Yana D'],['Marina Banatskaia','Elena Ian'],['Marina Banatskaia','Irina Strembitska'],
- ['Daria Kozitskaya','Tatiana Sokolova'],['Daria Kozitskaya','Xenia Hors'],['Hyunjung Moon','Masha Geveling'],['Hyunjung Moon','Irina Strembitska'],
- ['Anna Ermolina','Elena Ian'],['Anna Ermolina','Yana D'],['Maria Evangelista','Tatiana Sokolova'],['Maria Evangelista','Xenia Hors']
-];
+// Пары межгрупповых матчей W — общий список из access.js (с учётом замен).
 
 function norm(s = '') {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -156,12 +152,28 @@ async function ensureCrossGroupSheet() {
   try { values = await getValues(LEAGUE_RESULTS_SHEET_ID, CROSS_GROUP_SHEET+'!A1:O1'); } catch {}
   if (!(values[0] || []).length) await api.spreadsheets.values.update({ spreadsheetId:LEAGUE_RESULTS_SHEET_ID, range:CROSS_GROUP_SHEET+'!A1:O1', valueInputOption:'RAW', requestBody:{ values:[CROSS_GROUP_HEADERS] } });
 }
-async function seedWomenCrossGroupSchedule(season){
+// Межгрупповые матчи W в листе Cross_Group_Match_Log приводим к текущим
+// составам: если игрока заменили в таблице дивизиона, его НЕсыгранные матчи
+// переходят к заменившему (имя меняется прямо в строке), сыгранные остаются
+// как были. Недостающие пары дописываются.
+export async function seedWomenCrossGroupSchedule(season){
   await ensureCrossGroupSheet();
+  const { pairs, subs } = await resolveWCrossPairs(season);
   const api=sheetsClient(),values=await getValues(LEAGUE_RESULTS_SHEET_ID,CROSS_GROUP_SHEET+'!A1:O');
-  const rows=values.slice(1),exists=(a,b)=>rows.some(r=>String(r[1]||'')===String(season)&&divisionLetter(r[2])==='W'&&((sameName(r[4],a)&&sameName(r[6],b))||(sameName(r[4],b)&&sameName(r[6],a))));
-  const missing=W_CROSS_SCHEDULE.filter(([a,b])=>!exists(a,b)).map(([a,b])=>['',String(season),'W','2',a,'1',b,'','','','','','','','scheduled','']);
+  const rows=values.slice(1);
+  const played=r=>['confirmed','played','done'].includes(String(r[13]||'').trim().toLowerCase())||Boolean(String(r[8]||'').trim());
+  const renamed=[];
+  rows.forEach((r,i)=>{
+    if(String(r[1]||'')!==String(season)||divisionLetter(r[2])!=='W'||played(r))return;
+    let changed=false;
+    for(const col of [4,6])for(const x of subs)if(sameName(r[col],x.from)){r[col]=x.to;changed=true}
+    if(changed)renamed.push({range:CROSS_GROUP_SHEET+'!E'+(i+2)+':G'+(i+2),values:[[r[4]||'',r[5]||'',r[6]||'']]});
+  });
+  if(renamed.length)await api.spreadsheets.values.batchUpdate({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,requestBody:{valueInputOption:'USER_ENTERED',data:renamed}});
+  const exists=(a,b)=>rows.some(r=>String(r[1]||'')===String(season)&&divisionLetter(r[2])==='W'&&((sameName(r[4],a)&&sameName(r[6],b))||(sameName(r[4],b)&&sameName(r[6],a))));
+  const missing=pairs.filter(([a,b])=>!exists(a,b)).map(([a,b])=>['',String(season),'W','2',a,'1',b,'','','','','','','','scheduled','']);
   if(missing.length)await api.spreadsheets.values.append({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:CROSS_GROUP_SHEET+'!A:O',valueInputOption:'USER_ENTERED',insertDataOption:'INSERT_ROWS',requestBody:{values:missing}});
+  return { renamed: renamed.length, added: missing.length, subs };
 }
 function playoffStage(v='') {
   const x=String(v||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'');

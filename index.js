@@ -2398,6 +2398,21 @@ app.listen(PORT, () => withPriority('low', async () => {
     syncAllWaitlists().then(r => r.forEach(x => console.log(`waitlist sync s${x.season}:`, x.ok ? `${x.waitlist} в листе → «${x.tab}»` : x.reason)))
       .catch(e => console.error('waitlist sync:', e.message));
   }, 2 * 60 * 1000).unref?.();
+  // Межгрупповые матчи W ↔ таблица дивизиона: заменённого игрока в
+  // несыгранных матчах меняем на заменившего (раз в 30 минут и при запуске).
+  const syncWCross = async () => {
+    try {
+      const { latestSeason, seasonRoster } = await import('./division.js');
+      const season = await latestSeason();
+      const w = ((await seasonRoster(season))?.players || []).filter(p => String(p.letter).toUpperCase() === 'W');
+      if (!w.some(p => String(p.group) === '1') || !w.some(p => String(p.group) === '2')) return;
+      const { seedWomenCrossGroupSchedule } = await import('./results.js');
+      const r = await seedWomenCrossGroupSchedule(season);
+      if (r?.renamed || r?.added) console.log(`W cross: заменено строк ${r.renamed}, добавлено ${r.added}`, (r.subs || []).map(x => `${x.from} → ${x.to}`).join(', '));
+    } catch (e) { console.error('W cross sync:', e.message); }
+  };
+  setTimeout(syncWCross, 3 * 60 * 1000).unref?.();
+  setInterval(syncWCross, 30 * 60 * 1000).unref?.();
   import('./sheets.js').then(m => m.addNewTabOnce('tournaments')).then(done => { if (done) console.log('tabs: «Турниры» добавлены группам'); }).catch(e => console.error('tabs add:', e.message));
   import('./sheets.js').then(m => m.addTabToGroupOnce('partners', 'guest')).then(done => { if (done) console.log('tabs: «Партнёры» добавлены гостям'); }).catch(e => console.error('tabs add partners:', e.message));
   console.log(`PTF Registration Bot listening on ${PORT}`);

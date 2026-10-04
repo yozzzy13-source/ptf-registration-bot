@@ -369,8 +369,20 @@ async function readCrossGroupRows(letter, season) {
   try {
     const res=await sheetsClient().spreadsheets.values.get({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:'Cross_Group_Match_Log!A:O'});
     const values=res.data.values||[],headers=(values[0]||[]).map(norm);
-    return values.slice(1).map(r=>{const o={};headers.forEach((h,i)=>{if(h)o[h]=r[i]??''});return o})
+    const rows=values.slice(1).map(r=>{const o={};headers.forEach((h,i)=>{if(h)o[h]=r[i]??''});return o})
       .filter(r=>String(r.season)===String(season)&&divisionLetter(r.division)===divisionLetter(letter));
+    // Замена игрока в группе: в несыгранных матчах сразу показываем того, кто
+    // заменил (лист сам поправится при ближайшей сверке).
+    if(divisionLetter(letter)==='W'){
+      const { resolveWCrossPairs } = await import('./access.js');
+      const { subs } = await resolveWCrossPairs(season).catch(() => ({ subs: [] }));
+      const { sameName } = await import('./sheets.js');
+      if(subs.length)for(const r of rows){
+        if(String(r.status||'').toLowerCase()==='confirmed'||String(r.score||'').trim())continue;
+        for(const x of subs){if(sameName(r.player_1,x.from))r.player_1=x.to;if(sameName(r.player_2,x.from))r.player_2=x.to}
+      }
+    }
+    return rows;
   } catch { return []; }
 }
 
