@@ -2619,6 +2619,8 @@ function pickSeason(n){
   if(String(divSeason)===String(n))return;
   divSeason=String(n);divLetter='';divData=null;divErr='';showExt=false;showMx=false;renderDiv();
 }
+// «5:7  2:6» → «7:5  6:2»: тот же счёт со стороны второго игрока (тай-брейки в скобках тоже).
+function flipScore(v){return String(v||'').replace(/(\d+)\s*:\s*(\d+)/g,function(_,a,b){return b+':'+a})}
 var crossOpen=false;
 function toggleCross(){crossOpen=!crossOpen;renderDiv()}
 function crossGroupBlock(groups){
@@ -2626,6 +2628,10 @@ function crossGroupBlock(groups){
   if(!all.length)return '';
   all.sort(function(a,b){return String(a.date||'9999').localeCompare(String(b.date||'9999'))||String(a.player_1||'').localeCompare(String(b.player_1||''))});
   var title=L?'Межгрупповые матчи':'Cross-group matches';
+  // Победитель — всегда слева и жирным, счёт — с его стороны, как в остальных
+  // матчах. В листе первым стоит игрок группы 2, а побеждает не всегда он.
+  all=all.map(function(m){var w=nameKey(m.winner||'');if(String(m.status||'').toLowerCase()!=='confirmed'||!w||w!==nameKey(m.player_2||''))return m;
+    return Object.assign({},m,{player_1:m.player_2,player_2:m.player_1,player_1_group:m.player_2_group,player_2_group:m.player_1_group,score:flipScore(m.score)})});
   var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):'',middle=done?'<s>'+esc(score)+'</s>':'<i class="cross-vs">vs</i>';var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(matchDate(m.date)):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> '+middle+' <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
   return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
 }
