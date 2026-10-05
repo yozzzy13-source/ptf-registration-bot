@@ -468,6 +468,12 @@ const changed=[];db.setMatchChangeHandler(ids=>changed.push(...ids));await db.up
 const wlog=tables.get('w1|Match_Log');wlog.push(['1','2','Wendy Two','1','Wendy One']);wlog.push(['2','1','Wendy One','2','Wendy Two',6,0]);
 const unique=await results.getUnplayedOpponents('W','Wendy One','2','1');check(unique.total===1&&unique.names.length===1&&unique.played===0,'Repeated and playoff rows do not inflate or complete regular opponent');
 const eight=await results.getUnplayedOpponents('A','A Player 1','2','');check(eight.total===7&&eight.names.length===7,'Eight-player division with nine schedule entries yields seven opponents');
+// Шаблон таблицы рассчитан на 8 мест (28 матчей), а в группе живых игроков меньше.
+// Пары с номером больше n(n-1)/2 по числу игроков раньше выпадали из «осталось сыграть».
+{const tmpl=[tables.get('w2|Match_Log')[0]];let no=0;for(let a=1;a<=8;a++)for(let b=a+1;b<=8;b++){no++;tmpl.push([String(no),String(a),a===4?'Wendy Three':'',String(b),b===5?'Wendy Four':''])}
+ tables.set('w2|Match_Log',tmpl);await results.refreshAfterResult();
+ const left=await results.getUnplayedOpponents('W','Wendy Three','2','2');
+ check(left.known&&left.names.includes('Wendy Four'),'8-slot template: late pair (match 19) still counts as unplayed for a smaller group');}
 const ev=await load('events.js'),flow=await load('eventflow.js');
 const event={event_id:'past',status:'published',date:'14.09.2099',time:'10:00',signup_deadline:'30.09.2099'};
 const start=Date.parse('2099-09-14T03:00:00Z');
