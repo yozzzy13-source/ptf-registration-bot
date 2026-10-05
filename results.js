@@ -611,6 +611,7 @@ export async function refreshAfterResult() {
     invalidateDivisionCache();
   } catch (e) { console.error('division cache reset failed:', e.message); }
   scheduleCache.clear();
+  crossLogCache = { t: 0, season: '', rows: null };
   try {
     const mode = String(await getSetting('PROFILE_REFRESH').catch(() => '') || '').trim().toLowerCase();
     // Пересчёт формул витрины — фон: человеку, нажавшему «Подтвердить», его
@@ -624,6 +625,8 @@ export async function refreshAfterResult() {
 // это строки без счёта, а не то, чего нет в таблице.
 const scheduleCache = new Map();
 const SCHEDULE_CACHE_MS = 120000;
+// Лист межгрупповых матчей — для «осталось сыграть» в W (на всех один).
+let crossLogCache = { t: 0, season: '', rows: null };
 
 export async function getDivisionSchedule(division, season = '', group = '') {
   const key = divisionLetter(division);
@@ -635,9 +638,21 @@ export async function getDivisionSchedule(division, season = '', group = '') {
   const spreadsheetId = (await divisionSheetId(key, season, group).catch(() => '')) || (!group && DIVISION_SPREADSHEETS[key]) || '';
   if (!spreadsheetId) return [];
   try {
-    // C — первый игрок, E — второй, F.. — счёт, S — отметка «сыграно».
+    // A — номер, B/D — места в сетке, C — первый игрок, E — второй,
+    // F.. — счёт, S — отметка «сыграно».
     const values = await getValues(spreadsheetId, 'Match_Log!A2:S');
     const out = [];
+    // Граница группового этапа — по размеру сетки таблицы, а не по числу
+    // живых игроков. Шаблон рассчитан на 8 мест (28 матчей); в группе из 6
+    // пустые места остаются в сетке, и номера матчей идут до 28. Раньше
+    // граница считалась по игрокам (6 → 15 матчей), и все пары с номером
+    // больше 15 выпадали из «осталось сыграть» — так у Ксении пропала Ирина.
+    // Таблица дивизиона считает так же — по местам сетки.
+    const slots = new Set();
+    for (const row of values) {
+      if (!(Number(row?.[0]) > 0)) continue;
+      for (const c of [1, 3]) { const id = Number(row?.[c]); if (id > 0) slots.add(id); }
+    }
     for (let i = 0; i < values.length; i++) {
       const row = values[i] || [];
       const p1 = String(row[2] || '').trim();
@@ -650,7 +665,8 @@ export async function getDivisionSchedule(division, season = '', group = '') {
     const roster=await divisionRoster(key,season,group);
     const names=(roster.players||[]).map(p=>norm(p.name));
     const count=new Set(names).size;
-    const regularMax=count*(count-1)/2;
+    const size=Math.max(slots.size,count);
+    const regularMax=size>1?size*(size-1)/2:0;
     const unique=new Map();
     for(const m of out) {
       if(count && (!names.includes(norm(m.p1))||!names.includes(norm(m.p2))))continue;
@@ -661,6 +677,13 @@ export async function getDivisionSchedule(division, season = '', group = '') {
       else if(m.played)unique.get(pair).played=true;
     }
     const clean=[...unique.values()];
+    // Контроль: у каждой пары состава должна быть строка в расписании. Нет —
+    // значит, таблицу правили руками (замена игрока, сдвиг строк), и
+    // напоминание об этой паре молча пропадёт. Пишем в лог, чтобы заметить.
+    const uniq=[...new Set(names)];
+    const lost=[];
+    for(let i=0;i<uniq.length;i++)for(let j=i+1;j<uniq.length;j++){if(!unique.has([uniq[i],uniq[j]].sort().join('|')))lost.push(uniq[i]+' — '+uniq[j])}
+    if(lost.length)console.warn(`schedule ${key}${group?' гр.'+group:''} s${season}: нет строк для пар ${lost.slice(0,6).join('; ')}${lost.length>6?' …':''}`);
     scheduleCache.set(cacheKey, { t: Date.now(), v: clean });
     return clean;
   } catch (e) {
@@ -677,7 +700,29 @@ export async function getUnplayedOpponents(division, playerName, season = '', gr
   const mine = schedule.filter(m => norm(m.p1) === me || norm(m.p2) === me);
   if (!mine.length) return { known: false, names: [], total: 0, played: 0 };
   const names = mine.filter(m => !m.played).map(m => (norm(m.p1) === me ? m.p2 : m.p1));
-  return { known: true, names, total: mine.length, played: mine.length - names.length };
+  let total = mine.length;
+  // Межгрупповые пары W тоже входят в обязательные матчи: добавляем те, что
+  // ещё не сыграны (в листе межгрупповых нет подтверждённого результата).
+  if (divisionLetter(division) === 'W' && String(group || '')) {
+    const cross = await unplayedCrossOpponents(playerName, season).catch(() => null);
+    if (cross) { total += cross.total; for (const n of cross.names) if (!names.some(x => sameName(x, n))) names.push(n); }
+  }
+  return { known: true, names, total, played: total - names.length };
+}
+
+async function unplayedCrossOpponents(playerName, season = '') {
+  if (!LEAGUE_RESULTS_SHEET_ID) return null;
+  season = String(season || await (await import('./division.js')).latestSeason());
+  const { pairs } = await resolveWCrossPairs(season);
+  const wanted = pairs.flatMap(([a, b]) => sameName(a, playerName) ? [b] : sameName(b, playerName) ? [a] : []);
+  if (!wanted.length) return { names: [], total: 0 };
+  if (!crossLogCache.rows || crossLogCache.season !== season || Date.now() - crossLogCache.t > SCHEDULE_CACHE_MS) {
+    const values = await getValues(LEAGUE_RESULTS_SHEET_ID, CROSS_GROUP_SHEET + '!A2:O');
+    crossLogCache = { t: Date.now(), season, rows: values.filter(r => String(r?.[1] || '') === season && divisionLetter(r?.[2]) === 'W') };
+  }
+  const done = r => String(r[13] || '').trim().toLowerCase() === 'confirmed' || Boolean(String(r[8] || '').trim());
+  const names = wanted.filter(o => !crossLogCache.rows.some(r => done(r) && ((sameName(r[4], playerName) && sameName(r[6], o)) || (sameName(r[6], playerName) && sameName(r[4], o)))));
+  return { names, total: wanted.length };
 }
 
 export function describeWrite(result) {
