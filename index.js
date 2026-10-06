@@ -21,8 +21,8 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
   notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultHalfConfirmed, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
-  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed } from './matches.js';
-import { allSlots, pendingActionsFor, setMatchChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
+  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed, scheduleSlotCards } from './matches.js';
+import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
@@ -351,6 +351,9 @@ app.get('/cal', async (req, res) => {
   noCache(res);
   const q = new URLSearchParams({ t: params.t || 'PTF match', s: params.s || '', e: params.e || '', l: params.l || '' });
   const icsUrl = `${PUBLIC_URL}/ics?${q.toString()}`;
+  // Тот же матч для Google Календаря: событие открывается уже заполненным.
+  const gStamp = v => { const d = new Date(v || ''); return Number.isNaN(d.getTime()) ? '' : d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); };
+  const gUrl = gStamp(params.s) ? 'https://calendar.google.com/calendar/render?' + new URLSearchParams({ action:'TEMPLATE', text:String(params.t || 'PTF match'), dates:`${gStamp(params.s)}/${gStamp(params.e) || gStamp(params.s)}`, location:String(params.l || '') }).toString() : '';
   const title = String(params.t || 'PTF match').replace(/[&<>]/g, '');
   const place = String(params.l || '').replace(/[&<>]/g, '');
   const when = (() => {
@@ -370,11 +373,14 @@ b{color:#f6f4ef}button{width:100%;border:0;border-radius:16px;padding:16px;font-
 .hint{font-size:12px;margin-top:14px}</style></head><body>
 <div class="card"><h1>📅 ${ru?'Добавить в календарь':'Add to calendar'}</h1>
 <p><b>${title}</b></p><p>${when}</p>${place ? `<p>📍 ${place}</p>` : ''}
-<button id="go">📲 ${ru?'Добавить событие':'Add event'}</button>
+<button id="go">🍎 ${ru?'Apple Календарь (iPhone)':'Apple Calendar (iPhone)'}</button>
+${gUrl ? `<button id="g" style="background:#2b2b2b;color:#f6f4ef;border:1px solid #3a3a3a">📅 ${ru?'Google Календарь':'Google Calendar'}</button>` : ''}
 <p class="hint">${ru?'Откроется системное окно календаря — подтвердите добавление.':'Your calendar will open — confirm adding the event.'}</p></div>
 <script>
 var tg=window.Telegram&&window.Telegram.WebApp; if(tg){tg.ready();tg.expand();}
 var ICS=${JSON.stringify(icsUrl)};
+var G=${JSON.stringify(gUrl)};
+var gb=document.getElementById('g');if(gb)gb.onclick=function(){try{if(tg&&tg.openLink){tg.openLink(G);return}}catch(e){}window.location.href=G;};
 document.getElementById('go').onclick=function(){
   try{ if(tg&&tg.openLink){tg.openLink(ICS,{try_instant_view:false});return} }catch(e){}
   window.location.href=ICS;
@@ -891,6 +897,7 @@ app.get('/api/match/bootstrap', async (req, res) => {
     const byId = new Map(opponents.map(o => [String(o.telegram_id), o]));
     const shape = (s) => ({
       ...s,
+      broadcast_msgs: undefined,   // кому разослано окно — служебное, в браузер не отдаём
       dates: cellToList(s.dates),
       courts: cellToList(s.courts),
       from: byId.get(String(s.from_telegram_id)) || null,
@@ -1289,8 +1296,8 @@ app.post('/api/match/result', async (req, res) => {
     }
     const validPoint=x=>['0','1','3'].includes(String(x));
     const fromWon=winnerId===String(slot.from_telegram_id),both=!winnerId&&kind==='technical';
-    const pointsFrom=v.isAdmin&&validPoint(b.points_from)?Number(b.points_from):(both?0:fromWon?3:kind==='played'?'':kind==='retired'?1:0);
-    const pointsTo=v.isAdmin&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
+    const pointsFrom=v.isAdmin&&kind!=='played'&&validPoint(b.points_from)?Number(b.points_from):(both?0:fromWon?3:kind==='played'?'':kind==='retired'?1:0);
+    const pointsTo=v.isAdmin&&kind!=='played'&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
     let photo={fileId:'',warning:''};
     try{photo=await uploadResultPhoto(v.user.id,b.photo)}catch(e){return res.status(400).json({ok:false,error:e.message})}
     const enteredByOrganiser=v.isAdmin&&!participant;
@@ -1365,8 +1372,8 @@ app.post('/api/match/manual', async (req,res)=>{
       storedScore=formatScore(score)+(kind==='retired'?' RET':'');set3Mode=detectSet3Mode(score);
     }
     const validPoint=x=>['0','1','3'].includes(String(x)),fromWon=winnerId===sides[0],both=!winnerId&&kind==='technical';
-    const pointsFrom=v.isAdmin&&validPoint(b.points_from)?Number(b.points_from):(both?0:fromWon?3:kind==='played'?'':kind==='retired'?1:0);
-    const pointsTo=v.isAdmin&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
+    const pointsFrom=v.isAdmin&&kind!=='played'&&validPoint(b.points_from)?Number(b.points_from):(both?0:fromWon?3:kind==='played'?'':kind==='retired'?1:0);
+    const pointsTo=v.isAdmin&&kind!=='played'&&validPoint(b.points_to)?Number(b.points_to):(both?0:fromWon?(kind==='played'?'':kind==='retired'?1:0):3);
     let photo={fileId:'',warning:''};try{photo=await uploadResultPhoto(v.user.id,b.photo)}catch(e){return res.status(400).json({ok:false,error:e.message})}
     const row={challenge_id:uid('match'),match_type:'manual',status:'accepted',division,season,group,
       from_telegram_id:sides[0],from_name:from.name,from_username:from.username||'',
@@ -2308,6 +2315,9 @@ export async function runStuckNudges(now=Date.now()) {
       else if(item.scope==='score') await notifyStuckScore(item);
       else await notifyStuckResult(item);
       await markStuckNudge(item.slot.challenge_id, item.scope, item.stage,item);
+      // Напоминание из цепочки — тут и обновляем цифру на кнопке «Мои матчи»
+      // (сразу после самого уведомления её не трогаем, чтобы не дублировать).
+      queueMatchAttention([item.slot.from_telegram_id,item.slot.to_telegram_id].filter(Boolean).map(String),{},{force:true});
     } catch (e) {
       console.error(`stuck nudge ${item.scope}/${item.stage} failed:`, e.message);
     }
@@ -2361,6 +2371,8 @@ process.on?.('SIGTERM', async () => {
 // к Google оно уступает действиям людей.
 app.listen(PORT, () => withPriority('low', async () => {
   setMatchChangeHandler(queueMatchAttention);
+  // Окно поменялось (разобрали день, закрыли) — правим разосланные сообщения.
+  setWindowChangeHandler(id => scheduleSlotCards(id));
   // Снимок витрины лиги сбрасывается вместе с остальными кэшами — то есть сразу
   // после подтверждённого результата, а не по таймеру.
   onLeagueCacheInvalidated(invalidateLeagueSnapshot);

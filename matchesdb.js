@@ -13,7 +13,7 @@
 // Отвечающий выбирает конкретную дату и корт — они пишутся в agreed_*.
 import { sheets as sheetsClient } from './google.js';
 import { MATCHES_SPREADSHEET_ID, DIVISIONS_SPREADSHEET_ID, MATCH_SHEETS, TIMEZONE } from './config.js';
-import { nowISO, safe } from './util.js';
+import { nowISO, safe, uid } from './util.js';
 import { authorizeSlot, slotScope, sameScope, isWCrossGroupPair } from './access.js';
 import { getPlayerLeagueInfo } from './sheets.js';
 import { divisionLetter } from './division.js';
@@ -33,7 +33,14 @@ const SLOT_HEADERS = [
   'unfinished_by', 'unfinished_at', 'unfinished_note', 'unfinished_photo_file_id',
   // Готовая карточка результата — сохраняется в момент результата и потом
   // пересылается как есть, а не пересобирается задним числом.
-  'result_card_file_id'
+  'result_card_file_id',
+  // Окно на несколько дней: отклик забирает только свой день. Под него
+  // заводится отдельная строка-матч (parent_id — окно, откуда она взята),
+  // а остальные дни остаются в самом окне и висят открытыми.
+  'parent_id',
+  // Кому и каким сообщением окно разослано: [[chat, message, lang], …] —
+  // чтобы потом поправить эти сообщения (остались дни / окно закрыто).
+  'broadcast_msgs'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -428,6 +435,33 @@ async function withClaimLock(key, fn) {
   }
 }
 
+// День окна уже прошёл (по концу интервала автора).
+function dayPast(d, slot = {}, now = Date.now()) {
+  const end = Date.parse(`${normDate(d)}T${normTime(slot.time_to || '23:59') || '23:59'}:00+07:00`);
+  return Number.isFinite(end) && end <= now;
+}
+// Взял ли этот человек уже день из этого окна (переговоры или согласованный матч).
+async function takenFromWindow(windowId, telegramId) {
+  if (!windowId || !telegramId) return false;
+  return (await allSlots()).some(r => String(r.parent_id) === String(windowId)
+    && String(r.to_telegram_id) === String(telegramId)
+    && ['pending', 'accepted'].includes(String(r.status || '').toLowerCase()));
+}
+// Матч, взятый из окна, сорвался (отказ, отмена, нет ответа): его день
+// возвращается в окно, если окно ещё открыто. Сама строка-матч закрывается.
+// Окна уже нет — вернуть некуда: строка сама становится открытым окном (как раньше).
+async function returnDayToWindow(slot, days, actor = {}) {
+  if (String(slot.match_type) !== 'open' || !slot.parent_id || !days.length) return null;
+  const parent = await findSlot(slot.parent_id);
+  if (!parent || String(parent.status || '').toLowerCase() !== 'open') return null;
+  const all = [...new Set([...cellToList(parent.dates), ...days].map(normDate))].filter(d => !dayPast(d, parent)).sort();
+  await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, parent._rowNumber, { dates: listToCell(all) });
+  const patch = { status: 'cancelled', cancelled_at: nowISO() };
+  await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
+  await logMatchEvent('day_returned', slot, actor, `${days.join(', ')} → окно ${parent.challenge_id}`);
+  return { slot: { ...slot, ...patch }, window: { ...parent, dates: listToCell(all) } };
+}
+
 // Отклик на окно = предложение конкретных даты/корта. Матч назначается только
 // после подтверждения второй стороной (как заявка на тренировку у тренера).
 // allowSelf — тестовый режим для админа: позволяет откликнуться на собственное окно,
@@ -449,6 +483,8 @@ export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {})
     if (['cancelled', 'declined', 'expired'].includes(status)) return { ok: false, reason: 'closed', slot };
     if (!opts.allowSelf && String(slot.from_telegram_id) === String(taker.telegram_id)) return { ok: false, reason: 'own', slot };
     if (slot.to_telegram_id && String(slot.to_telegram_id) !== String(taker.telegram_id)) return { ok: false, reason: 'not_for_you', slot };
+    // Один день из окна уже взят этим же человеком — второй с ним не нужен.
+    if (await takenFromWindow(slot.challenge_id, taker.telegram_id)) return { ok: false, reason: 'already_yours', slot };
 
     const dates = cellToList(slot.dates);
     const courts = cellToList(slot.courts);
@@ -475,6 +511,21 @@ export async function claimSlot(challengeId, taker = {}, choice = {}, opts = {})
       pending_by: String(taker.telegram_id || ''), round: '1', nudge_sent: '',
       responded_at: nowISO()
     };
+    // Окно на несколько дней: отклик забирает только выбранный день. Для него
+    // заводим отдельную строку-матч, а остальные (ещё не прошедшие) дни
+    // остаются в окне и висят открытыми для других.
+    const rest = String(slot.match_type) === 'open' ? dates.filter(d => d !== date && !dayPast(d, slot)) : [];
+    if (rest.length) {
+      const { _rowNumber, ...base } = slot;
+      const child = {
+        ...base, challenge_id: uid('match'), parent_id: String(slot.challenge_id), broadcast_msgs: '',
+        chat_id: '', message_thread_id: '', message_id: '', dates: date, created_at: nowISO(), ...patch
+      };
+      await appendObject(MATCH_SHEETS.slots, SLOT_HEADERS, child);
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { dates: listToCell(rest) });
+      await logMatchEvent('proposed', child, taker, `${date} ${time}${court ? ' · ' + court : ''} · из окна ${slot.challenge_id}, осталось дней: ${rest.length}`);
+      return { ok: true, slot: child, window: { ...slot, dates: listToCell(rest) } };
+    }
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
     await logMatchEvent('proposed', merged, taker, `${date} ${time}${court ? ' · ' + court : ''}`);
@@ -505,9 +556,14 @@ export async function listOpenSlots(division, viewerTelegramId = '', season = ''
   const rows = (await allSlots()).filter(r => String(r.status).toLowerCase() === 'open')
     .filter(r => !r.to_telegram_id || String(r.to_telegram_id) === String(viewerTelegramId))
     .filter(r => !isSlotPast(r));
+  // Из окна этот человек уже взял день — второй раз окно ему не показываем.
+  const all = await allSlots();
+  const tookFrom = new Set(all.filter(r => r.parent_id && String(r.to_telegram_id) === String(viewerTelegramId)
+    && ['pending', 'accepted'].includes(String(r.status || '').toLowerCase())).map(r => String(r.parent_id)));
   const viewer = viewerTelegramId ? await getPlayerLeagueInfo({ telegram_id:viewerTelegramId }).catch(() => null) : null;
   const out = [];
   for (const r of rows) {
+    if (tookFrom.has(String(r.challenge_id))) continue;
     const scope = await slotScope(r);
     const sameGroup = sameScope(scope, { division, season, group });
     // The author’s open W window is also visible to their two approved
@@ -600,6 +656,15 @@ export async function acceptProposal(challengeId, actor = {}) {
     const patch = { status: 'accepted', responded_at: nowISO(), court_pending_at: nowISO(), court_nudge: '', reminder_sent: '', score_nudge: '' };
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, patch);
     const merged = { ...slot, ...patch };
+    // Встречным предложением матч мог переехать на другой день того же окна —
+    // этот день из окна убираем, чтобы его не взял кто-то ещё.
+    if (slot.parent_id && slot.agreed_date) {
+      const parent = await findSlot(slot.parent_id).catch(() => null);
+      const left = parent ? cellToList(parent.dates).filter(d => normDate(d) !== normDate(slot.agreed_date)) : [];
+      if (parent && String(parent.status || '').toLowerCase() === 'open' && left.length !== cellToList(parent.dates).length) {
+        await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, parent._rowNumber, left.length ? { dates: listToCell(left) } : { status: 'cancelled', cancelled_at: nowISO() });
+      }
+    }
     await logMatchEvent('accepted', merged, actor, `${slot.agreed_date} ${slot.agreed_time}${slot.agreed_court ? ' · ' + slot.agreed_court : ''}`);
     return { ok: true, slot: merged };
   });
@@ -620,6 +685,10 @@ export async function rejectProposal(challengeId, actor = {}) {
     const waiting = awaitingSide(slot);
     if (String(waiting.id) !== String(actor.telegram_id)) return { ok: false, reason: 'not_your_turn', slot };
     const wasDirect = String(slot.match_type) === 'direct';
+    if (!wasDirect) {
+      const back = await returnDayToWindow(slot, [slot.agreed_date || slot.dates].map(normDate).filter(d => d && !dayPast(d, slot)), actor);
+      if (back) { await logMatchEvent('rejected', { ...slot }, actor); return { ok: true, slot: back.slot, previous: slot, window: back.window }; }
+    }
     const patch = wasDirect
       ? { status: 'declined', responded_at: nowISO() }
       : { status: 'open', to_telegram_id: '', to_name: '', to_username: '', agreed_date: '', agreed_time: '', agreed_court: '', pending_by: '', round: '', nudge_sent: '', responded_at: nowISO() };
@@ -699,7 +768,15 @@ export async function expireStaleSlots() {
     const dates = cellToList(r.dates);
     const last = dates.length ? dates[dates.length - 1] : r.agreed_date;
     const end = Date.parse(`${last}T23:59:00+07:00`);
-    if (Number.isNaN(end) || end > now) continue;
+    if (Number.isNaN(end) || end > now) {
+      // Окно ещё живо, но часть его дней прошла — убираем их из окна: так
+      // и разосланные сообщения покажут только дни, которые ещё можно взять.
+      if (status === 'open' && String(r.match_type) === 'open' && dates.length > 1) {
+        const future = dates.filter(d => !dayPast(d, r, now));
+        if (future.length && future.length < dates.length) await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, r._rowNumber, { dates: listToCell(future) });
+      }
+      continue;
+    }
     await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, r._rowNumber, { status: 'expired', cancelled_at: nowISO() });
     await logMatchEvent('expired', r, { telegram_id: r.from_telegram_id, name: r.from_name }, last);
     done.push(r);
@@ -1082,6 +1159,10 @@ export async function closeStuckSlot(challengeId,{scope='negotiation',expected=n
       return Number.isFinite(end)&&end>now;
     });
     const backToOpen=slot.match_type==='open'&&dates.length>0;
+    if(backToOpen&&slot.status==='pending'){
+      const back=await returnDayToWindow(slot,dates,{telegram_id:slot.from_telegram_id,name:slot.from_name});
+      if(back)return {ok:true,slot:back.slot,previous:slot,backToOpen:true,scope,window:back.window};
+    }
     const patch=backToOpen?{
       status:'open',dates:listToCell(dates),to_telegram_id:'',to_name:'',to_username:'',
       agreed_date:'',agreed_time:'',agreed_court:'',pending_by:'',round:'',nudge_sent:'',
@@ -1113,6 +1194,10 @@ export async function cancelMatchmaking(challengeId,actor={},now=Date.now()) {
     });
     const claimed=Boolean(slot.to_telegram_id);
     const backToOpen=slot.match_type==='open'&&claimed&&dates.length>0;
+    if(backToOpen){
+      const back=await returnDayToWindow(slot,dates,actor);
+      if(back)return {ok:true,slot:back.slot,previous:slot,backToOpen:true,window:back.window};
+    }
     const patch=backToOpen?{
       status:'open',dates:listToCell(dates),to_telegram_id:'',to_name:'',to_username:'',
       agreed_date:'',agreed_time:'',agreed_court:'',pending_by:'',round:'',nudge_sent:'',
@@ -1624,7 +1709,13 @@ export function pendingActionsFor(telegramId,rows,now=Date.now()) {
 }
 let matchChangeHandler=null;
 export function setMatchChangeHandler(handler){matchChangeHandler=handler;}
+// Разосланное окно поменялось (дни, статус) — сообщения у игроков нужно поправить.
+let windowChangeHandler=null;
+export function setWindowChangeHandler(handler){windowChangeHandler=handler;}
 function emitMatchChange(before,after){
+ if(windowChangeHandler&&after?.broadcast_msgs&&(!before||before.status!==after.status||before.dates!==after.dates)){
+  try{windowChangeHandler(after.challenge_id)}catch(e){console.error('window cards:',e.message)}
+ }
  if(!matchChangeHandler)return;
  const ids=[...new Set([before?.from_telegram_id,before?.to_telegram_id,after?.from_telegram_id,after?.to_telegram_id].filter(Boolean).map(String))];
  // Nudge timestamps and log writes do not trigger keyboard refreshes.

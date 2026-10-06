@@ -2427,10 +2427,16 @@ export async function sendPaymentStart(chatId, lang, applicationId) {
   await sendMessage(chatId, `${t(lang,'application_received')}${formatPaymentAmounts(lang, amounts.amountThb, amounts.amountUsdt)}`, { reply_markup: paymentKeyboard(lang, applicationId) });
 }
 
-const attentionQueue=new Set();let attentionTimer=null;
-export function queueMatchAttention(ids,previous={}) {
+const attentionQueue=new Set(),attentionForced=new Set();let attentionTimer=null;
+// Цифра на кнопке «Мои матчи» обновляется только новым сообщением бота.
+// Раньше при каждом новом деле прилетало «🔴 ждут вашего действия — N» сразу
+// следом за самим уведомлением (отклик, встречное…) — дубль. Теперь:
+//  · дел стало больше — молчим: человек только что получил само уведомление;
+//    цифру обновит напоминание из обычной цепочки (force), если он не ответит;
+//  · дел стало меньше — тихо (без звука) обновляем цифру, чтобы не висела лишняя.
+export function queueMatchAttention(ids,previous={},opts={}) {
  for(const id of ids)if(!attentionCounts.has(String(id))&&previous[id]!==undefined)attentionCounts.set(String(id),previous[id]);
- ids.forEach(id=>attentionQueue.add(String(id)));
+ ids.forEach(id=>{attentionQueue.add(String(id));if(opts.force)attentionForced.add(String(id));});
  if(attentionTimer)return;
  attentionTimer=setTimeout(async()=>{
   attentionTimer=null;const batch=[...attentionQueue];attentionQueue.clear();
@@ -2445,8 +2451,10 @@ export function queueMatchAttention(ids,previous={}) {
     // снова и снова. Теперь первое наблюдение без известного «до» — молча
     // запоминаем. Настоящие изменения (новый вызов, внесённый счёт) приходят
     // с прошлым значением и по-прежнему дают сообщение.
-    if(!attentionCounts.has(id)){attentionCounts.set(id,n);continue;}
+    if(!attentionCounts.has(id)){attentionCounts.set(id,n);attentionForced.delete(id);continue;}
+    const forced=attentionForced.delete(id);
     if(n===attentionCounts.get(id))continue;
+    if(n>attentionCounts.get(id)&&!forced)continue;
     const lang=p.language==='ru'?'ru':'en',st=await playerState(id);
     const kb=await keyboardFor(id,lang,st.kind,id);if(!kb)continue;
     await sendMessage(id,n?(lang==='ru'?'🔴 Мои матчи: ждут вашего действия — '+n:'🔴 My matches: actions waiting for you — '+n):(lang==='ru'?'✅ В матчах нет действий, ожидающих вашего ответа.':'✅ No match actions are waiting for your response.'),{reply_markup:kb,disable_notification:true});

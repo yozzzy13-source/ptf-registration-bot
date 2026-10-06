@@ -243,7 +243,7 @@ var unplayed={known:false,names:[]};
 var canMatch=false,matchGroup='',canBookCourt=false,bookDate='',bookCourts=[],bookTime='17:00',bookDur='120',adminPlayers=[],adminItems=[],adminLoaded=false,adminDiv='',adminQuery='',adminSugOpen=false,resultTasks=[],resultSlotId='',resultMode='',isAdmin=false,me=null,division='',courts=[],opponents=[],openSlots=[],myMatches=[],selDates=[],selCourts=[],selFrom='17:00',selTo='21:00',selComment='',selOpp='',mode='mine',focusSlot='',counterSlotId='',matchDuration=120,resultAfterMin=90;
 var T={
   ru:{title:'Мои матчи',subDiv:'Твой дивизион: ',subNone:'Ты пока не в составе дивизиона — окна матчей станут доступны после распределения.',
-      tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
+      tOpen:'Открытые окна',tNew:'Создать',tMine:'Расписание',tCalls:'Вызовы',slotGone:'Это окно уже занято или закрыто',slotGoneHint:'Все его дни разобраны или автор его закрыл. Ниже — окна дивизиона, которые ещё свободны.',tCourt:'Корт',tAdmin:'Контроль',adminTitle:'Все активные запросы',adminSearch:'Поиск по имени',adminAll:'Все дивизионы',adminEmpty:'Активных запросов нет',adminOpen:'открытое окно',adminPending:'согласование',adminAccepted:'матч согласован',adminGroup:'Открыто для группы',contact:'Связаться',cancelRequestAsk:'Отменить этот запрос? Соперник получит уведомление.',tCreate:'➕ Создать вызов',tBackCalls:'‹ К вызовам',histTitle:'История матчей лиги',histMine:'Мой дивизион',histAll:'Вся лига',histEmpty:'Сыгранных матчей пока нет.',histMore:'Показать ещё',
       annTitle:'📣 Афиша-анонс',annHint:'Выберите двух игроков — афиша уйдёт в чат админов, публикация в сторис оттуда же кнопкой.',annP1:'Игрок 1',annP2:'Игрок 2',annDivision:'Дивизион (необязательно — подставится сам, если оба игрока из одного)',annComment:'Комментарий (необязательно) — попадёт и в промпт, и на афишу как дата/место',annCommentPh:'Например: сб · 4 окт · 18:00 · The Dome',annSend:'✨ Сгенерировать афишу',annSending:'Отправляю…',annSent:'✅ Готово — картинки придут в чат админов через пару минут.',annNeedPlayers:'Выберите двух разных игроков',
       emptyOpen:'Сейчас нет открытых окон в твоей группе. Создай своё — бот отправит его соперникам лично.',
       emptyMine:'У тебя пока нет назначенных матчей и открытых окон.',
@@ -287,7 +287,7 @@ var T={
       bookNote:'Бот ничего не отправляет сам: он только готовит текст и ссылку. Ответы кортов приходят вам в WhatsApp.',
       h1:'1 ч',h15:'1.5 ч',h2:'2 ч',h25:'2.5 ч',h3:'3 ч'},
   en:{title:'My matches',subDiv:'Your division: ',subNone:'You are not in a division yet — match slots open up once divisions are set.',
-      tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',tCourt:'Court',tAdmin:'Admin',adminTitle:'All active requests',adminSearch:'Search by name',adminAll:'All divisions',adminEmpty:'No active requests',adminOpen:'open slot',adminPending:'negotiating',adminAccepted:'match agreed',adminGroup:'Open to group',contact:'Message',cancelRequestAsk:'Cancel this request? Your opponent will be notified.',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
+      tOpen:'Open slots',tNew:'Create',tMine:'Schedule',tCalls:'Challenges',slotGone:'This slot is already taken or closed',slotGoneHint:'All its days are taken or the author closed it. Below are the division slots that are still open.',tCourt:'Court',tAdmin:'Admin',adminTitle:'All active requests',adminSearch:'Search by name',adminAll:'All divisions',adminEmpty:'No active requests',adminOpen:'open slot',adminPending:'negotiating',adminAccepted:'match agreed',adminGroup:'Open to group',contact:'Message',cancelRequestAsk:'Cancel this request? Your opponent will be notified.',tCreate:'➕ New challenge',tBackCalls:'‹ Back to challenges',histTitle:'League match history',histMine:'My division',histAll:'Whole league',histEmpty:'No matches played yet.',histMore:'Show more',
       annTitle:'📣 Announcement poster',annHint:'Pick two players — the poster goes to the admin chat, publish to story from there with a button.',annP1:'Player 1',annP2:'Player 2',annDivision:'Division (optional — filled in automatically if both players share one)',annComment:'Comment (optional) — goes into the prompt and onto the poster as date/place',annCommentPh:'e.g. Sat · 4 Oct · 18:00 · The Dome',annSend:'✨ Generate poster',annSending:'Sending…',annSent:'✅ Done — images will arrive in the admin chat shortly.',annNeedPlayers:'Pick two different players',
       emptyOpen:'No open slots in your group. Create one — the bot will send it privately to your opponents.',
       emptyMine:'No scheduled matches or open slots yet.',
@@ -1191,7 +1191,9 @@ function resultKindPicker(prefix){
 function pointsEditor(prefix,p1,p2){
   if(!isAdmin)return '';
   var opts=[0,1,3].map(function(v){return '<option value="'+v+'">'+v+'</option>'}).join('');
-  return '<div id="'+prefix+'Points"><label>'+esc(X.pointsFor)+'</label><div class="two"><div><span class="hint">'+esc(p1.n||'')+'</span><select id="'+prefix+'Pts1">'+opts+'</select></div><div><span class="hint">'+esc(p2.n||'')+'</span><select id="'+prefix+'Pts2">'+opts+'</select></div></div></div>';
+  // Очки правятся руками только для снятия (RET) и техрезультата. Обычный матч
+  // считается по стандарту (победа 3, поражение 1) — поля скрыты.
+  return '<div id="'+prefix+'Points" class="'+(resultKind==='played'?'hidden':'')+'"><label>'+esc(X.pointsFor)+'</label><div class="two"><div><span class="hint">'+esc(p1.n||'')+'</span><select id="'+prefix+'Pts1" data-pid="'+esc(p1.id||'')+'">'+opts+'</select></div><div><span class="hint">'+esc(p2.n||'')+'</span><select id="'+prefix+'Pts2" data-pid="'+esc(p2.id||'')+'">'+opts+'</select></div></div></div>';
 }
 function pickResultKind(node,prefix){
   resultKind=node.dataset.k||'played';
@@ -1199,17 +1201,19 @@ function pickResultKind(node,prefix){
   var score=$(prefix+'ScoreBox');if(score)score.classList.toggle('hidden',resultKind==='technical');
   var both=$(prefix+'Both');if(both)both.classList.toggle('hidden',resultKind!=='technical');
   if(resultKind!=='technical'&&selWinner==='both'){selWinner='';if(both)both.classList.remove('on')}
+  var pts=$(prefix+'Points');if(pts)pts.classList.toggle('hidden',resultKind==='played');
   syncPointDefaults(prefix);
 }
 function syncPointDefaults(prefix){
   if(!isAdmin)return;
   var p1=$(prefix+'Pts1'),p2=$(prefix+'Pts2');if(!p1||!p2)return;
   if(selWinner==='both'){p1.value='0';p2.value='0';return}
-  var first=$(prefix+'WinSeg')&&$(prefix+'WinSeg').querySelector('.s:first-child');
-  var firstId=first&&first.dataset.w;
-  var firstWon=selWinner&&selWinner===firstId;
-  p1.value=firstWon?'3':(resultKind==='retired'?'1':'0');
-  p2.value=firstWon?(resultKind==='retired'?'1':'0'):'3';
+  // Очки — по тому, чей это селект (data-pid), а не по порядку кнопок: кнопка
+  // победителя переезжает влево, и раньше 3 очка доставались не тому.
+  var lose=resultKind==='retired'?'1':'0';
+  if(!selWinner){p1.value=lose;p2.value=lose;return}
+  p1.value=String(p1.dataset.pid)===String(selWinner)?'3':lose;
+  p2.value=String(p2.dataset.pid)===String(selWinner)?'3':lose;
 }
 function renderResultForm(s){
   var p1={id:String(s.from_telegram_id||''),n:s.from_name||''},p2={id:String(s.to_telegram_id||''),n:s.to_name||''};
@@ -1351,7 +1355,7 @@ function renderManualWinner(){
   seg.innerHTML='<div class="s" data-w="'+esc(from.telegram_id||'')+'" data-n="'+esc(from.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(from.name||'—')+'</div>'
     +'<div class="s" data-w="'+esc(to.telegram_id||'')+'" data-n="'+esc(to.name||'')+'" onclick="pickWinner(this,\'m\')">'+esc(to.name||'—')+'</div>'
     +(isAdmin?'<div class="s hidden" id="mBoth" data-w="both" data-n="'+esc(X.bothTechnical)+'" onclick="pickWinner(this,\'m\')">'+esc(X.bothTechnical)+'</div>':'');
-  if($('mPointsHost'))$('mPointsHost').innerHTML=pointsEditor('m',{n:from.name},{n:to.name});
+  if($('mPointsHost'))$('mPointsHost').innerHTML=pointsEditor('m',{id:from.telegram_id,n:from.name},{id:to.telegram_id,n:to.name});
   var both=$('mBoth');if(both)both.classList.toggle('hidden',resultKind!=='technical');
   selWinner='';setScoreNames('m','','');bindScore('m');syncPointDefaults('m');
 }
@@ -1552,6 +1556,13 @@ function load(keepTab){
         showTab(allowed.indexOf(want)>=0?want:'mine');
         // Переход по ссылке «Играю» из чата дивизиона — сразу открываем выбор даты и корта.
         if(focusSlot&&openSlots.some(function(s){return s.challenge_id===focusSlot}))openPicker(focusSlot);
+        // Старая кнопка «Играю» из рассылки, а окно уже разобрали или закрыли:
+        // говорим об этом прямо и показываем свободные окна, а не пустой экран.
+        else if(focusSlot&&(myMatches||[]).some(function(s){return String(s.parent_id||'')===focusSlot})){showTab('mine')}
+        else if(focusSlot&&!(myMatches||[]).some(function(s){return s.challenge_id===focusSlot})){
+          showTab('open');var vo=$('viewOpen');
+          if(vo)vo.insertAdjacentHTML('afterbegin','<div class="card" style="margin-bottom:12px"><b>⛔ '+esc(X.slotGone)+'</b><div class="hint" style="margin-top:6px">'+esc(X.slotGoneHint)+'</div></div>');
+        }
       } else showTab(mode);
     }).catch(function(e){$('viewOpen').innerHTML='<div class="empty" style="color:#ff6b6b">'+esc(e.message)+'</div>'});
 }
