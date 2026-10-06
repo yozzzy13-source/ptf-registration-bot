@@ -140,7 +140,8 @@ const result2={challenge_id:'history-form',division:'Division C',season:'2',grou
 const before=writes.length;const write=await results.writeConfirmedResult(result2);
 check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
 const allSeasonForm=cardContexts.get('history-form');
-check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='L,W,L','Card form uses the all-season profile history and includes this match once');
+// Recent Form в витрине идёт от свежего к старому: «LOST WIN» = последний LOST.
+check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='W,L,L','Card form uses the all-season profile history (newest-first in the sheet) and includes this match once');
 check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
 // Заголовки Match_Log раньше не находились никогда (norm() съедает подчёркивание
 // в «p1_id»), и вместе с ними молча отваливалась запись сезона.
