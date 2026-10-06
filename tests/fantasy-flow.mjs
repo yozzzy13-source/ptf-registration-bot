@@ -155,6 +155,7 @@ settings.set('FANTASY_BUDGET','88');settings.set('FANTASY_TEAM_SIZE','8');settin
 // но только на игрока той же группы.
 const newcomer={name:'Player 12',letter:'W',group:'2'};
 roster=roster.filter(p=>p.name!=='Player 3').concat(newcomer);originalRoster.push(newcomer);profiles.push({id:'13',name:'Player 12'});
+settings.set('fantasy_test_price_overrides',JSON.stringify({'Player 12':40}));
 await f.buildFantasyCatalog({mode:'test',fresh:true});
 settings.set('FANTASY_TEST_ENTRY_OPEN','off');
 const swap=await f.getFantasyBootstrap('1','Player 0','en','test');
@@ -164,6 +165,8 @@ const in12=swap.players.find(p=>p.name==='Player 12').key;
 await rejects(()=>f.transferFantasyPlayer('1',{team_slot:2,player_out_key:squad[3],player_in_key:swap.players.find(p=>p.name==='Player 11').key},'en','test'),'Free W transfer to another group rejected');
 const wSwap=await f.transferFantasyPlayer('1',{team_slot:2,player_out_key:squad[3],player_in_key:in12},'en','test');
 check(wSwap.forced&&wSwap.team.picks.some(p=>(p.key||p)===in12)&&wSwap.team.transfers_used===2,'Free W transfer to same group succeeds without spending a transfer');
+check(wSwap.team.budget_spent>88,'Free transfer of a withdrawn player ignores the budget');
+settings.set('fantasy_test_price_overrides','');
 await rejects(()=>f.transferFantasyPlayer('1',{team_slot:2,player_out_key:in12,player_in_key:squad[3]},'en','test'),'Paid transfers still closed');
 settings.set('FANTASY_TEST_ENTRY_OPEN','on');
 console.log('PASS: '+checks+' Fantasy flow checks; all Sheets writes mocked.');

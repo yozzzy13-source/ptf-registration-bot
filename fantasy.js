@@ -340,7 +340,13 @@ export async function transferFantasyPlayer(id,input={},lang='en',mode='test'){
   // Если в команде несколько выбывших, остальные пока остаются в составе как были:
   // замена одного не должна упираться в то, что второй тоже не в ростере.
   kept=next.filter(p=>p.key&&!c.players.some(x=>x.key===p.key)).map(p=>({...p,price:n(p.price)})),
-  v=validateFantasySelection({picks:next,captain_key:captain,vice_key:vice},kept.length?{...c,players:[...c.players,...kept]}:c,{complete:true,lang});
+  // Бюджет при замене. Бесплатная замена выбывшего (он ушёл не по воле
+  // владельца) бюджетом не ограничена: брать можно любого из его группы.
+  // После неё команда может стоять чуть выше 88 — тогда обычная замена лишь
+  // не должна увеличивать этот перерасход.
+  before=picks.reduce((sum,p)=>sum+n(c.players.find(x=>x.key===p.key)?.price??p.price),0),
+  limit=forced?Number.MAX_SAFE_INTEGER:Math.max(c.budget,before),
+  v=validateFantasySelection({picks:next,captain_key:captain,vice_key:vice},{...c,budget:limit,players:kept.length?[...c.players,...kept]:c.players},{complete:true,lang});
  if(!v.ok){const e=Error(v.errors.join(' '));e.code=400;throw e}
  const now=nowISO(),usedNext=forced?used:used+1;await appendObject(use.transfers,{transfer_id:uid('ft'),team_id:row.team_id,telegram_id:String(id),season:c.season,player_out_key:old.key,player_out_name:old.name,player_in_key:incoming.key,player_in_name:incoming.name,price_out:old.price,price_in:incoming.price,forced:forced?'yes':'no',created_at:now});
  await updateObjectByRow(use.teams,row._rowNumber,{picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext,updated_at:now});
