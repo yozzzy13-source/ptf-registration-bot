@@ -365,10 +365,16 @@ function parseJsonCell(v) {
   catch (e) { return []; }
 }
 // «WIN WIN LOST WIN» → ['W','W','L','W'] от старого к новому.
+// В витрине (Frontend_Profile_All → Recent Form) форма записана от свежего
+// матча к старому: «WIN LOST WIN LOST LOST» — последний матч первым. Везде в
+// коде (мини-приложение, карточка, постер) форма хранится по времени — от
+// старого к свежему, — а рисуется свежим слева. Раньше строку брали как есть,
+// и на странице игрока ряд выходил перевёрнутым. Разворачиваем здесь, один раз.
 function parseForm(v) {
   return String(v ?? '').trim().split(/\s+/).filter(Boolean)
     .map(x => x.toUpperCase().startsWith('W') ? 'W' : (x.toUpperCase().startsWith('L') ? 'L' : ''))
-    .filter(Boolean);
+    .filter(Boolean)
+    .reverse();
 }
 
 // Универсальное чтение листа «шапка + строки» из чужой таблицы.
