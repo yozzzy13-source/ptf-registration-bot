@@ -106,7 +106,7 @@ export async function buildStandings(season, letter, group = '', snapshots = nul
     const move = Number.isFinite(was) ? was - p.place : null;   // + вверх, − вниз
     return { ...p, was: Number.isFinite(was) ? was : null, move };
   });
-  return { season, letter, group, rows, baseline: !before.places.size, since: before.issue };
+  return { season, letter, group, rows, playoff: table.playoff || null, baseline: !before.places.size, since: before.issue };
 }
 
 // ------------------------------------------------------------- рисование
@@ -288,23 +288,142 @@ export async function renderStandingsPoster(data = {}, { title = '', subtitle = 
 }
 
 // ------------------------------------------------------------- подпись
-// Подпись к сторис — одно короткое предложение и всё. Ни хэштегов, ни названия
-// дивизиона, ни дат: в сторис длинный текст просто не помещается, а дивизион,
-// период и все цифры и так нарисованы на самой картинке.
+// Подпись к сторис — одна-две короткие фразы на английском. Ни хэштегов, ни
+// названия дивизиона, ни дат: всё это уже нарисовано на картинке.
+//
+// Раньше модель получала таблицу и писала «кто лидирует / кто поднялся» — и
+// подписи всех групп выходили на одно лицо. Теперь бот сам ищет в таблице
+// сюжет недели, а модель только облекает его в слова:
+//
+//   · где группа сейчас — прежде всего по СЫГРАННЫМ матчам (кто-то проходит
+//     дистанцию за две недели, кто-то начинает в последнюю), сроки — поправка;
+//   · у кого сколько матчей в запасе, кто уже точно в плей-офф, кому уже не
+//     догнать, кто поднялся / упал, кто без поражений, у кого серия;
+//   · сюжеты в одном выпуске не повторяются, и в группе не берём тот же, что
+//     на прошлой неделе; начало фраз тоже не повторяем.
 const TEXT_MODEL = process.env.STANDINGS_TEXT_MODEL || 'gpt-4o-mini';
 const OPENAI_KEY = String(process.env.OPENAI_API_KEY || '').trim();
+const CAPTIONS_SETTING = 'standings_last_captions';
+const WIN_POINTS = 3;
 
-// Просим модель, но никогда на неё не полагаемся: нет ключа или запрос не
-// прошёл — собираем фразу сами из тех же фактов.
-function fallbackSentence(data) {
-  const rows = data.rows || [];
-  const top = rows[0];
-  const climber = rows.filter(r => Number.isFinite(r.move) && r.move > 0).sort((a, b) => b.move - a.move)[0];
-  if (climber && top) return `${top.name} stays on top, ${climber.name} climbs ${climber.move}.`;
-  if (top) return `${top.name} leads with ${top.points} points.`;
-  return 'Standings updated.';
+// Где сезон по календарю: окончание регулярки — Settings → season_deadline.
+async function seasonClock(now = Date.now()) {
+  const deadline = txt(await getSetting('season_deadline').catch(() => ''));
+  const end = /^\d{4}-\d{2}-\d{2}$/.test(deadline) ? Date.parse(`${deadline}T23:59:00+07:00`) : null;
+  const daysLeft = Number.isFinite(end) ? Math.ceil((end - now) / 86400000) : null;
+  return { daysLeft, regularOver: daysLeft !== null && daysLeft < 0 };
 }
-async function askForSentence(prompt) {
+
+const looseKey = (v = '') => txt(v).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const ord = n => { const v = Number(n) || 0, t = v % 100; return v + (t >= 11 && t <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[v % 10] || 'th')); };
+const streakOf = form => { let n = 0; for (let i = (form || []).length - 1; i >= 0 && form[i] === 'W'; i--) n++; return n; };
+
+// Разбор таблицы: прогресс, расчёт шансов и список возможных сюжетов с весом.
+export function storyFacts(data = {}, { daysLeft = null, regularOver = false, forms = new Map(), crossCount = new Map() } = {}) {
+  const rows = (data.rows || []).filter(r => txt(r.name));
+  const n = rows.length;
+  // Матчей у игрока по регламенту: круг в группе плюс межгрупповые пары (W).
+  const due = r => Math.max(n - 1 + (crossCount.get(looseKey(r.name)) || 0), Number(r.matches) || 0);
+  const perPlayer = Math.max(1, ...rows.map(due));
+  const played = rows.reduce((s, r) => s + (Number(r.matches) || 0), 0);
+  const totalDue = rows.reduce((s, r) => s + due(r), 0);
+  const progress = totalDue ? Math.min(1, played / totalDue) : 0;
+  const left = r => Math.max(0, due(r) - (Number(r.matches) || 0));
+  const maxPts = r => (Number(r.points) || 0) + left(r) * WIN_POINTS;
+  const cut = Math.min(4, n - 1);                      // зона плей-офф: места 1–4
+  const allDone = rows.every(r => left(r) === 0);
+  let stage = progress < 0.3 ? 'early' : progress < 0.7 ? 'middle' : 'late';
+  if (daysLeft !== null && daysLeft <= 14 && stage !== 'late' && progress >= 0.4) stage = 'late';
+  if (allDone || regularOver) stage = 'final';
+  const hasPlayoff = Boolean(data.playoff && [data.playoff.sf1, data.playoff.sf2, data.playoff.final, ...(data.playoff.qf || []), ...(data.playoff.sf || [])]
+    .some(m => m && (m.first || m.second)));
+  if (hasPlayoff && (allDone || regularOver)) stage = 'playoff';
+
+  // Кто уже точно в четвёрке: обогнать его могут меньше четырёх человек.
+  const clinched = cut > 0 ? rows.filter(r => r.place <= cut && rows.filter(o => o !== r && maxPts(o) >= r.points).length < cut) : [];
+  const fourth = rows.find(r => r.place === cut);
+  const out = fourth && progress >= 0.5 ? rows.filter(r => r.place > cut && maxPts(r) < fourth.points) : [];
+  const medianLeft = [...rows].map(left).sort((a, b) => a - b)[Math.floor(n / 2)] || 0;
+
+  const stories = [];
+  const add = (type, weight, text, names = []) => stories.push({ type, weight, text, names });
+  const top = rows[0], second = rows[1];
+  if (top && Number.isFinite(top.was) && top.was !== 1 && top.matches > 0)
+    add('new_leader', 9, `${top.name} takes over first place (was ${ord(top.was)}).`, [top.name]);
+  const climber = rows.filter(r => r.move >= 2).sort((a, b) => b.move - a.move)[0];
+  if (climber) add('climber', 6 + climber.move, `${climber.name} climbs ${climber.move} places to ${ord(climber.place)}.`, [climber.name]);
+  const faller = rows.filter(r => r.move <= -2).sort((a, b) => a.move - b.move)[0];
+  if (faller) add('faller', 4 + Math.abs(faller.move) / 2, `${faller.name} drops ${Math.abs(faller.move)} places to ${ord(faller.place)}.`, [faller.name]);
+  const inHand = rows.filter(r => left(r) - medianLeft >= 2 && maxPts(r) >= (rows[cut - 1]?.points || 0))
+    .sort((a, b) => left(b) - left(a))[0];
+  if (inHand && stage !== 'final') add('in_hand', stage === 'early' ? 5 : 8, `${inHand.name} is ${ord(inHand.place)} with ${left(inHand)} matches still to play — more than most of the group.`, [inHand.name]);
+  const notStarted = rows.filter(r => !Number(r.matches));
+  if (notStarted.length && progress >= 0.3 && stage !== 'final') add('not_started', 6, `${notStarted.map(r => r.name).join(', ')} ${notStarted.length > 1 ? 'have' : 'has'} not played a match yet.`, notStarted.map(r => r.name));
+  const unbeaten = rows.filter(r => r.matches >= 3 && r.wins === r.matches);
+  if (unbeaten.length) add('unbeaten', 6 + unbeaten[0].matches / 2, `${unbeaten[0].name} is unbeaten: ${unbeaten[0].wins} from ${unbeaten[0].matches}.`, [unbeaten[0].name]);
+  const streaker = rows.map(r => ({ r, s: streakOf(forms.get(looseKey(r.name))) })).filter(x => x.s >= 3).sort((a, b) => b.s - a.s)[0];
+  if (streaker && !unbeaten.some(u => u.name === streaker.r.name)) add('streak', 5 + streaker.s / 2, `${streaker.r.name} has won ${streaker.s} in a row.`, [streaker.r.name]);
+  if (clinched.length && stage !== 'early') add('clinched', stage === 'final' ? 6 : 9, `${clinched.map(r => r.name).join(', ')} ${clinched.length > 1 ? 'have' : 'has'} mathematically secured a top-${cut} (playoff) place.`, clinched.map(r => r.name));
+  const race = cut > 0 ? rows.filter(r => r.place >= cut - 1 && r.place <= cut + 2) : [];
+  if (race.length >= 3 && Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points)) <= 3 && stage !== 'early' && stage !== 'playoff')
+    add('race', stage === 'late' ? 10 : 6, `Only ${Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points))} points separate places ${race[0].place} to ${race[race.length - 1].place} around the playoff line (top ${cut}).`, race.map(r => r.name));
+  if (out.length && stage === 'late') add('out', 3, `${out.map(r => r.name).join(', ')} can no longer reach the top ${cut}.`, out.map(r => r.name));
+  if (top && second && top.points - second.points >= 5 && stage !== 'early') add('runaway', 5, `${top.name} leads by ${top.points - second.points} points.`, [top.name]);
+  if (stage === 'final' && top) add('regular_done', 8, `Regular season complete: ${rows.slice(0, cut).map(r => `${r.place}. ${r.name}`).join(', ')} go through.`, rows.slice(0, cut).map(r => r.name));
+  if (stage === 'playoff') {
+    const p = data.playoff || {};
+    const pairs = [...(p.qf || []), ...(p.sf || []), p.sf1, p.sf2, p.final].filter(m => m && m.first && m.second && !m.played);
+    if (pairs.length) add('playoff', 12, `Playoff matches ahead: ${pairs.map(m => `${m.first.name} vs ${m.second.name}`).join('; ')}.`, pairs.flatMap(m => [m.first.name, m.second.name]));
+  }
+  if (top) add('leader', 2, `${top.name} leads with ${top.points} points after ${top.matches} matches.`, [top.name]);
+  return { stage, progress, played: Math.round(played / 2), total: Math.round(totalDue / 2), daysLeft, perPlayer, stories };
+}
+
+const STAGE_TEXT = {
+  early: 'Early in the season: few matches played, the table is still forming.',
+  middle: 'Middle of the season: about half the matches are played.',
+  late: 'Final stretch of the regular season: most matches are played, every result matters for the playoff places.',
+  final: 'The regular season is complete.',
+  playoff: 'Playoff week: the knockout matches are next.'
+};
+
+// Сюжет для группы: самый весомый, но не тот, что уже взят в этом выпуске
+// другой группой и не тот, что был у этой группы неделю назад.
+export function pickStory(facts, { usedTypes = [], lastType = '' } = {}) {
+  const ranked = [...facts.stories].sort((a, b) => b.weight - a.weight);
+  const fresh = ranked.filter(s => !usedTypes.includes(s.type) && s.type !== lastType);
+  const main = fresh[0] || ranked.find(s => s.type !== lastType) || ranked[0] || null;
+  const extra = ranked.find(s => s !== main && !(main?.names || []).some(n => s.names.includes(n)) && s.weight >= 5) || null;
+  return { main, extra };
+}
+
+// Запасные фразы на случай, если модель недоступна: под каждый сюжет
+// несколько вариантов, выбор зависит от группы — подписи не совпадают.
+const FALLBACK = {
+  new_leader: [s => s.text.replace(/\s*\(was \d+\w*\)/, ''), s => `New name on top: ${s.names[0]}.`],
+  climber: [s => s.text, s => `Big week for ${s.names[0]} — up the table.`],
+  faller: [s => s.text, s => `A tough week for ${s.names[0]}.`],
+  in_hand: [s => s.text, s => `Watch ${s.names[0]}: plenty of matches in hand.`],
+  not_started: [s => s.text, s => `Still waiting for a first match from ${s.names.join(', ')}.`],
+  unbeaten: [s => s.text, s => `Nobody has beaten ${s.names[0]} yet.`],
+  streak: [s => s.text, s => `${s.names[0]} keeps on winning.`],
+  clinched: [s => s.text.replace(' mathematically', ''), s => `${s.names.join(', ')} — playoff place confirmed.`],
+  race: [s => s.text, s => 'The fight for the playoff places is wide open.'],
+  out: [s => s.text],
+  runaway: [s => s.text, s => `${s.names[0]} is pulling away at the top.`],
+  regular_done: [s => s.text],
+  playoff: [s => s.text],
+  leader: [s => s.text, s => `${s.names[0]} sets the pace.`]
+};
+function fallbackCaption(pick, seed = '') {
+  const s = pick.main;
+  if (!s) return 'Standings updated.';
+  const list = FALLBACK[s.type] || [x => x.text];
+  const h = [...String(seed)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return list[h % list.length](s);
+}
+
+async function askForCaption(prompt) {
   if (!OPENAI_KEY) return '';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
@@ -313,9 +432,9 @@ async function askForSentence(prompt) {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: TEXT_MODEL, temperature: 0.7, max_tokens: 60,
+        model: TEXT_MODEL, temperature: 0.9, max_tokens: 90,
         messages: [
-          { role: 'system', content: 'You write ONE short English sentence for an Instagram story about amateur tennis standings. Max 14 words. No emoji, no hashtags, no quotes. Never name the division or the group — the image already shows them. Just say what is happening in the table.' },
+          { role: 'system', content: 'You write the caption for an Instagram story showing an amateur tennis league table. ONE or TWO short English sentences, at most 28 words in total. Build it around the MAIN STORY you are given; you may add the SECOND STORY only if it fits naturally. Use only the facts given — never invent results, streaks or numbers. Match the tone to the season stage. Lively but not cheesy. No emoji, no hashtags, no quotes. Never name the division, the group or the season — the image already shows them. Do not start the way the listed other captions start.' },
           { role: 'user', content: prompt }
         ]
       }),
@@ -323,15 +442,60 @@ async function askForSentence(prompt) {
     });
     const json = await res.json().catch(() => ({}));
     return txt(json?.choices?.[0]?.message?.content).replace(/^["']|["']$/g, '');
-  } catch (e) { console.error('standings sentence failed:', e.message); return ''; }
+  } catch (e) { console.error('standings caption failed:', e.message); return ''; }
   finally { clearTimeout(timer); }
 }
 
-export async function groupCaption(data) {
+const firstWords = (t = '', k = 3) => txt(t).split(/\s+/).slice(0, k).join(' ');
+// Подпись группы. ctx — общий на весь выпуск: какие сюжеты и начала фраз уже
+// заняты, что было у этой группы неделю назад, где сезон по календарю.
+export async function groupCaption(data, ctx = {}) {
+  const facts = storyFacts(data, ctx);
+  const key = groupKey(data.season, data.letter, data.group);
+  const last = ctx.lastCaptions?.[key] || {};
+  const pick = pickStory(facts, { usedTypes: ctx.usedTypes || [], lastType: last.type || '' });
+  const avoid = [...(ctx.usedCaptions || []), last.caption].filter(Boolean).map(c => firstWords(c));
   const rows = (data.rows || []).slice(0, MAX_ROWS);
-  const facts = rows.map(r => `${r.place}. ${r.name} — ${r.points} pts, ${r.matches} played, ${r.wins} won`
+  const table = rows.map(r => `${r.place}. ${r.name} — ${r.points} pts, ${r.matches} played, ${r.wins} won`
     + (Number.isFinite(r.move) && r.move !== 0 ? `, ${r.move > 0 ? 'up' : 'down'} ${Math.abs(r.move)}` : '')).join('\n');
-  return await askForSentence(`Standings after this week:\n${facts}`) || fallbackSentence(data);
+  const prompt = [
+    `SEASON STAGE: ${STAGE_TEXT[facts.stage]} ${facts.played} of ${facts.total} group matches played${facts.daysLeft !== null && facts.daysLeft >= 0 ? `, ${facts.daysLeft} days left in the regular season` : ''}.`,
+    `MAIN STORY: ${pick.main?.text || 'The table after this week.'}`,
+    pick.extra ? `SECOND STORY (optional): ${pick.extra.text}` : '',
+    avoid.length ? `Other captions start with: ${avoid.map(a => `"${a}"`).join(', ')}` : '',
+    `TABLE:\n${table}`
+  ].filter(Boolean).join('\n');
+  let caption = await askForCaption(prompt);
+  if (!caption || avoid.includes(firstWords(caption))) caption = fallbackCaption(pick, key + (ctx.issue || ''));
+  if (ctx.usedTypes && pick.main) ctx.usedTypes.push(pick.main.type);
+  if (ctx.usedCaptions) ctx.usedCaptions.push(caption);
+  if (ctx.thisIssue) ctx.thisIssue[key] = { type: pick.main?.type || '', caption };
+  return caption;
+}
+
+// Контекст выпуска: календарь сезона, форма игроков (для серий) и подписи
+// прошлой недели — чтобы не повторяться.
+async function captionContext(now = Date.now(), issue = '') {
+  const clock = await seasonClock(now);
+  const forms = new Map();
+  try {
+    const { getLeagueProfiles } = await import('./sheets.js');
+    for (const p of await getLeagueProfiles()) if (p?.name && Array.isArray(p.form)) forms.set(looseKey(p.name), p.form);
+  } catch {}
+  // Межгрупповые пары W: у этих игроков по регламенту на матчи больше.
+  const crossCount = new Map();
+  try {
+    const { currentWCrossPairs, resolveWCrossPairs } = await import('./access.js');
+    const pairs = (await resolveWCrossPairs().catch(() => null))?.pairs || currentWCrossPairs();
+    for (const pair of pairs || []) for (const name of pair) crossCount.set(looseKey(name), (crossCount.get(looseKey(name)) || 0) + 1);
+  } catch {}
+  let lastCaptions = {};
+  try { lastCaptions = JSON.parse(await getSetting(CAPTIONS_SETTING).catch(() => '') || '{}') || {}; } catch {}
+  return { ...clock, forms, crossCount, lastCaptions, usedTypes: [], usedCaptions: [], thisIssue: {}, issue };
+}
+async function rememberCaptions(ctx) {
+  if (!ctx?.thisIssue || !Object.keys(ctx.thisIssue).length) return;
+  await setSetting(CAPTIONS_SETTING, JSON.stringify({ ...(ctx.lastCaptions || {}), ...ctx.thisIssue }), 'Подписи прошлого выпуска таблиц — чтобы не повторяться').catch(() => {});
 }
 
 // ------------------------------------------------------------- выпуск
@@ -347,6 +511,7 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
   const useSeason = txt(season) || txt(await latestSeason().catch(() => '')) || '';
   const wanted = txt(only).toUpperCase().replace(/\s+/g, '');
   const snapshots = await readSnapshots();
+  const captionCtx = await captionContext(now, issueLabel(now));
   const items = [];
   for (const g of await standingsGroups(useSeason)) {
     const label = `${txt(g.letter).toUpperCase()}${txt(g.group).toUpperCase()}`;
@@ -356,9 +521,9 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
     const title = groupTitle(g.letter, g.group, g.title);
     const subtitle = `SEASON ${useSeason} · ${spanLabel(data, now)}`;
     const buffer = await renderStandingsPoster(data, { title, subtitle });
-    items.push({ key: label, letter: g.letter, group: g.group, title, subtitle, data, buffer, caption: await groupCaption(data) });
+    items.push({ key: label, letter: g.letter, group: g.group, title, subtitle, data, buffer, caption: await groupCaption(data, captionCtx) });
   }
-  return { season: useSeason, items };
+  return { season: useSeason, items, captionCtx };
 }
 
 // Отправка в тему: картинка группы, следом её подпись отдельным сообщением —
@@ -418,6 +583,7 @@ export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { f
   await deliverStandings(prepared, { ...target, canPublish: instagramEnabled() });
   // Снимок кладём ПОСЛЕ отправки: если что-то упало по дороге, точка отсчёта
   // не сдвинется и следующий выпуск всё равно покажет верное движение.
+  if (save) await rememberCaptions(prepared.captionCtx);
   if (save) for (const item of prepared.items) {
     await saveSnapshot(issue, prepared.season, item.letter, item.group, item.data.rows)
       .catch(e => console.error('standings snapshot failed:', e.message));
