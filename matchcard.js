@@ -573,6 +573,11 @@ async function metasFromSheets(slot, winnerIsFrom, seasonHint = '') {
     // Та же цепочка, что в results.js: сначала журналы дивизионов сквозь
     // сезоны, витрина профилей — запасной вариант.
     const formOf = async name => {
+      // Главный источник — общий журнал лиги: там все матчи по порядку,
+      // включая межгрупповые. Форма — по этот матч включительно.
+      const { leagueFormBefore } = await import('./results.js');
+      const central = await leagueFormBefore(name, { throughPair: [p1, p2], limit: 5 }).catch(() => null);
+      if (central && central.length) return central;
       const live = await playerFormAcrossSeasons(name, { season, limit: 5 }).catch(() => []);
       if (live.length) return live;
       const shown = profiles.find(x => sameName(x.name, name))?.form;
