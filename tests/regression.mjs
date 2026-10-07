@@ -137,11 +137,13 @@ put('1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY','Frontend_Profile_All',[
  ['3','Carol Three','WIN LOST WIN'],['4','Dan Four','LOST WIN']
 ]);
 const result2={challenge_id:'history-form',division:'Division C',season:'2',group:'2',from_name:'Carol Three',to_name:'Dan Four',from_telegram_id:'3',to_telegram_id:'4',agreed_date:'2099-09-14',result_score:'6:4 6:3',result_winner:'3'};
+{const log=tables.get('master|Cross_Division_Match_Log');const mk=(a,ai,b,bi,w)=>{const r=Array(41).fill('');Object.assign(r,{4:ai,6:bi,8:a,9:b,23:'Yes',24:w});return r};
+ log.push(mk('Carol Three','3','Zed','9','3'),mk('Zed','9','Carol Three','3','9'),mk('Carol Three','3','Zed','9','3'),mk('Zed','9','Dan Four','4','9'),mk('Dan Four','4','Zed','9','4'));}
 const before=writes.length;const write=await results.writeConfirmedResult(result2);
 check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
 const allSeasonForm=cardContexts.get('history-form');
 // Recent Form в витрине идёт от свежего к старому: «LOST WIN» = последний LOST.
-check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='W,L,L','Card form uses the all-season profile history (newest-first in the sheet) and includes this match once');
+check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='L,W,L','Card form comes from the league journal (all matches in order) and includes this match once');
 check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
 // Заголовки Match_Log раньше не находились никогда (norm() съедает подчёркивание
 // в «p1_id»), и вместе с ними молча отваливалась запись сезона.
@@ -1614,7 +1616,27 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]});
  check(!/#/.test(cap),'В подписи к сторис нет хэштегов');
  check(!/DIVISION|GROUP|SEASON/i.test(cap),'Дивизион, группа и сезон в тексте не повторяются — они на картинке');
- check(cap.split(/\s+/).length<=16,'Подпись — одно короткое предложение');
+ check(cap.split(/\s+/).length<=30,'Подпись — одна-две короткие фразы');
+ // Сюжет недели: стадия по сыгранным матчам, расчёт шансов, без повторов в выпуске.
+ const late={season:'2',letter:'B',group:'',rows:[
+  {place:1,name:'P One',points:19,matches:7,wins:6,move:0,was:1},{place:2,name:'P Two',points:15,matches:7,wins:4,move:1,was:3},
+  {place:3,name:'P Three',points:13,matches:6,wins:3,move:-1,was:2},{place:4,name:'P Four',points:12,matches:6,wins:3,move:0,was:4},
+  {place:5,name:'P Five',points:11,matches:7,wins:2,move:0,was:5},{place:6,name:'P Six',points:10,matches:6,wins:2,move:0,was:6},
+  {place:7,name:'P Seven',points:7,matches:3,wins:2,move:2,was:9},{place:8,name:'P Eight',points:7,matches:7,wins:0,move:-1,was:7}]};
+ const lf=st.storyFacts(late,{daysLeft:10});
+ check(lf.stage==='late','Почти все матчи сыграны и до конца регулярки 10 дней — финишная прямая');
+ check(lf.stories.some(x=>x.type==='clinched'&&x.names.includes('P One')),'Тот, кого уже не догнать, — «точно в плей-офф»');
+ check(lf.stories.some(x=>x.type==='in_hand'&&x.names.includes('P Seven')),'Игрок с матчами в запасе замечен');
+ check(lf.stories.some(x=>x.type==='race'),'Плотная борьба у черты плей-офф замечена');
+ const early=st.storyFacts({...late,rows:late.rows.map(r=>({...r,matches:1,points:r.place<5?3:1,move:0}))},{daysLeft:10});
+ check(early.stage!=='late','Стадия — по сыгранным матчам, а не по календарю');
+ const p1=st.pickStory(lf,{}),p2=st.pickStory(lf,{usedTypes:[p1.main.type]});
+ check(p1.main.type!==p2.main.type,'Две группы в одном выпуске получают разные сюжеты');
+ check(st.pickStory(lf,{lastType:p1.main.type}).main.type!==p1.main.type,'Сюжет прошлой недели в группе не повторяется');
+ const ctxCap={usedTypes:[],usedCaptions:[],thisIssue:{},lastCaptions:{}};
+ const c1=await st.groupCaption(late,ctxCap),c2=await st.groupCaption({...late,letter:'A'},ctxCap);
+ check(c1!==c2&&c1.split(' ').slice(0,3).join(' ')!==c2.split(' ').slice(0,3).join(' '),'Подписи групп в выпуске начинаются по-разному');
+ check(Object.keys(ctxCap.thisIssue).length===2,'Подписи выпуска запоминаются для следующей недели');
  check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
  check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
 
@@ -2197,4 +2219,22 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/\.tabs\.subtabs\{flex-wrap:nowrap;overflow-x:auto/.test(mh),'Вкладки «Моих матчей» не обрезаются при крупном шрифте');
 }
 
+// --- Форма на карточке — по общему журналу лиги, с межгрупповыми матчами ---
+{
+ const saved=tables.get('master|Cross_Division_Match_Log');
+ const H=Array(41).fill('');Object.assign(H,{0:'Match #',4:'P1 ID',6:'P2 ID',8:'P1 Name',9:'P2 Name',23:'Completed?',24:'Winner ID'});
+ const row=(no,a,ai,b,bi,w)=>{const r=Array(41).fill('');Object.assign(r,{0:String(no),4:ai,6:bi,8:a,9:b,23:'Yes',24:w});return r};
+ tables.set('master|Cross_Division_Match_Log',[H,
+  row(127,'Daria Kozitskaya','41','Xenia Hors','67','41'),        // межгрупповой — W
+  row(142,'Daria Kozitskaya','41','Olga Sauer','20','41'),        // групповой — W
+  row(165,'Daria Kozitskaya','41','Tatiana Sokolova','63','63'),  // межгрупповой — L
+  row(166,'Daria Kozitskaya','41','Maria Evangelista','52','41')  // текущий матч
+ ]);
+ const before=await results.leagueFormBefore('Daria Kozitskaya',{beforeRow:5});
+ check(before.join('')==='WWL','Форма до матча берёт и межгрупповые матчи, по порядку журнала');
+ const through=await results.leagueFormBefore('Daria Kozitskaya',{throughPair:['Maria Evangelista','Daria Kozitskaya']});
+ check(through.join('')==='WWLW','Постер старого матча — форма по этот матч включительно');
+ check((await results.leagueFormBefore('Daria Kozitskaya',{throughPair:['Daria Kozitskaya','Olga Sauer']})).join('')==='WW','Форма на постере не забегает вперёд');
+ if(saved)tables.set('master|Cross_Division_Match_Log',saved);else tables.delete('master|Cross_Division_Match_Log');
+}
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
