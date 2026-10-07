@@ -345,7 +345,7 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
     if (existing) {
       await batchUpdate(LEAGUE_RESULTS_SHEET_ID,
         centralWrites(existing.row, slot, parsed).concat(await centralMetaWrites(existing.row, { p1, p2, pair })), journal);
-      const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal).catch(e => ({ status: 'error', reason: e.message }));
+      const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal, existing.row).catch(e => ({ status: 'error', reason: e.message }));
       return { status: 'duplicate', row: existing.row, division };
     }
     const row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
@@ -356,7 +356,7 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
       ...await centralMetaWrites(row, { p1, p2, pair })
     ], journal);
 
-    const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal).catch(e => ({ status: 'error', reason: e.message }));
+    const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal, row).catch(e => ({ status: 'error', reason: e.message }));
     return { status: 'saved', row, division };
   } catch (e) {
     console.error('writeConfirmedResult failed:', e.message);
@@ -364,7 +364,7 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
   }
 }
 
-async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal = null) {
+async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal = null, centralRow = 0) {
   const pair = known && known.known !== undefined ? known : await divisionPair(p1, p2);
   if (!pair.known) return { status: 'player_not_found' };
   const { d1, d2 } = pair;
@@ -374,7 +374,7 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   if (pair.crossGroup) {
     if (playoff) return playoff;
     const crossSeason=String(pair.season || slot.season || '').trim();
-    await captureCrossGroupCardContext({p1,p2,parsed,pair,season:crossSeason,slot,d1})
+    await captureCrossGroupCardContext({p1,p2,parsed,pair,season:crossSeason,slot,d1,centralRow})
       .catch(e=>console.error('cross-group card context capture failed:',e.message));
     const saved=await writeCrossGroupResult(pair,slot);
     await refreshAfterResult().catch(e=>console.error('refresh after cross-group result failed:',e.message));
@@ -441,7 +441,7 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   // «до» этого матча. Снимаем строго перед записью — после неё это состояние
   // уже не восстановить простым чтением таблицы. Best-effort: карточка не
   // обязана блокировать сохранение самого счёта.
-  await captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1 })
+  await captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1, centralRow })
     .catch(e => console.error('card context capture failed:', e.message));
   await batchUpdate(spreadsheetId, writes.concat(extra), journal);
   // Результат записан — значит всё, что из него считается, устарело.
@@ -458,9 +458,60 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
 // порядок матчей задаёт их нумерация, а не формула в таблице, и обновляется он
 // сразу после записи счёта. Витрина профилей осталась запасным вариантом на
 // случай, если журнал прочитать не удалось.
-async function cardFormsBefore(names, fallbacks, { season = '', upTo = 0 } = {}) {
+// Форма по общему журналу лиги (Cross_Division_Match_Log). Это единственное
+// место, где лежат ВСЕ матчи игрока по порядку: групповые, межгрупповые (W),
+// матчи прошлых сезонов. Таблицы дивизионов для этого не годятся: в них нет
+// межгрупповых матчей, а номер строки там — номер пары в сетке, а не порядок,
+// в котором матчи сыграны. Так у Дарьи на карточке было «W W» вместо W W L W.
+// Порядок — порядок строк журнала: результаты дописываются в него по мере
+// подтверждения. beforeRow — строка текущего матча: берём всё, что выше неё.
+// throughPair — для постера старого матча: форма по этот матч включительно
+// (последняя строка этой пары в журнале).
+export async function leagueFormBefore(name, { beforeRow = 0, limit = 5, throughPair = null } = {}) {
+  if (!LEAGUE_RESULTS_SHEET_ID || !String(name || '').trim()) return [];
+  const values = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!A1:AO`);
+  const head = (values[0] || []).map(h => String(h || '').trim().toLowerCase());
+  const col = (label, fallback) => { const i = head.indexOf(label); return i >= 0 ? i : fallback; };
+  const P1ID = col('p1 id', 4), P2ID = col('p2 id', 6), P1 = col('p1 name', 8), P2 = col('p2 name', 9);
+  if (!beforeRow && Array.isArray(throughPair) && throughPair.length === 2) {
+    for (let i = values.length - 1; i >= DATA_START_ROW - 1; i--) {
+      const r = values[i] || [];
+      if ((sameName(r[P1], throughPair[0]) && sameName(r[P2], throughPair[1])) || (sameName(r[P1], throughPair[1]) && sameName(r[P2], throughPair[0]))) { beforeRow = i + 2; break; }
+    }
+  }
+  const DONE = col('completed?', 23), WIN = col('winner id', 24), PTS1 = 39, PTS2 = 40;   // AN:AO — очки техрезультата
+  const out = [];
+  for (let i = DATA_START_ROW - 1; i < values.length; i++) {
+    const rowNumber = i + 1;
+    if (beforeRow && rowNumber >= beforeRow) break;
+    const r = values[i] || [];
+    const isP1 = sameName(r[P1], name), isP2 = !isP1 && sameName(r[P2], name);
+    if (!isP1 && !isP2) continue;
+    let won;
+    if (/^yes$/i.test(String(r[DONE] || '').trim())) {
+      const w = String(r[WIN] || '').trim();
+      if (!w) continue;
+      won = w === String(r[isP1 ? P1ID : P2ID] || '').trim().replace(/\.0+$/, '');
+    } else {
+      // Техрезультат: счёта нет, победитель — тот, кому начислено больше очков.
+      const a = Number(r[PTS1]), b = Number(r[PTS2]);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) continue;
+      won = isP1 ? a > b : b > a;
+    }
+    out.push(won ? 'W' : 'L');
+  }
+  return out.slice(-limit);
+}
+
+async function cardFormsBefore(names, fallbacks, { season = '', upTo = 0, beforeRow = 0 } = {}) {
   const profiles = await getLeagueProfiles().catch(() => []);
   return Promise.all(names.map(async (name, i) => {
+    // Главный источник — общий журнал лиги (все матчи по порядку). Без номера
+    // строки текущего матча «до» не определить — тогда идём по старой цепочке.
+    if (beforeRow) {
+      const central = await leagueFormBefore(name, { beforeRow, limit: 5 }).catch(() => null);
+      if (central) return central;
+    }
     const live = await playerFormAcrossSeasons(name, { season, upTo, limit: 5 }).catch(() => []);
     if (live.length) return live;
     const form = profiles.find(player => sameName(player.name, name))?.form;
@@ -469,7 +520,7 @@ async function cardFormsBefore(names, fallbacks, { season = '', upTo = 0 } = {})
   }));
 }
 
-async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot, d1 }) {
+async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot, d1, centralRow = 0 }) {
   const p1Group=String(pair.groupA || pair.a?.group || '').trim();
   const p2Group=String(pair.groupB || pair.b?.group || '').trim();
   const [p1Table,p2Table,p1Sheet,p2Sheet]=await Promise.all([
@@ -481,7 +532,7 @@ async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot
   const [historyP1,historyP2]=await cardFormsBefore([p1,p2],[
     () => p1Sheet ? recentFormBefore(p1Sheet,p1,0) : Promise.resolve([]),
     () => p2Sheet ? recentFormBefore(p2Sheet,p2,0) : Promise.resolve([])
-  ], { season });
+  ], { season, beforeRow: centralRow });
   const place=(table,name)=>table?.ok
     ? table.players.find(x=>sameName(x.name,name))?.place
     : undefined;
@@ -495,7 +546,7 @@ async function captureCrossGroupCardContext({ p1, p2, parsed, pair, season, slot
   });
 }
 
-async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1 }) {
+async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed, pair, season, slot, d1, centralRow = 0 }) {
   const matchIdx = headers.indexOf('match');
   let matchNumber = 0;
   if (matchIdx >= 0) {
@@ -511,7 +562,7 @@ async function captureCardContext({ spreadsheetId, headers, info, p1, p2, parsed
     cardFormsBefore([p1,p2],[
       () => recentFormBefore(spreadsheetId, p1, previous),
       () => recentFormBefore(spreadsheetId, p2, previous)
-    ], { season, upTo: previous })
+    ], { season, upTo: previous, beforeRow: centralRow })
   ]);
   // Имена сверяем терпимо: «Yana D.» в составе и «Yana D» в матч-логе — один и
   // тот же человек, а строгое сравнение оставляло карточку без места.
