@@ -140,7 +140,8 @@ const result2={challenge_id:'history-form',division:'Division C',season:'2',grou
 const before=writes.length;const write=await results.writeConfirmedResult(result2);
 check(write.status==='saved'&&write.division.status==='saved','Confirmed group 2 score written');
 const allSeasonForm=cardContexts.get('history-form');
-check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='L,W,L','Card form uses the all-season profile history and includes this match once');
+// Recent Form в витрине идёт от свежего к старому: «LOST WIN» = последний LOST.
+check(allSeasonForm?.p1.form.join(',')==='W,L,W,W'&&allSeasonForm?.p2.form.join(',')==='W,L,L','Card form uses the all-season profile history (newest-first in the sheet) and includes this match once');
 check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before).some(w=>w.spreadsheetId==='c1'),'Only correct group table receives result');
 // Заголовки Match_Log раньше не находились никогда (norm() съедает подчёркивание
 // в «p1_id»), и вместе с ними молча отваливалась запись сезона.
@@ -298,6 +299,35 @@ const returnedSlot=await db.findSlot('cancel-open');
 check(returnedSlot.status==='open'&&!returnedSlot.to_telegram_id&&returnedSlot.dates.includes('2099-09-20'),'Returned window preserves future availability and clears opponent');
 await db.updateSlot('cancel-direct',{status:'accepted',result_status:'pending'});
 check((await db.cancelMatchmaking('cancel-direct',{telegram_id:'1'})).reason==='result_started','A match with submitted result cannot be cancelled');
+// Окно на несколько дней: отклик забирает только свой день, остальные висят открытыми.
+{
+ const win={...slot,challenge_id:'multi',season:'2',group:'1',dates:'2099-10-01, 2099-10-02, 2099-10-03',time_from:'10:00',time_to:'14:00',broadcast_msgs:'[["5",77,"ru"]]'};
+ await db.createSlot(win);
+ const took=await db.claimSlot('multi',{telegram_id:'2',name:'Bob Two'},{date:'2099-10-02',time:'10:00',court:'Court A'});
+ const parent=await db.findSlot('multi');
+ check(took.ok&&took.slot.challenge_id!=='multi'&&took.slot.parent_id==='multi'&&took.slot.status==='pending'&&took.slot.dates==='2099-10-02','Taking one day creates a separate match for that day');
+ check(parent.status==='open'&&parent.dates==='2099-10-01, 2099-10-03'&&!parent.to_telegram_id,'The other days stay open in the window');
+ check((await db.listOpenSlots('Division C','2','2','1')).every(r=>r.challenge_id!=='multi'),'The same player does not see the window again');
+ check((await db.claimSlot('multi',{telegram_id:'2',name:'Bob Two'},{date:'2099-10-03',time:'10:00',court:'Court A'})).reason==='already_yours','The same player cannot take a second day');
+ const back=await db.rejectProposal(took.slot.challenge_id,{telegram_id:'1'});
+ const parent2=await db.findSlot('multi');
+ check(back.ok&&(await db.findSlot(took.slot.challenge_id)).status==='cancelled'&&parent2.dates==='2099-10-01, 2099-10-02, 2099-10-03','A rejected day returns to the window');
+ const again=await db.claimSlot('multi',{telegram_id:'2',name:'Bob Two'},{date:'2099-10-01',time:'11:00',court:'Court A'});
+ await db.acceptProposal(again.slot.challenge_id,{telegram_id:'1'});
+ check((await db.findSlot(again.slot.challenge_id)).status==='accepted'&&(await db.findSlot('multi')).dates==='2099-10-02, 2099-10-03','Accepted day stays out of the window');
+ const mt=await fs.readFile(path.join(root,'matches.js'),'utf8');
+ check(/broadcast_msgs: JSON\.stringify\(cards\)/.test(mt)&&/export async function refreshSlotCards/.test(mt)&&/closedSlotText/.test(mt),'Broadcast messages are remembered and edited when the window changes');
+ const mm=await load('matches.js');
+ let before=messages.length;await mm.refreshSlotCards('multi');
+ let edits=messages.slice(before).filter(m=>m.method==='editMessageText');
+ check(edits.length===1&&String(edits[0].args[0])==='5'&&edits[0].args[1]===77&&/2 окт · Сб, 3 окт/.test(edits[0].args[2])&&!/1 окт/.test(edits[0].args[2])&&edits[0].args[3].reply_markup.inline_keyboard.length===1,'Window card shows the remaining days with the button');
+ await db.cancelMatchmaking('multi',{telegram_id:'1'});
+ before=messages.length;await mm.refreshSlotCards('multi');
+ edits=messages.slice(before).filter(m=>m.method==='editMessageText');
+ check(edits.length===1&&/Окно закрыто/.test(edits[0].args[2])&&!edits[0].args[3].reply_markup.inline_keyboard.length,'Closed window card loses the button');
+ const packed=(await load('matches.js')).packRows([[{text:'✅ Корт подтвердил'}],[{text:'🕐 Изменить время'}],[{text:'✖️ Отменить матч'}],[{text:'📲 Отправить в WhatsApp',wide:true}]]);
+ check(packed.length===3&&packed[0].length===2&&packed[2].length===1&&!packed[2][0].wide,'Short buttons go two per row, wide ones stay alone');
+}
 const adminOld={...base,challenge_id:'admin-old',status:'accepted',agreed_date:'2099-09-18',agreed_time:'09:00',result_status:'',result_confirmed_at:''};
 const adminNew={...base,challenge_id:'admin-new',status:'accepted',agreed_date:'2099-09-22',agreed_time:'09:00',result_status:'',result_confirmed_at:''};
 const adminConfirmedStatus={...base,challenge_id:'admin-confirmed-status',status:'accepted',agreed_date:'2099-09-17',result_status:' Confirmed ',result_confirmed_at:''};
@@ -1584,7 +1614,27 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]});
  check(!/#/.test(cap),'В подписи к сторис нет хэштегов');
  check(!/DIVISION|GROUP|SEASON/i.test(cap),'Дивизион, группа и сезон в тексте не повторяются — они на картинке');
- check(cap.split(/\s+/).length<=16,'Подпись — одно короткое предложение');
+ check(cap.split(/\s+/).length<=30,'Подпись — одна-две короткие фразы');
+ // Сюжет недели: стадия по сыгранным матчам, расчёт шансов, без повторов в выпуске.
+ const late={season:'2',letter:'B',group:'',rows:[
+  {place:1,name:'P One',points:19,matches:7,wins:6,move:0,was:1},{place:2,name:'P Two',points:15,matches:7,wins:4,move:1,was:3},
+  {place:3,name:'P Three',points:13,matches:6,wins:3,move:-1,was:2},{place:4,name:'P Four',points:12,matches:6,wins:3,move:0,was:4},
+  {place:5,name:'P Five',points:11,matches:7,wins:2,move:0,was:5},{place:6,name:'P Six',points:10,matches:6,wins:2,move:0,was:6},
+  {place:7,name:'P Seven',points:7,matches:3,wins:2,move:2,was:9},{place:8,name:'P Eight',points:7,matches:7,wins:0,move:-1,was:7}]};
+ const lf=st.storyFacts(late,{daysLeft:10});
+ check(lf.stage==='late','Почти все матчи сыграны и до конца регулярки 10 дней — финишная прямая');
+ check(lf.stories.some(x=>x.type==='clinched'&&x.names.includes('P One')),'Тот, кого уже не догнать, — «точно в плей-офф»');
+ check(lf.stories.some(x=>x.type==='in_hand'&&x.names.includes('P Seven')),'Игрок с матчами в запасе замечен');
+ check(lf.stories.some(x=>x.type==='race'),'Плотная борьба у черты плей-офф замечена');
+ const early=st.storyFacts({...late,rows:late.rows.map(r=>({...r,matches:1,points:r.place<5?3:1,move:0}))},{daysLeft:10});
+ check(early.stage!=='late','Стадия — по сыгранным матчам, а не по календарю');
+ const p1=st.pickStory(lf,{}),p2=st.pickStory(lf,{usedTypes:[p1.main.type]});
+ check(p1.main.type!==p2.main.type,'Две группы в одном выпуске получают разные сюжеты');
+ check(st.pickStory(lf,{lastType:p1.main.type}).main.type!==p1.main.type,'Сюжет прошлой недели в группе не повторяется');
+ const ctxCap={usedTypes:[],usedCaptions:[],thisIssue:{},lastCaptions:{}};
+ const c1=await st.groupCaption(late,ctxCap),c2=await st.groupCaption({...late,letter:'A'},ctxCap);
+ check(c1!==c2&&c1.split(' ').slice(0,3).join(' ')!==c2.split(' ').slice(0,3).join(' '),'Подписи групп в выпуске начинаются по-разному');
+ check(Object.keys(ctxCap.thisIssue).length===2,'Подписи выпуска запоминаются для следующей недели');
  check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
  check(/Alice One/.test(cap),'Подпись опирается на факты таблицы, а не на выдумку');
 
@@ -1859,7 +1909,9 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
 // --- «Ждут вашего действия» не повторяется после перезапуска -----------------
 {
  const botSrc4=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/if\(!attentionCounts\.has\(id\)\)\{attentionCounts\.set\(id,n\);continue;\}/.test(botSrc4),'После перезапуска первое наблюдение запоминается молча — без повторного сообщения');
+ check(/if\(!attentionCounts\.has\(id\)\)\{attentionCounts\.set\(id,n\);attentionForced\.delete\(id\);continue;\}/.test(botSrc4),'После перезапуска первое наблюдение запоминается молча — без повторного сообщения');
+ check(/if\(n>attentionCounts\.get\(id\)&&!forced\)continue;/.test(botSrc4),'Новое дело не дублируется сообщением «ждут вашего действия» — цифру обновит напоминание');
+ check(/queueMatchAttention\(\[item\.slot\.from_telegram_id,item\.slot\.to_telegram_id\][^;]*\{force:true\}\)/.test(await fs.readFile(path.join(root,'index.js'),'utf8')),'Напоминание из цепочки обновляет цифру на кнопке');
  check(/for\(const id of ids\)if\(!attentionCounts\.has\(String\(id\)\)&&previous\[id\]!==undefined\)attentionCounts\.set/.test(botSrc4),'Настоящее изменение матча по-прежнему приносит сообщение');
 }
 
