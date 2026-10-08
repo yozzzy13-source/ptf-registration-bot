@@ -2005,7 +2005,7 @@ export async function getAllActiveLeaguePlayers() {
   // Снявшиеся с сезона — не активные: ни напоминаний, ни рассылок по матчам.
   const gone = await (await import('./withdraw.js')).withdrawnList().catch(() => []);
   for (const p of (map.players || [])) {
-    if (gone.some(r => String(r.season) === String(map.season || r.season) && sameName(r.player, p.name))) continue;
+    if (map.season && gone.some(r => String(r.season) === String(map.season) && sameName(r.player, p.name))) continue;
     const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
     if (!hit) continue;
     if (!(await getMasterPlayers()).some(m => sameName(m.player_name, hit.name))) continue;
@@ -2235,7 +2235,9 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
   const site = await getWebsitePlayers().catch(() => []);
   // Снявшиеся с сезона соперниками больше не предлагаются.
   const gone = await (await import('./withdraw.js')).withdrawnList().catch(() => []);
-  const isGone = name => gone.some(r => String(r.season) === String(map.season || season || r.season) && sameName(r.player, name));
+  // Отметка действует только в своём сезоне: в новом сезоне игрок снова обычный.
+  const curSeason = String(map.season || season || '');
+  const isGone = name => Boolean(curSeason) && gone.some(r => String(r.season) === curSeason && sameName(r.player, name));
   const siteByKey = new Map();
   for (const sp of site) for (const k of nameKeys(sp.name || '')) if (!siteByKey.has(k)) siteByKey.set(k, sp);
 
