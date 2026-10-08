@@ -45,7 +45,9 @@ export async function withdrawnList({ fresh = false } = {}) {
 export async function isWithdrawn(name, season = '') {
   if (!txt(name)) return false;
   const s = txt(season) || txt(await latestSeason().catch(() => ''));
-  return (await withdrawnList().catch(() => [])).some(r => (!s || txt(r.season) === s) && sameName(r.player, name));
+  // Строго по сезону: снятие в сезоне 2 ни на что не влияет в сезоне 3.
+  if (!s) return false;
+  return (await withdrawnList().catch(() => [])).some(r => txt(r.season) === s && sameName(r.player, name));
 }
 
 // ---------------------------------------------------------- что снимаем
