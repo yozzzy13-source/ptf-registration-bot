@@ -2257,6 +2257,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(done.ok&&String(log[1][32])==='0'&&!String(log[1][31]||'')&&!String(log[1][5]||''),'W/O: снявшемуся 0 в TechLoss, счёт пустой');
  check(JSON.stringify(tables.get('master|Cross_Division_Match_Log'))===centralBefore,'В общий журнал лиги (историю матчей) W/O не пишется');
  check(await wd.isWithdrawn('Dan Four','2'),'Отметка «снялся» сохранена');
+ check(!(await wd.isWithdrawn('Dan Four','3'))&&!(await wd.isWithdrawn('Dan Four','1')),'Снятие действует только в своём сезоне — в следующем игрок снова обычный');
  check(!messages.slice(msgBefore).some(m=>['sendPhoto','sendPhotoBuffer','sendDocumentBuffer'].includes(m.method)),'Карточек результата при снятии нет');
  check((await sheets.getDivisionOpponents('Division C','3','2','2')).every(p=>p.name!=='Dan Four'),'Снявшийся не предлагается соперником');
  results.refreshAfterResult&&await results.refreshAfterResult();
