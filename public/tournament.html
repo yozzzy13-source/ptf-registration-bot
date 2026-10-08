@@ -221,7 +221,7 @@ let S = {
 
 // Читающие ручки. Список явный: наличие параметров не делает запрос записью,
 // а угадывание метода по данным уводило чтения на POST и в ошибку 404.
-const GET_PATHS = new Set(['bootstrap','state','candidates','log','stages','pairs','open','my-invites']);
+const GET_PATHS = new Set(['bootstrap','state','candidates','log','stages','pairs','open','my-invites','league-withdraw-preview']);
 // Один вход для всех запросов. Ошибку сервер везёт в detail — общий
 // переводчик /api подменяет текст в поле error на дежурную фразу.
 async function api(path, body, method) {
@@ -354,7 +354,35 @@ function viewList() {
       <button class="btn wide" onclick="openImport()">⤵ Перенести сезон лиги в турнир</button>
       <div class="hint" style="margin:10px 0 0">Перенос только читает составы дивизионов. В таблицы организатора турнирный модуль не пишет никогда — все свои данные он держит в собственных листах.</div>
     </div>
-    ${T() ? `<div class="sect">НАСТРОЙКИ ТУРНИРА</div>${settingsCard()}` : ''}`;
+    ${T() ? `<div class="sect">НАСТРОЙКИ ТУРНИРА</div>${settingsCard()}` : ''}
+    <div class="sect">ЛИГА · СНЯТЬ ИГРОКА</div>${leagueWithdrawCard()}`;
+}
+// Снятие игрока с сезона лиги — то же, что /withdraw в боте: несыгранные
+// матчи становятся W/O (сопернику 3 : 0), игрок выключается из матчей.
+function leagueWithdrawCard() {
+  const w = S.wd || {};
+  return `<div class="card">
+    <input id="wdName" placeholder="Имя Фамилия" value="${esc(w.name || '')}" style="width:100%;box-sizing:border-box">
+    <div style="height:8px"></div>
+    <button class="btn wide" onclick="wdPreview()">Проверить</button>
+    ${w.text ? `<div class="hint" style="white-space:pre-line;margin:10px 0 0">${esc(w.text)}</div>` : ''}
+    ${w.ready ? `<div style="height:8px"></div><button class="btn pri wide" onclick="wdApply()">🚪 Снять ${esc(w.player)}</button>` : ''}
+    <div class="hint" style="margin:10px 0 0">Пишет в боевые таблицы лиги. Сыгранные матчи остаются; W/O видно в таблице и шахматке, в историю матчей не попадает.</div>
+  </div>`;
+}
+async function wdPreview() {
+  const name = ($('wdName')?.value || '').trim();
+  if (!name) return flash('Укажите имя игрока', true);
+  try {
+    const j = await api('league-withdraw-preview', { name });
+    S.wd = { name, text: j.text, ready: Boolean(j.plan?.ok), player: j.plan?.player || name };
+    render();
+  } catch (e) { flash(e.message, true); }
+}
+async function wdApply() {
+  const w = S.wd || {};
+  if (!w.ready || !confirm('Снять ' + w.player + ' с турнира? Это запишет W/O в таблицы лиги.')) return;
+  await run(async () => { const j = await api('league-withdraw', { name: w.player }); S.wd = { name: '', text: j.text, ready: false }; }, 'Игрок снят');
 }
 function statusRu(s) {
   return { draft:'черновик', registration:'запись открыта', running:'идёт', completed:'завершён', archived:'архив' }[String(s || '').toLowerCase()] || String(s || '');

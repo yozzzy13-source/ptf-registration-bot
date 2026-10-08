@@ -768,8 +768,10 @@ async function leagueViewer(initData, token = '', { allowGuest = false, lang: la
   if (!league.member && !league.admin && !profileCompleted) {
     return allowGuest ? guestViewer(user, profile, langHint || lang) : { ok:false, code:403, lang, error:'profile_required' };
   }
+  // Снялся с сезона — матчи ему больше не открываем (таблицы и история видны как раньше).
+  const withdrawn = league.found ? await (await import('./withdraw.js')).isWithdrawn(league.name || profile.name || '', league.season || '').catch(() => false) : false;
   return { ok:true, user, profile, lang, division:league.division || '', season:league.season || '',
-    matchGroup:league.group || '', canMatch:league.found || league.admin, isAdmin:league.admin,
+    matchGroup:league.group || '', canMatch:(league.found && !withdrawn) || league.admin, isAdmin:league.admin, withdrawn,
     isLeagueMember:Boolean(league.member || league.admin), isPlayersMasterMember:Boolean(league.member), profileCompleted };
 }
 async function matchViewer(initData, token = '') { return leagueViewer(initData, token); }

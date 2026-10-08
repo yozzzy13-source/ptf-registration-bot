@@ -1211,6 +1211,27 @@ export async function cancelMatchmaking(challengeId,actor={},now=Date.now()) {
   });
 }
 
+// Игрок снялся с сезона: всё, что у него в работе и ещё не сыграно, снимаем —
+// открытые окна, переговоры, согласованные матчи без результата. Возвращаем
+// снятое, чтобы второй стороне можно было написать.
+export async function cancelPlayerMatchmaking(telegramId, actor = {}) {
+  const id = String(telegramId || '');
+  if (!id) return [];
+  const out = [];
+  for (const slot of await allSlots()) {
+    if (![String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(id)) continue;
+    const status = String(slot.status || '').toLowerCase();
+    const live = ['open', 'pending'].includes(status) || (status === 'accepted' && !String(slot.result_status || '').trim());
+    if (!live) continue;
+    await withClaimLock(slot.challenge_id, async () => {
+      await updateRow(MATCH_SHEETS.slots, SLOT_HEADERS, slot._rowNumber, { status: 'cancelled', cancelled_at: nowISO() });
+      await logMatchEvent('player_withdrawn', slot, actor, 'игрок снялся с сезона');
+    });
+    out.push(slot);
+  }
+  return out;
+}
+
 export async function dropStuckTimeChange(challengeId,expected=null) {
   return withClaimLock(challengeId,async()=>{
     const slot=await findSlot(challengeId);

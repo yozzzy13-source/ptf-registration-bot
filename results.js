@@ -691,7 +691,12 @@ export async function getDivisionSchedule(division, season = '', group = '') {
   try {
     // A — номер, B/D — места в сетке, C — первый игрок, E — второй,
     // F.. — счёт, S — отметка «сыграно».
-    const values = await getValues(spreadsheetId, 'Match_Log!A2:S');
+    const all = await getValues(spreadsheetId, 'Match_Log!A1:AZ');
+    // W/O (техпоражение, в т.ч. снятие игрока) — тоже закрытый матч, хотя
+    // счёта у него нет: колонки P1/P2 TechLoss.
+    const head = (all[0] || []).map(h => norm(h).replace(/\s+/g, '_'));
+    const tl1 = head.findIndex(h => h === 'p1_techloss'), tl2 = head.findIndex(h => h === 'p2_techloss');
+    const values = all.slice(1);
     const out = [];
     // Граница группового этапа — по размеру сетки таблицы, а не по числу
     // живых игроков. Шаблон рассчитан на 8 мест (28 матчей); в группе из 6
@@ -710,7 +715,8 @@ export async function getDivisionSchedule(division, season = '', group = '') {
       const p2 = String(row[4] || '').trim();
       if (!p1 || !p2) continue;
       const hasScore = String(row[5] ?? '').trim() !== '' && String(row[6] ?? '').trim() !== '';
-      out.push({ row: i + 2, match:Number(row[0]), p1, p2, played: hasScore });
+      const walkover = (tl1 >= 0 && String(row[tl1] ?? '').trim() !== '') || (tl2 >= 0 && String(row[tl2] ?? '').trim() !== '');
+      out.push({ row: i + 2, match:Number(row[0]), p1, p2, played: hasScore || walkover });
     }
     const {divisionRoster}=await import('./division.js');
     const roster=await divisionRoster(key,season,group);

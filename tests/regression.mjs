@@ -2237,4 +2237,41 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check((await results.leagueFormBefore('Daria Kozitskaya',{throughPair:['Daria Kozitskaya','Olga Sauer']})).join('')==='WW','Форма на постере не забегает вперёд');
  if(saved)tables.set('master|Cross_Division_Match_Log',saved);else tables.delete('master|Cross_Division_Match_Log');
 }
+// --- Снятие игрока с сезона: W/O в таблицу, без журнала лиги и карточек -----
+{
+ const wd=await load('withdraw.js');
+ const savedLog=tables.get('c2|Match_Log');
+ tables.set('c2|Match_Log',[
+  ['Match #','P1 ID','Player 1','P2 ID','Player 2','Set 1 P1','Set 1 P2','Set 1 TB P1','Set 1 TB P2','Set 2 P1','Set 2 P2','Set 2 TB P1','Set 2 TB P2','Set 3 P1','Set 3 P2','Set 3 TB P1','Set 3 TB P2','Set 3 Mode','Completed?','Tech Result','P1 Sets Won','P2 Sets Won','P1 Games Won','P2 Games Won','Winner ID','Key','Display P1','Display P2','Rec','Name1','URL','P1 TechLoss','P2 TechLoss'],
+  ['1','1','Carol Three','2','Dan Four']
+ ]);
+ results.refreshAfterResult&&await results.refreshAfterResult();
+ const plan=await wd.planWithdrawal('Dan Four','2');
+ check(plan.ok&&plan.matches.length===1&&plan.matches[0].opponent==='Carol Three'&&plan.matches[0].cell==='Match_Log!AG2','Снятие находит несыгранный матч и колонку TechLoss снявшегося');
+ const preview=wd.withdrawalSummary(plan);
+ check(/Carol Three/.test(preview)&&/W\/O/.test(preview),'Предпросмотр перечисляет будущие W/O');
+ const centralBefore=JSON.stringify(tables.get('master|Cross_Division_Match_Log'));
+ const msgBefore=messages.length;
+ const done=await wd.applyWithdrawal('Dan Four',{season:'2',actor:{telegram_id:'99',name:'Admin'}});
+ const log=tables.get('c2|Match_Log');
+ check(done.ok&&String(log[1][32])==='0'&&!String(log[1][31]||'')&&!String(log[1][5]||''),'W/O: снявшемуся 0 в TechLoss, счёт пустой');
+ check(JSON.stringify(tables.get('master|Cross_Division_Match_Log'))===centralBefore,'В общий журнал лиги (историю матчей) W/O не пишется');
+ check(await wd.isWithdrawn('Dan Four','2'),'Отметка «снялся» сохранена');
+ check(!messages.slice(msgBefore).some(m=>['sendPhoto','sendPhotoBuffer','sendDocumentBuffer'].includes(m.method)),'Карточек результата при снятии нет');
+ check((await sheets.getDivisionOpponents('Division C','3','2','2')).every(p=>p.name!=='Dan Four'),'Снявшийся не предлагается соперником');
+ results.refreshAfterResult&&await results.refreshAfterResult();
+ const left=await results.getUnplayedOpponents('C','Carol Three','2','2');
+ check(!left.names.includes('Dan Four'),'W/O закрывает матч в «осталось сыграть»');
+ check(!(await wd.planWithdrawal('Dan Four','2')).ok,'Повторно снять нельзя');
+ division.invalidateDivisionCache();
+ const tbl=await division.getDivisionTable('C','2','2');
+ const carol=tbl.players.find(p=>p.name==='Carol Three'),dan=tbl.players.find(p=>p.name==='Dan Four');
+ check(carol.wins>=1&&dan.points===0&&dan.losses===1&&dan.matches===1&&dan.setsWon===0&&dan.setsLost===0&&dan.gamesLost===0,'В таблице W/O: снявшемуся 0 очков и поражение, сеты и геймы не идут');
+ check(Object.values(tbl.matrix||{}).includes('W/O'),'В шахматке матч показан как W/O');
+ const tg5=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'withdraw'/.test(tg5),'Команда /withdraw есть в админском /help и в меню команд');
+ const ta=await fs.readFile(path.join(root,'tournamentsapi.js'),'utf8'),th=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
+ check(/league-withdraw-preview/.test(ta)&&/function leagueWithdrawCard/.test(th),'Снятие есть и в турнирной админке');
+ if(savedLog)tables.set('c2|Match_Log',savedLog);
+}
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

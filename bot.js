@@ -1541,6 +1541,21 @@ function findConfirmedSlot(done, wanted) {
           : `Сезон ${escapeHtml(r.season)}: ⛔ ${escapeHtml(why[r.reason] || r.reason)}`).join('\n'));
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+    // /withdraw Имя Фамилия — снять игрока с сезона: его несыгранные матчи
+    // становятся W/O (сопернику 3 : 0), сам он выключается из матчей.
+    // Сначала предпросмотр, запись — только по кнопке.
+    if (/^\/withdraw(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const name = text.replace(/^\/withdraw(?:@\w+)?\s*/i, '').trim();
+      if (!name) return sendMessage(chatId, '<b>🚪 Снять игрока с турнира</b>\n\nФормат: <code>/withdraw Имя Фамилия</code>\n\nБот покажет его несыгранные матчи, они будут засчитаны соперникам как W/O (3 : 0). Запись — только после кнопки «Снять».');
+      try {
+        const { planWithdrawal, withdrawalSummary } = await import('./withdraw.js');
+        const plan = await planWithdrawal(name);
+        if (!plan.ok) return sendMessage(chatId, withdrawalSummary(plan));
+        const key = Math.random().toString(36).slice(2, 10);
+        withdrawJobs.set(key, { name: plan.player.name, season: plan.season, at: Date.now() });
+        return sendMessage(chatId, withdrawalSummary(plan), { reply_markup: { inline_keyboard: [[{ text: '🚪 Снять', callback_data: 'wd_ok:' + key }, { text: 'Отмена', callback_data: 'wd_no' }]] } });
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (text.startsWith('/fix_result')) {
       // Перевыпуск карточки в ленте: /fix_result <id сообщения> [id матча].
       // Id сообщения берётся из ссылки на пост — это последнее число в ней.
@@ -2239,6 +2254,19 @@ export async function handleCallback(q) {
     }
     // Таблица одной группы в сторис. Публикуем по одной: каждая группа — своя
     // сторис, объединять их в одну картинку нельзя.
+    // Снятие игрока с сезона: подтверждение из предпросмотра /withdraw.
+    if (data.startsWith('wd_ok:') || data === 'wd_no') {
+      if (data === 'wd_no') { await answerCallbackQuery(q.id, 'Отменено').catch(() => {}); return editMessageText(chatId, q.message.message_id, '✖️ Снятие отменено.').catch(() => {}); }
+      const job = withdrawJobs.get(data.slice('wd_ok:'.length));
+      if (!job) { await answerCallbackQuery(q.id).catch(() => {}); return sendMessage(chatId, 'Предпросмотр устарел — отправьте /withdraw заново.'); }
+      withdrawJobs.delete(data.slice('wd_ok:'.length));
+      await answerCallbackQuery(q.id, 'Снимаю…').catch(() => {});
+      try {
+        const { applyWithdrawal, withdrawalSummary } = await import('./withdraw.js');
+        const r = await applyWithdrawal(job.name, { season: job.season, actor: { telegram_id: from.id, name: from.first_name || '' } });
+        return editMessageText(chatId, q.message.message_id, withdrawalSummary(r, { applied: true })).catch(() => sendMessage(chatId, withdrawalSummary(r, { applied: true })));
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (data.startsWith('igtable:')) {
       const item=tableBatch.get(data.slice('igtable:'.length));
       if(!item?.buffer?.length)return sendMessage(chatId,'Таблица уже не в памяти — соберите её заново командой /tables.');
@@ -2427,6 +2455,7 @@ export async function sendPaymentStart(chatId, lang, applicationId) {
   await sendMessage(chatId, `${t(lang,'application_received')}${formatPaymentAmounts(lang, amounts.amountThb, amounts.amountUsdt)}`, { reply_markup: paymentKeyboard(lang, applicationId) });
 }
 
+const withdrawJobs=new Map();
 const attentionQueue=new Set(),attentionForced=new Set();let attentionTimer=null;
 // Цифра на кнопке «Мои матчи» обновляется только новым сообщением бота.
 // Раньше при каждом новом деле прилетало «🔴 ждут вашего действия — N» сразу

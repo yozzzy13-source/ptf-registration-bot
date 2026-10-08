@@ -104,6 +104,23 @@ export function registerTournamentRoutes(app, { viewer }) {
     }, actor, test) });
   }));
 
+  // Снятие игрока с сезона ЛИГИ (таблицы дивизионов) — то же, что команда
+  // /withdraw в боте. Предпросмотр ничего не пишет; снятие — только боевой
+  // режим: таблицы лиги одни, «тестовой» лиги не существует.
+  app.get('/api/tournaments/league-withdraw-preview', guard(async (req, res) => {
+    const { planWithdrawal, withdrawalSummary } = await import('./withdraw.js');
+    const plan = await planWithdrawal(String(req.query.name || ''));
+    res.json({ ok:true, plan:{ ok:plan.ok, reason:plan.reason || '', season:plan.season, player:plan.player?.name || '', division:plan.letter || '', group:plan.group || '',
+      matches:(plan.matches || []).map(m => ({ opponent:m.opponent, kind:m.kind })) }, text:withdrawalSummary(plan).replace(/<[^>]+>/g, '') });
+  }));
+  app.post('/api/tournaments/league-withdraw', guard(async (req, res, v, test, actor) => {
+    if (test) return res.status(400).json({ ok:false, error:'test_mode', detail:'Снятие пишет в боевые таблицы лиги — выключите тестовый режим.' });
+    const { applyWithdrawal, withdrawalSummary } = await import('./withdraw.js');
+    const r = await applyWithdrawal(String(req.body?.name || ''), { actor:{ telegram_id:actor.id, name:actor.name } });
+    if (!r.ok) return res.status(400).json({ ok:false, error:r.reason, detail:withdrawalSummary(r).replace(/<[^>]+>/g, '') });
+    res.json({ ok:true, text:withdrawalSummary(r, { applied:true }).replace(/<[^>]+>/g, ''), walkovers:r.matches.length, cancelled:r.cancelled });
+  }));
+
   // --------------------------------------------------------------- пары
   app.get('/api/tournaments/pairs', guard(async (req, res, v, test) => {
     res.json({ ok:true, pairs: await listPairs(id(req), test) });

@@ -2002,7 +2002,10 @@ export async function getAllActiveLeaguePlayers() {
     for (const k of nameKeys(a.name || '')) if (!byKey.has(k)) byKey.set(k, a);
   }
   const out = [];
+  // Снявшиеся с сезона — не активные: ни напоминаний, ни рассылок по матчам.
+  const gone = await (await import('./withdraw.js')).withdrawnList().catch(() => []);
   for (const p of (map.players || [])) {
+    if (gone.some(r => String(r.season) === String(map.season || r.season) && sameName(r.player, p.name))) continue;
     const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
     if (!hit) continue;
     if (!(await getMasterPlayers()).some(m => sameName(m.player_name, hit.name))) continue;
@@ -2230,12 +2233,16 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
   }
   // Фото и ссылку на профиль по-прежнему берём с витрины сайта.
   const site = await getWebsitePlayers().catch(() => []);
+  // Снявшиеся с сезона соперниками больше не предлагаются.
+  const gone = await (await import('./withdraw.js')).withdrawnList().catch(() => []);
+  const isGone = name => gone.some(r => String(r.season) === String(map.season || season || r.season) && sameName(r.player, name));
   const siteByKey = new Map();
   for (const sp of site) for (const k of nameKeys(sp.name || '')) if (!siteByKey.has(k)) siteByKey.set(k, sp);
 
   const out = [];
   {
     for (const p of roster) {
+      if (isGone(p.name)) continue;
       const hit = nameKeys(p.name).map(k => byKey.get(k)).find(Boolean);
       if (!hit || String(hit.telegram_id) === String(excludeTelegramId)) continue;
       // Снятых и неактивных не показываем: статус живёт в анкете.
@@ -2262,6 +2269,7 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
     const mine=applicants.find(a=>String(a.telegram_id)===String(excludeTelegramId));
     const wanted=crossPairs.flatMap(([a,b])=>sameName(a,mine?.name)?[b]:sameName(b,mine?.name)?[a]:[]);
     for(const name of wanted){
+      if(isGone(name))continue;
       const rp=(map.players||[]).find(x=>x.letter==='W'&&sameName(x.name,name));
       const hit=nameKeys(name).map(k=>byKey.get(k)).find(Boolean);
       if(!rp||!hit||!master.some(m=>sameName(m.player_name,hit.name))||out.some(o=>String(o.telegram_id)===String(hit.telegram_id)))continue;
