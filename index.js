@@ -22,7 +22,7 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed, scheduleSlotCards } from './matches.js';
-import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHandler, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
+import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHandler, findSameResult, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
@@ -1386,6 +1386,9 @@ app.post('/api/match/manual', async (req,res)=>{
       result_winner:winnerId,result_score:storedScore,result_set3_mode:set3Mode,
       result_kind:kind,result_points_from:pointsFrom,result_points_to:pointsTo,
       result_photo_file_id:photo.fileId,result_note:safe(b.note),result_submitted_at:nowISO(),created_at:nowISO(),responded_at:nowISO()};
+    // Тот же матч (пара + дата) уже внесён — второй раз не принимаем.
+    const same=await findSameResult(row.from_telegram_id,row.to_telegram_id,row.agreed_date).catch(()=>null);
+    if(same)return res.status(409).json({ok:false,error:v.lang==='ru'?'Результат этого матча уже внесён ('+same.agreed_date+'). Если он неверный — исправьте или удалите его, а не вносите заново.':'This match result is already recorded ('+same.agreed_date+'). Edit or delete it instead of entering it again.'});
     await createManualMatch(row);
     let confirmationDelivered=false;
     try { confirmationDelivered=Boolean(await notifyResultForVerification(row)); }

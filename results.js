@@ -281,24 +281,23 @@ async function findDivisionRow(spreadsheetId, sheetName, p1, p2) {
 // Старый results-бот продолжает разбирать счёт, вручную выложенный в тему результатов,
 // и дописывает свою строку. Дату он ставит СЕГОДНЯШНЮЮ (день сообщения), а не день матча,
 // поэтому сверять только по дате нельзя — ищем ту же пару в окне ±7 дней в любом порядке имён.
-const DUPLICATE_WINDOW_DAYS = 7;
 
-async function findExistingResultRow(p1, p2, dateSerial) {
-  const values = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!B2:J`);
-  const t1 = norm(p1), t2 = norm(p2);
+// Строка общего журнала, куда уже записан матч (в памяти; главное — log_row в самом матче).
+const logRowMemo = new Map();
+async function sameDayRow(p1, p2, dateSerial, season = '') {
+  if (!Number.isFinite(dateSerial)) return 0;
+  const res = await sheetsClient().spreadsheets.values.get({
+    spreadsheetId: LEAGUE_RESULTS_SHEET_ID, range: `${LEAGUE_RESULTS_SHEETS.log}!B2:J`, valueRenderOption: 'UNFORMATTED_VALUE'
+  });
+  const values = res?.data?.values || [];
   for (let i = 0; i < values.length; i++) {
-    const row = values[i] || [];
-    const a = norm(row[7]);   // колонка I
-    const b = norm(row[8]);   // колонка J
-    if (!a || !b) continue;
-    const samePair = (a === t1 && b === t2) || (a === t2 && b === t1);
-    if (!samePair) continue;
-    const when = Number(row[0]);
-    const close = !Number.isFinite(when) || !Number.isFinite(dateSerial)
-      || Math.abs(when - dateSerial) <= DUPLICATE_WINDOW_DAYS;
-    if (close) return { row: i + 2, date: when };
+    const r = values[i] || [];
+    if (Number(r[0]) !== Number(dateSerial)) continue;                                  // B — тот же день
+    const rowSeason = (String(r[2] ?? '').match(/(\d+)/) || [])[1] || '';               // D — тот же сезон
+    if (season && rowSeason && rowSeason !== String(season)) continue;
+    if ((sameName(r[7], p1) && sameName(r[8], p2)) || (sameName(r[7], p2) && sameName(r[8], p1))) return i + 2;
   }
-  return null;
+  return 0;
 }
 
 // Составы сезона определяют дивизион и группу для записи результата.
@@ -338,26 +337,43 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
     }
 
     const dateSerial = localDateSerial(slot.agreed_date);
-    // Если строка этой пары уже есть — не дописываем вторую. Скорее всего её внёс
-    // старый бот из сообщения в чате; счёт из мини-приложения при этом подтверждён
-    // обоими игроками, поэтому расхождение стоит проверить руками.
-    const existing = await findExistingResultRow(p1, p2, dateSerial);
-    if (existing) {
-      await batchUpdate(LEAGUE_RESULTS_SHEET_ID,
-        centralWrites(existing.row, slot, parsed).concat(await centralMetaWrites(existing.row, { p1, p2, pair })), journal);
-      const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal, existing.row).catch(e => ({ status: 'error', reason: e.message }));
-      return { status: 'duplicate', row: existing.row, division };
+    // Каждый подтверждённый матч — своя строка общего журнала. Никакой сверки
+    // по именам и датам: пары повторяются (новый сезон, плей-офф, турниры), и
+    // поиск «такой же строки» однажды уже записал сезон 2 поверх сезона 1.
+    // Номер строки матч запоминает у себя (log_row). Повторная запись того же
+    // матча (правка счёта, /result_resync) идёт в ЕГО строку — если там всё ещё
+    // эта пара; иначе (строку удалили или сдвинули) — новой строкой.
+    const known = Number(slot.log_row || logRowMemo.get(String(slot.challenge_id || '')) || 0);
+    let row = 0, rewritten = false;
+    if (known >= DATA_START_ROW) {
+      const cur = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!I${known}:J${known}`).catch(() => []);
+      const [a = '', b = ''] = cur?.[0] || [];
+      if ((sameName(a, p1) && sameName(b, p2)) || (sameName(a, p2) && sameName(b, p1))) { row = known; rewritten = true; }
     }
-    const row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
+    // Матчи, записанные до появления log_row, номера строки не знают. Для них —
+    // и только для них — строка «своя», если совпадает всё сразу: та же пара,
+    // ТОТ ЖЕ день и тот же сезон. Двух матчей одной пары в один день не бывает,
+    // а матч другого сезона или другой даты сюда уже никогда не попадёт.
+    if (!row && !known) row = await sameDayRow(p1, p2, dateSerial, pair.season).catch(() => 0);
+    if (row) rewritten = true;
+    if (!row) row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
     await batchUpdate(LEAGUE_RESULTS_SHEET_ID, [
       { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[dateSerial]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
       ...centralWrites(row, slot, parsed),
       ...await centralMetaWrites(row, { p1, p2, pair })
     ], journal);
+    // Запоминаем строку — но не в тестовом прогоне с откатом (journal).
+    if (!journal && slot.challenge_id) {
+      logRowMemo.set(String(slot.challenge_id), row);
+      if (Number(slot.log_row || 0) !== row) {
+        try { const { updateSlot } = await import('./matchesdb.js'); await updateSlot(slot.challenge_id, { log_row: String(row) }); }
+        catch (e) { console.error('log_row save failed:', e.message); }
+      }
+    }
 
     const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal, row).catch(e => ({ status: 'error', reason: e.message }));
-    return { status: 'saved', row, division };
+    return { status: 'saved', row, rewritten, division };
   } catch (e) {
     console.error('writeConfirmedResult failed:', e.message);
     return { status: 'error', reason: e.message };

@@ -1556,6 +1556,23 @@ function findConfirmedSlot(done, wanted) {
         return sendMessage(chatId, withdrawalSummary(plan), { reply_markup: { inline_keyboard: [[{ text: '🚪 Снять', callback_data: 'wd_ok:' + key }, { text: 'Отмена', callback_data: 'wd_no' }]] } });
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+    // /result_resync <имя игрока> — заново записать подтверждённый результат
+    // матча в таблицы: общий журнал лиги и таблицу дивизиона. Без карточек и
+    // рассылок. Нужна, когда строки матча в журнале нет (история игрока
+    // пустая) или она была записана не туда.
+    if (/^\/result_resync(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const wanted = text.replace(/^\/result_resync(?:@\w+)?\s*/i, '').trim();
+      if (!wanted) return sendMessage(chatId, 'Формат: <code>/result_resync Имя игрока</code> (или id матча). Бот заново запишет его подтверждённый результат в общий журнал и таблицу дивизиона — без карточек и рассылок.');
+      try {
+        const done = (await allSlots()).filter(r => String(r.result_status || '').toLowerCase() === 'confirmed');
+        const { slot, many } = findConfirmedSlot(done, wanted);
+        if (many) return sendMessage(chatId, `Нашёл несколько матчей на «${escapeHtml(wanted)}». Укажите id матча:\n` + many.slice(0, 12).map(m => `• <code>${escapeHtml(m.challenge_id)}</code> — ${escapeHtml(m.from_name || '')} — ${escapeHtml(m.to_name || '')}, ${escapeHtml(m.agreed_date || '')}`).join('\n'));
+        if (!slot) return sendMessage(chatId, 'Подтверждённый матч не найден.');
+        const { writeConfirmedResult, describeWrite } = await import('./results.js');
+        const w = await writeConfirmedResult(slot);
+        return sendMessage(chatId, `🔁 <b>${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}</b>, ${escapeHtml(slot.agreed_date || '')}\n${escapeHtml(describeWrite(w))}${w.row ? `\nСтрока общего журнала: <b>${w.row}</b>` : ''}`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (text.startsWith('/fix_result')) {
       // Перевыпуск карточки в ленте: /fix_result <id сообщения> [id матча].
       // Id сообщения берётся из ссылки на пост — это последнее число в ней.

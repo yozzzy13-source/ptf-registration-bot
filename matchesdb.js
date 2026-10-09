@@ -40,7 +40,10 @@ const SLOT_HEADERS = [
   'parent_id',
   // Кому и каким сообщением окно разослано: [[chat, message, lang], …] —
   // чтобы потом поправить эти сообщения (остались дни / окно закрыто).
-  'broadcast_msgs'
+  'broadcast_msgs',
+  // Строка общего журнала лиги, куда записан результат этого матча. Повторная
+  // запись (правка счёта) идёт в неё же, а не ищется по именам.
+  'log_row'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -1439,6 +1442,18 @@ export async function addMatchUnfinishedEvidence(challengeId, actor = {}, eviden
 
 // Ручной матч: игроки договорились вне бота. Сразу создаётся согласованным,
 // результат так же уходит сопернику на подтверждение.
+// Результат этой пары на эту дату уже внесён (ждёт подтверждения или
+// подтверждён)? Тогда второй такой же не принимаем: двойное нажатие или
+// повторный ввод давали две записи одного матча — и две строки в журнале.
+export async function findSameResult(fromId, toId, date) {
+  const ids = [String(fromId || ''), String(toId || '')].sort().join('|');
+  const day = normDate(date);
+  return (await allSlots()).find(r => [String(r.from_telegram_id || ''), String(r.to_telegram_id || '')].sort().join('|') === ids
+    && normDate(r.agreed_date || '') === day
+    && !['cancelled', 'declined', 'expired'].includes(String(r.status || '').toLowerCase())
+    && ['pending', 'confirmed', 'disputed'].includes(String(r.result_status || '').toLowerCase())) || null;
+}
+
 export async function createManualMatch(row) {
   await appendObject(MATCH_SHEETS.slots, SLOT_HEADERS, row);
   await logMatchEvent('manual_created', row, { telegram_id: row.from_telegram_id, name: row.from_name },

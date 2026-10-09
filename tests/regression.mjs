@@ -150,7 +150,7 @@ check(writes.slice(before).some(w=>w.spreadsheetId==='c2')&&!writes.slice(before
 check(write.division.columns>0,'Match_Log header row is located');
 check(write.division.season_write?.value==='Season 2','Season is written into the division Match_Log');
 check(String(tables.get('c2|Match_Log')[1][19]||'')==='Season 2','Competition cell holds the season of the match');
-const dup=await results.writeConfirmedResult(result2);check(dup.status==='duplicate','Repeat result does not append duplicate');
+const dup=await results.writeConfirmedResult(result2);check(dup.status==='saved'&&dup.rewritten&&dup.row===write.row,'Repeat write of the same match goes to its own row, no second row');
 const mixed=await results.writeConfirmedResult({...result2,group:'cross',to_name:'Alice One',to_telegram_id:'1'});check(mixed.status==='saved'&&mixed.division?.cross_group,'Same-division cross-group result is stored centrally');
 check(tables.has('master|Cross_Group_Match_Log'),'Cross-group journal is created in MatchLog');
 const womenCrossSlot={challenge_id:'women-cross-movement',division:'Division W',season:'2',group:'cross',from_name:'Wendy Two',to_name:'Wendy Three',from_telegram_id:'8',to_telegram_id:'9',agreed_date:'2099-09-22',result_score:'6:4 6:3',result_winner:'8'};
@@ -2274,5 +2274,26 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const ta=await fs.readFile(path.join(root,'tournamentsapi.js'),'utf8'),th=await fs.readFile(path.join(root,'public','tournament.html'),'utf8');
  check(/league-withdraw-preview/.test(ta)&&/function leagueWithdrawCard/.test(th),'Снятие есть и в турнирной админке');
  if(savedLog)tables.set('c2|Match_Log',savedLog);
+}
+// --- Результат нового сезона не пишется поверх матча прошлого сезона --------
+{
+ const log=tables.get('master|Cross_Division_Match_Log');
+ const old=Array(41).fill('');Object.assign(old,{1:'14.05.2026',3:'Season 1',8:'Carol Three',9:'Dan Four',10:6,11:4,14:6,15:3,23:'Yes'});
+ log.push(old);const oldRow=log.length;
+ const before=JSON.stringify(log[oldRow-1]);
+ const r=await results.writeConfirmedResult({...result2,challenge_id:'season2-again',agreed_date:'2099-10-01',result_score:'7:5 6:0'});
+ check(r.status==='saved'&&r.row!==oldRow,'Матч нового сезона получает свою строку, а не находит «дубль» в прошлом сезоне');
+ check(JSON.stringify(tables.get('master|Cross_Division_Match_Log')[oldRow-1])===before,'Строка прошлого сезона не тронута');
+ const again=await results.writeConfirmedResult({...result2,challenge_id:'season2-again',agreed_date:'2099-10-01',result_score:'7:5 6:0'});
+ check(again.status==='saved'&&again.rewritten&&again.row===r.row,'Повтор того же матча пишется в его собственную строку');
+ const other=await results.writeConfirmedResult({...result2,challenge_id:'season2-playoff',agreed_date:'2099-10-02',result_score:'6:1 6:1'});
+ check(other.status==='saved'&&!other.rewritten&&other.row!==r.row,'Другой матч той же пары — всегда новая строка, без сверки по именам');
+ const viaSlot=await results.writeConfirmedResult({...result2,challenge_id:'fresh-id',log_row:String(r.row),agreed_date:'2099-10-01',result_score:'7:5 6:1'});
+ check(viaSlot.row===r.row,'Номер строки берётся из самого матча (log_row)');
+ const mdb2=await load('matchesdb.js');
+ await mdb2.createManualMatch({challenge_id:'dup-a',match_type:'manual',status:'accepted',from_telegram_id:'3',to_telegram_id:'4',from_name:'Carol Three',to_name:'Dan Four',agreed_date:'2099-10-05',dates:'2099-10-05',result_status:'pending'});
+ check(Boolean(await mdb2.findSameResult('4','3','2099-10-05')),'Второй ввод того же матча (пара + дата) распознаётся');
+ check(!(await mdb2.findSameResult('4','3','2099-10-06')),'Другая дата — это другой матч');
+ check(/cmd:'result_resync'/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'Команда /result_resync в меню и /help');
 }
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
