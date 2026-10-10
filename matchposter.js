@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findApplicantByTelegramId } from './sheets.js';
-import { matchDataForSlot, playerPhotoForPoster } from './matchcard.js';
+import { matchDataForSlot, playerPhotoForPoster, cardStage, STAGE_THEMES } from './matchcard.js';
 import { sponsorsAvailable, sponsorStrip } from './sponsors.js';
 // Пробрасываем дальше: снаружи удобнее спрашивать у модуля постера.
 export { sponsorsAvailable };
@@ -50,11 +50,50 @@ The setting is a premium blue hard court at a luxury tennis club in Phuket durin
 LIGHTING — both players must look photographed together
 Light both people with the SAME key light, from the same direction, at the same intensity and the same color temperature, as if they were standing side by side in one photograph taken at one moment. Their faces must have equal brightness, equal contrast and matching shadow direction. Do not light one player brightly and the other in shadow. Do not give one a warm golden look and the other a cool or flat look. Do not make one face noticeably sharper, more contrasty or more saturated than the other. Match their skin tones to the same exposure and white balance, while keeping each person's real complexion. The two portraits must read as one photograph, not as two images pasted together.
 
-Keep the bottom 30 percent of the image dark, calm and free from faces, hands and important scene details. That area is covered later by an information panel and by real sponsor logos added by code.
+Keep the bottom 20 percent of the image dark, calm and free from faces, hands and important scene details. That area is covered later by an information panel and by real sponsor logos added by code.
 
 Do not generate text, letters, player names, scores, rankings, badges, banners, logos, watermarks, scoreboards, trophies or fake sponsor marks. The image generator creates only the photographic scene.`;
 
 const cleanEnvPrompt = value => String(value || '').replace(/\\n/g, '\n').trim();
+// Плей-офф: своя сцена на каждую стадию, и игроки меньше — чтобы сцена
+// (прожекторы, закат, кубок) читалась в верхней трети кадра. Отдельный
+// шаблон, а не приписка к обычному: у обычного другая раскладка кадра, и два
+// противоречащих указания нейросеть выполняет как попало.
+// Заменить можно переменной MATCH_POSTER_PLAYOFF_PROMPT; {{stage_scene}} и
+// {{stage}} подставляются сами.
+export const PLAYOFF_SCENES = {
+  QF: 'QUARTER-FINAL NIGHT: an evening hard court under powerful stadium floodlights. Cool steel-blue and teal atmosphere, visible light beams cutting through a light haze in the dark blue sky above the players, crisp cold highlights on the court lines. Tense, focused, cinematic.',
+  SF: 'SEMI-FINAL SUNSET: a dramatic golden-hour sunset over the tropical club. Rich gold and amber sky with long sun rays streaming down behind the players, glowing clouds, warm golden rim light. Epic and triumphant.',
+  '3rd': 'BRONZE MATCH: a warm copper and bronze sunset with a soft atmospheric haze, deep terracotta and amber tones in the sky, gentle warm backlight. Calm, proud, dignified.',
+  Final: 'CHAMPIONSHIP FINAL: a night centre court with bright spotlights and a glowing arena atmosphere, golden sparks and fine golden confetti drifting in the air. A large shining silver-and-gold championship trophy stands on a pedestal in sharp focus in the gap between the two players, slightly behind them, rising in the gap between their heads, the cup fully visible just below the title area. Grand, celebratory, prestigious.'
+};
+const PLAYOFF_PROMPT = `Create a cinematic vertical 9:16 tennis PLAYOFF match poster background using the two supplied player portraits as strict identity references.
+
+REFERENCE ASSIGNMENT
+Player 1 is {{player_1}} and must appear on the left.
+Player 2 is {{player_2}} and must appear on the right.
+
+Preserve each person's exact recognizable facial identity, including face proportions, eyes, nose, mouth, jawline, skin tone, apparent age, hairstyle and distinctive features. Do not blend their faces, swap traits, or beautify either person into someone different.
+
+STAGE: {{stage}}
+{{stage_scene}}
+
+FRAMING — the scene must stay visible
+Show both players as close portraits cropped at mid-chest, side by side with equal visual weight and a small gap between them in the centre of the frame. Faces are large and clearly readable. The tops of their heads sit at about 29 percent of the image height and their faces around 33 to 45 percent; the figures fill the band down to about 80 percent of the height. The area above their heads (the top 27 percent) shows the stage scene described above — sky, light beams, sun, sparks — and stays free of heads: a logo and a large title are placed over it, so keep it calm and slightly darker in the centre. Faces must still be large enough to be clearly recognizable. Camera at eye level, 85mm portrait look.
+
+Keep both players' posture relaxed and natural, different from each other, not mirrored, no crossed arms. Do not show tennis rackets, balls or sports bags. Both players wear premium modern minimalist tennis apparel in clearly different complementary colors.
+
+LIGHTING — both players must look photographed together
+Light both people with the SAME key light, from the same direction, at the same intensity and color temperature, as if photographed side by side at one moment. Equal brightness, contrast and shadow direction on both faces; nobody in shadow. The two portraits must read as one photograph.
+
+Keep the bottom 20 percent of the image dark, calm and free from faces, hands and important details: it is covered later by an information panel and sponsor logos added by code.
+
+Do not generate text, letters, player names, scores, numbers, banners, logos, watermarks or scoreboards. The image generator creates only the photographic scene.`;
+const PLAYOFF_STAGE_TITLES = { QF:'QUARTER-FINAL', SF:'SEMI-FINAL', '3rd':'3RD PLACE MATCH', Final:'FINAL' };
+export function playoffPromptTemplate() {
+  return cleanEnvPrompt(process.env.MATCH_POSTER_PLAYOFF_PROMPT) || PLAYOFF_PROMPT;
+}
+
 export function posterPromptTemplate() {
   return cleanEnvPrompt(process.env.MATCH_POSTER_PROMPT)
     || cleanEnvPrompt(process.env.POSTER_PROMPT)
@@ -104,6 +143,8 @@ const VARIANT_NOTES = [
 export function buildPosterPrompt(match={}, { comment='', variant=1 }={}) {
   const n = Math.max(1, Math.min(VARIANTS, Number(variant || 1)));
   const values = tokenMap(match, comment, n);
+  const stage = cardStage(match.stage);
+  if (stage) return buildPlayoffPrompt(values, stage.key, comment, n);
   const base = fillTokens(posterPromptTemplate(), values);
   const context = [
     `Reference assignment: player 1 is ${values.player_1 || 'the first supplied portrait'}; player 2 is ${values.player_2 || 'the second supplied portrait'}.`,
@@ -113,6 +154,20 @@ export function buildPosterPrompt(match={}, { comment='', variant=1 }={}) {
     'The image generator creates only the photographic scene. Exact names, score, rankings, form and organization logos are added later by code.'
   ].filter(Boolean).join('\n');
   return base + '\n\n' + context;
+}
+
+function buildPlayoffPrompt(values, key, comment, n) {
+  const base = fillTokens(playoffPromptTemplate(), { ...values, stage: PLAYOFF_STAGE_TITLES[key] || key, stage_scene: PLAYOFF_SCENES[key] || '' });
+  const notes = [
+    'Composition option 1: calm, premium, both faces at the same height, one shared key light.',
+    'Composition option 2: slightly different head angles and a stronger backlight from the stage scene, applied equally to both players.'
+  ];
+  return base + '\n\n' + [
+    `Reference assignment: player 1 is ${values.player_1 || 'the first supplied portrait'}; player 2 is ${values.player_2 || 'the second supplied portrait'}.`,
+    notes[n - 1] || notes[0],
+    comment ? `Organizer direction: ${comment}` : '',
+    'Mandatory constraints: large chest-level portraits; top quarter shows the stage scene; faces identical to the references and equally lit; dark calm bottom 20 percent; no text.'
+  ].filter(Boolean).join('\n');
 }
 
 const consentValue = row => String(row?.photo_publication_consent || '').trim().toUpperCase();
@@ -328,22 +383,106 @@ export function posterStageLabel(match={}) {
 // Свободная полоса под панелью счёта на постере матча.
 export const SPONSOR_BAND={ top:L.sponsor.top, bottom:L.sponsor.bottom };
 export const posterSponsorStrip = () => sponsorStrip(SPONSOR_BAND);
-async function posterLogoLayers(sponsor=null) {
+async function posterLogoLayers(sponsor=null, logoTop=L.logoTop, box=L.logoBox) {
   const layers=[];
   try {
     const org=await sharp(path.join(LOGOS_DIR,'ptf.png'))
-      .resize({ width:L.logoBox.w, height:L.logoBox.h, fit:'inside', withoutEnlargement:true }).png().toBuffer();
+      .resize({ width:box.w, height:box.h, fit:'inside', withoutEnlargement:true }).png().toBuffer();
     const meta=await sharp(org).metadata();
-    layers.push({ input:org, left:Math.round((WIDTH-(meta.width||L.logoBox.w))/2), top:L.logoTop });
+    layers.push({ input:org, left:Math.round((WIDTH-(meta.width||box.w))/2), top:logoTop });
   } catch(e) { if(e?.code!=='ENOENT')console.error('poster org logo failed:',e.message); }
   if(sponsor?.layer)layers.push(sponsor.layer);
   return layers;
+}
+
+// ------------------------------------------------------ постер плей-офф
+// Тот же язык, что у утверждённой карточки плей-офф: металл стадии (сталь,
+// золото, бронза, насыщенное золото финала), уголки рамки, сверху
+// «PHUKET TENNIS FAMILY» и плашка дивизиона с сезоном; на панели — счёт,
+// под ним стадия между именами, форма; плашки мест — только финал и 3-е место.
+// Раскладка как у обычного постера (заголовок, логотип того же размера), но
+// панель — компактная: только имена, счёт и крупная стадия. Форма, места и
+// прочая статистика остаются карточкам; постер — про лица и момент.
+const PL={ panelBottom:1548, panelH:268 };
+const hexA=(hex,a)=>{const n=parseInt(hex.slice(1),16);return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`;};
+function corners(th, double) {
+  const Lc=110,o=26,w=4;
+  const c=(x,y,dx,dy,off)=>`<path d="M${x+dx*off} ${y+dy*(off+Lc)} V${y+dy*off} H${x+dx*(off+Lc)}" fill="none" stroke="${th.metal}" stroke-width="${w}" stroke-linecap="round" opacity="${off>o?.55:.95}"/>`;
+  const set=off=>c(0,0,1,1,off)+c(WIDTH,0,-1,1,off)+c(0,HEIGHT,1,-1,off)+c(WIDTH,HEIGHT,-1,-1,off);
+  return set(o)+(double?set(o+14):'');
+}
+// Стадия — заголовок постера наверху, как на матчевых постерах больших
+// турниров: крупное слово стадии над игроками, бренд лиги рядом, внизу
+// компактная панель с именами и счётом.
+// Утверждён layout 'B': логотип по центру, как на обычном постере, стадия
+// крупно под ним; дивизион и сезон — мелко в нижней панели.
+// layout 'A' (логотип в углу) оставлен для сравнения макетов.
+export async function composePlayoffPoster(backgroundBuffer, match={}, stage=cardStage(match.stage), { layout='B' }={}) {
+  if (!backgroundBuffer) throw new Error('poster_background_missing');
+  const th=STAGE_THEMES[stage.key]||STAGE_THEMES.SF, final=stage.key==='Final';
+  const panelH=176, P={ x:40, y:PL.panelBottom-panelH, w:1000, h:panelH, r:38 };
+  const score=scoreLine(match.score);
+  const left=nameFit(match.winner), right=nameFit(match.loser);
+  const room=Math.max(160,(L.cxR-right.width/2)-(L.cxL+left.width/2)-L.gap*2);
+  const size=scoreSize(score,room);
+  const divRaw=String(match.division||'').split('·')[0].trim();
+  const chip=[divRaw&&!/^Division\b/i.test(divRaw)?`DIVISION ${divRaw.toUpperCase()}`:divRaw.toUpperCase(),match.season?`SEASON ${match.season}`:''].filter(Boolean).join(' · ');
+  const title=PLAYOFF_STAGE_TITLES[stage.key]||stage.key;
+  // Кегль заголовка — по ширине кадра: «3RD PLACE MATCH» длиннее «FINAL».
+  const hs=Math.min(final?150:120, Math.floor(960/(title.length*0.68)));
+  const rowY=P.y+84, divY=P.y+140;
+  const head=layout==='B'
+    ? { brandY:L.titleY, brandX:WIDTH/2, anchor:'middle', logoTop:L.logoTop, logoBox:L.logoBox, logoLeft:null, titleY:L.logoTop+L.logoBox.h+hs*0.92 }
+    : { brandY:118, brandX:200, anchor:'start', logoTop:52, logoBox:{ w:140, h:110 }, logoLeft:48, titleY:190+hs*0.78 };
+  const sponsor=await posterSponsorStrip();
+  const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${C.bg1}" stop-opacity=".72"/>
+      <stop offset=".18" stop-color="${C.bg1}" stop-opacity=".25"/>
+      <stop offset=".3" stop-color="${C.bg1}" stop-opacity=".04"/>
+      <stop offset=".62" stop-color="${C.bg1}" stop-opacity=".1"/>
+      <stop offset=".76" stop-color="${C.bg1}" stop-opacity=".8"/>
+      <stop offset="1" stop-color="${C.bg1}" stop-opacity=".98"/></linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="${th.deep}"/><stop offset=".5" stop-color="${th.light}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${th.light}"/><stop offset=".55" stop-color="${th.metal}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient>
+  </defs>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
+  ${corners(th,final)}
+  <rect width="${WIDTH}" height="8" fill="url(#bar)"/>
+  <rect y="${HEIGHT-8}" width="${WIDTH}" height="8" fill="url(#bar)"/>
+  <text x="${head.brandX}" y="${head.brandY}" text-anchor="${head.anchor}" font-family="${FONT}" font-size="${layout==='B'?28:26}" font-weight="700"
+    letter-spacing="${layout==='B'?9:7}" fill="${th.light}" opacity=".95">PHUKET TENNIS FAMILY</text>
+  ${layout==='B'?'':`<text x="${head.brandX}" y="${head.brandY+34}" text-anchor="start" font-family="${FONT}" font-size="18" font-weight="700" letter-spacing="4" fill="${C.dim}">PLAYOFFS · ${esc(chip)}</text>`}
+  <text x="${WIDTH/2}" y="${head.titleY}" text-anchor="middle" font-family="${FONT}" font-size="${hs}" font-weight="900"
+    letter-spacing="${Math.round(hs*0.06)}" fill="url(#metal)" stroke="${hexA(C.bg1,.35)}" stroke-width="2">${esc(title)}</text>
+  <rect x="${P.x}" y="${P.y}" width="${P.w}" height="${P.h}" rx="${P.r}" fill="${C.bg2}" fill-opacity=".78" stroke="${hexA(th.metal,.45)}" stroke-width="1.5"/>
+  <text x="${L.cxL}" y="${rowY}" text-anchor="middle" font-family="${FONT}" font-size="${left.size}" font-weight="900" fill="${final?th.light:C.text}">${esc(left.text)}</text>
+  <text x="${L.cxR}" y="${rowY}" text-anchor="middle" font-family="${FONT}" font-size="${right.size}" font-weight="900" fill="${C.silver}">${esc(right.text)}</text>
+  <rect x="${L.cxL-left.width/2}" y="${rowY+16}" width="${left.width}" height="3" rx="2" fill="${th.metal}" opacity=".85"/>
+  <rect x="${L.cxR-right.width/2}" y="${rowY+16}" width="${right.width}" height="3" rx="2" fill="${C.silver}" opacity=".55"/>
+  <text x="${WIDTH/2}" y="${rowY+10}" text-anchor="middle" font-family="${FONT}" font-size="${size}" font-weight="900" letter-spacing="1" fill="${stage.key==='SF'?C.amber:th.light}">${esc(score||'—')}</text>
+  ${layout==='B'&&chip?`<text x="${WIDTH/2}" y="${divY}" text-anchor="middle" font-family="${FONT}" font-size="17" font-weight="700" letter-spacing="4" fill="${C.dim}" opacity=".85">${esc(chip)}</text>`:''}
+</svg>`);
+  const logos=[];
+  try {
+    const org=await sharp(path.join(LOGOS_DIR,'ptf.png')).resize({ width:head.logoBox.w, height:head.logoBox.h, fit:'inside', withoutEnlargement:true }).png().toBuffer();
+    const meta=await sharp(org).metadata();
+    logos.push({ input:org, left:head.logoLeft ?? Math.round((WIDTH-(meta.width||head.logoBox.w))/2), top:head.logoTop });
+  } catch(e) { if(e?.code!=='ENOENT')console.error('poster org logo failed:',e.message); }
+  if(sponsor?.layer)logos.push(sponsor.layer);
+  return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})
+    .composite([{input:svg,left:0,top:0},...logos]).png({compressionLevel:6}).toBuffer();
 }
 
 // Накладывает точный текст и логотипы на любой будущий AI-фон. Эту функцию
 // можно проверять и использовать уже сейчас — сетевого доступа она не требует.
 export async function composeMatchPoster(backgroundBuffer, match={}) {
   if (!backgroundBuffer) throw new Error('poster_background_missing');
+  const stage=cardStage(match.stage);
+  if (stage) return composePlayoffPoster(backgroundBuffer, match, stage);
   const P=L.panel;
   const score=scoreLine(match.score);
   const left=nameFit(match.winner),right=nameFit(match.loser);
@@ -570,4 +709,94 @@ export async function generatePosterBackgrounds(job={}, photos=null) {
   }
   if(!result.length)throw new Error('poster_prompts_missing');
   return result;
+}
+
+
+// ------------------------------------------------------ постер места игрока
+// После финала и матча за 3-е место: отдельный постер каждому игроку —
+// CHAMPION / RUNNER-UP / 3RD PLACE / 4TH PLACE. Один портрет, своя сцена,
+// то же оформление, что у постера матча плей-офф (вариант B).
+export const PLACE_KINDS = {
+  champion: { title:'CHAMPION', theme:'Final', scene:'CHAMPION CELEBRATION: a night centre court in a glowing arena, bright spotlights, golden confetti and sparks falling. The player proudly holds a large shining silver-and-gold championship trophy, raised at chest or shoulder height, both hands on it, a happy confident expression.' },
+  runner_up: { title:'RUNNER-UP', theme:'QF', metal:{ metal:'#C9CCD3', light:'#EEF0F4', deep:'#6E727B', text:'#EEF0F4' }, scene:'RUNNER-UP: an elegant evening court under cool silver and moonlight-blue light, soft haze, gentle sparkle in the air. The player wears a silver medal on a ribbon around the neck, a proud and composed expression.' },
+  third: { title:'3RD PLACE', theme:'3rd', scene:'BRONZE MEDAL: a warm copper and bronze sunset over the tropical club, soft atmospheric haze, warm backlight. The player wears a bronze medal on a ribbon around the neck, a proud satisfied smile.' },
+  fourth: { title:'4TH PLACE', theme:'QF', scene:'FOURTH PLACE: a calm blue-hour evening court with soft floodlights and a cool steel-blue atmosphere. The player looks focused and determined, arms relaxed.' }
+};
+const PLACE_PROMPT = `Create a cinematic vertical 9:16 tennis poster background featuring ONE player, using the supplied portrait as a strict identity reference.
+
+The player is {{player}}. Preserve the exact recognizable facial identity: face proportions, eyes, nose, mouth, jawline, skin tone, apparent age, hairstyle and distinctive features. Do not beautify the person into someone different.
+
+SCENE
+{{scene}}
+
+FRAMING
+A single close portrait cropped at mid-chest, centred, the face large and clearly readable. The top of the head sits at about 29 percent of the image height and the face around 33 to 46 percent; the figure fills the frame down to about 80 percent of the height. The top 27 percent shows the scene (sky, light, sparks) behind a logo and a large title added later, so keep it free of the head and calm in the centre. Premium modern minimalist tennis apparel. Eye-level camera, 85mm portrait look, realistic skin texture, polished professional sports photography.
+
+Keep the bottom 20 percent of the image dark and calm: an information panel and sponsor logos are added there by code.
+
+Do not generate text, letters, names, numbers, banners, logos or watermarks. Do not show tennis rackets or balls.`;
+export function buildPlacePrompt(name='', kind='champion', { comment='', variant=1 }={}) {
+  const k=PLACE_KINDS[kind]||PLACE_KINDS.champion;
+  const notes=['Composition option 1: calm, premium editorial portrait, soft key light.','Composition option 2: slightly turned head and a stronger rim light from the scene.'];
+  return fillTokens(cleanEnvPrompt(process.env.PLACE_POSTER_PROMPT)||PLACE_PROMPT,{ player:String(name||''), scene:k.scene })
+    +'\n\n'+[notes[(Number(variant)||1)-1]||notes[0], comment?`Organizer direction: ${comment}`:''].filter(Boolean).join('\n');
+}
+export async function preparePlacePosterJob({ name='', telegramId='', kind='champion', division='', season='', comment='', variants=VARIANTS }={}) {
+  const row=await findApplicantByTelegramId(telegramId).catch(()=>null);
+  const consent=[{ telegram_id:String(telegramId||''), name:String(name||''), value:consentValue(row)||'NOT_ANSWERED', allowed:posterConsentAllowed(consentValue(row)) }];
+  const count=Math.max(1,Math.min(2,Number(variants||VARIANTS)));
+  const prompts=Array.from({length:count},(_,i)=>({ variant:i+1, prompt:buildPlacePrompt(name,kind,{comment,variant:i+1}) }));
+  return { kind:'place', place:kind, name:String(name||''), telegramId:String(telegramId||''), division:String(division||''), season:String(season||''),
+    status:consent[0].allowed?(posterEnabled()?'ready_to_generate':'api_not_configured'):'blocked_consent', consent, prompts, comment:String(comment||'').trim() };
+}
+export async function generatePlaceBackgrounds(job={}) {
+  if(!posterEnabled())throw new Error('OPENAI_API_KEY не задан');
+  if(!job.consent?.every(x=>x.allowed))throw new Error('poster_consent_required');
+  const photo=await playerPhotoForPoster({ telegramId:job.telegramId, name:job.name });
+  if(!photo)throw new Error('poster_source_photo_missing');
+  const refs=[await imageReference(photo)];
+  const out=[];
+  for(const item of job.prompts||[])out.push({ variant:item.variant, buffer:await generateOneBackground(String(item.prompt||''),refs) });
+  return out;
+}
+export async function composePlacePoster(backgroundBuffer, { name='', kind='champion', division='', season='' }={}) {
+  if (!backgroundBuffer) throw new Error('poster_background_missing');
+  const k=PLACE_KINDS[kind]||PLACE_KINDS.champion;
+  const th={ ...(STAGE_THEMES[k.theme]||STAGE_THEMES.SF), ...(k.metal||{}) };
+  const champion=kind==='champion';
+  const panelH=170, P={ x:40, y:PL.panelBottom-panelH, w:1000, h:panelH, r:38 };
+  const nm=fit(name,22); let ns=60; while(ns>34&&textWidth(nm,ns)>900)ns-=1;
+  const divRaw=String(division||'').split('·')[0].trim();
+  const chip=[divRaw&&!/^Division\b/i.test(divRaw)?`DIVISION ${divRaw.toUpperCase()}`:divRaw.toUpperCase(),season?`SEASON ${season}`:''].filter(Boolean).join(' · ');
+  const hs=Math.min(champion?150:130, Math.floor(960/(k.title.length*0.68)));
+  const titleY=L.logoTop+L.logoBox.h+hs*0.92;
+  const sponsor=await posterSponsorStrip();
+  const svg=Buffer.from(`<svg width="${WIDTH}" height="${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${C.bg1}" stop-opacity=".72"/><stop offset=".18" stop-color="${C.bg1}" stop-opacity=".25"/>
+      <stop offset=".3" stop-color="${C.bg1}" stop-opacity=".04"/><stop offset=".64" stop-color="${C.bg1}" stop-opacity=".1"/>
+      <stop offset=".78" stop-color="${C.bg1}" stop-opacity=".8"/><stop offset="1" stop-color="${C.bg1}" stop-opacity=".98"/></linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${th.deep}"/><stop offset=".5" stop-color="${th.light}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.light}"/><stop offset=".55" stop-color="${th.metal}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient>
+  </defs>
+  <rect width="${WIDTH}" height="${HEIGHT}" fill="url(#shade)"/>
+  ${corners(th,champion)}
+  <rect width="${WIDTH}" height="8" fill="url(#bar)"/><rect y="${HEIGHT-8}" width="${WIDTH}" height="8" fill="url(#bar)"/>
+  <text x="${WIDTH/2}" y="${L.titleY}" text-anchor="middle" font-family="${FONT}" font-size="28" font-weight="700" letter-spacing="9" fill="${th.light}" opacity=".95">PHUKET TENNIS FAMILY</text>
+  <text x="${WIDTH/2}" y="${titleY}" text-anchor="middle" font-family="${FONT}" font-size="${hs}" font-weight="900" letter-spacing="${Math.round(hs*0.06)}" fill="url(#metal)" stroke="${hexA(C.bg1,.35)}" stroke-width="2">${esc(k.title)}</text>
+  <rect x="${P.x}" y="${P.y}" width="${P.w}" height="${P.h}" rx="${P.r}" fill="${C.bg2}" fill-opacity=".78" stroke="${hexA(th.metal,.45)}" stroke-width="1.5"/>
+  <text x="${WIDTH/2}" y="${P.y+86}" text-anchor="middle" font-family="${FONT}" font-size="${ns}" font-weight="900" fill="${th.light}">${esc(nm)}</text>
+  ${chip?`<text x="${WIDTH/2}" y="${P.y+132}" text-anchor="middle" font-family="${FONT}" font-size="17" font-weight="700" letter-spacing="4" fill="${C.dim}" opacity=".85">PLAYOFFS · ${esc(chip)}</text>`:''}
+</svg>`);
+  const logos=await posterLogoLayers(sponsor);
+  return sharp(backgroundBuffer).rotate().resize(WIDTH,HEIGHT,{fit:'cover',position:'centre'})
+    .composite([{input:svg,left:0,top:0},...logos]).png({compressionLevel:6}).toBuffer();
+}
+// Какие постеры мест положены после матча: финал — чемпион и раннер-ап,
+// матч за 3-е — третье и четвёртое места.
+export function placesForStage(stageKey) {
+  if (stageKey === 'Final') return [['winner','champion'],['loser','runner_up']];
+  if (stageKey === '3rd') return [['winner','third'],['loser','fourth']];
+  return [];
 }

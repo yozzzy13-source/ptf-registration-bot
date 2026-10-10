@@ -629,6 +629,11 @@ position:sticky;left:0;z-index:1}
 /* --- матчи --- */
 .mt{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:11px;margin-bottom:8px;
 box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+.ponote{font-size:11.5px;color:var(--mute2);text-align:center;margin:-2px 0 10px}
+.stgw{text-align:center;margin:2px 0 4px}
+.stg{display:inline-block;padding:3px 10px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.4px;color:#D9C7A3;background:rgba(201,167,106,.14);border:1px solid rgba(201,167,106,.45)}
+.stg.fin{color:#1b160f;background:linear-gradient(180deg,#E9D29E,#C9A76A);border-color:#C9A76A}
+.mt.po{border-color:rgba(201,167,106,.45)!important}
 .mtop{text-align:center;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute2);
 font-weight:800;margin-bottom:9px}
 .fm2{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:9px;align-items:center}
@@ -2636,14 +2641,14 @@ function crossGroupBlock(groups){
   return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
 }
 function playoffStages(po){
-  po=po||{};var stages=[],has=function(m){return m&&(m.first||m.second)};
+  po=po||{};var stages=[],has=function(m){return m&&(m.first||m.second||m.label_1||m.label_2)};
   var qf=(po.qf||[]).filter(has),sf=(po.sf||[po.sf1,po.sf2]).filter(has);
   if(qf.length)stages.push({t:L?'Четвертьфиналы':'Quarterfinals',m:qf});
   if(sf.length)stages.push({t:L?'Полуфиналы':'Semifinals',m:sf});
   if(has(po.final))stages.push({t:X.final,m:[po.final],fin:true});
   if(has(po.third))stages.push({t:L?'За 3-е место':'Third place',m:[po.third]});
   if(!stages.length)return '';
-  return '<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div><div class="playgrid">'+stages.map(function(st){return '<div class="playstage"><div class="playtitle">'+esc(st.t)+'</div>'+st.m.map(function(m,i){return poBox(st.t+(st.m.length>1?' · '+(i+1):''),m,st.fin)}).join('')+'</div>'}).join('')+'</div>';
+  return '<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)+'<div class="playgrid">'+stages.map(function(st){return '<div class="playstage"><div class="playtitle">'+esc(st.t)+'</div>'+st.m.map(function(m,i){return poBox(st.t+(st.m.length>1?' · '+(i+1):''),m,st.fin)}).join('')+'</div>'}).join('')+'</div>';
 }
 function renderDiv(){
   if(!divSeason)divSeason=String(season||(seasons.length?seasons[seasons.length-1].number:''))||'';
@@ -2682,9 +2687,11 @@ function renderDiv(){
       +'<div class="cd">'+esc(divLabel(d.division))+(divSeason?(L?' · Сезон ':' · Season ')+esc(divSeason):'')+'</div></div></div>';
   }
   // Сетка идёт сразу под чемпионом; если плей-офф ещё не игрался — блока нет.
-  var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played);
+  // Сезон 1: сетка появлялась, когда что-то сыграно. Теперь — и опубликованная
+  // (пары известны), и предварительная на последней неделе регулярки.
+  var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played)||po.published||(po.preview&&(po.sf1||po.sf2));
   if(hasPo){
-    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'
+    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)
       +'<div class="tree"><div class="col">'
       +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
       +'</div><div class="conn"><i></i><u></u></div><div class="col">'
@@ -2735,17 +2742,28 @@ function standingsBlock(d,title){
     +'<span><i>—</i> '+esc(X.zStay)+'</span>'
     +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>');
 }
+// Пометка над сеткой: предварительная (по текущей таблице) или когда финалы.
+function poNote(po){
+  if(po&&po.preview)return '<div class="ponote">'+esc(L?'Предварительная сетка — по текущей таблице, меняется после каждого матча до конца регулярки.':'Provisional bracket — based on the current table, it changes after every match until the regular season ends.')+'</div>';
+  return '';
+}
+// «Winner SF1» → «Победитель SF1»: кто встанет в пару, пока её нет.
+function poPlaceholder(t){
+  t=String(t||'');if(!t||t==='TBD')return '—';
+  var m=t.match(/^(Winner|Loser)\s+(\S+)$/);if(!m)return t;
+  return L?(m[1]==='Winner'?'Победитель ':'Проигравший ')+m[2]:t;
+}
 function poBox(title,m,isFinal){
   if(!m)return '';
-  var side=function(pl,other){
-    if(!pl)return '<div class="sl"><div class="avph">?</div><span class="nm2">—</span><b></b></div>';
+  var side=function(pl,other,ph){
+    if(!pl)return '<div class="sl"><div class="avph">?</div><span class="nm2">'+esc(poPlaceholder(ph))+'</span><b></b></div>';
     var win=m.winner_id&&String(m.winner_id)===String(pl.id);
     var sc=m.score||'';
     return '<div class="sl'+(win?' win':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'div\')">'
       +avL(pl)+'<span class="nm2">'+esc(shortName(pl.name))+'</span><b>'+esc(win?sc:'')+'</b></div>';
   };
   return '<div class="mbox'+(isFinal?' fin':'')+'"><div class="mtitle">'+esc(title)+'</div>'
-    +side(m.first)+side(m.second)+'</div>';
+    +side(m.first,m.second,m.label_1)+side(m.second,m.first,m.label_2)+'</div>';
 }
 function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
 function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv();syncUrl()}
@@ -2784,6 +2802,22 @@ function mxTable(d){
   return '<div class="mx"><table>'+head+body+'</table></div>';
 }
 
+// Стадия плей-офф из подписи соревнования: «Semifinal S2», «QF S2», «Final S1»…
+function playoffStageOf(c){
+  var x=String(c||'').toLowerCase().replace(/\bs\s*\d+\b/g,'').replace(/[^a-z0-9]+/g,'');
+  if(/^(qf|quarterfinals?|quarter)$/.test(x))return 'QF';
+  if(/^(sf|semifinals?|semi)$/.test(x))return 'SF';
+  if(/^(3rd|third|thirdplace|bronze|3rdplace|3rdplacematch)$/.test(x))return '3rd';
+  if(/^(f|final|finals)$/.test(x))return 'Final';
+  return '';
+}
+function stageLabel(st){
+  return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'Матч за 3-е место':'3rd place match',Final:L?'Финал':'Final'})[st]||'';
+}
+function stageBadge(c){
+  var st=playoffStageOf(c);if(!st)return '';
+  return '<span class="stg'+(st==='Final'?' fin':'')+'">🏆 '+esc(stageLabel(st))+'</span>';
+}
 // ---------------------------------------------------------------- лента матчей
 function allMatchesList(){
   var out=[],seen={};
@@ -2874,10 +2908,11 @@ function plrPick(n){if(!n)markTyping('pq');else typingIn='';pQuery=n;pSugOpen=fa
 function plrBlur(){setTimeout(function(){if(!pSugOpen)return;pSugOpen=false;renderPlayers()},180)}
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
-  var top=[m.no?'#'+m.no:'',matchDate(m.date),m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+  var st=playoffStageOf(m.competition);
+  var top=[m.no?'#'+m.no:'',matchDate(m.date),st?'':m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   // В ленте ярлык дивизиона стоит по центру под счётом — второй, в углу,
   // был дублем. Угловой остаётся только в карточке игрока.
-  return '<div class="mt">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+  return '<div class="mt'+(st?' po':'')+'">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')+(st?'<div class="stgw">'+stageBadge(m.competition)+'</div>':'')
     +'<div class="fm2">'
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
     // По имени тоже открывается карточка игрока — раньше кликался только кружок.
@@ -3763,8 +3798,9 @@ function matchRow(m){
   var meName=(byId(openId)||{}).name||'';
   var dv=divTag(divisionAt(m.season,meName,openId,m.opponent,m.opponent_id,m.division),m.season);
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
-  var top=[m.match_no?'#'+m.match_no:'',matchDate(m.date),m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
-  return '<div class="mt">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')
+  var st=playoffStageOf(m.competition);
+  var top=[m.match_no?'#'+m.match_no:'',matchDate(m.date),st?'':m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
+  return '<div class="mt'+(st?' po':'')+'">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')+(st?'<div class="stgw">'+stageBadge(m.competition)+'</div>':'')
     +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result==='WIN'?'WIN':'LOST')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'

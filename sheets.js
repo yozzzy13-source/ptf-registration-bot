@@ -2279,5 +2279,23 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
       out.push({telegram_id:String(hit.telegram_id),name:rp.name,username:hit.telegram_username||'',rating:hit.ntrp||hit.rating||'',status:hit.status||'',language:hit.language||'',cross_group:true,profile_url:sp.profile_url||'',photo_url:sp.photo_url||''});
     }
   }
+  // Соперник по четвертьфиналу плей-офф (после публикации сетки) — даже из
+  // другой группы: с ним нужно договориться о матче.
+  try {
+    const mine = applicants.find(a => String(a.telegram_id) === String(excludeTelegramId));
+    const po = mine ? await (await import('./playoff.js')).playoffOpponentsFor(mine.name, curSeason) : [];
+    for (const o of po) {
+      if (o.division !== letter || isGone(o.name)) continue;
+      const hit = nameKeys(o.name).map(k => byKey.get(k)).find(Boolean);
+      if (!hit) continue;
+      const already = out.find(x => String(x.telegram_id) === String(hit.telegram_id));
+      if (already) { already.playoff = o.stage; continue; }
+      const sp = nameKeys(o.name).map(k => siteByKey.get(k)).find(Boolean) || {};
+      out.push({ telegram_id: String(hit.telegram_id), name: o.name, username: hit.telegram_username || '', rating: hit.ntrp || hit.rating || '',
+        status: hit.status || '', language: hit.language || '', playoff: o.stage, cross_group: String(o.group || '') !== String(group || ''),
+        profile_url: sp.profile_url || '',
+        photo_url: hit.avatar_file_id ? `${(await import('./config.js')).PUBLIC_URL}/avatar/${hit.telegram_id}.png` : sp.photo_url || '' });
+    }
+  } catch (e) { console.error('playoff opponents failed:', e.message); }
   return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity:'base' }));
 }

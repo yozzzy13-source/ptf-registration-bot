@@ -268,11 +268,15 @@ function cards(mode='review',n=slot) {
   return '<div class="squad">'+d.picks.map(k=>{
     const p=player(k)||own?.picks.find(x=>x.key===k)||{key:k,name:k};
     const cap=d.captain_key===k,vice=d.vice_key===k;
+    // ×1.5 приносит капитан; вице — только если капитан выбыл без матчей.
+    const boostKey=own&&own.multiplier_key?own.multiplier_key:d.captain_key,boost=boostKey===k&&(cap||vice);
+    const base=Number(p.score?.total||0);
+    const ptsText=boost&&mode!=='captains'&&mode!=='select'?boostText(base)+' Fantasy Points':fpNum(base)+' Fantasy Points';
     const openId=n+':'+k;
     const nameEl=showBreakdown
       ?'<button type="button" class="name name-btn" data-action="matches-toggle" data-key="'+esc(openId)+'" aria-expanded="'+(matchesOpen===openId)+'">'+esc(p.name)+'</button>'
       :'<div class="name">'+esc(p.name)+'</div>';
-    return '<div class="pick"><div class="pick-row">'+avatar(p)+'<div class="player-name">'+nameEl+'<div class="meta">'+esc(p.pool||'')+' · '+(p.score?.total||0)+' Fantasy Points</div><div class="actions">'+(mode==='captains'?button(tr('Капитан','Captain'),'captain','mini '+(cap?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+cap+'"')+button(tr('Вице-капитан','Vice-captain'),'vice','mini '+(vice?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+vice+'"'):(cap?'<span class="badge cap">'+tr('Капитан','Captain')+' ×1.5</span>':'')+(vice?'<span class="badge">'+tr('Вице-капитан','Vice-captain')+'</span>':''))+
+    return '<div class="pick"><div class="pick-row">'+avatar(p)+'<div class="player-name">'+nameEl+'<div class="meta">'+esc(p.pool||'')+' · '+esc(ptsText)+'</div><div class="actions">'+(mode==='captains'?button(tr('Капитан','Captain'),'captain','mini '+(cap?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+cap+'"')+button(tr('Вице-капитан','Vice-captain'),'vice','mini '+(vice?'on':''),'data-key="'+esc(k)+'" aria-pressed="'+vice+'"'):(cap?'<span class="badge cap">'+tr('Капитан','Captain')+(boost?' ×'+fpNum(1.5):'')+'</span>':'')+(vice?'<span class="badge'+(boost?' cap':'')+'">'+tr('Вице-капитан','Vice-captain')+(boost?' ×'+fpNum(1.5)+tr(' (замена)',' (stand-in)'):'')+'</span>':''))+
     (mode==='select'?button(tr('Убрать','Remove'),'remove','mini danger','data-key="'+esc(k)+'"'):'')+
     (mode==='team'&&n===slot&&canTransfer(k,n)?button((own.free_transfer_keys||[]).includes(k)?tr('Бесплатная замена','Free transfer'):tr('Заменить','Replace'),'transfer-start','mini transfer','data-key="'+esc(k)+'"'):'')+'</div></div>'+
     (p.price_breakdown?'<button type="button" class="price price-toggle" data-action="price-info" data-key="'+esc(k)+'" aria-expanded="'+(priceOpen===k)+'" aria-label="'+esc(tr('Откуда цена: ','Where the price comes from: ')+p.name)+'">'+Number(p.price||0)+'</button>'+(priceOpen===k?priceBreakdown(p):''):'<div class="price">'+Number(p.price||0)+'</div>')+'</div>'
@@ -332,11 +336,14 @@ function successView() {
 let rankMode='teams',rankOpen='';
 // Рейтинг разворачивается так же, как в интерфейсе лиги: команда показывает
 // свой состав с очками каждого игрока, игрок — за какие матчи он их набрал.
+// Очки с капитанским множителем: «49,5 (33 × 1,5)». Запятая по-русски.
+function fpNum(v){const x=Math.round(Number(v||0)*10)/10;return ru?String(x).replace('.',','):String(x)}
+function boostText(base){return fpNum(base*1.5)+' ('+fpNum(base)+' × '+fpNum(1.5)+')'}
 function rankSquad(picks) {
   if(!picks||!picks.length)return '<div class="rank-more"><div class="pbd-row note">'+esc(tr('Состав скрыт.','Squad is hidden.'))+'</div></div>';
   return '<div class="rank-more">'+picks.map(pk=>'<div class="pbd-row"><span>'+esc(pk.name)
-    +(pk.captain?' <b class="capmark">'+esc(tr('К','C'))+'</b>':pk.vice?' <b class="capmark vc">'+esc(tr('ВК','VC'))+'</b>':'')
-    +'</span><b>'+Number(pk.points||0)+'</b></div>').join('')+'</div>';
+    +(pk.captain?' <b class="capmark">'+esc(tr('К','C'))+(pk.multiplied?' ×'+fpNum(1.5):'')+'</b>':pk.vice?' <b class="capmark vc">'+esc(tr('ВК','VC'))+(pk.multiplied?' ×'+fpNum(1.5):'')+'</b>':'')
+    +'</span><b>'+(pk.multiplied?esc(boostText(Number(pk.points||0))):fpNum(pk.points))+'</b></div>').join('')+'</div>';
 }
 function tableView() {
   const list=rankMode==='teams'?D.leaderboard:D.player_leaderboard;

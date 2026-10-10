@@ -43,7 +43,10 @@ const SLOT_HEADERS = [
   'broadcast_msgs',
   // Строка общего журнала лиги, куда записан результат этого матча. Повторная
   // запись (правка счёта) идёт в неё же, а не ищется по именам.
-  'log_row'
+  'log_row',
+  // Стадия плей-офф (QF / SF / Final / 3rd). Пусто — матч регулярки. Отдельно
+  // от round: round — номер раунда переговоров о времени.
+  'stage'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 

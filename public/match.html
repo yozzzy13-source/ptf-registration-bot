@@ -106,6 +106,16 @@ button.mini{width:auto;margin:0;padding:9px 14px;font-size:13px;border-radius:11
 .chip{padding:9px 13px;border-radius:999px;background:var(--card2);border:1px solid var(--border);font-size:12.5px;font-weight:800;cursor:pointer;user-select:none;color:var(--muted)}
 .chip.on{border-color:var(--accLine);background:linear-gradient(180deg,var(--accBg2),var(--accBg));color:var(--accent)}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:flex-end;justify-content:center;z-index:50}
+/* Окно «Счёт отправлен» / «Не получилось» — по центру, поверх всего. */
+.stg{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.3px;color:#D9C7A3;background:rgba(201,167,106,.14);border:1px solid rgba(201,167,106,.45);vertical-align:middle}
+.stg.fin{color:#1b160f;background:linear-gradient(180deg,#E9D29E,#C9A76A);border-color:#C9A76A}
+.slot.po{border-color:rgba(201,167,106,.45)}
+.donebox{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px}
+.donebox .card{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:22px 18px 18px;width:100%;max-width:420px;text-align:center}
+.donebox .ic{font-size:44px;line-height:1;margin-bottom:10px}
+.donebox h3{margin:0 0 8px;font-size:18px}
+.donebox p{margin:0 0 10px;color:var(--muted);font-size:13.5px;line-height:1.45}
+.donebox .warn{color:var(--accent);font-size:12.5px}
 .sheet{background:var(--card);border:1px solid var(--border);border-radius:20px 20px 0 0;padding:18px 16px 22px;width:100%;max-width:620px;max-height:88vh;overflow:auto}
 .sheet h3{margin:0 0 4px;font-size:17px}
 .setrow{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:8px;align-items:center;margin-bottom:8px}
@@ -571,6 +581,22 @@ function waitingBlock(){
   }).join('');
 }
 
+// Стадия плей-офф из подписи соревнования: «Semifinal S2», «QF S2», «Final S1»…
+function playoffStageOf(c){
+  var x=String(c||'').toLowerCase().replace(/\bs\s*\d+\b/g,'').replace(/[^a-z0-9]+/g,'');
+  if(/^(qf|quarterfinals?|quarter)$/.test(x))return 'QF';
+  if(/^(sf|semifinals?|semi)$/.test(x))return 'SF';
+  if(/^(3rd|third|thirdplace|bronze|3rdplace|3rdplacematch)$/.test(x))return '3rd';
+  if(/^(f|final|finals)$/.test(x))return 'Final';
+  return '';
+}
+function stageLabel(st){
+  return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'Матч за 3-е место':'3rd place match',Final:L?'Финал':'Final'})[st]||'';
+}
+function stageBadge(c){
+  var st=playoffStageOf(c);if(!st)return '';
+  return '<span class="stg'+(st==='Final'?' fin':'')+'">🏆 '+esc(stageLabel(st))+'</span>';
+}
 // --- история матчей лиги -----------------------------------------------------
 // Лежит под расписанием на той же вкладке: сначала свои матчи, следом — что
 // происходит в лиге. По умолчанию свой дивизион, вся лига — переключателем.
@@ -598,7 +624,7 @@ function historyBlock(){
     +'<div class="chip'+(histScope==='all'?' on':'')+'" onclick="setHistScope(\'all\')">'+esc(X.histAll)+'</div>';
   var rows=list.slice(0,histLimit).map(function(m){
     var head=[m.date,m.division?('Div '+m.division):'',m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
-    return '<div class="slot"><div class="meta">'+esc(head)+'</div>'
+    return '<div class="slot'+(playoffStageOf(m.competition)?' po':'')+'"><div class="meta">'+esc(head)+stageBadge(m.competition)+'</div>'
       +'<div class="who" style="font-size:14px"><b>'+esc(m.winner)+'</b> <span style="color:var(--muted)">vs</span> '+esc(m.loser)+'</div>'
       +'<div class="when">🎾 <b>'+esc(m.score||'—')+'</b></div></div>';
   }).join('');
@@ -628,9 +654,18 @@ function adminMatchTime(s){
 function adminQueryChanged(el){adminQuery=el.value;adminSugOpen=!!el.value.trim();renderAdmin();var input=$('adminSearch');if(input){input.focus();try{input.setSelectionRange(input.value.length,input.value.length)}catch(e){}}}
 function adminPickName(name){adminQuery=name;adminSugOpen=false;renderAdmin()}
 function adminSearchBlur(){setTimeout(function(){adminSugOpen=false;renderAdmin()},150)}
+// Вкладка «Контроль» — два раздела: матчи (как раньше) и плей-офф.
+var adminMode=new URLSearchParams(location.search).get('po')==='1'?'playoff':'matches';
+function setAdminMode(m){adminMode=m;renderAdmin()}
+function adminModeBar(){
+  return '<div class="seg" style="margin:0 0 12px">'
+    +'<div class="s'+(adminMode==='matches'?' on':'')+'" onclick="setAdminMode(\'matches\')">'+esc(L?'Матчи':'Matches')+'</div>'
+    +'<div class="s'+(adminMode==='playoff'?' on':'')+'" onclick="setAdminMode(\'playoff\')">🏆 '+esc(L?'Плей-офф':'Playoffs')+'</div></div>';
+}
 function renderAdmin(){
   var view=$('viewAdmin');
   if(!isAdmin){view.innerHTML='';return}
+  if(adminMode==='playoff'){view.innerHTML=adminModeBar()+renderPlayoffAdmin();return}
   if(!adminLoaded){view.innerHTML='<div class="empty">…</div>';fetch('/api/match/admin-active?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');adminItems=j.items||[];adminLoaded=true;renderAdmin()}).catch(function(e){view.innerHTML='<div class="empty" style="color:var(--danger)">'+esc(e.message)+'</div>'});return}
   var divisions=[];adminItems.forEach(function(s){var d=String(s.division||'').trim();if(d&&divisions.indexOf(d)<0)divisions.push(d)});divisions.sort();
   var qSug=adminQuery.trim().toLowerCase();
@@ -657,7 +692,184 @@ function renderAdmin(){
       +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
       +acts+'</div>';
   }).join('');
-  view.innerHTML=controls+renderAnnouncePanel()+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
+  view.innerHTML=adminModeBar()+controls+renderAnnouncePanel()+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
+}
+// ---------------------------------------------------------------- плей-офф (организатор)
+// Всё по одному дивизиону за раз: несыгранные матчи → сетка (предварительная
+// или опубликованная) → время и счёт. Внизу — афиша финальных дней.
+var poState=null,poLoading=false,poErr='',poDiv='',poOpen='',poBusy=false;
+function poLoad(force){
+  if(poLoading)return;if(poState&&!force)return;
+  poLoading=true;poErr='';
+  fetch('/api/playoff/state?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){
+    poLoading=false;if(!j.ok)throw new Error(j.error||'Error');poState=j;
+    if(!poDiv||!j.divisions.some(function(d){return d.letter===poDiv}))poDiv=(j.divisions[0]||{}).letter||'';
+    if(mode==='admin'&&adminMode==='playoff')renderAdmin();
+  }).catch(function(e){poLoading=false;poErr=e.message;if(mode==='admin')renderAdmin()});
+}
+function poAct(body,btn,okText,after){
+  if(poBusy)return;poBusy=true;var old=btn?btn.textContent:'';if(btn){btn.disabled=true;btn.textContent='…'}
+  body.initData=initData;body.t=linkToken;if(!body.letter)body.letter=poDiv;body.season=poState&&poState.season;
+  fetch('/api/playoff/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(j){
+    poBusy=false;if(btn){btn.disabled=false;btn.textContent=old}
+    if(!j.ok)throw new Error(j.error||'Error');
+    if(okText)poSay(typeof okText==='function'?okText(j):okText);
+    if(after)after(j);poOpen='';poState=null;poLoad(true);
+  }).catch(function(e){poBusy=false;if(btn){btn.disabled=false;btn.textContent=old}poSay('⛔ '+e.message)});
+}
+function poSay(t){if(tg&&tg.showAlert)tg.showAlert(t);else alert(t)}
+function poAsk(t,go){if(tg&&tg.showConfirm)tg.showConfirm(t,function(ok){if(ok)go()});else if(confirm(t))go()}
+var PO_STAGE={QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final'};
+function poStage(st){return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final'})[st]||st}
+function poSeed(s){var m=String(s||'').match(/^(\d+)·(.+)$/);if(m)return m[1]+(L?' гр.'+m[2]:' gr.'+m[2]);return String(s||'')}
+function poPh(d,slot,side){var t=(d.template||[]).filter(function(x){return x.slot===slot})[0];if(!t||!t.from)return '—';var f=t.from[side];return (f[1]==='W'?(L?'Победитель ':'Winner '):(L?'Проигравший ':'Loser '))+f[0]}
+function poDivision(){return (poState&&poState.divisions||[]).filter(function(d){return d.letter===poDiv})[0]||null}
+function poNames(d){var out=[];(d.standings||[]).forEach(function(g){(g.rows||[]).forEach(function(r){if(out.indexOf(r.name)<0)out.push(r.name)})});return out}
+// Кого предложить вместо: следующий по таблице той же группы, кого ещё нет в сетке.
+function poSuggest(d,gi){
+  var inPlan={};(d.preview||[]).forEach(function(m){if(m.player_1)inPlan[m.player_1]=1;if(m.player_2)inPlan[m.player_2]=1});
+  (d.rows||[]).forEach(function(m){if(m.player_1)inPlan[m.player_1]=1;if(m.player_2)inPlan[m.player_2]=1});
+  var groups=(d.standings||[]).slice().sort(function(a,b){return String(a.group).localeCompare(String(b.group),'en',{numeric:true})});
+  var g=groups[gi]||groups[0]||{rows:[]};
+  return (g.rows||[]).slice().sort(function(a,b){return a.place-b.place}).filter(function(r){return !inPlan[r.name]}).map(function(r){return r.name});
+}
+function renderPlayoffAdmin(){
+  if(!poState){poLoad();return poErr?'<div class="empty" style="color:var(--danger)">'+esc(poErr)+'</div>':'<div class="empty">…</div>'}
+  var st=poState,d=poDivision();
+  var chips='<div class="chips" style="margin-bottom:10px">'+st.divisions.map(function(x){
+    var warn=x.unplayed.length&&x.deadline_passed&&!x.published?' ⚠️':'';
+    return '<div class="chip'+(x.letter===poDiv?' on':'')+'" onclick="poDiv=\''+esc(x.letter)+'\';poOpen=\'\';renderAdmin()">'+esc(x.title)+(x.published?' ✓':'')+warn+'</div>'}).join('')+'</div>';
+  if(!d)return chips+'<div class="empty">'+esc(L?'Дивизионов нет':'No divisions')+'</div>';
+  var h=chips+'<div class="card"><h3 style="margin:0 0 4px;font-size:17px">🏆 '+esc(d.title)+'</h3>'
+    +'<div class="meta"><span class="pill '+(d.published?'acc':'open')+'">'+esc(d.published?(L?'Сетка опубликована':'Published'):(L?'Предварительная сетка':'Provisional'))+'</span>'
+    +(d.deadline?' '+esc((L?'Дедлайн регулярки: ':'Regular season deadline: ')+fmtDay(d.deadline)):'')+'</div>'
+    +'<div class="hint" style="margin-top:6px">'+esc(d.grouped?(L?'Четвертьфиналы: 1А–4Б, 2Б–3А / 1Б–4А, 2А–3Б. Игроки назначают их сами. Полуфиналы и финалы — в один день, время ставите вы.':'Quarterfinals: 1A–4B, 2B–3A / 1B–4A, 2A–3B, arranged by the players. Semifinals and finals on one day, you set the times.'):(L?'Полуфиналы 1–4 и 2–3, финал и матч за 3-е место. Время ставите вы.':'Semifinals 1–4 and 2–3, final and 3rd place. You set the times.'))+'</div></div>';
+  h+='<div class="acts" style="margin:-4px 0 12px"><button class="mini" onclick="poAct({action:\'bracket_preview\'},this,L?\'✅ Картинка сетки — в админском чате, с кнопками «Разослать всем» и «В сторис»\':\'✅ Bracket image sent to the admin chat\')">🖼 '+esc(L?'Сетка картинкой':'Bracket image')+'</button></div>';
+  h+=poUnplayedBlock(d);
+  h+=d.published?poPublishedBlock(d):poPreviewBlock(d);
+  h+=poPosterBlock(st);
+  return h;
+}
+function poUnplayedBlock(d){
+  if(!d.unplayed.length)return '';
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">'+esc((L?'Несыгранные матчи регулярки: ':'Unplayed regular matches: ')+d.unplayed.length)+'</h3>'
+    +'<div class="hint" style="margin-bottom:8px">'+esc(d.deadline_passed?(L?'Регулярка закрыта. Решите по каждому матчу — таблица и сетка пересчитаются.':'The regular season is over. Decide on each match — the table and bracket will recalculate.'):(L?'До дедлайна их ещё можно сыграть. Решать — после дедлайна.':'They can still be played before the deadline. Decide after the deadline.'))+'</div>'
+    +d.unplayed.map(function(m,i){
+      return '<div class="slot"><div class="who">'+esc(m.p1)+' — '+esc(m.p2)+'</div>'
+        +'<div class="meta">'+esc(m.kind==='cross'?(L?'Межгрупповой':'Cross-group'):(m.group?(L?'Группа ':'Group ')+m.group:''))+'</div>'
+        +'<div class="acts">'
+        +'<button class="mini" onclick="poDecide('+i+',\'loss_p1\',this)">W/O: '+esc(L?'проиграл ':'loss ')+esc(m.p1)+'</button>'
+        +'<button class="mini" onclick="poDecide('+i+',\'loss_p2\',this)">W/O: '+esc(L?'проиграл ':'loss ')+esc(m.p2)+'</button>'
+        +'<button class="mini" onclick="poDecide('+i+',\'none\',this)">'+esc(L?'Не засчитывать':'Not counted')+'</button>'
+        +'</div></div>';
+    }).join('')+'</div>';
+}
+function poDecide(i,decision,btn){
+  var d=poDivision(),m=d&&d.unplayed[i];if(!m)return;
+  var key=m.key,who=decision==='loss_p1'?m.p1:m.p2;
+  var t=decision==='none'?(L?'Матч не будет засчитан никому. Продолжить?':'The match will not count for anyone. Continue?'):(L?'Техническое поражение (W/O) — '+who+'. Сопернику +3 очка. Игроки получат сообщение. Продолжить?':'Walkover loss for '+who+'. Opponent gets +3. Players will be notified. Continue?');
+  poAsk(t,function(){poAct({action:'decide',key:key,decision:decision},btn,L?'✅ Записано':'✅ Saved')});
+}
+function poSideHtml(name,seed,ph){return name?'<b>'+esc(name)+'</b>'+(seed?' <span style="color:var(--muted)">('+esc(poSeed(seed))+')</span>':''):'<span style="color:var(--muted)">'+esc(ph)+'</span>'}
+function poPreviewBlock(d){
+  var rows=(d.preview||[]).filter(function(m){return m.player_1||m.player_2});
+  var h='<div class="card"><h3 style="margin:0 0 4px;font-size:16px">'+esc(L?'Сетка по текущей таблице':'Bracket from the current table')+'</h3>'
+    +'<div class="hint" style="margin-bottom:8px">'+esc(L?'Пока не опубликована, она меняется вместе с таблицей. Если кто-то не играет плей-офф — замените его (по умолчанию предложен следующий по таблице).':'Until published it follows the table. If someone is not playing the playoffs, replace them (the next in the table is suggested).')+'</div>';
+  h+=rows.map(function(m){
+    var key=m.slot;
+    var body='<div class="slot"><div class="meta"><span class="pill">'+esc(m.slot)+'</span> '+esc(poStage(m.stage))+'</div>'
+      +'<div class="who" style="font-size:14px">'+poSideHtml(m.player_1,m.seed_1,'—')+(m.override_1?' ✎':'')+' <span style="color:var(--muted)">vs</span> '+poSideHtml(m.player_2,m.seed_2,'—')+(m.override_2?' ✎':'')+'</div>'
+      +'<div class="acts"><button class="mini" onclick="poOpen=poOpen===\'ov:'+key+'\'?\'\':\'ov:'+key+'\';renderAdmin()">↔ '+esc(L?'Заменить':'Replace')+'</button></div>';
+    if(poOpen==='ov:'+key){
+      body+='<div style="margin-top:8px">'+[1,2].map(function(side){
+        var gi=m['gi_'+side],place=m['place_'+side],cur=m['player_'+side],sug=poSuggest(d,gi),names=poNames(d);
+        return '<label>'+esc((L?'Место ':'Seat ')+poSeed(m['seed_'+side])+': '+(cur||'—'))+'</label><div class="row"><select id="ov'+side+'"><option value="">'+esc(L?'— по таблице —':'— by the table —')+'</option>'
+          +sug.concat(names.filter(function(n){return sug.indexOf(n)<0})).map(function(n,i){return '<option value="'+esc(n)+'">'+esc(n)+(i===0&&sug.length?(L?' (следующий по таблице)':' (next in the table)'):'')+'</option>'}).join('')+'</select>'
+          +'<button class="mini" onclick="poAct({action:\'override\',gi:'+gi+',place:'+place+',name:$(\'ov'+side+'\').value},this,L?\'✅ Замена сохранена\':\'✅ Saved\')">OK</button></div>';
+      }).join('')+'</div>';
+    }
+    return body+'</div>';
+  }).join('');
+  h+='<button class="primary" onclick="poPublish(this)">📣 '+esc(L?'Опубликовать сетку':'Publish the bracket')+'</button>';
+  if(d.unplayed.length)h+='<div class="hint" style="margin-top:6px">⚠️ '+esc(L?'Есть несыгранные матчи — сначала решите по ним, иначе места могут поменяться.':'There are unplayed matches — decide on them first, places may still change.')+'</div>';
+  return h+'</div>';
+}
+function poPublish(btn){
+  poAsk(L?'Опубликовать сетку? Пары зафиксируются, игроки получат сообщения.':'Publish the bracket? Pairs are fixed and players get messages.',function(){
+    poAct({action:'publish'},btn,function(j){return (L?'✅ Опубликовано. Сообщений игрокам: ':'✅ Published. Messages sent: ')+(j.notified||0)});
+  });
+}
+function poPublishedBlock(d){
+  var anyPlayed=d.rows.some(function(r){return String(r.status).toLowerCase()==='confirmed'});
+  var h='<div class="card"><h3 style="margin:0 0 8px;font-size:16px">'+esc(L?'Сетка':'Bracket')+'</h3>';
+  h+=d.rows.map(function(m){return poMatchCard(d,m)}).join('');
+  if(!anyPlayed)h+='<button class="mini" style="margin-top:10px" onclick="poRepublish(this)">🔄 '+esc(L?'Пересобрать по таблице':'Rebuild from the table')+'</button>';
+  return h+'</div>';
+}
+function poRepublish(btn){
+  poAsk(L?'Пересобрать сетку по текущей таблице? Сообщения получат только те, у кого поменялась пара.':'Rebuild from the current table? Only players whose pair changed get a message.',function(){
+    poAct({action:'publish'},btn,function(j){return (L?'✅ Готово. Изменилось пар: ':'✅ Done. Pairs changed: ')+(j.changed||0)});
+  });
+}
+function poMatchCard(d,m){
+  var done=String(m.status).toLowerCase()==='confirmed',both=m.player_1&&m.player_2,key=m.slot;
+  var when=[m.date?fmtDay(m.date):'',m.time||'',m.court||''].filter(Boolean).join(' · ');
+  var h='<div class="slot'+(m.stage==='Final'?' po':'')+'"><div class="meta"><span class="pill'+(done?' acc':'')+'">'+esc(m.slot)+'</span> '+esc(poStage(m.stage))+(done?' · ✅':'')+'</div>'
+    +'<div class="who" style="font-size:14px">'+poSideHtml(m.player_1,m.seed_1,poPh(d,m.slot,0))+' <span style="color:var(--muted)">vs</span> '+poSideHtml(m.player_2,m.seed_2,poPh(d,m.slot,1))+'</div>'
+    +(done?'<div class="when">🏆 <b>'+esc(m.winner)+'</b> · '+esc(m.score)+'</div>':'')
+    +(m.stage!=='QF'?'<div class="meta">📅 '+esc(when||(L?'время не задано':'no time set'))+'</div>':'<div class="meta">'+esc(L?'Игроки назначают сами':'Arranged by the players')+(m.date&&done?' · '+esc(fmtDay(m.date)):'')+'</div>')
+    +'<div class="acts">'
+    +(m.stage!=='QF'?'<button class="mini" onclick="poToggle(\'tm:'+key+'\')">🕐 '+esc(L?'Время':'Time')+'</button>':'')
+    +(both?'<button class="mini" onclick="poOpenScore(\''+key+'\')">📊 '+esc(done?(L?'Исправить счёт':'Fix score'):(L?'Счёт':'Score'))+'</button>':'')
+    // Заменить можно только в первом раунде: дальше пары складываются из результатов.
+    +(!done&&!poFed(d,m.slot)?'<button class="mini" onclick="poToggle(\'rp:'+key+'\')">↔ '+esc(L?'Заменить':'Replace')+'</button>':'')
+    +'</div>';
+  if(poOpen==='tm:'+key){
+    var days=(poState.poster_days||[]);
+    h+='<div style="margin-top:8px"><label>'+esc(L?'День':'Day')+'</label><select id="poDate">'+days.map(function(x){return '<option value="'+esc(x)+'"'+(x===m.date?' selected':'')+'>'+esc(fmtDay(x))+'</option>'}).join('')+'</select>'
+      +'<label>'+esc(L?'Время':'Time')+'</label><input id="poTime" type="time" value="'+esc(m.time||'')+'">'
+      +'<label>'+esc(L?'Корт':'Court')+'</label><input id="poCourt" value="'+esc(m.court||poState.court||'')+'">'
+      +'<button class="primary" onclick="poAct({action:\'schedule\',slot:\''+key+'\',date:$(\'poDate\').value,time:$(\'poTime\').value,court:$(\'poCourt\').value},this,L?\'✅ Время сохранено\':\'✅ Saved\')">'+esc(L?'Сохранить':'Save')+'</button></div>';
+  }
+  if(poOpen==='rp:'+key){
+    var names=poNames(d);
+    h+='<div style="margin-top:8px"><label>'+esc(L?'Кого заменить':'Whom to replace')+'</label><select id="rpSide"><option value="1">'+esc(m.player_1||poPh(d,m.slot,0))+'</option><option value="2">'+esc(m.player_2||poPh(d,m.slot,1))+'</option></select>'
+      +'<label>'+esc(L?'На кого':'With')+'</label><select id="rpName">'+names.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>'}).join('')+'</select>'
+      +'<button class="primary" onclick="poAct({action:\'replace\',slot:\''+key+'\',side:$(\'rpSide\').value,name:$(\'rpName\').value},this,L?\'✅ Заменено, игроки получат сообщение\':\'✅ Replaced, players notified\')">'+esc(L?'Заменить':'Replace')+'</button></div>';
+  }
+  return h+'</div>';
+}
+function poFed(d,slot){var t=(d.template||[]).filter(function(x){return x.slot===slot})[0];return Boolean(t&&t.from)}
+function poToggle(k){poOpen=poOpen===k?'':k;renderAdmin()}
+// Счёт плей-офф — в привычной форме ручного ввода (победитель, сеты с
+// тай-брейками, RET/W/O, фото, комментарий). Игроки, этап, дата и корт
+// подставлены; счёт от организатора сразу подтверждён.
+function poOpenScore(slot){
+  var d=poDivision(),m=d&&d.rows.filter(function(r){return r.slot===slot})[0];if(!m)return;
+  var find=function(n){return adminPlayers.filter(function(p){return String(p.name||'').toLowerCase()===String(n||'').toLowerCase()})[0]};
+  var a=find(m.player_1),b=find(m.player_2);
+  if(!a||!b){poSay(L?'Не нашёл игрока в списке — проверьте имена в сетке.':'Player not found in the list.');return}
+  showTab('res');openManual();
+  var hint=document.querySelector('#viewRes .hint');
+  if(hint)hint.textContent=L?'Матч плей-офф: счёт от организатора сразу подтверждён, подтверждения игроков не нужно. После сохранения постер придёт в админский чат на утверждение.':'Playoff match: the organiser\'s score is confirmed at once. The poster then comes to the admin chat for approval.';
+  $('mFrom').value=manualLabel(a);$('mOpp').value=manualLabel(b);
+  if($('mRound'))$('mRound').value=m.stage;
+  var today=isoDate(new Date());if($('mDate'))$('mDate').value=(m.date&&m.date<=today)?m.date:today;
+  if($('mCourt')&&m.court)$('mCourt').value=m.court;
+  renderManualWinner();
+}
+function poPosterBlock(st){
+  var days=st.poster_days||[];if(!days.length)return '';
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:16px">📣 '+esc(L?'Афиша финальных дней':'Finals day poster')+'</h3>'
+    +'<div class="hint" style="margin-bottom:8px">'+esc(L?'Картинка и текст на английском. Сначала предпросмотр — он придёт вам в бот с кнопкой «Разослать всем». Рассылка уходит всем в боте, а игроки этого дня получают личное сообщение со своим временем.':'Picture and text in English. Preview first — it comes to you in the bot with a "Send to all" button. Everyone in the bot gets it, and the day\'s players get a personal message with their time.')+'</div>'
+    +days.map(function(x){return '<div class="slot"><div class="who">'+esc(fmtDay(x))+'</div><div class="acts">'
+      +'<button class="mini" onclick="poAct({action:\'poster_preview\',date:\''+x+'\'},this,function(j){return (L?\'✅ Предпросмотр в боте. Матчей: \':\'✅ Preview sent. Matches: \')+j.matches+(j.missing_time?(L?\' · без времени: \':\' · no time: \')+j.missing_time:\'\')})">👀 '+esc(L?'Предпросмотр':'Preview')+'</button>'
+      +'<button class="mini" onclick="poSendPoster(\''+x+'\',this)">📣 '+esc(L?'Разослать всем':'Send to all')+'</button></div></div>'}).join('')+'</div>';
+}
+function poSendPoster(date,btn){
+  poAsk(L?'Разослать афишу всем в боте? Сначала должен быть сделан предпросмотр.':'Send the poster to everyone in the bot? A preview must be made first.',function(){
+    poAct({action:'poster_send',date:date},btn,function(j){return (L?'📣 В рассылке: ':'📣 Queued: ')+j.recipients+(L?' · личных сообщений: ':' · personal: ')+j.personal});
+  });
 }
 // Афиша-анонс: выбираем двух игроков и необязательный комментарий, дальше
 // генерация и публикация — как у постера результата, просто без матча.
@@ -1256,6 +1468,32 @@ function orderByWinner(prefix,node){
   var name=node.dataset.n||'';
   if(name&&hint&&hint.textContent!==name)two.insertBefore(two.children[1],first);
 }
+// Итог отправки счёта — отдельным окном, а не строчкой внизу формы: строку
+// легко не заметить, и человек жал «Отправить» второй раз. Экран не
+// перезагружается сам — только по «Готово», чтобы окно не мигнуло и не пропало.
+function resultPopup(ok,j,err){
+  var old=$('doneBox');if(old)old.remove();
+  var el=document.createElement('div');el.className='donebox';el.id='doneBox';
+  var title,body='',warn='';
+  if(ok&&j&&j.playoff){
+    title=L?(j.corrected?'Счёт исправлен':'Счёт сохранён'):(j.corrected?'Score corrected':'Score saved');
+    body=j.corrected?(L?'Исправлено в таблицах и в сетке плей-офф. Повторно ничего не рассылается.':'Updated in the tables and the playoff bracket. Nothing is sent again.')
+      :(L?'Результат записан, победитель прошёл дальше по сетке. Постер матча генерируется — два варианта придут в админский чат на утверждение. До вашей кнопки «Опубликовать» никто ничего не получит.':'Saved; the winner moves on in the bracket. The match poster is being generated — two variants will come to the admin chat. Nobody gets anything until you press Publish.');
+  }else if(ok){
+    title=L?'Счёт отправлен':'Score sent';
+    if(j&&j.organiser)body=L?'Оба игрока получили запрос на подтверждение. Как только они подтвердят, результат попадёт в таблицу и бот опубликует карточку матча.':'Both players were asked to confirm. Once they do, the result goes into the standings and the bot posts the match card.';
+    else body=(L?'Мы отправили счёт '+(j&&j.opponent?'игроку '+j.opponent:'сопернику')+' на подтверждение. Как только он подтвердит, результат попадёт в таблицу и бот опубликует карточку матча.':'We sent the score to '+(j&&j.opponent?j.opponent:'your opponent')+' for confirmation. Once confirmed, it goes into the standings and the bot posts the match card.');
+    if(j&&j.warning)warn='⚠️ '+j.warning;
+  }else{
+    title=L?'Не получилось отправить':'Could not send';
+    body=String(err||'')+'<br>'+(L?'Счёт не сохранён — проверьте и попробуйте ещё раз.':'The score was not saved — check it and try again.');
+  }
+  el.innerHTML='<div class="card"><div class="ic">'+(ok?'✅':'⛔')+'</div><h3>'+esc(title)+'</h3><p>'+(ok?esc(body):body)+'</p>'
+    +(warn?'<p class="warn">'+esc(warn)+'</p>':'')
+    +'<button class="btn" id="doneOk">'+(ok?(L?'Готово':'Done'):(L?'Понятно':'OK'))+'</button></div>';
+  document.body.appendChild(el);
+  $('doneOk').onclick=function(){el.remove();if(ok)load(true)};
+}
 function submitResult(id,btn){
   var res=$('rRes');res.className='res';var sets=collectSets('r');
   if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
@@ -1266,8 +1504,8 @@ function submitResult(id,btn){
   fetch('/api/match/result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,challenge_id:id,kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:($('rNote').value||'').trim(),
     points_from:$('rPts1')?$('rPts1').value:'',points_to:$('rPts2')?$('rPts2').value:''
-  })}).then(function(r){return r.json()}).then(function(j){clearTimeout(slowT);btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;selWinner='';resPhoto='';resultSlotId='';load(true)})
-  .catch(function(e){clearTimeout(slowT);btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  })}).then(function(r){return r.json()}).then(function(j){clearTimeout(slowT);btn.disabled=false;if(!j.ok)throw new Error(j.detail||j.error||'Error');res.className='res ok';res.textContent=X.resSent;selWinner='';resPhoto='';resultSlotId='';resultPopup(true,j)})
+  .catch(function(e){clearTimeout(slowT);btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;resultPopup(false,null,esc(e.message))});
 }
 // Свой поиск вместо браузерного списка: тот на телефоне вываливался весь
 // сразу, закрывал соседние поля, не давал клавиатуре открыться и никак не
@@ -1367,8 +1605,8 @@ function submitManual(btn){
     initData:initData,t:linkToken,from_telegram_id:$('mFrom')?(manualPerson($('mFrom').value).telegram_id||''):'',to_telegram_id:manualPerson($('mOpp').value).telegram_id||'',date:$('mDate').value,
     court:(($('mCourt')&&$('mCourt').value)||'').trim(),round:$('mRound')?$('mRound').value:'',kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:(($('mNote')&&$('mNote').value)||'').trim(),
     points_from:$('mPts1')?$('mPts1').value:'',points_to:$('mPts2')?$('mPts2').value:''
-  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=j.warning?X.resSent+' ⚠️ '+j.warning:X.resSent;resPhoto='';load(true)})
-  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=X.resSent;resPhoto='';resultPopup(true,j)})
+  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;resultPopup(false,null,esc(e.message))});
 }
 function renderBook(){
   var today=new Date(),todayIso=isoDate(today);
@@ -1444,7 +1682,7 @@ function renderNew(){
     return '<div class="chip'+(selCourts.indexOf(c.name)>=0?' on':'')+'" onclick="toggleCourt(\''+esc(c.name).replace(/'/g,"\\'")+'\')">'+esc(c.name)+'</div>';
   }).join('')||'<div class="hint">'+esc(X.courtAny)+'</div>';
   var oppList=opponents.length
-    ? opponents.map(function(o){return '<div class="opp'+(String(o.telegram_id)===String(selOpp)?' sel':'')+'" onclick="pickOpp(\''+esc(o.telegram_id)+'\')">'+avatar(o)+'<div><div class="who">'+esc(o.name)+'</div><div class="meta">'+(o.rating?'NTRP '+esc(o.rating):'')+'</div></div></div>'}).join('')
+    ? opponents.slice().sort(function(a,b){return (b.playoff?1:0)-(a.playoff?1:0)}).map(function(o){return '<div class="opp'+(String(o.telegram_id)===String(selOpp)?' sel':'')+'" onclick="pickOpp(\''+esc(o.telegram_id)+'\')">'+avatar(o)+'<div><div class="who">'+esc(o.name)+'</div><div class="meta">'+(o.playoff?'<span class="stg">🏆 '+esc(L?'Соперник в плей-офф':'Playoff opponent')+'</span> ':'')+(o.rating?'NTRP '+esc(o.rating):'')+'</div></div></div>'}).join('')
     : '<div class="hint">'+esc(X.noOpp)+'</div>';
 
   // Возврат к списку вызовов: «Создать» больше не вкладка, уйти отсюда иначе некуда.

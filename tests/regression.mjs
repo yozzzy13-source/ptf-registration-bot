@@ -83,7 +83,7 @@ const telegramSync={isChatDead:()=>false,markChatAlive:()=>{},deadChatsCount:()=
 synthetic(path.join(root,'telegram.js'),Object.fromEntries(telegramNames.map(n=>[n,telegramSync[n]?telegramSync[n]:n.endsWith('COMMANDS')?{}:n==='ADMIN_COMMAND_LIST'?[]:async(...args)=>{if(n==='sendMessage'&&String(args[0])===telegramFailureId)throw Error('blocked test recipient');if(n==='sendMessage'&&String(args[0])===telegramTransientId&&transientLeft-->0)throw Error('sendMessage: {"ok":false,"error_code":429,"description":"Too Many Requests: retry after 1","parameters":{"retry_after":1}}');if(n!=='withBulkRetries')messages.push({method:n,args});if(n==='withBulkRetries')return typeof args[0]==='function'?args[0]():undefined;if(n==='sendPhotoBuffer')return {photo:[{file_id:'generated-card'}]};if(n==='getMe')return {username:'test_bot'};return {}}])));
 synthetic('express',{default:Object.assign(()=>({use(...x){middleware.push(x)},get(p,h){routes.push({method:'get',p,h})},post(p,h){routes.push({method:'post',p,h})},listen(){}}),{json:()=>()=>{},urlencoded:()=>()=>{},static:()=>()=>{}})});
 const cardContexts=new Map();
-const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null});
+const cardModule=synthetic(path.join(root,'matchcard.js'),{cardForSlot:async()=>Buffer.from('generated-card'),rememberCardContext:(id,data)=>cardContexts.set(String(id),data),matchDataForSlot:async()=>({}),playerPhotoForPoster:async()=>null,cardStage:()=>null,STAGE_THEMES:{}});
 const sourceLoads=new Map();
 async function getModule(spec,ref){
  const key=spec.startsWith('.')?path.resolve(path.dirname(ref.identifier),spec):spec;
@@ -218,7 +218,7 @@ const techBefore=writes.length;const techWrite=await results.writeConfirmedResul
 check(techWrite.status==='saved'&&techWrite.division?.cross_group,'Confirmed technical cross-group result reaches central cross-group log');
 check(writes.slice(techBefore).some(w=>/!AB\d+$/.test(w.range)&&w.values[0][0]==='W/L')&&writes.slice(techBefore).some(w=>/!AN\d+:AO\d+$/.test(w.range)&&String(w.values[0])==='3,0'),'Technical marker and points are written to AB and AN:AO');
 const qfApi=await request('post','/api/match/manual','99',{from_telegram_id:'8',to_telegram_id:'10',date:'2099-09-19',court:'Court A',round:'QF',kind:'played',winner:'8',sets:[{a:6,b:2},{a:6,b:3}],points_from:'3',points_to:'1'});
-check(qfApi.body.ok,'Admin can mark a manual result as a quarterfinal');const qfSlot=await db.findSlot(qfApi.body.challenge_id);check(qfSlot.round==='QF','Playoff stage is stored in the match slot');check((await db.confirmResult(qfApi.body.challenge_id,{telegram_id:'10'})).ok,'Playoff result still requires the second player confirmation');const qfWrite=await results.writeConfirmedResult({...qfSlot,result_status:'confirmed'});check(qfWrite.division?.playoff&&tables.has('master|Playoff'),'Confirmed grouped quarterfinal is stored in the Playoff sheet');
+check(qfApi.body.ok,'Admin can mark a manual result as a quarterfinal');const qfSlot=await db.findSlot(qfApi.body.challenge_id);check(qfSlot.stage==='QF'&&!qfSlot.round,'Playoff stage is stored in the match slot (stage, not the negotiation round)');check(qfSlot.result_status==='confirmed'&&qfApi.body.playoff&&qfApi.body.organiser,'Playoff result entered by the organiser is confirmed at once, no player confirmation');check(!messages.some(m=>m.method==='sendPhoto'&&/Quarter-final/.test(String(m.args?.[2]?.caption||''))),'Playoff result is not broadcast as a card');const qfWrite=await results.writeConfirmedResult({...qfSlot,result_status:'confirmed'});check(qfWrite.division?.playoff&&tables.has('master|Playoff'),'Confirmed grouped quarterfinal is stored in the Playoff sheet');
 const retApi=await request('post','/api/match/manual','3',{to_telegram_id:'4',date:'2099-09-18',court:'Court A',kind:'retired',winner:'3',sets:[{a:6,b:4},{a:2,b:1}],note:'injury'});
 check(retApi.body.ok,'Player can submit a RET result');
 const retSlot=await db.findSlot(retApi.body.challenge_id);check(retSlot.result_kind==='retired'&&/RET$/.test(retSlot.result_score),'RET keeps the played score and label');
@@ -1473,7 +1473,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/Нет сохранённой карточки/.test(pubSrc),'Матчи без сохранённой карточки названы в сводке');
  const mSrc=await fs.readFile(path.join(root,'matches.js'),'utf8');
  check(/export async function archiveResultCard/.test(mSrc),'Карточка сохраняется в момент результата');
- check(/if \(media\.buffer\) await archiveResultCard\(slot, media\.buffer\)/.test(mSrc),'Сохраняется та же картинка, что уходит в ленту');
+ check(/const cardMedia = opts\.media \? await resultMedia\(/.test(mSrc)&&/if \(cardMedia\.buffer\) await archiveResultCard\(slot, cardMedia\.buffer\)/.test(mSrc),'Сохраняется карточка матча (у плей-офф — карточка, даже если в ленту ушёл постер)');
  check(/sendDocumentBuffer\(chatId, buffer, `card-/.test(mSrc)&&/deleteMessage\(chatId, sent\.message_id\)/.test(mSrc),'Файлом, в оригинале, и сообщение сразу удаляется');
  check(/'result_card_file_id'/.test(await fs.readFile(path.join(root,'matchesdb.js'),'utf8')),'Под карточку есть колонка в Match Slots');
  // Fantasy Points в публичные материалы не идут.
@@ -2295,5 +2295,55 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(Boolean(await mdb2.findSameResult('4','3','2099-10-05')),'Второй ввод того же матча (пара + дата) распознаётся');
  check(!(await mdb2.findSameResult('4','3','2099-10-06')),'Другая дата — это другой матч');
  check(/cmd:'result_resync'/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'Команда /result_resync в меню и /help');
+}
+// Плей-офф: счёт полуфинала пары из одной группы не трогает их строку
+// регулярки в таблице дивизиона и подписывается стадией в общем журнале.
+{
+ const before=writes.length;
+ const sf=await results.writeConfirmedResult({...result2,challenge_id:'sf-same-group',stage:'SF',agreed_date:'2099-11-07',result_score:'6:3 6:3'});
+ const mine=writes.slice(before);
+ check(sf.status==='saved'&&sf.division?.playoff&&sf.division.stage==='SF','Счёт полуфинала уходит в плей-офф');
+ check(!mine.some(w=>w.spreadsheetId==='c2'),'Полуфинал не перезаписывает строку регулярки в таблице дивизиона');
+ check(mine.some(w=>/Cross_Division_Match_Log!D\d+$/.test(w.range)&&w.values[0][0]==='Semifinal S2'),'В общем журнале матч подписан стадией «Semifinal S2»');
+ check(results.describeWrite(sf).includes('Playoff'),'Описание записи говорит про плей-офф');
+ // Номер раунда переговоров («2») — не стадия.
+ const before2=writes.length;
+ const reg=await results.writeConfirmedResult({...result2,challenge_id:'round-two',round:'2',agreed_date:'2099-09-20',result_score:'6:2 6:2'});
+ check(reg.division&&!reg.division.playoff,'round=2 — обычный матч, не плей-офф');
+ check(writes.slice(before2).some(w=>/Cross_Division_Match_Log!D\d+$/.test(w.range)&&w.values[0][0]==='Season 2'),'Обычный матч подписан «Season 2»');
+ const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ for(const c of ['playoff','playoff_result','pace'])check(new RegExp("cmd:'"+c+"'").test(tg),'Команда /'+c+' в меню и /help');
+}
+// Плей-офф в ленте: результат не уходит карточкой — его забирает постер на
+// утверждение; с готовой картинкой (кнопка «Опубликовать») — уходит как обычно.
+{
+ const mt=await load('matches.js');
+ const held=[];mt.setPlayoffPosterHandler(async s=>{held.push(s.challenge_id)});
+ const before=messages.length;
+ const r=await mt.broadcastResult({...result2,challenge_id:'po-held',stage:'Final',result_status:'confirmed'});
+ check(r.held&&held.includes('po-held')&&messages.length===before,'Результат плей-офф не рассылается карточкой — ждёт постер');
+ const r2=await mt.broadcastResult({...result2,challenge_id:'po-pub',stage:'Final',result_status:'confirmed'},{media:Buffer.from('poster')});
+ const sentNow=messages.slice(before);
+ check(!r2.held&&sentNow.some(m=>/sendPhoto/.test(m.method)&&/Playoffs · Final/.test(String(m.args?.[3]?.caption||m.args?.[2]?.caption||''))),'С постером — уходит в ленту и подписчикам, заголовок «Playoffs · Final»');
+ const r3=await mt.broadcastResult({...result2,challenge_id:'po-card',stage:'SF',result_status:'confirmed'},{asCard:true});
+ check(!r3.held,'«Опубликовать карточкой» — обычная рассылка');
+ const r4=await mt.broadcastResult({...result2,challenge_id:'reg-1',result_status:'confirmed'});
+ check(!r4.held,'Обычный матч рассылается как раньше');
+ mt.setPlayoffPosterHandler(null);
+}
+// Счёт плей-офф от организатора: сразу подтверждён; повторный ввод — исправление.
+{
+ const fix=await request('post','/api/match/manual','99',{from_telegram_id:'8',to_telegram_id:'10',date:'2099-09-19',court:'Court A',round:'QF',kind:'played',winner:'8',sets:[{a:6,b:1},{a:6,b:1}]});
+ check(fix.body.ok&&fix.body.corrected&&fix.body.playoff,'Повторный ввод того же матча плей-офф — исправление, а не дубль');
+ const fixed=await db.findSlot(fix.body.challenge_id);
+ check(fixed.result_score.replace(/\s+/g,' ').trim()==='6:1 6:1'&&fixed.result_status==='confirmed','Исправленный счёт записан в тот же матч');
+ const reg=await request('post','/api/match/manual','99',{from_telegram_id:'8',to_telegram_id:'10',date:'2099-09-22',court:'Court A',round:'',kind:'played',winner:'8',sets:[{a:6,b:1},{a:6,b:1}]});
+ check(reg.body.ok&&!reg.body.playoff&&(await db.findSlot(reg.body.challenge_id)).result_status==='pending','Обычный матч от организатора по-прежнему ждёт подтверждения игроков');
+ await db.createSlot({challenge_id:'po-sf-slot',match_type:'direct',status:'accepted',division:'Division C',season:'2',group:'2',stage:'SF',from_telegram_id:'3',from_name:'Carol Three',to_telegram_id:'4',to_name:'Dan Four',dates:'2099-11-07',agreed_date:'2099-11-07',agreed_time:'10:00',time_from:'10:00',time_to:'12:00'});
+ const viaRes=await request('post','/api/match/result','99',{challenge_id:'po-sf-slot',kind:'played',winner:'4',perspective:'winner',sets:[{a:6,b:3},{a:6,b:4}]});
+ check(viaRes.body.ok&&viaRes.body.playoff&&(await db.findSlot('po-sf-slot')).result_status==='confirmed','Счёт плей-офф-матча, назначенного игроками, от организатора — сразу подтверждён');
+ const byPlayer=await db.createSlot({challenge_id:'po-qf-player',match_type:'direct',status:'accepted',division:'Division C',season:'2',group:'2',stage:'QF',from_telegram_id:'3',from_name:'Carol Three',to_telegram_id:'4',to_name:'Dan Four',dates:'2099-11-05',agreed_date:'2099-11-05',agreed_time:'10:00',time_from:'10:00',time_to:'12:00'});
+ const pRes=await request('post','/api/match/result','3',{challenge_id:'po-qf-player',kind:'played',winner:'3',perspective:'winner',sets:[{a:6,b:3},{a:6,b:4}]});
+ check(pRes.body.ok&&!pRes.body.playoff&&(await db.findSlot('po-qf-player')).result_status==='pending','Счёт четвертьфинала от игрока — как обычно, ждёт подтверждения соперника');
 }
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);

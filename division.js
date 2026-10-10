@@ -386,9 +386,6 @@ async function readCrossGroupRows(letter, season) {
   } catch { return []; }
 }
 
-async function readPlayoffRows(letter,season){
-  if(!LEAGUE_RESULTS_SHEET_ID)return[];try{const res=await sheetsClient().spreadsheets.values.get({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:'Playoff!A:Q'}),values=res.data.values||[],headers=(values[0]||[]).map(norm);return values.slice(1).map(r=>{const o={};headers.forEach((h,i)=>{if(h)o[h]=r[i]??''});return o}).filter(r=>String(r.season)===String(season)&&divisionLetter(r.division)===divisionLetter(letter))}catch{return[]}
-}
 
 // Карта «имя игрока → его место в дивизионе» по всем дивизионам сезона.
 //
@@ -590,13 +587,15 @@ export async function getDivisionTable(letter, season = '', group = '') {
     if (c) champion = { id: c.id, name: c.name, photo: c.photo };
   }
   let playoff={qf:[],sf:[sf1,sf2].filter(Boolean),sf1,sf2,final,third,champion};
-  if(grouped){
-    const raw=await readPlayoffRows(key,season),make=r=>{const firstName=txt(r.player_1),secondName=txt(r.player_2),winner=txt(r.winner);return{first:firstName?{id:firstName,name:firstName,photo:portrait(firstName)}:null,second:secondName?{id:secondName,name:secondName,photo:portrait(secondName)}:null,score:txt(r.score),winner_id:winner,played:txt(r.status).toLowerCase()==='confirmed'||Boolean(txt(r.score)),slot:txt(r.slot),stage:txt(r.stage)}};
-    const stage=x=>raw.filter(r=>txt(r.stage).toLowerCase()===x).sort((a,b)=>num(a.slot)-num(b.slot)).map(make);
-    const qf=stage('qf'),sf=stage('sf'),fin=stage('final')[0]||null,bronze=stage('3rd')[0]||null;
-    const champ=fin&&fin.winner_id?{id:fin.winner_id,name:fin.winner_id,photo:portrait(fin.winner_id)}:null;
-    playoff={qf,sf,sf1:sf[0]||null,sf2:sf[1]||null,final:fin,third:bronze,champion:champ};
-  }
+  // Сезон 2 и дальше: сетка — в листе Playoff (для всех дивизионов). Есть
+  // опубликованные пары — показываем их; нет — остаётся старый путь сезона 1
+  // (строки плей-офф сразу после группового этапа в таблице дивизиона).
+  try {
+    const po = await import('./playoff.js');
+    const rows = await po.divisionRows(key, season);
+    if (po.isPublished(rows)) playoff = po.sitePlayoff({ rows: rows.filter(r => r.player_1 || r.player_2 || r.published_at), grouped, portrait }) || playoff;
+    else if (grouped) playoff = { qf: [], sf: [], sf1: null, sf2: null, final: null, third: null, champion: null };
+  } catch (e) { console.error('playoff rows read failed:', e.message); }
 
   const value = {
     ok: true, division: key, season, grouped, players: table, matrix, cross_matches: crossMatches,

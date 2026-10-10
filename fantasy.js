@@ -271,8 +271,11 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
   for(const p of picks){const value=pointMap.get(p.key)?.total||0;total+=value+(p.key===multiplier?value*.5:0)}
   // Kostas wants the team leaderboard to expand and show who is on each squad
   // (with each player's own points), not just the team total.
-  const squad=picks.map(p=>({key:p.key,name:p.name,pool:p.pool,points:r1(pointMap.get(p.key)?.total||0),captain:p.key===row.captain_key,vice:p.key===row.vice_key}));
-  return{picks,total:r1(total),squad};
+  // points — личные очки игрока; team_points — сколько он принёс команде
+  // (у капитана, или вице на замене, ×1.5). В интерфейсе видно оба числа.
+  const squad=picks.map(p=>{const base=r1(pointMap.get(p.key)?.total||0),boost=p.key===multiplier;
+   return{key:p.key,name:p.name,pool:p.pool,points:base,team_points:r1(boost?base*FANTASY_SCORING.captainMultiplier:base),multiplied:boost,captain:p.key===row.captain_key,vice:p.key===row.vice_key}});
+  return{picks,total:r1(total),squad,multiplier};
  };
  for(const row of lockedRows){
   const {picks,total,squad}=teamScore(row);
@@ -290,6 +293,8 @@ export async function getFantasyBootstrap(id,owner,lang='en',mode='test'){
  const locked=deadlinePassed(catalog.entryDeadline),seasonFinished=deadlinePassed(catalog.seasonEndAt),transfersOpen=locked&&!seasonFinished&&await fantasyEntryOpen(mode,{afterDeadline:true});
  const publicTeams=await Promise.all(teams.map(async row=>({...publicTeam(row),
   points:leaderboard.find(x=>x.team_id===row.team_id)?.points??teamScore(row).total,
+  // Кто сейчас приносит ×1.5: капитан, а если он выбыл без матчей — вице.
+  multiplier_key:teamScore(row).multiplier||'',
   // Черновик очки набирает, но в рейтинг не попадает, пока его не подтвердили.
   in_standings:String(row.status||'')==='locked',
   // Бесплатная замена выбывшего доступна всё соревнование — не только когда

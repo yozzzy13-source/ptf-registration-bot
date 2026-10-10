@@ -20,8 +20,6 @@ const MASTER_START_ROW = 4;
 const COL_P1_NAME = 9; // колонка I в Cross_Division_Match_Log
 const CROSS_GROUP_SHEET = 'Cross_Group_Match_Log';
 const CROSS_GROUP_HEADERS = ['match_id','season','division','player_1_group','player_1','player_2_group','player_2','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
-const PLAYOFF_SHEET = 'Playoff';
-const PLAYOFF_HEADERS = ['match_id','season','division','stage','slot','player_1','player_2','player_1_group','player_2_group','result_kind','score','winner','player_1_points','player_2_points','comment','status','date'];
 // Пары межгрупповых матчей W — общий список из access.js (с учётом замен).
 
 function norm(s = '') {
@@ -183,22 +181,13 @@ function playoffStage(v='') {
   if(['3rd','third','thirdplace','bronze'].includes(x))return '3rd';
   return '';
 }
-async function ensurePlayoffSheet() {
-  const api=sheetsClient(),meta=await api.spreadsheets.get({spreadsheetId:LEAGUE_RESULTS_SHEET_ID});
-  const exists=(meta.data.sheets||[]).some(x=>x.properties?.title===PLAYOFF_SHEET);
-  if(!exists)await api.spreadsheets.batchUpdate({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,requestBody:{requests:[{addSheet:{properties:{title:PLAYOFF_SHEET}}}]}});
-  let values=[];try{values=await getValues(LEAGUE_RESULTS_SHEET_ID,PLAYOFF_SHEET+'!A1:Q1')}catch{}
-  if(!(values[0]||[]).length)await api.spreadsheets.values.update({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:PLAYOFF_SHEET+'!A1:Q1',valueInputOption:'RAW',requestBody:{values:[PLAYOFF_HEADERS]}});
+// Стадия матча из слота: поле stage, а у старых ручных матчей — round
+// («SF»). Число в round — номер раунда переговоров, это не стадия.
+function stageOfSlot(slot = {}) {
+  return playoffStage(slot.stage) || (/^\d*$/.test(String(slot.round || '').trim()) ? '' : playoffStage(slot.round));
 }
-async function writePlayoffResult(pair,slot,stage) {
-  await ensurePlayoffSheet();const values=await getValues(LEAGUE_RESULTS_SHEET_ID,PLAYOFF_SHEET+'!A1:Q'),rows=values.slice(1);
-  const p1=String(slot.from_name||pair.a?.name||'').trim(),p2=String(slot.to_name||pair.b?.name||'').trim();let found=-1;
-  for(let i=0;i<rows.length;i++){const r=rows[i]||[],same=String(r[1]||'')===String(pair.season)&&divisionLetter(r[2])===pair.d1&&String(r[3]||'').toLowerCase()===String(stage).toLowerCase();const names=(sameName(r[5],p1)&&sameName(r[6],p2))||(sameName(r[5],p2)&&sameName(r[6],p1));if(same&&names){found=i+2;break}}
-  const winner=!slot.result_winner?'':String(slot.result_winner)===String(slot.from_telegram_id)?p1:p2;
-  const row=[String(slot.challenge_id||''),String(pair.season||''),pair.d1,stage,String(slot.round_slot||''),p1,p2,String(pair.groupA||pair.a?.group||''),String(pair.groupB||pair.b?.group||''),resultKind(slot),String(slot.result_score||''),winner,...resultPoints(slot),String(slot.result_note||''),'confirmed',String(slot.agreed_date||'')];
-  const api=sheetsClient();if(found>0)await api.spreadsheets.values.update({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:PLAYOFF_SHEET+'!A'+found+':Q'+found,valueInputOption:'USER_ENTERED',requestBody:{values:[row]}});else await api.spreadsheets.values.append({spreadsheetId:LEAGUE_RESULTS_SHEET_ID,range:PLAYOFF_SHEET+'!A:Q',valueInputOption:'USER_ENTERED',insertDataOption:'INSERT_ROWS',requestBody:{values:[row]}});
-  return{status:'saved',division:pair.d1,playoff:true,stage,row:found>0?found:rows.length+2,sheet:PLAYOFF_SHEET};
-}
+// Запись счёта плей-офф — в playoff.js (recordPlayoffResult): лист Playoff,
+// продвижение по сетке. Здесь только определение стадии.
 
 async function writeCrossGroupResult(pair, slot) {
   await seedWomenCrossGroupSchedule(pair.season);
@@ -243,13 +232,16 @@ async function playersIndex() {
 // цепляет матч к профилям — без них матч не попадал ни в историю игрока, ни в
 // сезонные цифры, и сезон приходилось проставлять руками.
 // Пишем только в пустые ячейки: чужие пометки организатора не трогаем.
-async function centralMetaWrites(row, { p1, p2, pair }) {
+async function centralMetaWrites(row, { p1, p2, pair, stage = '' }) {
   const season = String(pair?.season || '').trim();
+  // Матч плей-офф подписываем стадией: «Semifinal S2». По этой подписи сайт
+  // ставит значок стадии, а Fantasy и история понимают сезон (S2).
+  const label = stage && season ? (await import('./playoff.js')).competitionLabel(stage, season) : (season ? `Season ${season}` : '');
   const master = await playersIndex().catch(() => ({}));
   const idOf = name => master[norm(name)]?.id ?? '';
   const divisionOf = (name, letter) => letter || master[norm(name)]?.division || '';
   const wanted = [
-    ['D', season ? `Season ${season}` : ''],
+    ['D', label],
     ['E', idOf(p1)],
     ['F', divisionOf(p1, pair?.d1)],
     ['G', idOf(p2)],
@@ -260,7 +252,9 @@ async function centralMetaWrites(row, { p1, p2, pair }) {
   const out = [];
   wanted.forEach(([letter, value], i) => {
     if (value === '' || value === undefined || value === null) return;
-    if (String(have[i] ?? '').trim()) return;
+    const cur = String(have[i] ?? '').trim();
+    // Стадию плей-офф ставим и поверх автоматической «Season N» (её писал бот).
+    if (cur && !(letter === 'D' && stage && /^season\s*\d+$/i.test(cur))) return;
     out.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!${letter}${row}`, values: [[value]] });
   });
   return out;
@@ -336,6 +330,20 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
       return { status: 'cross_division_blocked', d1: pair.d1, d2: pair.d2, p1, p2 };
     }
 
+    // Матч плей-офф? Стадия — из самого матча или из опубликованной сетки
+    // (четвертьфинал, который игроки назначили сами). От неё зависит, куда
+    // писать: плей-офф не трогает строку регулярки в таблице дивизиона.
+    if (!stageOfSlot(slot)) {
+      const found = await import('./playoff.js').then(m => m.detectStage(slot)).catch(e => { console.error('playoff stage detect failed:', e.message); return ''; });
+      if (found) {
+        slot.stage = found;
+        if (!journal && slot.challenge_id) {
+          try { const { updateSlot } = await import('./matchesdb.js'); await updateSlot(slot.challenge_id, { stage: found }); }
+          catch (e) { console.error('stage save failed:', e.message); }
+        }
+      }
+    }
+    const stage = stageOfSlot(slot);
     const dateSerial = localDateSerial(slot.agreed_date);
     // Каждый подтверждённый матч — своя строка общего журнала. Никакой сверки
     // по именам и датам: пары повторяются (новый сезон, плей-офф, турниры), и
@@ -361,7 +369,7 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
       { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[dateSerial]] },
       { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
       ...centralWrites(row, slot, parsed),
-      ...await centralMetaWrites(row, { p1, p2, pair })
+      ...await centralMetaWrites(row, { p1, p2, pair, stage })
     ], journal);
     // Запоминаем строку — но не в тестовом прогоне с откатом (journal).
     if (!journal && slot.challenge_id) {
@@ -385,10 +393,17 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   if (!pair.known) return { status: 'player_not_found' };
   const { d1, d2 } = pair;
   if (!d1 || d1 !== d2) return { status: 'cross_division', d1, d2 };
-  const stage=playoffStage(slot.round);
-  const playoff=stage?await writePlayoffResult(pair,slot,stage):null;
+  // Плей-офф пишется только в лист Playoff — строку регулярки этой пары в
+  // таблице дивизиона не трогаем (раньше счёт полуфинала затирал её).
+  const stage=stageOfSlot(slot);
+  if (stage) {
+    const season=String(pair.season||slot.season||'').trim();
+    if (journal) return { status:'saved', division:d1, playoff:true, stage, dry_run:true };
+    const saved=await (await import('./playoff.js')).recordPlayoffResult(slot,stage,season,d1);
+    await refreshAfterResult().catch(e=>console.error('refresh after playoff result failed:',e.message));
+    return saved;
+  }
   if (pair.crossGroup) {
-    if (playoff) return playoff;
     const crossSeason=String(pair.season || slot.season || '').trim();
     await captureCrossGroupCardContext({p1,p2,parsed,pair,season:crossSeason,slot,d1,centralRow})
       .catch(e=>console.error('cross-group card context capture failed:',e.message));
@@ -411,7 +426,7 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   const spreadsheetId = (await divisionSheetId(d1, season, pair.group).catch(() => '')) || (!pair.group && DIVISION_SPREADSHEETS[d1]) || '';
   if (!spreadsheetId) return { status: 'config_missing', division: d1 };
   const info = await findDivisionRow(spreadsheetId, 'Match_Log', p1, p2);
-  if (!info) return playoff || { status: 'row_not_found', division: d1, season };
+  if (!info) return { status: 'row_not_found', division: d1, season };
   const p = info.reversed ? reverseScore(parsed) : parsed;
   const kind = resultKind(slot), points = resultPoints(slot, info.reversed), marker = resultMarker(slot, info.reversed);
   const writes = [
@@ -463,7 +478,7 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   // Результат записан — значит всё, что из него считается, устарело.
   // Без этого таблица дивизиона, места и профили жили старыми ещё пять минут.
   await refreshAfterResult().catch(e => console.error('refresh after result failed:', e.message));
-  return { status: 'saved', division: d1, row: info.row, reversed: info.reversed, playoff:playoff||null,
+  return { status: 'saved', division: d1, row: info.row, reversed: info.reversed, playoff:null,
     season, season_write: seasonWrite, columns: headers.length, spreadsheet_id: spreadsheetId };
 }
 
@@ -809,6 +824,8 @@ export function describeWrite(result) {
     return `в общем логе уже есть строка этой пары (строка ${result.row}) — вторую не добавлял, счёт дивизиона обновлён. Проверьте, совпадает ли счёт.`;
   }
   const d = result.division;
+  if (d?.status === 'saved' && d.playoff) return `плей-офф: записано в общий лог и в лист Playoff (Division ${d.division}, ${d.slot || d.stage})${d.dry_run ? ' — пробный прогон' : ''}`;
+  if (d?.status === 'saved' && d.cross_group) return `записано в общий лог и в межгрупповые матчи (Division ${d.division})`;
   if (d?.status === 'saved') return `записано в общий лог и в таблицу Division ${d.division}, строка ${d.row}`;
   if (d?.status === 'cross_division') return 'междивизионный матч — только общий лог';
   if (d?.status === 'row_not_found') {

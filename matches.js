@@ -184,7 +184,9 @@ export async function publishOpenSlot(slot) {
   });
   const { sameName } = await import('./sheets.js');
   const paired = await alreadyPairedNames(slot);
-  const recipients = all.filter(r => !paired.some(n => sameName(n, r.name)));
+  // Открытое окно — для матчей регулярки; соперник по четвертьфиналу из
+  // другой группы его взять не сможет, поэтому ему окно не шлём.
+  const recipients = all.filter(r => !r.playoff && !paired.some(n => sameName(n, r.name)));
   const skipped = all.length - recipients.length;
   const text = openSlotText(slot);
   const opts = { reply_markup: openSlotKeyboard(slot) };
@@ -1235,7 +1237,10 @@ async function feedCard(slot, lang='en') {
   const line = technicalBoth
     ? telegramLink({name:slot.from_name,username:slot.from_username,telegramId:slot.from_telegram_id})+'  L/L  '+telegramLink({name:slot.to_name,username:slot.to_username,telegramId:slot.to_telegram_id})
     : '🏆 '+telegramLink(winner)+'  <b>'+escapeHtml(winnerFirstScore(slot))+'</b>  '+telegramLink(loser);
-  const text = '🎾 <b>Match Result</b>'+(subtitle ? '\n'+escapeHtml(subtitle) : '')+'\n\n'+line
+  // Плей-офф: в заголовке — стадия.
+  const stageTitle = ({ QF:'Quarter-final', SF:'Semi-final', Final:'Final', '3rd':'3rd place match' })[slotStage(slot)];
+  const head = stageTitle ? '🏆 <b>Playoffs · ' + stageTitle + '</b>' : '🎾 <b>Match Result</b>';
+  const text = head+(subtitle ? '\n'+escapeHtml(subtitle.replace(/ · Group cross/,'')) : '')+'\n\n'+line
     +(String(slot.result_note||'').trim() ? '\n💬 <i>'+escapeHtml(String(slot.result_note).trim())+'</i>' : '');
   const winnerLabel=technicalBoth?(slot.from_name||'Player'):(winner.name||'Player');
   const loserLabel=technicalBoth?(slot.to_name||'Player'):(loser.name||'Player');
@@ -1384,16 +1389,37 @@ export const __subscribersWithRetry = subscribersWithRetry;
 
 // Рассылка результата — фон: она не должна отнимать лимит Google у тех, кто
 // прямо сейчас вносит или подтверждает счёт.
-export function broadcastResult(slot) { return withPriority('low', () => broadcastResultNow(slot)); }
-async function broadcastResultNow(slot) {
+// Матч плей-офф публикуется не карточкой, а постером, и только после того,
+// как организатор выбрал вариант. Поэтому при подтверждении результата
+// рассылка не идёт: обработчик (playoffmedia.js) запускает генерацию постера
+// и присылает варианты в админский чат. Кнопка «Опубликовать» зовёт эту же
+// рассылку с готовой картинкой (opts.media). opts.asCard — опубликовать
+// обычной карточкой (если постер сделать нельзя).
+let playoffPosterHandler = null;
+export function setPlayoffPosterHandler(fn) { playoffPosterHandler = fn; }
+const slotStage = slot => {
+  const v = String(slot?.stage || '').trim();
+  return ['QF', 'SF', 'Final', '3rd'].includes(v) ? v : '';
+};
+export function broadcastResult(slot, opts = {}) { return withPriority('low', () => broadcastResultNow(slot, opts)); }
+async function broadcastResultNow(slot, opts = {}) {
+  const stage = slotStage(slot);
+  if (stage && !opts.media && !opts.asCard && playoffPosterHandler) {
+    await playoffPosterHandler(slot).catch(e => console.error('playoff poster start failed:', e.message));
+    await logMatchEvent('result_broadcast_held', slot, { telegram_id: slot.result_by, name: '' }, 'плей-офф: ждёт постер').catch(() => {});
+    return { sent: 0, failed: 0, held: true };
+  }
   const scope = await slotScope(slot);
   slot = {...slot,season:scope.season,group:scope.group};
   const cards = { ru: await feedCard(slot, 'ru'), en: await feedCard(slot, 'en') };
   // Лента — общий английский фид, поэтому и карточка для группы английская.
   // В личку каждый получает свой язык (см. ниже).
   const { text, reply_markup } = cards.en;
-  const media = await resultMedia(slot);
-  if (media.buffer) await archiveResultCard(slot, media.buffer);
+  const media = opts.media ? { buffer: opts.media } : await resultMedia(slot);
+  // В архив (подборка недели в Instagram) всегда идёт карточка матча — и у
+  // плей-офф тоже, хотя в ленту бота уходит постер.
+  const cardMedia = opts.media ? await resultMedia(slot).catch(() => ({})) : media;
+  if (cardMedia.buffer) await archiveResultCard(slot, cardMedia.buffer);
   const extraPhoto = slot.result_photo_file_id || '';
   // Первая отправка загружает файл, остальные — уже по file_id.
   const sendWith = async (chatId, caption, opts) => {
@@ -1462,7 +1488,7 @@ async function broadcastResultNow(slot) {
     });
   } catch (e) { console.error('results broadcast failed:', e.message); }
   const posterId=String(slot.challenge_id || slot.match_id || '');
-  if (posterId) {
+  if (posterId && !stage) {
     await notifyAdmin(`<b>🎨 Постер матча</b>\n\n${escapeHtml(slot.from_name || 'Player 1')} — ${escapeHtml(slot.to_name || 'Player 2')}\nСчёт: <b>${escapeHtml(winnerFirstScore(slot))}</b>\n\nМожно сразу создать два варианта постера через OpenAI. Готовые PNG придут в этот админский топик.`, {
       reply_markup:{ inline_keyboard:[
         [{ text:'🎨 Создать 2 варианта', callback_data:`poster:prepare:${posterId}` }],

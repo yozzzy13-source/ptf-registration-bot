@@ -1444,14 +1444,19 @@ function findConfirmedSlot(done, wanted) {
       // Полный безопасный тест на последнем подтверждённом матче: не публикует
       // результат повторно и присылает оба постера только в текущий админский чат.
       try {
-        const wanted=String(text.replace(/^\/poster_test(?:@\w+)?\s*/i,'')).trim();
+        // Последним словом можно указать стадию плей-офф (QF, SF, 3rd, Final):
+        // постер соберётся в оформлении этой стадии — для проверки макета.
+        let wanted=String(text.replace(/^\/poster_test(?:@\w+)?\s*/i,'')).trim();
+        const stageMatch=wanted.match(/(?:^|\s)(QF|SF|3rd|Final)$/i);
+        const testStage=stageMatch?({qf:'QF',sf:'SF','3rd':'3rd',final:'Final'})[stageMatch[1].toLowerCase()]:'';
+        if(stageMatch)wanted=wanted.slice(0,stageMatch.index).trim();
         const rows=await allSlots();
         const done=rows.filter(r=>String(r.result_status || '').toLowerCase()==='confirmed');
         const {slot,many}=findConfirmedSlot(done,wanted);
         if(many)return sendMessage(chatId,`Нашёл несколько матчей на «${escapeHtml(wanted)}», уточните имя:\n`+many.slice(0,10).map(m=>`• <code>${escapeHtml(m.from_name || '')} — ${escapeHtml(m.to_name || '')}</code>`).join('\n'));
         if(!slot)return sendMessage(chatId,wanted?'Матч не найден. Укажите имя игрока или запустите /poster_test без аргумента — возьму последний подтверждённый матч.':'Подтверждённых результатов пока нет.');
         await sendMessage(chatId,`🧪 <b>Тест постера</b>\n\n${escapeHtml(slot.from_name || '')} — ${escapeHtml(slot.to_name || '')}\n\nРезультат матча повторно не публикуется. Два постера придут только сюда.`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
-        return preparePosterForAdmin({chatId,threadId:msg.message_thread_id||'',slot,comment:''});
+        return preparePosterForAdmin({chatId,threadId:msg.message_thread_id||'',slot:testStage?{...slot,stage:testStage}:slot,comment:''});
       } catch(error) {
         return sendMessage(chatId,`⛔ ${escapeHtml(error?.message || error)}`,msg.message_thread_id?{message_thread_id:msg.message_thread_id}:{});
       }
@@ -1554,6 +1559,76 @@ function findConfirmedSlot(done, wanted) {
         const key = Math.random().toString(36).slice(2, 10);
         withdrawJobs.set(key, { name: plan.player.name, season: plan.season, at: Date.now() });
         return sendMessage(chatId, withdrawalSummary(plan), { reply_markup: { inline_keyboard: [[{ text: '🚪 Снять', callback_data: 'wd_ok:' + key }, { text: 'Отмена', callback_data: 'wd_no' }]] } });
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    // /playoff — состояние плей-офф по дивизионам и кнопка в раздел «Плей-офф».
+    if (/^\/playoff(?:@\w+)?$/i.test(text)) {
+      try {
+        const { playoffState, stateSummary } = await import('./playoff.js');
+        const st = await playoffState();
+        const markup = PUBLIC_URL ? { reply_markup: { inline_keyboard: [[{ text: '🏆 Открыть плей-офф', web_app: { url: `${PUBLIC_URL}/match?tab=admin&po=1` } }]] } } : {};
+        return sendMessage(chatId, stateSummary(st).slice(0, 4000), String(chatId).startsWith('-') ? {} : markup);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    // /playoff_result A SF1 Победитель | 6:4 6:3 — счёт матча плей-офф, со стороны победителя.
+    if (/^\/playoff_result(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const body = text.replace(/^\/playoff_result(?:@\w+)?\s*/i, '').trim();
+      const m = body.match(/^(\S+)\s+(QF[1-4]|SF[12]|Final|3rd)\s+(.+?)\s*\|\s*(.+)$/i);
+      if (!m) return sendMessage(chatId, 'Формат: <code>/playoff_result A SF1 Имя победителя | 6:4 6:3</code>\nСчёт — со стороны победителя. Матчи: QF1–QF4, SF1, SF2, Final, 3rd.');
+      try {
+        const po = await import('./playoff.js');
+        const { cellToScore, validateMatchScore, reverseScore, getSets } = await import('./tennis.js');
+        const st = await po.playoffState();
+        const slotName = m[2].toUpperCase() === 'FINAL' ? 'Final' : m[2].toUpperCase() === '3RD' ? '3rd' : m[2].toUpperCase();
+        const d = st.divisions.find(x => x.letter === (m[1].toUpperCase().startsWith('P') ? 'PRIME' : m[1].toUpperCase()));
+        const row = d?.rows.find(r => r.slot === slotName);
+        if (!row) return sendMessage(chatId, '⛔ Такого матча нет в опубликованной сетке.');
+        const { sameName } = await import('./sheets.js');
+        const winnerFirst = sameName(row.player_1, m[3]) ? true : sameName(row.player_2, m[3]) ? false : null;
+        if (winnerFirst === null) return sendMessage(chatId, `⛔ В паре ${escapeHtml(row.player_1)} — ${escapeHtml(row.player_2)} нет «${escapeHtml(m[3])}».`);
+        let p = cellToScore(m[4]);
+        if (!validateMatchScore(p).ok) return sendMessage(chatId, '⛔ Счёт не распознан: ' + escapeHtml(validateMatchScore(p).message || ''));
+        if (!winnerFirst) p = reverseScore(p);
+        const sets = getSets(p).map(x => ({ a: x.a, b: x.b, tba: x.tba ?? '', tbb: x.tbb ?? '' }));
+        const r = await po.adminResult(d.letter, st.season, { slot: slotName, kind: 'played', sets }, { user: { id: from.id }, profile: { name: from.first_name || '' } });
+        if (!r?.ok) return sendMessage(chatId, '⛔ ' + escapeHtml(r?.reason || 'не получилось'));
+        return sendMessage(chatId, `✅ ${escapeHtml(slotName)} ${escapeHtml(d.title)}: ${escapeHtml(row.player_1)} — ${escapeHtml(row.player_2)}\n${escapeHtml(r.write || '')}`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    // /playoff_cards [A|all] — карточки сыгранных матчей плей-офф файлами, для
+    // ленты Instagram. Никуда не публикуются — только в этот чат.
+    if (/^\/playoff_cards(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const want = text.replace(/^\/playoff_cards(?:@\w+)?\s*/i, '').trim().toUpperCase();
+      try {
+        const po = await import('./playoff.js');
+        const { cardForSlot } = await import('./matchcard.js');
+        const { winnerFirstScore } = await import('./matches.js');
+        const st = await po.playoffState();
+        const rows = st.divisions.filter(d => !want || want === 'ALL' || d.letter === po.letterKey(want))
+          .flatMap(d => d.rows.filter(r => String(r.status).toLowerCase() === 'confirmed' && r.match_id).map(r => ({ ...r, title: d.title })));
+        if (!rows.length) return sendMessage(chatId, 'Сыгранных матчей плей-офф пока нет.');
+        await sendMessage(chatId, `🗂 Карточки плей-офф: ${rows.length}. Отправляю файлами…`);
+        let n = 0;
+        for (const r of rows) {
+          const slot = await findMatchSlot(r.match_id).catch(() => null);
+          if (!slot) continue;
+          const png = await cardForSlot({ ...slot, stage: r.stage }, { winnerFirstScore, season: st.season });
+          await sendDocumentBuffer(chatId, png, `card-${r.division}-${r.slot}.png`, { caption: `${escapeHtml(r.title)} · ${escapeHtml(r.slot)}: ${escapeHtml(r.player_1)} — ${escapeHtml(r.player_2)}` });
+          n++;
+        }
+        return sendMessage(chatId, `✅ Готово: ${n}.`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    // /pace — сводка темпа сезона прямо сейчас. Без слова: предпросмотр,
+    // шорт-лист не меняется. «/pace save» — как субботняя: с отметкой, кому писали.
+    if (/^\/pace(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const save = /\bsave\b/i.test(text);
+      try {
+        await sendMessage(chatId, '⏳ Считаю темп сезона…');
+        const { runPaceDigest } = await import('./pace.js');
+        const r = await runPaceDigest(Date.now(), { force: true, save, chatId: String(chatId) });
+        if (!r.ok) return sendMessage(chatId, '⛔ ' + escapeHtml({ no_season: 'в листе Events нет строки сезона лиги с датами начала и конца', no_chat: 'некуда отправить' }[r.reason] || r.reason));
+        return sendMessage(chatId, save ? `✅ Сводка готова, шорт-лист обновлён: сообщений ${r.sent}.` : `👀 Это предпросмотр: шорт-лист не менялся. Чтобы отметить, кому написали, — <code>/pace save</code>.`);
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
     // /result_resync <имя игрока> — заново записать подтверждённый результат
@@ -2272,6 +2347,24 @@ export async function handleCallback(q) {
     // Таблица одной группы в сторис. Публикуем по одной: каждая группа — своя
     // сторис, объединять их в одну картинку нельзя.
     // Снятие игрока с сезона: подтверждение из предпросмотра /withdraw.
+    // Плей-офф: постеры матчей и мест, сетка картинкой — кнопки «Опубликовать»,
+    // «В сторис», «Переделать», «Разослать всем» (см. playoffmedia.js).
+    if (data.startsWith('pm:')) {
+      await answerCallbackQuery(q.id, '…').catch(() => {});
+      const { handleCallback } = await import('./playoffmedia.js');
+      const r = await handleCallback(data);
+      return sendMessage(chatId, r.text, msg?.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
+    }
+    // Афиша плей-офф: «Разослать всем» под предпросмотром.
+    if (data.startsWith('po_send:')) {
+      await answerCallbackQuery(q.id, 'Ставлю в рассылку…').catch(() => {});
+      try {
+        const { sendPoster } = await import('./playoff.js');
+        const r = await sendPoster(data.slice('po_send:'.length), { id: from.id, name: from.first_name || '', chatId });
+        if (!r.ok) return sendMessage(chatId, r.reason === 'no_preview' ? 'Предпросмотр устарел — сделайте его заново в разделе «Плей-офф».' : r.reason === 'already_sent' ? 'Эта афиша уже разослана — второй раз не отправляю.' : '⛔ ' + escapeHtml(r.reason));
+        return sendMessage(chatId, `📣 Афиша в рассылке: получателей ${r.recipients}. Личные сообщения игрокам дня: ${r.personal}.`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     if (data.startsWith('wd_ok:') || data === 'wd_no') {
       if (data === 'wd_no') { await answerCallbackQuery(q.id, 'Отменено').catch(() => {}); return editMessageText(chatId, q.message.message_id, '✖️ Снятие отменено.').catch(() => {}); }
       const job = withdrawJobs.get(data.slice('wd_ok:'.length));

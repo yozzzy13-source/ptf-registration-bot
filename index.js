@@ -7,7 +7,7 @@ import { SITE_URL } from './config.js';
 import { PORT, PUBLIC_URL, BOT_TOKEN, SPREADSHEET_ID, DEFAULT_USDT_AMOUNT, SHEETS, MATCH_DURATION_MIN, ADMIN_IDS, COURT_BOOKING_OPEN, TIMEZONE } from './config.js';
 import { setWebhook, setCommands, sendMessage, getMe, sendPhotoBuffer, getFileBuffer, markChatAlive, deadChatsCount } from './telegram.js';
 import { queueMatchAttention, handleMessage, handleCallback, sendPaymentStart, prepareAnnouncementForAdmin, rememberLang } from './bot.js';
-import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, setUserLanguage, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
+import { onLeagueCacheInvalidated, warmSheetCache, getPartners, getPartnersPageTexts, getLeagueProfiles, getLeagueMatchHistory, getLeagueEvents, getLeagueAchievements, invalidateLeagueCache, getSetting, setSetting, getAllActiveLeaguePlayers, getPlayerLeagueInfo, sameName, getDivisionOpponents, getActiveEvents, getAllEvents, upsertApplicant, createApplication, createOrUpdateApplication, getPaymentMethods, getRows, findApplicantByTelegramIdentity, findApplicantByTelegramId, updateApplicantByTelegramId, setUserLanguage, updateObjectByRow, isProfileCompleted, enrichEventsWithStats, getEventPlayers, getManualParticipants, ensureAvatarColumns, ensureInstagramColumn, publishedAvatars, getMasterPhotos, withRatingSourceTag, ratingSourceOf, playerGroup, PLAYER_GROUPS, getGroupTabs, MINIAPP_TABS, healApplicantId } from './sheets.js';
 import { parseInitData, verifyTelegramInitData, verifyWebAppToken, uid, nowISO, safe, escapeHtml } from './util.js';
 import { reverseScore as reverseScoreSafe } from './tennis.js';
 import { notifyNewApplication, notifyAvatarVariant, paymentAutoOn, notifyAdmin, getAdminChatId } from './admin.js';
@@ -26,7 +26,7 @@ import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHand
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
-  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin, confirmCourt, courtCloseAt } from './matchesdb.js';
+  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin, confirmCourt, courtCloseAt, updateSlot } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
@@ -804,7 +804,7 @@ app.get('/api/match/history', async (req, res) => {
           no: m.match_no || '', date: m.date || '', season: m.season || '',
           division: (m.division || m.opponent_division || '').toString().toUpperCase(),
           winner: win ? me : m.opponent, loser: win ? m.opponent : me,
-          score: m.score || '', court: m.court || ''
+          score: m.score || '', court: m.court || '', competition: m.competition || ''
         });
       }
     }
@@ -855,6 +855,108 @@ app.get('/api/match/admin-active', async (req, res) => {
 // Афиша-анонс: пара игроков + комментарий из мини-приложения (админская
 // вкладка), запуск генерации — сюда; сама картинка и кнопка «В сторис»
 // по-прежнему приходят в чат админов, как и у постера результата.
+// ---------------------------------------------------------------- плей-офф
+// Раздел «Плей-офф» во вкладке «Контроль» мини-приложения. Только организатор.
+async function playoffAdmin(req, res) {
+  const b = req.method === 'GET' ? req.query : (req.body || {});
+  const v = await matchViewer(String(b.initData || ''), String(b.t || ''));
+  if (!v.ok) { res.status(v.code).json({ ok:false, error:v.error }); return null; }
+  if (!v.isAdmin) { res.status(403).json({ ok:false, error:'Только для организатора' }); return null; }
+  return v;
+}
+const PLAYOFF_ERRORS = {
+  already_played: 'В этом дивизионе уже есть сыгранный матч плей-офф — пересобрать сетку нельзя. Меняйте игроков в конкретных парах.',
+  not_enough_players: 'Не хватает игроков на все места первого раунда.',
+  not_found: 'Матч не найден — обновите экран.', no_name: 'Выберите игрока.', not_in_division: 'Этого игрока нет в дивизионе.',
+  bad_date: 'Дата в формате ГГГГ-ММ-ДД.', bad_time: 'Время в формате ЧЧ:ММ.', bad_decision: 'Неизвестное решение.',
+  no_columns: 'В Match_Log нет колонок P1/P2 TechLoss.', row_moved: 'Строка матча в таблице сдвинулась — обновите экран.',
+  no_matches: 'На этот день нет матчей плей-офф.', no_preview: 'Сначала сделайте предпросмотр афиши.',
+  no_players: 'В паре ещё нет обоих игроков.'
+};
+app.get('/api/playoff/state', async (req, res) => {
+  try {
+    const v = await playoffAdmin(req, res); if (!v) return;
+    const { playoffState } = await import('./playoff.js');
+    res.json(await playoffState(String(req.query.season || '')));
+  } catch (e) { console.error('playoff state failed:', e); res.status(500).json({ ok:false, error:e.message }); }
+});
+app.post('/api/playoff/action', async (req, res) => {
+  try {
+    const v = await playoffAdmin(req, res); if (!v) return;
+    const b = req.body || {}, po = await import('./playoff.js');
+    const season = String(b.season || '') || String((await po.playoffState().catch(() => ({}))).season || '');
+    const letter = String(b.letter || '');
+    const actor = { telegram_id: v.user.id, name: v.profile?.name || '' };
+    let r;
+    switch (String(b.action || '')) {
+      case 'override': r = await po.setOverride(letter, season, b.gi, b.place, b.name); break;
+      case 'publish': r = await po.publishBracket(letter, season, { actor }); break;
+      case 'replace': r = await po.replacePlayer(letter, season, String(b.slot || ''), b.side, b.name, { actor }); break;
+      case 'schedule': r = await po.setSchedule(letter, season, String(b.slot || ''), { date: String(b.date || ''), time: String(b.time || ''), court: String(b.court || '') }); break;
+      case 'decide': r = await po.decideUnplayed(letter, season, String(b.key || ''), String(b.decision || ''), actor); break;
+      case 'result': r = await playoffAdminResult(letter, season, b, v); break;
+      case 'poster_preview': r = await po.previewPoster(String(b.date || '')); break;
+      case 'bracket_preview': r = await (await import('./playoffmedia.js')).previewBracket(letter, season); break;
+      case 'poster_send': r = await po.sendPoster(String(b.date || ''), { id: v.user.id, name: actor.name, chatId: v.user.id }); break;
+      default: return res.status(400).json({ ok:false, error:'Неизвестное действие' });
+    }
+    if (!r?.ok) return res.status(409).json({ ok:false, error: PLAYOFF_ERRORS[r?.reason] || r?.reason || 'Не получилось' });
+    res.json({ ...r, ok:true });
+  } catch (e) { console.error('playoff action failed:', e); res.status(500).json({ ok:false, error:e.message }); }
+});
+// Счёт матча плей-офф от организатора: сразу подтверждён (он сам на корте).
+// Счёт в форме — со стороны первого игрока пары (player_1). Повторный ввод
+// исправляет тот же матч, а не создаёт новый.
+async function playoffAdminResult(letter, season, b, v) {
+  const po = await import('./playoff.js');
+  const row = (await po.divisionRows(letter, season, { fresh:true })).find(r => r.slot === String(b.slot || ''));
+  if (!row) return { ok:false, reason:'not_found' };
+  if (!row.player_1 || !row.player_2) return { ok:false, reason:'no_players' };
+  const players = await getAllActiveLeaguePlayers().catch(() => []);
+  const tg = name => String(players.find(p => sameName(p.name, name))?.telegram_id || ('po:' + String(name).toLowerCase().replace(/\s+/g, '_')));
+  const ids = [tg(row.player_1), tg(row.player_2)];
+  const kind = ['retired','technical'].includes(String(b.kind || '').toLowerCase()) ? String(b.kind).toLowerCase() : 'played';
+  let winnerId = '', storedScore = '', set3Mode = '';
+  if (kind === 'technical') {
+    const w = Number(b.winner) === 2 ? 1 : 0;
+    winnerId = ids[w]; storedScore = w === 0 ? 'W/L' : 'L/W';
+  } else {
+    const score = scoreFromBody(b.sets);
+    if (kind === 'played') {
+      const check = validateMatchScore(score);
+      if (!check.ok) return { ok:false, reason:check.message };
+      winnerId = check.winner === 'p1' ? ids[0] : ids[1];
+    } else {
+      if (!Array.isArray(b.sets) || !b.sets.length) return { ok:false, reason:'Для RET укажите сыгранный счёт' };
+      winnerId = Number(b.winner) === 2 ? ids[1] : ids[0];
+    }
+    storedScore = formatScore(score) + (kind === 'retired' ? ' RET' : ''); set3Mode = detectSet3Mode(score);
+  }
+  const result = { result_status:'confirmed', result_by:String(v.user.id), result_winner:winnerId, result_score:storedScore, result_set3_mode:set3Mode,
+    result_kind:kind, result_points_from:'', result_points_to:'', result_note:safe(b.note || ''), result_submitted_at:nowISO(), result_confirmed_at:nowISO(), result_confirmed_by:String(v.user.id) };
+  const existing = row.match_id ? await findSlot(row.match_id).catch(() => null) : null;
+  if (existing && String(existing.result_status || '').toLowerCase() === 'confirmed') {
+    // Исправление уже внесённого счёта: тот же матч, та же строка журнала.
+    await updateSlot(existing.challenge_id, result);
+    const slot = { ...existing, ...result, stage: row.stage };
+    const write = await writeConfirmedResult(slot).catch(e => ({ status:'error', reason:e.message }));
+    invalidateLeagueCache(); invalidateDivisionCache();
+    return { ok:true, corrected:true, write:describeWrite(write) };
+  }
+  const { divisionDisplayName } = await import('./division.js');
+  const p1 = players.find(p => sameName(p.name, row.player_1)), p2 = players.find(p => sameName(p.name, row.player_2));
+  const date = String(row.date || '').trim() || new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
+  const slot = { challenge_id:uid('match'), match_type:'manual', status:'accepted', division:p1?.division || divisionDisplayName(letter), season:String(season),
+    group:String(row.player_1_group || '') === String(row.player_2_group || '') ? String(row.player_1_group || '') : 'cross',
+    from_telegram_id:ids[0], from_name:row.player_1, from_username:'', to_telegram_id:ids[1], to_name:row.player_2, to_username:'',
+    dates:date, time_from:row.time || '', time_to:'', duration_min:MATCH_DURATION_MIN, courts:row.court || '', comment:'',
+    agreed_date:date, agreed_time:row.time || '', agreed_court:row.court || '', pending_by:'', round:'', stage:row.stage,
+    created_at:nowISO(), responded_at:nowISO(), ...result };
+  await createManualMatch(slot);
+  const done = await finishConfirmedWebResult(slot);
+  return { ok:true, write:done.write, review:done.review };
+}
+
 app.post('/api/match/announce-poster', async (req, res) => {
   try {
     const b=req.body||{},v=await matchViewer(b.initData||'',String(b.t||''));
@@ -966,6 +1068,12 @@ app.post('/api/match/create', async (req, res) => {
       agreed_date:'', agreed_time:'', agreed_court:'',
       created_at: nowISO()
     };
+    // Соперник по четвертьфиналу: матч сразу помечаем стадией, а группа —
+    // «межгрупповая», если соперник из другой группы.
+    if (isDirect && opponent?.playoff) {
+      slot.stage = opponent.playoff;
+      if (opponent.cross_group) slot.group = 'cross';
+    }
     await createSlot(slot);
     if (isDirect) await sendDirectChallenge(slot).catch(e => console.error('sendDirectChallenge failed:', e.message));
     else await publishOpenSlot(slot).catch(e => console.error('publishOpenSlot failed:', e.message));
@@ -1308,6 +1416,17 @@ app.post('/api/match/result', async (req, res) => {
     const saved=v.isAdmin
       ?await submitResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload)
       :await submitResult(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name},payload);
+    // Матч плей-офф, счёт внёс организатор — подтверждения игроков не ждём.
+    if(saved.ok&&v.isAdmin){
+      const stage=await import('./playoff.js').then(m=>m.detectStage({...slot,...saved.slot})).catch(()=>'');
+      if(stage){
+        const conf=await confirmResultByAdmin(b.challenge_id,{telegram_id:v.user.id,name:v.profile.name});
+        if(conf.ok){
+          const done=await finishConfirmedWebResult({...conf.slot,stage});
+          return res.json({ok:true,organiser:true,playoff:true,score:conf.slot.result_score,write:done.write});
+        }
+      }
+    }
     if(!saved.ok){const messages={not_found:'Match not found.',not_accepted:'Match is not agreed.',already_confirmed:'Result already confirmed.',not_a_player:'Not your match.',different_group:'different_group',league_access_denied:'league_access_denied',division_required:'division_required'};console.warn(`result not saved: ${b.challenge_id} — ${saved.reason}`);return res.status(409).json({ok:false,error:messages[saved.reason]||'Cannot save result'})}
     let confirmationDelivered=false;
     try { confirmationDelivered=Boolean(await notifyResultForVerification(saved.slot)); }
@@ -1315,7 +1434,11 @@ app.post('/api/match/result', async (req, res) => {
     const deliveryWarning=confirmationDelivered?'':(v.lang==='ru'
       ?'Счёт сохранён, но сообщение сопернику не доставлено. Он всё равно увидит подтверждение в «Моих матчах».'
       :'The score was saved, but the message was not delivered. Your opponent can still confirm it in My matches.');
+    // Для окна «Счёт отправлен»: кто должен подтвердить. Внёс организатор —
+    // подтверждают оба игрока; внёс игрок — его соперник.
+    const opponentName=String(v.user.id)===String(slot.from_telegram_id)?slot.to_name:slot.from_name;
     res.json({ok:true,score:saved.slot.result_score,confirmation_delivered:confirmationDelivered,
+      organiser:enteredByOrganiser,opponent:enteredByOrganiser?'':String(opponentName||''),
       warning:[photo.warning,deliveryWarning].filter(Boolean).join(' ')});
   }catch(e){
     console.error('match result failed:',e.message);
@@ -1381,13 +1504,33 @@ app.post('/api/match/manual', async (req,res)=>{
       from_telegram_id:sides[0],from_name:from.name,from_username:from.username||'',
       to_telegram_id:sides[1],to_name:to.name,to_username:to.username||'',
       dates:date,time_from:'',time_to:'',duration_min:MATCH_DURATION_MIN,courts:safe(b.court).slice(0,60),comment:'',
-      agreed_date:date,agreed_time:safe(b.time),agreed_court:safe(b.court).slice(0,60),pending_by:'',round:v.isAdmin?safe(b.round):'',
+      agreed_date:date,agreed_time:safe(b.time),agreed_court:safe(b.court).slice(0,60),pending_by:'',round:'',
+      // Этап матча выбирает только организатор: «Регулярный» или стадия плей-офф.
+      stage:v.isAdmin?(await import('./playoff.js')).stageKey(b.round):'',
       result_status:'pending',result_by:(v.isAdmin&&!sides.includes(String(v.user.id)))?String(v.user.id):sides[0],
       result_winner:winnerId,result_score:storedScore,result_set3_mode:set3Mode,
       result_kind:kind,result_points_from:pointsFrom,result_points_to:pointsTo,
       result_photo_file_id:photo.fileId,result_note:safe(b.note),result_submitted_at:nowISO(),created_at:nowISO(),responded_at:nowISO()};
     // Тот же матч (пара + дата) уже внесён — второй раз не принимаем.
     const same=await findSameResult(row.from_telegram_id,row.to_telegram_id,row.agreed_date).catch(()=>null);
+    // Плей-офф от организатора: подтверждения игроков не нужно, он сам на корте.
+    // Повторный ввод того же матча — исправление счёта, а не новый матч.
+    if(row.stage&&v.isAdmin){
+      const result={result_status:'confirmed',result_by:String(v.user.id),result_winner:row.result_winner,result_score:row.result_score,result_set3_mode:row.result_set3_mode,
+        result_kind:row.result_kind,result_points_from:'',result_points_to:'',result_photo_file_id:row.result_photo_file_id,result_note:row.result_note,
+        result_submitted_at:nowISO(),result_confirmed_at:nowISO(),result_confirmed_by:String(v.user.id),stage:row.stage};
+      if(same&&String(same.result_status||'').toLowerCase()==='confirmed'){
+        await updateSlot(same.challenge_id,result);
+        const write=await writeConfirmedResult({...same,...result}).catch(e=>({status:'error',reason:e.message}));
+        invalidateLeagueCache();invalidateDivisionCache();
+        return res.json({ok:true,organiser:true,playoff:true,corrected:true,challenge_id:same.challenge_id,write:describeWrite(write)});
+      }
+      if(same)return res.status(409).json({ok:false,error:'Этот матч уже внесён и ждёт подтверждения — подтвердите или удалите его во вкладке «Матчи».'});
+      Object.assign(row,result);
+      await createManualMatch(row);
+      const done=await finishConfirmedWebResult(row);
+      return res.json({ok:true,organiser:true,playoff:true,challenge_id:row.challenge_id,write:done.write,review:done.review});
+    }
     if(same)return res.status(409).json({ok:false,error:v.lang==='ru'?'Результат этого матча уже внесён ('+same.agreed_date+'). Если он неверный — исправьте или удалите его, а не вносите заново.':'This match result is already recorded ('+same.agreed_date+'). Edit or delete it instead of entering it again.'});
     await createManualMatch(row);
     let confirmationDelivered=false;
@@ -1396,7 +1539,9 @@ app.post('/api/match/manual', async (req,res)=>{
     const deliveryWarning=confirmationDelivered?'':(v.lang==='ru'
       ?'Матч сохранён, но сообщение сопернику не доставлено. Он всё равно увидит подтверждение в «Моих матчах».'
       :'The match was saved, but the message was not delivered. Your opponent can still confirm it in My matches.');
+    const byOrganiser=v.isAdmin&&!sides.includes(String(v.user.id));
     res.json({ok:true,challenge_id:row.challenge_id,confirmation_delivered:confirmationDelivered,
+      organiser:byOrganiser,opponent:byOrganiser?'':String(String(v.user.id)===sides[0]?to.name:from.name||''),
       warning:[photo.warning,deliveryWarning].filter(Boolean).join(' ')});
   }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
 });
@@ -2194,13 +2339,16 @@ app.get('/api/league/division', async (req, res) => {
         parts.push({ group: g.group, group_title: g.title, group_title_en:g.title_en, ...t });
       }
       if (!parts.length) return res.status(404).json({ ok:false, error: messages.not_configured });
-      return res.json({ ok:true, ...parts[0], groups: parts });
+      // Последняя неделя регулярки: предварительная сетка по текущим таблицам.
+      const preview = await import('./playoff.js').then(m => m.sitePreview(letter, parts[0].season || season, parts)).catch(() => null);
+      return res.json({ ok:true, ...parts[0], ...(preview ? { playoff: preview } : {}), groups: parts });
     }
     const data = await getDivisionTable(letter, season);
     if (!data.ok) {
       return res.status(404).json({ ok:false, error: messages[data.reason] || 'Дивизион недоступен' });
     }
-    res.json({ ok:true, ...data });
+    const preview = await import('./playoff.js').then(m => m.sitePreview(letter, data.season || season, [{ group: '', players: data.players }])).catch(() => null);
+    res.json({ ok:true, ...data, ...(preview ? { playoff: preview } : {}) });
   } catch (e) {
     console.error('division api failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
@@ -2390,6 +2538,11 @@ app.listen(PORT, () => withPriority('low', async () => {
   ]).catch(() => {});
   warm();
   setInterval(warm, 8 * 60 * 1000).unref();
+  // Первый шорт-лист темпа (22 игрока от 10 октября) — через пару минут после
+  // старта, когда кэши прогреты. Повторно ничего не делает.
+  setTimeout(() => import('./pace.js').then(m => m.ensurePaceSeed())
+    .then(r => { if (r?.seeded) console.log(`pace: шорт-лист заведён, ${r.seeded} игроков${r.missing?.length ? ', не найдены: ' + r.missing.join(', ') : ''}`); })
+    .catch(e => console.error('pace seed failed:', e.message)), 2 * 60 * 1000).unref?.();
   // Токен Instagram живёт 60 дней. Продлеваем раз в сутки: продлить раньше
   // срока ничего не стоит, а пропущенное окно останавливает публикации молча.
   if (instagramEnabled()) {
@@ -2406,6 +2559,12 @@ app.listen(PORT, () => withPriority('low', async () => {
   // Незаконченные рассылки продолжаются сами. Ждём минуту после старта: при
   // деплое старая копия сервиса ещё какое-то время дописывает свой прогресс, и
   // раньше подхватывать очередь нельзя — получатели получили бы сообщение дважды.
+  // Вид рассылки «афиша плей-офф» должен быть известен до продолжения очереди.
+  import('./playoff.js').then(m => { m.setAdminResultHandler(playoffAdminResult); return m.ensurePosterKind(); }).catch(e => console.error('playoff poster kind failed:', e.message));
+  // Результат плей-офф: вместо карточки — постер на утверждение в админский чат.
+  Promise.all([import('./matches.js'), import('./playoffmedia.js')])
+    .then(([mt, pm]) => mt.setPlayoffPosterHandler(slot => pm.startMatchPoster(slot)))
+    .catch(e => console.error('playoff poster handler failed:', e.message));
   setTimeout(() => { resumeBroadcasts().catch(e => console.error('broadcast resume failed:', e.message)); }, 60 * 1000).unref?.();
   startLogCleanup();
   // Лист ожидания → таблица участников: при запуске сверяем целиком (так
@@ -2467,6 +2626,12 @@ app.listen(PORT, () => withPriority('low', async () => {
       }
       await expireStaleSlots().catch(e => console.error('expire slots failed:', e.message));
       await runDeadlineNudge().catch(e => console.error('deadline nudge failed:', e.message));
+      // Суббота, 13:00 — сводка темпа сезона организатору: кто отстаёт и что
+      // ему написать. Даты сезона — из листа Events.
+      await import('./pace.js').then(m => m.runPaceDigest(Date.now())).catch(e => console.error('pace digest failed:', e.message));
+      // Плей-офф: предварительная сетка на последней неделе, напоминание о
+      // дедлайне регулярки и о несыгранных матчах.
+      await import('./playoff.js').then(m => m.runPlayoffSweep(Date.now())).catch(e => console.error('playoff sweep failed:', e.message));
       // Напоминания по событиям идут тем же проходом: за сутки, за два часа и
       // про неоплаченный счёт.
       const { runEventReminders, runWaitlistOffers, runSignupNudges } = await import('./eventflow.js');

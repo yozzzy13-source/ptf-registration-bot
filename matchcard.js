@@ -436,7 +436,28 @@ function formChipsSvg(form, cx, y, { gap=44, r=17 }={}) {
 export async function renderMatchCard(match = {}) {
   return renderInstagramMatchCard(match);
 }
+// Стадия плей-офф для карточки: из «SF», «Semifinal», «Semifinal S2» и т.п.
+export function cardStage(v = '') {
+  const x = txt(v).toLowerCase().replace(/\bs\d+\b/g, '').replace(/[^a-z0-9]+/g, '');
+  if (/^(qf|quarterfinals?)$/.test(x)) return { key:'QF', title:'QUARTER-FINAL', places:false };
+  if (/^(sf|semifinals?)$/.test(x)) return { key:'SF', title:'SEMI-FINAL', places:false };
+  if (/^(3rd|third|thirdplace|bronze|3rdplace)$/.test(x)) return { key:'3rd', title:'3RD PLACE MATCH', places:true, win:'3RD PLACE', lose:'4TH PLACE' };
+  if (/^(f|final|finals)$/.test(x)) return { key:'Final', title:'FINAL', places:true, win:'CHAMPION', lose:'RUNNER-UP' };
+  return null;
+}
+// Кубок — простой контур, без шрифтов и картинок: librsvg рисует его везде одинаково.
+function trophySvg(cx, cy, s = 1, color = C.gold) {
+  const k = n => Math.round(n * s * 10) / 10;
+  return `<g transform="translate(${cx - k(24)},${cy - k(26)})" fill="none" stroke="${color}" stroke-width="${k(3.2)}" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M${k(10)} ${k(4)}H${k(38)}V${k(16)}C${k(38)} ${k(26)} ${k(32)} ${k(32)} ${k(24)} ${k(32)}C${k(16)} ${k(32)} ${k(10)} ${k(26)} ${k(10)} ${k(16)}Z" fill="${color}" fill-opacity=".18"/>
+    <path d="M${k(10)} ${k(8)}H${k(3)}C${k(3)} ${k(16)} ${k(6)} ${k(20)} ${k(11)} ${k(21)}"/>
+    <path d="M${k(38)} ${k(8)}H${k(45)}C${k(45)} ${k(16)} ${k(42)} ${k(20)} ${k(37)} ${k(21)}"/>
+    <path d="M${k(24)} ${k(32)}V${k(41)}M${k(15)} ${k(48)}H${k(33)}M${k(18)} ${k(48)}L${k(19)} ${k(41)}H${k(29)}L${k(30)} ${k(48)}"/>
+  </g>`;
+}
 export async function renderInstagramMatchCard(match = {}) {
+  const stage = cardStage(match.stage);
+  if (stage) return renderPlayoffMatchCard(match, stage);
   const IW = 1080, IH = 1148, IR = 390;
   // Верхние 70% заняты результатом; нижние 30% намеренно остаются чистыми
   // для будущей композиции прозрачных логотипов.
@@ -633,6 +654,8 @@ export async function matchDataForSlot(slot = {}, { winnerFirstScore, season = '
     winnerId: winnerIsFrom ? slot.from_telegram_id : slot.to_telegram_id,
     loserId: winnerIsFrom ? slot.to_telegram_id : slot.from_telegram_id,
     label:bothTechnical?'TECHNICAL RESULT':'', round:slot.round||'',
+    // Матч плей-офф получает свою карточку (золото, стадия вместо места).
+    stage: cardStage(slot.stage) ? slot.stage : (/^\d*$/.test(txt(slot.round)) ? '' : (cardStage(slot.round) ? slot.round : '')),
     score, division: [slot.division, slot.group ? `Group ${slot.group}` : ''].filter(Boolean).join(' · '), season,
     date: slot.agreed_date ? fmtDate(slot.agreed_date) : '',
     court: slot.agreed_court || '',
@@ -652,3 +675,328 @@ function fmtDate(iso = '') {
 
 export function forgetPhotoCache() { photoCache.clear(); }
 
+
+// ------------------------------------------------------------ плей-офф
+// Карточка матча плей-офф. Та же сетка, что у обычной (портреты, счёт по сетам,
+// форма, лента партнёров), но:
+//  • золотые ленты сверху и снизу, тёплое золотое свечение за счётом;
+//  • вместо «места в дивизионе» — итог стадии: «TO THE FINAL» / «SEMIFINALIST»;
+//  • в финале — кубок и «CHAMPION», победитель подсвечен сильнее.
+function scoreBlockSvg(score, cx, cy, color = C.amber) {
+  const lines = scoreLines(score);
+  const fs = Math.min(68, Math.max(38, scoreSize(lines, 300)));
+  const step = Math.round(fs * 1.16), tbGap = Math.round(fs * 0.5);
+  const extra = lines.filter(l => /\(\d+:\d+\)$/.test(l)).length * tbGap;
+  let y = Math.round(cy + fs * 0.34 - ((lines.length - 1) * step + extra) / 2);
+  return lines.map(line => {
+    const tie = line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
+    const out = `<text x="${cx}" y="${y}" text-anchor="middle" font-family="${FONT}" font-size="${fs}"
+      font-weight="800" fill="${color}" letter-spacing="1">${esc(tie ? tie[1] : line)}</text>`
+      + (tie ? `<text x="${cx}" y="${y + Math.round(fs * 0.42)}" text-anchor="middle" font-family="${FONT}"
+      font-size="${Math.max(22, Math.round(fs * 0.38))}" font-weight="800" fill="${color}" fill-opacity="0.85">(${esc(tie[2])})</text>` : '');
+    y += step + (tie ? tbGap : 0);
+    return out;
+  }).join('');
+}
+// Оформление стадий: у каждой свой металл и свой декор.
+//   QF   — сталь и холодный синий: прожекторы вечернего корта;
+//   SF   — золото: лучи за счётом;
+//   3rd  — бронза: медаль «3» у победителя;
+//   Final— насыщенное золото, двойные уголки, искры, кубок и «CHAMPION».
+export const STAGE_THEMES = {
+  QF:    { metal: '#A9BCD6', light: '#DCE6F3', deep: '#53647C', glow: '#7FA6D9', bg2: '#0F151D', text: '#E6EDF6' },
+  SF:    { metal: '#C9A76A', light: '#E9D29E', deep: '#8C6E3C', glow: '#C9A76A', bg2: '#1B160F', text: '#EFE4CC' },
+  '3rd': { metal: '#C08457', light: '#E3B48C', deep: '#7A4A2A', glow: '#C08457', bg2: '#1C130D', text: '#F0DCCB' },
+  Final: { metal: '#D8B45F', light: '#F6E3A4', deep: '#8E6A2A', glow: '#E8C46A', bg2: '#21180A', text: '#F7EBCB' }
+};
+const hexA = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+const frameFor = th => ({ ring: th.metal, glow: hexA(th.metal, .3), soft: hexA(th.metal, .1), ringScale: 0.031, glowScale: 0.021 });
+const championFrame = th => ({ ring: th.metal, glow: hexA(th.light, .45), soft: hexA(th.metal, .18), ringScale: 0.042, glowScale: 0.03 });
+// Уголки рамки: только в углах кадра, чтобы не заходить на портреты.
+function cornersSvg(W, H, th, double) {
+  const L = 92, o = 22, w = 3;
+  const c = (x, y, dx, dy, off) => `<path d="M${x + dx * off} ${y + dy * (off + L)} V${y + dy * off} H${x + dx * (off + L)}" fill="none" stroke="${th.metal}" stroke-width="${w}" stroke-linecap="round" opacity="${off > o ? .5 : .95}"/>`;
+  const set = off => c(0, 0, 1, 1, off) + c(W, 0, -1, 1, off) + c(0, H, 1, -1, off) + c(W, H, -1, -1, off);
+  return set(o) + (double ? set(o + 12) : '');
+}
+// Искры финала: россыпь мелких ромбов в верхней части, детерминированно.
+function sparklesSvg(W, th) {
+  let out = '', seed = 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  for (let i = 0; i < 34; i++) {
+    const x = 40 + rnd() * (W - 80), y = 30 + rnd() * 230, r = 2 + rnd() * 4.5, op = .25 + rnd() * .55;
+    if (Math.abs(x - W / 2) < 150 && y > 150) continue;     // не на логотипе
+    out += `<path d="M${x} ${y - r} L${x + r * .6} ${y} L${x} ${y + r} L${x - r * .6} ${y} Z" fill="${i % 3 ? th.light : th.metal}" opacity="${op.toFixed(2)}"/>`;
+  }
+  return out;
+}
+// Лучи за счётом полуфинала.
+function raysSvg(cx, cy, th) {
+  let out = '';
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2, a2 = a + 0.08;
+    out += `<path d="M${cx} ${cy} L${cx + Math.cos(a) * 520} ${cy + Math.sin(a) * 520} L${cx + Math.cos(a2) * 520} ${cy + Math.sin(a2) * 520} Z" fill="${th.light}" opacity=".035"/>`;
+  }
+  return out;
+}
+// Прожекторы четвертьфинала: два мягких конуса света сверху.
+function floodlightsSvg(W, th) {
+  return `<path d="M120 0 L330 0 L520 520 L-60 520 Z" fill="url(#beam)" opacity=".55"/>
+    <path d="M${W - 330} 0 L${W - 120} 0 L${W + 60} 520 L${W - 520} 520 Z" fill="url(#beam)" opacity=".55"/>`;
+}
+// Медаль с числом — у победителя матча за 3-е место.
+function medalSvg(cx, cy, th, label) {
+  return `<circle cx="${cx}" cy="${cy}" r="17" fill="${hexA(th.metal, .25)}" stroke="${th.metal}" stroke-width="2.5"/>
+    <text x="${cx}" y="${cy + 6}" text-anchor="middle" font-family="${FONT}" font-size="17" font-weight="900" fill="${th.light}">${label}</text>`;
+}
+
+export async function renderPlayoffMatchCard(match = {}, stage = cardStage(match.stage)) {
+  const IW = 1080, IH = 1148, IR = 390;
+  const centers = [{ x:225, y:420 }, { x:855, y:420 }];
+  const th = STAGE_THEMES[stage.key] || STAGE_THEMES.SF;
+  const final = stage.key === 'Final', third = stage.key === '3rd';
+  const winner = txt(match.winner), loser = txt(match.loser);
+  // «W · Group cross» → «W»: группа в плей-офф ни при чём.
+  const divRaw = txt(match.division).split('·')[0].trim();
+  const division = divRaw && !/^Division\b/i.test(divRaw) ? `Division ${divRaw}` : divRaw;
+  // Сверху — дивизион и сезон, стадия — под счётом, между именами.
+  const chip = [division, match.season ? `Season ${txt(match.season)}` : ''].filter(Boolean).join(' · ');
+  const chipW = Math.min(960, Math.max(260, chip.length * 12.5 + 64));
+  // «3RD PLACE MATCH» в узкий просвет между именами не помещается — в две строки.
+  const stageLines = /\sMATCH$/.test(stage.title) ? [stage.title.replace(/\s+MATCH$/, ''), 'MATCH'] : [stage.title];
+  const stageSvg = (() => {
+    const y0 = 606 - (stageLines.length - 1) * 15;
+    const line = `<line x1="${IW / 2 - 70}" y1="${y0 - 34}" x2="${IW / 2 + 70}" y2="${y0 - 34}" stroke="${hexA(th.metal, .6)}" stroke-width="2"/>`;
+    return line + stageLines.map((t, i) => `<text x="${IW / 2}" y="${y0 + i * 30}" text-anchor="middle" font-family="${FONT}" font-size="${final ? 34 : stageLines.length > 1 ? 24 : 27}"
+      font-weight="900" letter-spacing="${final ? 7 : 5}" fill="${th.light}">${esc(t)}</text>`).join('');
+  })();
+  const plate = (cx, text, win) => {
+    const w = 300, h = 70, x = cx - w / 2, y = 770;
+    if (!stage.places) return '';   // четвертьфинал, полуфинал: стадия говорит сама за себя
+    const fill = win ? hexA(th.metal, final ? .2 : .14) : 'rgba(154,148,139,.10)';
+    const line = win ? hexA(th.metal, .6) : 'rgba(154,148,139,.35)';
+    const fg = win ? th.light : C.silver;
+    // Значок места: кубок чемпиону, серебро «2» финалисту, бронза «3», «4» — без металла.
+    const silver = { metal: '#B8B8BC', light: '#E4E4E8' }, plain = { metal: '#8A7F6F', light: '#B9B1A5' };
+    const icon = final ? (win ? trophySvg(x + 46, y + h / 2 + 2, 0.72, th.light) : medalSvg(x + 42, y + h / 2, silver, '2'))
+      : third ? (win ? medalSvg(x + 42, y + h / 2, th, '3') : medalSvg(x + 42, y + h / 2, plain, '4')) : '';
+    const tx = icon ? cx + 22 : cx;
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="35" fill="${fill}" stroke="${line}" stroke-width="2"/>
+      ${icon}<text x="${tx}" y="${y + 44}" text-anchor="middle" font-family="${FONT}" font-size="${text.length > 14 ? 21 : 24}"
+      font-weight="900" letter-spacing="3" fill="${fg}">${esc(text)}</text>`;
+  };
+  const decor = stage.key === 'QF' ? floodlightsSvg(IW, th) : stage.key === 'SF' ? raysSvg(IW / 2, centers[0].y, th) : final ? sparklesSvg(IW, th) : '';
+  const svg = `<svg width="${IW}" height="${IH}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="${C.bg1}"/><stop offset="1" stop-color="${th.bg2}"/></linearGradient>
+      <radialGradient id="glow" cx="50%" cy="38%" r="58%">
+        <stop offset="0" stop-color="${th.glow}" stop-opacity="${final ? '.22' : '.11'}"/>
+        <stop offset="1" stop-color="${th.glow}" stop-opacity="0"/></radialGradient>
+      <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${th.light}" stop-opacity=".22"/><stop offset="1" stop-color="${th.light}" stop-opacity="0"/></linearGradient>
+      <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="${th.deep}"/><stop offset=".5" stop-color="${th.light}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient>
+    </defs>
+    <rect width="${IW}" height="${IH}" fill="url(#g)"/>
+    <rect width="${IW}" height="${IH}" fill="url(#glow)"/>
+    ${decor}
+    ${cornersSvg(IW, IH, th, final)}
+    <rect width="${IW}" height="7" fill="url(#bar)"/>
+    <rect y="${IH - 7}" width="${IW}" height="7" fill="url(#bar)"/>
+    <text x="${IW / 2}" y="68" text-anchor="middle" font-family="${FONT}" font-size="24" font-weight="700"
+      letter-spacing="6" fill="${th.metal}">PHUKET TENNIS FAMILY</text>
+    <rect x="${IW / 2 - chipW / 2}" y="94" width="${chipW}" height="50" rx="25" fill="${hexA(th.metal, .14)}" stroke="${hexA(th.metal, .55)}"/>
+    <text x="${IW / 2}" y="127" text-anchor="middle" font-family="${FONT}" font-size="21" font-weight="800"
+      letter-spacing="2" fill="${th.text}">${esc(chip)}</text>
+    ${scoreBlockSvg(match.score, IW / 2, centers[0].y + (scoreLines(match.score).length >= 3 ? 8 : -20), stage.key === 'SF' ? C.amber : th.light)}
+    ${stageSvg}
+    <text x="${centers[0].x}" y="660" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="800"
+      fill="${final ? th.light : C.text}">${esc(fit(winner, 18))}</text>
+    <text x="${centers[1].x}" y="660" text-anchor="middle" font-family="${FONT}" font-size="42" font-weight="700"
+      fill="${C.dim}">${esc(fit(loser, 18))}</text>
+    ${formChipsSvg(match.winnerMeta && match.winnerMeta.form, centers[0].x, 713, { gap:42, r:17 })}
+    ${formChipsSvg(match.loserMeta && match.loserMeta.form, centers[1].x, 713, { gap:42, r:17 })}
+    ${plate(centers[0].x, stage.win, true)}
+    ${plate(centers[1].x, stage.lose, false)}
+  </svg>`;
+  const [wr, lr] = await Promise.all([
+    match.winnerPhoto ? { buffer: match.winnerPhoto } : cardPhoto({ telegramId:match.winnerId, name:winner }),
+    match.loserPhoto ? { buffer: match.loserPhoto } : cardPhoto({ telegramId:match.loserId, name:loser })
+  ]);
+  const wf = final ? championFrame(th) : frameFor(th);
+  const [a, b] = await Promise.all([
+    wr.buffer ? toCircle(wr.buffer, IR, wf).catch(() => initialsCircle(winner, IR, wf)) : initialsCircle(winner, IR, wf),
+    lr.buffer ? toCircle(lr.buffer, IR, FRAME.loser).catch(() => initialsCircle(loser, IR, FRAME.loser)) : initialsCircle(loser, IR, FRAME.loser)
+  ]);
+  const [am, bm, logos] = await Promise.all([sharp(a).metadata(), sharp(b).metadata(), cardLogoComposites(IW, IH)]);
+  return sharp(Buffer.from(svg)).composite([
+    { input:a, left:Math.round(centers[0].x - am.width / 2), top:Math.round(centers[0].y - am.height / 2) },
+    { input:b, left:Math.round(centers[1].x - bm.width / 2), top:Math.round(centers[1].y - bm.height / 2) },
+    ...logos
+  ]).png({ compressionLevel:6 }).toBuffer();
+}
+
+// Афиша дня плей-офф: одна картинка на день со всем расписанием.
+// day: { date:'2026-11-07', venue:'The Peak Racquet Park',
+//        matches:[{ time:'09:00', division:'A', stage:'SF', p1:'…', p2:'…' }] }
+// Подписи английские, как на всех наших картинках; текст рассылки — на языке игрока.
+export async function renderPlayoffSchedule(day = {}) {
+  const IW = 1080, IH = 1350;
+  const rows = (day.matches || []).slice().sort((a, b) => txt(a.time).localeCompare(txt(b.time)));
+  const d = new Date(`${txt(day.date)}T12:00:00+07:00`);
+  const dateLine = Number.isFinite(d.getTime())
+    ? d.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Asia/Bangkok' }).toUpperCase()
+    : txt(day.date).toUpperCase();
+  const area = [330, 1090], gap = rows.length > 5 ? 12 : 22;
+  const rh = Math.min(130, Math.floor((area[1] - area[0] - gap * Math.max(0, rows.length - 1)) / Math.max(1, rows.length)));
+  // Матчей мало (финальный день) — блок встаёт по центру, а не жмётся к шапке.
+  const used = rows.length * rh + gap * Math.max(0, rows.length - 1);
+  const top = area[0] + Math.max(0, Math.floor((area[1] - area[0] - used) / 2));
+  const AV = Math.min(64, rh - 34);
+  const photos = await Promise.all(rows.flatMap(r => [r.p1, r.p2]).map(async name => {
+    const res = await cardPhoto({ name }).catch(() => ({}));
+    const fr = { ring:C.gold, glow:'rgba(201,167,106,.18)', soft:'', ringScale:0.04, glowScale:0.03 };
+    const buf = res?.buffer ? await toCircle(res.buffer, AV, fr).catch(() => initialsCircle(name, AV, fr)) : await initialsCircle(name, AV, fr);
+    return { buf, meta: await sharp(buf).metadata() };
+  }));
+  const layers = [];
+  let body = '';
+  rows.forEach((r, i) => {
+    const y = top + i * (rh + gap), cy = y + rh / 2, st = cardStage(r.stage);
+    const div = txt(r.division) ? `DIVISION ${txt(r.division).replace(/^division\s*/i, '').toUpperCase()}` : '';
+    const label = [div, st ? st.title : ''].filter(Boolean).join(' · ');
+    const isFinal = st?.key === 'Final';
+    body += `<rect x="60" y="${y}" width="${IW - 120}" height="${rh}" rx="22" fill="${isFinal ? 'rgba(201,167,106,.12)' : C.plate}"
+        stroke="${isFinal ? 'rgba(201,167,106,.55)' : C.plateLine}" stroke-width="${isFinal ? 2 : 1}"/>
+      <text x="150" y="${cy + 15}" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="900" fill="${C.gold}">${esc(txt(r.time) || 'TBA')}</text>
+      <line x1="240" y1="${y + 18}" x2="240" y2="${y + rh - 18}" stroke="${C.line}"/>
+      <text x="${(270 + IW - 80) / 2}" y="${y + 30}" text-anchor="middle" font-family="${FONT}" font-size="16" font-weight="800"
+        letter-spacing="3" fill="${isFinal ? C.gold : C.mute}">${esc(label)}</text>
+      <text x="${(270 + IW - 80) / 2}" y="${cy + 24}" text-anchor="middle" font-family="${FONT}" font-size="22" font-weight="800" fill="${C.mute}">vs</text>
+      <text x="${(270 + IW - 80) / 2 - 40}" y="${cy + 24}" text-anchor="end" font-family="${FONT}" font-size="28" font-weight="800" fill="${C.text}">${esc(fit(r.p1 || 'TBD', 15))}</text>
+      <text x="${(270 + IW - 80) / 2 + 40}" y="${cy + 24}" text-anchor="start" font-family="${FONT}" font-size="28" font-weight="800" fill="${C.text}">${esc(fit(r.p2 || 'TBD', 15))}</text>`;
+  });
+  const svg = `<svg width="${IW}" height="${IH}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${C.bg1}"/><stop offset="1" stop-color="#1B160F"/></linearGradient>
+      <radialGradient id="glow" cx="50%" cy="10%" r="70%"><stop offset="0" stop-color="${C.gold}" stop-opacity=".14"/><stop offset="1" stop-color="${C.gold}" stop-opacity="0"/></radialGradient>
+      <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8C6E3C"/><stop offset=".5" stop-color="#E9D29E"/><stop offset="1" stop-color="#8C6E3C"/></linearGradient>
+    </defs>
+    <rect width="${IW}" height="${IH}" fill="url(#g)"/><rect width="${IW}" height="${IH}" fill="url(#glow)"/>
+    <rect x="14" y="14" width="${IW - 28}" height="${IH - 28}" rx="28" fill="none" stroke="${C.gold}" stroke-opacity=".55" stroke-width="2"/>
+    <rect width="${IW}" height="7" fill="url(#bar)"/>
+    <text x="${IW / 2}" y="78" text-anchor="middle" font-family="${FONT}" font-size="24" font-weight="700" letter-spacing="6" fill="${C.mute}">PHUKET TENNIS FAMILY</text>
+    ${trophySvg(IW / 2, 140, 1.25)}
+    <text x="${IW / 2}" y="232" text-anchor="middle" font-family="${FONT}" font-size="64" font-weight="900" letter-spacing="4" fill="#E9D29E">PLAYOFF DAY</text>
+    <text x="${IW / 2}" y="282" text-anchor="middle" font-family="${FONT}" font-size="26" font-weight="800" letter-spacing="4" fill="${C.text}">${esc(dateLine)}${day.venue ? '  ·  ' + esc(txt(day.venue).toUpperCase()) : ''}</text>
+    ${body}
+  </svg>`;
+  rows.forEach((r, i) => {
+    // Аватарки — в фиксированных колонках по краям строки, имена прижаты к «vs».
+    const y = top + i * (rh + gap), cy = y + rh / 2;
+    const [a, b] = [photos[i * 2], photos[i * 2 + 1]];
+    layers.push({ input:a.buf, left:Math.round(300 - a.meta.width / 2), top:Math.round(cy + 14 - a.meta.height / 2) });
+    layers.push({ input:b.buf, left:Math.round(IW - 110 - b.meta.width / 2), top:Math.round(cy + 14 - b.meta.height / 2) });
+  });
+  const strip = await sponsorStrip({ top: 1110, bottom: IH - 30, canvas: IW });
+  if (strip?.layer) layers.push(strip.layer);
+  return sharp(Buffer.from(svg)).composite(layers).png({ compressionLevel:6 }).toBuffer();
+}
+
+// ------------------------------------------------------ сетка плей-офф картинкой
+// Сторис 1080×1920 в духе сетки на сайте: колонки раундов, в каждой паре —
+// аватарка, имя, посев; у сыгранной пары победитель золотом и счёт с его
+// стороны. Пустые места подписаны «Winner QF1». Сверху бренд и «PLAYOFFS»,
+// внизу лента партнёров.
+// data: { division, season, grouped, matches:[{ slot, stage, p1, p2, seed1, seed2,
+//          label1, label2, winner, score, played }] }
+export async function renderBracketImage(data = {}) {
+  const IW = 1080, IH = 1920;
+  const th = STAGE_THEMES.Final;
+  const grouped = Boolean(data.grouped);
+  const by = slot => (data.matches || []).find(m => m.slot === slot) || { slot };
+  const cols = grouped
+    ? [{ x: 36, w: 318, slots: ['QF1', 'QF2', 'QF3', 'QF4'], label: 'QUARTER-FINALS' }, { x: 381, w: 318, slots: ['SF1', 'SF2'], label: 'SEMI-FINALS' }, { x: 726, w: 318, slots: ['Final'], label: 'FINAL' }]
+    : [{ x: 60, w: 440, slots: ['SF1', 'SF2'], label: 'SEMI-FINALS' }, { x: 580, w: 440, slots: ['Final'], label: 'FINAL' }];
+  const top = 620, bottom = 1380, BH = 150;
+  // Вертикальные центры пар: первый раунд — равномерно, дальше — между своими парами.
+  const centers = [];
+  const n0 = cols[0].slots.length, step0 = (bottom - top) / n0;
+  centers.push(cols[0].slots.map((_, i) => top + step0 * (i + 0.5)));
+  for (let c = 1; c < cols.length; c++) centers.push(cols[c].slots.map((_, i) => (centers[c - 1][i * 2] + centers[c - 1][i * 2 + 1]) / 2));
+  const avatars = [];
+  const AV = 52;
+  let body = '';
+  const side = (m, k, x, y, w) => {
+    const name = txt(m['p' + k]), label = txt(m['label' + k]), seed = txt(m['seed' + k]);
+    const win = m.played && name && sameName(name, m.winner);
+    const lose = m.played && name && !win;
+    // Справа от имени — счёт или посев: имя ужимаем, чтобы не наехать на них.
+    const tail = (win && txt(m.score)) || (!m.played && seed);
+    const shown = name ? fit(name, w > 400 ? (tail ? 15 : 20) : (tail ? 10 : 13)) : (label || 'TBD');
+    if (name) avatars.push({ name, x: x + 16, y: y - AV / 2, win });
+    const tx = x + (name ? 16 + AV + 14 : 22);
+    const score = win ? txt(m.score).replace(/\s+/g, ' ') : '';
+    return `<text x="${tx}" y="${y + 9}" font-family="${FONT}" font-size="${name ? (w > 400 ? 27 : 23) : 19}" font-weight="${win ? 900 : 700}"
+        fill="${win ? th.light : lose ? C.mute : name ? C.text : C.mute}" ${name ? '' : 'font-style="italic"'}>${esc(shown)}</text>`
+      + (seed && !m.played ? `<text x="${x + w - 16}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="17" font-weight="800" fill="${C.mute}">${esc(seed.replace('·', ' · G'))}</text>` : '')
+      + (score ? `<text x="${x + w - 16}" y="${y + 9}" text-anchor="end" font-family="${FONT}" font-size="${w > 400 ? 22 : 18}" font-weight="900" fill="${th.light}">${esc(score)}</text>` : '');
+  };
+  cols.forEach((col, c) => {
+    body += `<text x="${col.x + col.w / 2}" y="${top - 40}" text-anchor="middle" font-family="${FONT}" font-size="20" font-weight="900" letter-spacing="4" fill="${th.metal}">${col.label}</text>`;
+    col.slots.forEach((slot, i) => {
+      const m = by(slot), cy = centers[c][i], y = cy - BH / 2, fin = slot === 'Final';
+      body += `<rect x="${col.x}" y="${y}" width="${col.w}" height="${BH}" rx="20" fill="${fin ? hexA(th.metal, .13) : 'rgba(255,255,255,.045)'}" stroke="${fin ? hexA(th.metal, .7) : 'rgba(255,255,255,.12)'}" stroke-width="${fin ? 2.5 : 1.2}"/>
+        <line x1="${col.x + 16}" y1="${cy}" x2="${col.x + col.w - 16}" y2="${cy}" stroke="rgba(255,255,255,.08)"/>`
+        + side(m, 1, col.x, y + BH * 0.27, col.w) + side(m, 2, col.x, y + BH * 0.73, col.w);
+      // Линии к следующему раунду.
+      if (c < cols.length - 1) {
+        const nx = cols[c + 1].x, ny = centers[c + 1][Math.floor(i / 2)], mx = col.x + col.w + (nx - col.x - col.w) / 2;
+        body += `<path d="M${col.x + col.w} ${cy} H${mx} V${ny} H${nx}" fill="none" stroke="${hexA(th.metal, .45)}" stroke-width="2"/>`;
+      }
+    });
+  });
+  // Матч за 3-е место — под финалом.
+  const third = by('3rd'), fc = cols[cols.length - 1], ty = bottom + 40;
+  body += `<text x="${fc.x + fc.w / 2}" y="${ty}" text-anchor="middle" font-family="${FONT}" font-size="18" font-weight="900" letter-spacing="4" fill="${STAGE_THEMES['3rd'].metal}">3RD PLACE</text>
+    <rect x="${fc.x}" y="${ty + 18}" width="${fc.w}" height="${BH}" rx="20" fill="rgba(255,255,255,.045)" stroke="${hexA(STAGE_THEMES['3rd'].metal, .5)}" stroke-width="1.2"/>
+    <line x1="${fc.x + 16}" y1="${ty + 18 + BH / 2}" x2="${fc.x + fc.w - 16}" y2="${ty + 18 + BH / 2}" stroke="rgba(255,255,255,.08)"/>`
+    + side(third, 1, fc.x, ty + 18 + BH * 0.27, fc.w) + side(third, 2, fc.x, ty + 18 + BH * 0.73, fc.w);
+  // Чемпион, если финал сыгран.
+  const fin = by('Final');
+  const champ = fin.played ? txt(fin.winner) : '';
+  const div = txt(data.division);
+  const chip = [div ? (/^division/i.test(div) || /^prime$/i.test(div) ? div.toUpperCase() : `DIVISION ${div.toUpperCase()}`) : '', data.season ? `SEASON ${data.season}` : ''].filter(Boolean).join(' · ');
+  const svg = `<svg width="${IW}" height="${IH}" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${C.bg1}"/><stop offset="1" stop-color="${th.bg2}"/></linearGradient>
+      <radialGradient id="glow" cx="50%" cy="18%" r="60%"><stop offset="0" stop-color="${th.glow}" stop-opacity=".18"/><stop offset="1" stop-color="${th.glow}" stop-opacity="0"/></radialGradient>
+      <linearGradient id="bar" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${th.deep}"/><stop offset=".5" stop-color="${th.light}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient>
+      <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${th.light}"/><stop offset=".55" stop-color="${th.metal}"/><stop offset="1" stop-color="${th.deep}"/></linearGradient></defs>
+    <rect width="${IW}" height="${IH}" fill="url(#g)"/><rect width="${IW}" height="${IH}" fill="url(#glow)"/>
+    ${cornersSvg(IW, IH, th, true)}
+    <rect width="${IW}" height="8" fill="url(#bar)"/><rect y="${IH - 8}" width="${IW}" height="8" fill="url(#bar)"/>
+    <text x="${IW / 2}" y="140" text-anchor="middle" font-family="${FONT}" font-size="28" font-weight="700" letter-spacing="9" fill="${th.light}">PHUKET TENNIS FAMILY</text>
+    <text x="${IW / 2}" y="430" text-anchor="middle" font-family="${FONT}" font-size="118" font-weight="900" letter-spacing="8" fill="url(#metal)">PLAYOFFS</text>
+    ${chip ? `<text x="${IW / 2}" y="488" text-anchor="middle" font-family="${FONT}" font-size="24" font-weight="800" letter-spacing="5" fill="${C.dim}">${esc(chip)}</text>` : ''}
+    ${body}
+    ${champ ? `${trophySvg(IW / 2 - 200, 1665, 1.05, th.light)}<text x="${IW / 2 + 20}" y="1652" text-anchor="middle" font-family="${FONT}" font-size="20" font-weight="900" letter-spacing="5" fill="${th.metal}">CHAMPION</text>
+      <text x="${IW / 2 + 20}" y="1700" text-anchor="middle" font-family="${FONT}" font-size="40" font-weight="900" fill="${th.light}">${esc(fit(champ, 22))}</text>` : ''}
+  </svg>`;
+  const layers = [];
+  for (const a of avatars) {
+    const res = await cardPhoto({ name: a.name }).catch(() => ({}));
+    const fr = a.win ? { ring: th.metal, glow: hexA(th.metal, .25), soft: '', ringScale: 0.05, glowScale: 0.04 } : { ring: '#4A423A', glow: 'rgba(0,0,0,0)', soft: '', ringScale: 0.04, glowScale: 0.02 };
+    const buf = res?.buffer ? await toCircle(res.buffer, AV, fr).catch(() => initialsCircle(a.name, AV, fr)) : await initialsCircle(a.name, AV, fr);
+    const meta = await sharp(buf).metadata();
+    layers.push({ input: buf, left: Math.round(a.x + AV / 2 - meta.width / 2), top: Math.round(a.y + AV / 2 - meta.height / 2) });
+  }
+  try {
+    const org = await sharp(path.join(CARD_LOGOS_DIR, 'ptf.png')).resize({ width: 220, height: 140, fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+    const meta = await sharp(org).metadata();
+    layers.push({ input: org, left: Math.round((IW - (meta.width || 220)) / 2), top: 172 });
+  } catch (e) { if (e?.code !== 'ENOENT') console.error('bracket logo failed:', e.message); }
+  const strip = await sponsorStrip({ top: champ ? 1740 : 1600, bottom: IH - 50, canvas: IW });
+  if (strip?.layer) layers.push(strip.layer);
+  return sharp(Buffer.from(svg)).composite(layers).png({ compressionLevel: 6 }).toBuffer();
+}
