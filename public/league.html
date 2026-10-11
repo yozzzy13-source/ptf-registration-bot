@@ -633,6 +633,9 @@ box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 .stgw{text-align:center;margin:2px 0 4px}
 .stg{display:inline-block;padding:3px 10px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.4px;color:#D9C7A3;background:rgba(201,167,106,.14);border:1px solid rgba(201,167,106,.45)}
 .stg.fin{color:#1b160f;background:linear-gradient(180deg,#E9D29E,#C9A76A);border-color:#C9A76A}
+/* значок стадии внутри верхней строки карточки — компактный, высоту не меняет */
+.mtop .stg{display:inline;padding:1px 6px;font-size:8.5px;letter-spacing:.6px;line-height:inherit;vertical-align:baseline}
+.mt.po .mtop{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-top:2px;padding-bottom:2px;margin-top:-2px;margin-bottom:7px}
 .mt.po{border-color:rgba(201,167,106,.45)!important}
 .mtop{text-align:center;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--mute2);
 font-weight:800;margin-bottom:9px}
@@ -2814,6 +2817,15 @@ function playoffStageOf(c){
 function stageLabel(st){
   return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'Матч за 3-е место':'3rd place match',Final:L?'Финал':'Final'})[st]||'';
 }
+// Верхняя строка карточки матча: номер, дата, сезон (у плей-офф — значок
+// стадии в той же строке, чтобы карточка была той же высоты, что и обычная), корт.
+function matchTopHtml(no,date,competition,court,season){
+  var st=playoffStageOf(competition);
+  var sn=String(season||'').trim()||((String(competition||'').match(/\bS\s*(\d+)\b/i)||[])[1]||'');
+  var parts=[no?'#'+no:'',matchDate(date),st?(sn?'S'+sn:''):competition,court?'📍 '+court:''].filter(Boolean).map(esc);
+  if(st)parts.splice(no?2:1,0,stageBadge(competition));
+  return parts.length?'<div class="mtop">'+parts.join(' · ')+'</div>':'';
+}
 function stageBadge(c){
   var st=playoffStageOf(c);if(!st)return '';
   return '<span class="stg'+(st==='Final'?' fin':'')+'">🏆 '+esc(stageLabel(st))+'</span>';
@@ -2909,10 +2921,9 @@ function plrBlur(){setTimeout(function(){if(!pSugOpen)return;pSugOpen=false;rend
 function moreFeed(){fLimit+=20;renderFeed()}
 function feedCard(m){
   var st=playoffStageOf(m.competition);
-  var top=[m.no?'#'+m.no:'',matchDate(m.date),st?'':m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
   // В ленте ярлык дивизиона стоит по центру под счётом — второй, в углу,
   // был дублем. Угловой остаётся только в карточке игрока.
-  return '<div class="mt'+(st?' po':'')+'">'+(top?'<div class="mtop">'+esc(top)+'</div>':'')+(st?'<div class="stgw">'+stageBadge(m.competition)+'</div>':'')
+  return '<div class="mt'+(st?' po':'')+'">'+matchTopHtml(m.no,m.date,m.competition,m.court,m.season)
     +'<div class="fm2">'
     +'<div onclick="openPlayer(\''+q(m.winner.id)+'\',\'matches\')">'+av(m.winner,'','w')+'</div>'
     // По имени тоже открывается карточка игрока — раньше кликался только кружок.
@@ -3799,8 +3810,7 @@ function matchRow(m){
   var dv=divTag(divisionAt(m.season,meName,openId,m.opponent,m.opponent_id,m.division),m.season);
   // Корт подставляется с сервера из листа матчей — в журнале результатов его нет.
   var st=playoffStageOf(m.competition);
-  var top=[m.match_no?'#'+m.match_no:'',matchDate(m.date),st?'':m.competition,m.court?'📍 '+m.court:''].filter(Boolean).join(' · ');
-  return '<div class="mt'+(st?' po':'')+'">'+dv+(top?'<div class="mtop">'+esc(top)+'</div>':'')+(st?'<div class="stgw">'+stageBadge(m.competition)+'</div>':'')
+  return '<div class="mt'+(st?' po':'')+'">'+dv+matchTopHtml(m.match_no,m.date,m.competition,m.court,m.season)
     +'<div class="mrow"><div class="res '+(m.result==='WIN'?'w':'l')+'">'+esc(m.result==='WIN'?'WIN':'LOST')+'</div>'
     +'<div onclick="openPlayer(\''+q(m.opponent_id)+'\',\''+backTo+'\')">'+av(opp)+'</div>'
     +'<div><div class="who">'+esc(m.opponent)+'</div><div class="sc">'+esc(m.score||'—')+'</div></div>'
