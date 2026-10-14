@@ -1746,13 +1746,14 @@ function findConfirmedSlot(done, wanted) {
     if (text.startsWith('/tables')) {
       const rest=text.replace(/^\/tables(?:@\w+)?/i,'').trim();
       const draft=/\bdraft\b/i.test(rest);
-      const only=rest.replace(/\bdraft\b/ig,'').trim();
+      const captionsOnly=/\bcaptions?\b/i.test(rest);
+      const only=rest.replace(/\b(?:draft|captions?)\b/ig,'').trim();
       const { runWeeklyStandings } = await import('./standings.js');
-      await sendMessage(chatId,only?`Собираю таблицу: ${escapeHtml(only)}…`:'Собираю таблицы по всем группам…');
+      await sendMessage(chatId,captionsOnly?'Пишу подписи к таблицам (без картинок)…':only?`Собираю таблицу: ${escapeHtml(only)}…`:'Собираю таблицы по всем группам…');
       try {
-        const out=await runWeeklyStandings(Date.now(),chatId,{force:true,only,save:!draft});
-        if(out.prepared)setTableBatch(out.prepared);
-        if(draft)await sendMessage(chatId,'Черновой прогон: точка отсчёта для стрелок не сдвинута.');
+        const out=await runWeeklyStandings(Date.now(),chatId,{force:true,only,save:!draft&&!captionsOnly,captionsOnly});
+        if(out.prepared&&!captionsOnly)setTableBatch(out.prepared);
+        if(draft&&!captionsOnly)await sendMessage(chatId,'Черновой прогон: точка отсчёта для стрелок не сдвинута.');
         return null;
       } catch(error) {
         return sendMessage(chatId,`⛔ ${escapeHtml(error.message)}`);

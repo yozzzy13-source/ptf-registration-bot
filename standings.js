@@ -53,13 +53,23 @@ export async function readSnapshots() {
 
 // Последний снимок по группе: имя → место. Берём самый свежий выпуск, а не
 // все строки подряд — иначе стрелка считалась бы от начала сезона.
-// before — выпуск, который сейчас собирается: снимки этого же дня и позже не
-// берём. Иначе повторный прогон в день выпуска сравнил бы таблицу саму с собой.
+// before — день выпуска, который сейчас собирается. «Неделя» — это неделя:
+// берём последний снимок, сделанный не позже чем за WEEK_GAP_DAYS дней до него.
+// Повторный прогон в среду после вторничного выпуска (или ручной внеплановый
+// выпуск) сравнивает с прошлым вторником, а не со вчерашним днём.
+export const WEEK_GAP_DAYS = 6;
 const issueOf = r => (txt(r.issue) || txt(r.taken_at)).slice(0, 10);
+const daysBefore = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) - n * 86400000).toISOString().slice(0, 10);
 export async function lastSnapshot(season, letter, group, rows = null, before = '') {
   const all = rows || await readSnapshots();
-  const mine = all.filter(r => groupKey(r.season, r.division, r.group) === groupKey(season, letter, group)
-    && (!before || issueOf(r) < txt(before).slice(0, 10)));
+  const day = txt(before).slice(0, 10);
+  const groupRows = all.filter(r => groupKey(r.season, r.division, r.group) === groupKey(season, letter, group));
+  let mine = groupRows;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    const cutoff = daysBefore(day, WEEK_GAP_DAYS);
+    mine = groupRows.filter(r => issueOf(r) <= cutoff);
+    if (!mine.length) mine = groupRows.filter(r => issueOf(r) < day);   // самый первый выпуск сезона
+  }
   if (!mine.length) return { issue: '', places: new Map(), stats: new Map() };
   const issue = mine.map(issueOf).sort().pop();
   const places = new Map(), stats = new Map();
@@ -364,29 +374,36 @@ export function storyFacts(data = {}, { daysLeft = null, regularOver = false, fo
   const stories = [];
   const add = (type, weight, text, names = []) => stories.push({ type, weight, text, names });
   const top = rows[0], second = rows[1];
+  const hasWeek = rows.some(r => r.week);
   const wk = rows.filter(r => r.week && r.week.played > 0);
-  if (top && Number.isFinite(top.was) && top.was !== 1 && top.matches > 0)
+  const playedThisWeek = name => !hasWeek || wk.some(r => r.name === name);
+  // События недели — главный приоритет; табличные «состояния» (лидер, без
+  // поражений, отрыв) повторяются из недели в неделю и идут ниже.
+  const perfect = wk.filter(r => r.week.played >= 2 && r.week.wins === r.week.played).sort((a, b) => b.week.wins - a.week.wins)[0];
+  if (perfect) add('perfect_week', 12 + perfect.week.wins / 2, `${perfect.name} won all ${perfect.week.wins} matches this week.`, [perfect.name]);
+  const bestWeek = wk.filter(r => r.week.wins >= 2 && r !== perfect).sort((a, b) => b.week.wins - a.week.wins || b.week.points - a.week.points)[0];
+  if (bestWeek) add('week_wins', 10 + bestWeek.week.wins / 2, `${bestWeek.name} won ${bestWeek.week.wins} matches this week.`, [bestWeek.name]);
+  const firstWin = wk.filter(r => r.week.winsBefore === 0 && r.week.wins >= 1 && r.matches > r.week.played)[0];
+  if (firstWin) add('first_win', 9, `${firstWin.name} got a first win of the season this week.`, [firstWin.name]);
+  if (top && Number.isFinite(top.was) && top.was !== 1 && top.matches > 0 && (!hasWeek || top.week?.wins > 0))
     add('new_leader', 9, `${top.name} takes over first place.`, [top.name]);
   const climber = rows.filter(r => r.move >= 2 && r.matches > 0).sort((a, b) => b.move - a.move)[0];
-  if (climber) add('climber', 6 + climber.move, `${climber.name} climbs ${climber.move} places to ${ord(climber.place)}.`, [climber.name]);
-  const perfect = wk.filter(r => r.week.played >= 2 && r.week.wins === r.week.played).sort((a, b) => b.week.wins - a.week.wins)[0];
-  if (perfect) add('perfect_week', 9 + perfect.week.wins / 2, `${perfect.name} won all ${perfect.week.wins} matches this week.`, [perfect.name]);
-  const bestWeek = wk.filter(r => r.week.wins >= 2 && r !== perfect).sort((a, b) => b.week.wins - a.week.wins || b.week.points - a.week.points)[0];
-  if (bestWeek) add('week_wins', 7 + bestWeek.week.wins / 2, `${bestWeek.name} won ${bestWeek.week.wins} matches this week.`, [bestWeek.name]);
-  const firstWin = wk.filter(r => r.week.winsBefore === 0 && r.week.wins >= 1 && r.matches > r.week.played)[0];
-  if (firstWin) add('first_win', 7, `${firstWin.name} got a first win of the season this week.`, [firstWin.name]);
+  if (climber) add('climber', 7 + climber.move, `${climber.name} climbs ${climber.move} places to ${ord(climber.place)}.`, [climber.name]);
   const busy = wk.filter(r => r.week.played >= 3).sort((a, b) => b.week.played - a.week.played)[0];
-  if (busy) add('busy_week', 5, `${busy.name} played ${busy.week.played} matches this week.`, [busy.name]);
+  if (busy) add('busy_week', 6, `${busy.name} played ${busy.week.played} matches this week.`, [busy.name]);
   const weekTotal = wk.reduce((sum, r) => sum + r.week.played, 0) / 2;
   if (weekTotal >= 3) add('busy_group', 4, `${Math.round(weekTotal)} matches played in the group this week.`, []);
   const unbeaten = rows.filter(r => r.matches >= 3 && r.wins === r.matches);
   if (unbeaten.length) add('unbeaten', 6 + unbeaten[0].matches / 2, `${unbeaten[0].name} is unbeaten: ${unbeaten[0].wins} from ${unbeaten[0].matches}.`, [unbeaten[0].name]);
-  const streaker = rows.map(r => ({ r, s: streakOf(forms.get(looseKey(r.name))) })).filter(x => x.s >= 3).sort((a, b) => b.s - a.s)[0];
+  // Форма игрока общая за все сезоны: серию считаем только в пределах побед
+  // этого сезона и только если на этой неделе она продолжилась.
+  const streaker = rows.map(r => ({ r, s: Math.min(streakOf(forms.get(looseKey(r.name))), Number(r.wins) || 0) }))
+    .filter(x => x.s >= 3 && (!hasWeek || x.r.week?.wins > 0)).sort((a, b) => b.s - a.s)[0];
   if (streaker && !unbeaten.some(u => u.name === streaker.r.name)) add('streak', 5 + streaker.s / 2, `${streaker.r.name} has won ${streaker.s} in a row.`, [streaker.r.name]);
-  if (clinched.length && stage !== 'early') add('clinched', stage === 'final' ? 6 : 9, `${clinched.map(r => r.name).join(', ')} ${clinched.length > 1 ? 'have' : 'has'} secured a playoff place.`, clinched.map(r => r.name));
+  if (clinched.length && stage !== 'early') add('clinched', stage === 'final' ? 6 : 7, `${clinched.map(r => r.name).join(', ')} ${clinched.length > 1 ? 'have' : 'has'} secured a playoff place.`, clinched.map(r => r.name));
   const race = cut > 0 ? rows.filter(r => r.place >= cut - 1 && r.place <= cut + 2) : [];
   if (race.length >= 3 && Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points)) <= 3 && stage !== 'early' && stage !== 'playoff')
-    add('race', stage === 'late' ? 10 : 6, `Only ${Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points))} points separate places ${race[0].place} to ${race[race.length - 1].place} around the playoff line.`, []);
+    add('race', stage === 'late' ? 8 : 5, `Only ${Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points))} points separate places ${race[0].place} to ${race[race.length - 1].place} around the playoff line.`, []);
   if (top && second && top.points - second.points >= 5 && stage !== 'early') add('runaway', 5, `${top.name} leads by ${top.points - second.points} points.`, [top.name]);
   if (stage === 'final' && top) add('regular_done', 8, `Regular season complete: ${rows.slice(0, cut).map(r => r.name).join(', ')} go through.`, rows.slice(0, cut).map(r => r.name));
   if (stage === 'playoff') {
@@ -394,7 +411,12 @@ export function storyFacts(data = {}, { daysLeft = null, regularOver = false, fo
     const pairs = [...(p.qf || []), ...(p.sf || []), p.sf1, p.sf2, p.final].filter(m => m && m.first && m.second && !m.played);
     if (pairs.length) add('playoff', 12, `Playoff matches ahead: ${pairs.map(m => `${m.first.name} vs ${m.second.name}`).join('; ')}.`, pairs.flatMap(m => [m.first.name, m.second.name]));
   }
-  if (top && top.matches > 0) add('leader', 2, `${top.name} leads with ${top.points} points.`, [top.name]);
+  // Неделя без матчей в группе — нейтральная фраза без имён.
+  if (!stories.length) add('quiet', 1, 'A quieter week here — the table is ready for the next round of matches.', []);
+  // Никого не называем, если он на этой неделе не играл.
+  for (let i = stories.length - 1; i >= 0; i--)
+    if (!['regular_done', 'playoff'].includes(stories[i].type) && !stories[i].names.every(playedThisWeek)) stories.splice(i, 1);
+  if (!stories.length) add('quiet', 1, 'A quieter week here — the table is ready for the next round of matches.', []);
   return { stage, progress, played: Math.round(played / 2), total: Math.round(totalDue / 2), daysLeft, perPlayer, stories };
 }
 
@@ -433,7 +455,7 @@ const FALLBACK = {
   runaway: [s => s.text, s => `${s.names[0]} is pulling away at the top.`],
   regular_done: [s => s.text, s => 'Regular season complete — the playoff line-up is set.'],
   playoff: [s => s.text, s => 'Playoff week is here.'],
-  leader: [s => s.text, s => `${s.names[0]} sets the pace.`]
+  quiet: [s => s.text, s => 'The table after this week — more matches to come.']
 };
 // Подпись должна влезать в сторис и в комментарий Instagram: одна фраза.
 export const CAPTION_MAX = 100;
@@ -466,7 +488,7 @@ async function askForCaption(prompt) {
       body: JSON.stringify({
         model: TEXT_MODEL, temperature: 0.9, max_tokens: 50,
         messages: [
-          { role: 'system', content: 'You write the caption for an Instagram story showing an amateur tennis league table. Exactly ONE short English sentence: at most 14 words and 90 characters. Celebrate a success from the past week, built around the MAIN STORY; add the SECOND STORY only if it still fits the limit. Positive only: never mention anyone who has not played yet, who dropped places or who is out of the race, and never mention losses. Use only the facts given — never invent results, streaks or numbers. Lively but not cheesy, no clichés like "heats up" or "every match counts". No emoji, no hashtags, no quotes. Never name the division, the group or the season — the image already shows them. Do not start the way the listed other captions start.' },
+          { role: 'system', content: 'You write the caption for an Instagram story showing an amateur tennis league table. Exactly ONE short English sentence: at most 14 words and 90 characters. Celebrate what happened THIS WEEK, built around the MAIN STORY; add the SECOND STORY only if it still fits the limit. You may name only players listed under THIS WEEK. Say "this week" only about facts listed under THIS WEEK. Do not talk about who leads the table unless that is the MAIN STORY. Positive only: never mention anyone who has not played, who dropped places or who is out of the race, and never mention losses. Use only the facts given — never invent results, streaks or numbers. Lively but not cheesy, no clichés like "heats up" or "every match counts". No emoji, no hashtags, no quotes. Never name the division, the group or the season — the image already shows them. Do not start the way the listed other captions start.' },
           { role: 'user', content: prompt }
         ]
       }),
@@ -490,16 +512,15 @@ export async function groupCaption(data, ctx = {}) {
   const pick = pickStory(facts, { usedTypes: ctx.usedTypes || [], lastType: last.type || '' });
   const avoid = [...(ctx.usedCaptions || []), last.caption].filter(Boolean).map(c => firstWords(c));
   const rows = (data.rows || []).slice(0, MAX_ROWS);
-  // Модель видит только тех, кто уже играл, и только движение вверх.
-  const table = rows.filter(r => Number(r.matches) > 0).map(r => `${r.place}. ${r.name} — ${r.points} pts, ${r.matches} played, ${r.wins} won`
-    + (r.move > 0 ? `, up ${r.move}` : '')
-    + (r.week?.played ? `; this week ${r.week.played} played, ${r.week.wins} won` : '')).join('\n');
+  // Модель видит только тех, кто играл на этой неделе, и только движение вверх.
+  const weekRows = rows.filter(r => r.week?.played > 0);
+  const table = weekRows.map(r => `${r.name} — now ${ord(r.place)}${r.move > 0 ? ` (up ${r.move})` : ''}; this week ${r.week.played} played, ${r.week.wins} won; season ${r.matches} played, ${r.wins} won`).join('\n');
   const prompt = [
     `SEASON STAGE: ${STAGE_TEXT[facts.stage]} ${facts.played} of ${facts.total} group matches played${facts.daysLeft !== null && facts.daysLeft >= 0 ? `, ${facts.daysLeft} days left in the regular season` : ''}.`,
     `MAIN STORY: ${pick.main?.text || 'The table after this week.'}`,
     pick.extra ? `SECOND STORY (optional): ${pick.extra.text}` : '',
     avoid.length ? `Other captions start with: ${avoid.map(a => `"${a}"`).join(', ')}` : '',
-    `TABLE:\n${table}`
+    `THIS WEEK:\n${table || '(nobody played this week — do not name anyone)'}`
   ].filter(Boolean).join('\n');
   let caption = fitCaption(await askForCaption(prompt));
   if (!caption || avoid.includes(firstWords(caption))) caption = fallbackCaption(pick, key + (ctx.issue || ''));
@@ -543,7 +564,7 @@ function spanLabel(data, now) {
 }
 
 // Собирает по картинке и подписи на каждую группу сезона.
-export async function buildStandingsStories(season = '', { now = Date.now(), only = '' } = {}) {
+export async function buildStandingsStories(season = '', { now = Date.now(), only = '', captionsOnly = false } = {}) {
   const useSeason = txt(season) || txt(await latestSeason().catch(() => '')) || '';
   const wanted = txt(only).toUpperCase().replace(/\s+/g, '');
   const snapshots = await readSnapshots();
@@ -556,7 +577,7 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
     if (!data) continue;
     const title = groupTitle(g.letter, g.group, g.title);
     const subtitle = `SEASON ${useSeason} · ${spanLabel(data, now)}`;
-    const buffer = await renderStandingsPoster(data, { title, subtitle });
+    const buffer = captionsOnly ? null : await renderStandingsPoster(data, { title, subtitle });
     items.push({ key: label, letter: g.letter, group: g.group, title, subtitle, data, buffer, caption: await groupCaption(data, captionCtx) });
   }
   return { season: useSeason, items, captionCtx };
@@ -566,12 +587,20 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
 // одним касанием копируется целиком. Кнопка публикации в сторис появляется
 // только когда Instagram подключён.
 const tableFileName = (item = {}) => `table-${String(item.key || 'group').toLowerCase()}-${dayIn()}.png`;
-export async function deliverStandings(prepared, { chatId, threadId = '', canPublish = false } = {}) {
+export async function deliverStandings(prepared, { chatId, threadId = '', canPublish = false, captionsOnly = false } = {}) {
   if (!chatId) return { ok: false, reason: 'no_chat' };
   const opts = threadId ? { message_thread_id: threadId } : {};
   if (!prepared?.items?.length) {
     await sendMessage(chatId, '📊 <b>Таблицы дивизионов</b>\n\nНет ни одной группы с данными.', opts).catch(() => {});
     return { ok: true, empty: true };
+  }
+  if (captionsOnly) {
+    // Только подписи: картинки уже есть, нужны новые тексты.
+    await sendMessage(chatId, `✍️ <b>Подписи к таблицам</b> · ${esc(spanLabel(prepared.items[0].data, Date.now()))}\nКартинки не пересобирались.`, opts).catch(() => {});
+    for (const item of prepared.items)
+      await sendMessage(chatId, `📊 <b>${esc(item.title)}</b>\n<code>${esc(item.caption)}</code>`, opts)
+        .catch(e => console.error('standings caption failed:', e.message));
+    return { ok: true, count: prepared.items.length, captionsOnly: true };
   }
   for (const item of prepared.items) {
     // Файлом, а не фотографией: sendPhoto ужимает картинку до 1280 px, и
@@ -604,7 +633,8 @@ export function standingsDue(now = Date.now(), timeZone = TIMEZONE) {
 
 // force — ручной прогон командой: расписание и отметку «уже делали» не смотрим.
 // save=false — черновой прогон: картинки будут, но точка отсчёта не сдвинется.
-export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { force = false, only = '', save = true, season = '' } = {}) {
+export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { force = false, only = '', save = true, season = '', captionsOnly = false } = {}) {
+  if (captionsOnly) save = false;   // только тексты — снимок мест не трогаем
   if (!force && !standingsDue(now)) return { ok: false, reason: 'not_due' };
   const issue = issueLabel(now);
   if (!force) {
@@ -615,8 +645,8 @@ export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { f
   const { instagramTarget } = await import('./publicity.js');
   const target = await instagramTarget(adminChatId);
   if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
-  const prepared = await buildStandingsStories(season, { now, only });
-  await deliverStandings(prepared, { ...target, canPublish: instagramEnabled() });
+  const prepared = await buildStandingsStories(season, { now, only, captionsOnly });
+  await deliverStandings(prepared, { ...target, canPublish: instagramEnabled(), captionsOnly });
   // Снимок кладём ПОСЛЕ отправки: если что-то упало по дороге, точка отсчёта
   // не сдвинется и следующий выпуск всё равно покажет верное движение.
   if (save) await rememberCaptions(prepared.captionCtx);
