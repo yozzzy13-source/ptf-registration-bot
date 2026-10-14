@@ -53,18 +53,26 @@ export async function readSnapshots() {
 
 // Последний снимок по группе: имя → место. Берём самый свежий выпуск, а не
 // все строки подряд — иначе стрелка считалась бы от начала сезона.
-export async function lastSnapshot(season, letter, group, rows = null) {
+// before — выпуск, который сейчас собирается: снимки этого же дня и позже не
+// берём. Иначе повторный прогон в день выпуска сравнил бы таблицу саму с собой.
+const issueOf = r => (txt(r.issue) || txt(r.taken_at)).slice(0, 10);
+export async function lastSnapshot(season, letter, group, rows = null, before = '') {
   const all = rows || await readSnapshots();
-  const mine = all.filter(r => groupKey(r.season, r.division, r.group) === groupKey(season, letter, group));
-  if (!mine.length) return { issue: '', places: new Map() };
-  const issue = mine.map(r => txt(r.issue) || txt(r.taken_at)).sort().pop();
-  const places = new Map();
+  const mine = all.filter(r => groupKey(r.season, r.division, r.group) === groupKey(season, letter, group)
+    && (!before || issueOf(r) < txt(before).slice(0, 10)));
+  if (!mine.length) return { issue: '', places: new Map(), stats: new Map() };
+  const issue = mine.map(issueOf).sort().pop();
+  const places = new Map(), stats = new Map();
+  const num = v => (txt(v) === '' ? null : Number(v));
   for (const r of mine) {
-    if ((txt(r.issue) || txt(r.taken_at)) !== issue) continue;
+    if (issueOf(r) !== issue) continue;
     const place = Number(r.place);
-    if (nameKey(r.player) && Number.isFinite(place)) places.set(nameKey(r.player), place);
+    if (!nameKey(r.player) || !Number.isFinite(place)) continue;
+    places.set(nameKey(r.player), place);
+    const st = { matches: num(r.matches), wins: num(r.wins), points: num(r.points) };
+    if ([st.matches, st.wins, st.points].every(Number.isFinite)) stats.set(nameKey(r.player), st);
   }
-  return { issue, places };
+  return { issue, places, stats };
 }
 
 export async function saveSnapshot(issue, season, letter, group, table = []) {
@@ -97,14 +105,22 @@ export function groupTitle(letter, group, title = '') {
   return txt(group) ? `${base} · GROUP ${txt(group).toUpperCase()}` : base;
 }
 
-export async function buildStandings(season, letter, group = '', snapshots = null) {
+export async function buildStandings(season, letter, group = '', snapshots = null, issue = '') {
   const table = await getDivisionTable(letter, season, group).catch(() => null);
   if (!table?.ok || !table.players?.length) return null;
-  const before = await lastSnapshot(season, letter, group, snapshots);
+  const before = await lastSnapshot(season, letter, group, snapshots, issue);
   const rows = table.players.map(p => {
     const was = before.places.get(nameKey(p.name));
     const move = Number.isFinite(was) ? was - p.place : null;   // + вверх, − вниз
-    return { ...p, was: Number.isFinite(was) ? was : null, move };
+    // Что игрок сделал за неделю: разница с прошлым снимком.
+    const prev = before.stats.get(nameKey(p.name));
+    const week = prev ? {
+      played: Math.max(0, (Number(p.matches) || 0) - prev.matches),
+      wins: Math.max(0, (Number(p.wins) || 0) - prev.wins),
+      points: Math.max(0, (Number(p.points) || 0) - prev.points),
+      winsBefore: prev.wins
+    } : null;
+    return { ...p, was: Number.isFinite(was) ? was : null, move, week };
   });
   return { season, letter, group, rows, playoff: table.playoff || null, baseline: !before.places.size, since: before.issue };
 }
@@ -341,41 +357,44 @@ export function storyFacts(data = {}, { daysLeft = null, regularOver = false, fo
 
   // Кто уже точно в четвёрке: обогнать его могут меньше четырёх человек.
   const clinched = cut > 0 ? rows.filter(r => r.place <= cut && rows.filter(o => o !== r && maxPts(o) >= r.points).length < cut) : [];
-  const fourth = rows.find(r => r.place === cut);
-  const out = fourth && progress >= 0.5 ? rows.filter(r => r.place > cut && maxPts(r) < fourth.points) : [];
-  const medianLeft = [...rows].map(left).sort((a, b) => a - b)[Math.floor(n / 2)] || 0;
 
+  // Только успехи: никого не называем за падение, за то, что ещё не играл,
+  // или за то, что четвёрку уже не догнать. Сюжеты недели — по разнице с
+  // прошлым выпуском (сколько сыграл, выиграл, набрал за эти дни).
   const stories = [];
   const add = (type, weight, text, names = []) => stories.push({ type, weight, text, names });
   const top = rows[0], second = rows[1];
+  const wk = rows.filter(r => r.week && r.week.played > 0);
   if (top && Number.isFinite(top.was) && top.was !== 1 && top.matches > 0)
-    add('new_leader', 9, `${top.name} takes over first place (was ${ord(top.was)}).`, [top.name]);
-  const climber = rows.filter(r => r.move >= 2).sort((a, b) => b.move - a.move)[0];
+    add('new_leader', 9, `${top.name} takes over first place.`, [top.name]);
+  const climber = rows.filter(r => r.move >= 2 && r.matches > 0).sort((a, b) => b.move - a.move)[0];
   if (climber) add('climber', 6 + climber.move, `${climber.name} climbs ${climber.move} places to ${ord(climber.place)}.`, [climber.name]);
-  const faller = rows.filter(r => r.move <= -2).sort((a, b) => a.move - b.move)[0];
-  if (faller) add('faller', 4 + Math.abs(faller.move) / 2, `${faller.name} drops ${Math.abs(faller.move)} places to ${ord(faller.place)}.`, [faller.name]);
-  const inHand = rows.filter(r => left(r) - medianLeft >= 2 && maxPts(r) >= (rows[cut - 1]?.points || 0))
-    .sort((a, b) => left(b) - left(a))[0];
-  if (inHand && stage !== 'final') add('in_hand', stage === 'early' ? 5 : 8, `${inHand.name} is ${ord(inHand.place)} with ${left(inHand)} matches still to play — more than most of the group.`, [inHand.name]);
-  const notStarted = rows.filter(r => !Number(r.matches));
-  if (notStarted.length && progress >= 0.3 && stage !== 'final') add('not_started', 6, `${notStarted.map(r => r.name).join(', ')} ${notStarted.length > 1 ? 'have' : 'has'} not played a match yet.`, notStarted.map(r => r.name));
+  const perfect = wk.filter(r => r.week.played >= 2 && r.week.wins === r.week.played).sort((a, b) => b.week.wins - a.week.wins)[0];
+  if (perfect) add('perfect_week', 9 + perfect.week.wins / 2, `${perfect.name} won all ${perfect.week.wins} matches this week.`, [perfect.name]);
+  const bestWeek = wk.filter(r => r.week.wins >= 2 && r !== perfect).sort((a, b) => b.week.wins - a.week.wins || b.week.points - a.week.points)[0];
+  if (bestWeek) add('week_wins', 7 + bestWeek.week.wins / 2, `${bestWeek.name} won ${bestWeek.week.wins} matches this week.`, [bestWeek.name]);
+  const firstWin = wk.filter(r => r.week.winsBefore === 0 && r.week.wins >= 1 && r.matches > r.week.played)[0];
+  if (firstWin) add('first_win', 7, `${firstWin.name} got a first win of the season this week.`, [firstWin.name]);
+  const busy = wk.filter(r => r.week.played >= 3).sort((a, b) => b.week.played - a.week.played)[0];
+  if (busy) add('busy_week', 5, `${busy.name} played ${busy.week.played} matches this week.`, [busy.name]);
+  const weekTotal = wk.reduce((sum, r) => sum + r.week.played, 0) / 2;
+  if (weekTotal >= 3) add('busy_group', 4, `${Math.round(weekTotal)} matches played in the group this week.`, []);
   const unbeaten = rows.filter(r => r.matches >= 3 && r.wins === r.matches);
   if (unbeaten.length) add('unbeaten', 6 + unbeaten[0].matches / 2, `${unbeaten[0].name} is unbeaten: ${unbeaten[0].wins} from ${unbeaten[0].matches}.`, [unbeaten[0].name]);
   const streaker = rows.map(r => ({ r, s: streakOf(forms.get(looseKey(r.name))) })).filter(x => x.s >= 3).sort((a, b) => b.s - a.s)[0];
   if (streaker && !unbeaten.some(u => u.name === streaker.r.name)) add('streak', 5 + streaker.s / 2, `${streaker.r.name} has won ${streaker.s} in a row.`, [streaker.r.name]);
-  if (clinched.length && stage !== 'early') add('clinched', stage === 'final' ? 6 : 9, `${clinched.map(r => r.name).join(', ')} ${clinched.length > 1 ? 'have' : 'has'} mathematically secured a top-${cut} (playoff) place.`, clinched.map(r => r.name));
+  if (clinched.length && stage !== 'early') add('clinched', stage === 'final' ? 6 : 9, `${clinched.map(r => r.name).join(', ')} ${clinched.length > 1 ? 'have' : 'has'} secured a playoff place.`, clinched.map(r => r.name));
   const race = cut > 0 ? rows.filter(r => r.place >= cut - 1 && r.place <= cut + 2) : [];
   if (race.length >= 3 && Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points)) <= 3 && stage !== 'early' && stage !== 'playoff')
-    add('race', stage === 'late' ? 10 : 6, `Only ${Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points))} points separate places ${race[0].place} to ${race[race.length - 1].place} around the playoff line (top ${cut}).`, race.map(r => r.name));
-  if (out.length && stage === 'late') add('out', 3, `${out.map(r => r.name).join(', ')} can no longer reach the top ${cut}.`, out.map(r => r.name));
+    add('race', stage === 'late' ? 10 : 6, `Only ${Math.max(...race.map(r => r.points)) - Math.min(...race.map(r => r.points))} points separate places ${race[0].place} to ${race[race.length - 1].place} around the playoff line.`, []);
   if (top && second && top.points - second.points >= 5 && stage !== 'early') add('runaway', 5, `${top.name} leads by ${top.points - second.points} points.`, [top.name]);
-  if (stage === 'final' && top) add('regular_done', 8, `Regular season complete: ${rows.slice(0, cut).map(r => `${r.place}. ${r.name}`).join(', ')} go through.`, rows.slice(0, cut).map(r => r.name));
+  if (stage === 'final' && top) add('regular_done', 8, `Regular season complete: ${rows.slice(0, cut).map(r => r.name).join(', ')} go through.`, rows.slice(0, cut).map(r => r.name));
   if (stage === 'playoff') {
     const p = data.playoff || {};
     const pairs = [...(p.qf || []), ...(p.sf || []), p.sf1, p.sf2, p.final].filter(m => m && m.first && m.second && !m.played);
     if (pairs.length) add('playoff', 12, `Playoff matches ahead: ${pairs.map(m => `${m.first.name} vs ${m.second.name}`).join('; ')}.`, pairs.flatMap(m => [m.first.name, m.second.name]));
   }
-  if (top) add('leader', 2, `${top.name} leads with ${top.points} points after ${top.matches} matches.`, [top.name]);
+  if (top && top.matches > 0) add('leader', 2, `${top.name} leads with ${top.points} points.`, [top.name]);
   return { stage, progress, played: Math.round(played / 2), total: Math.round(totalDue / 2), daysLeft, perPlayer, stories };
 }
 
@@ -400,27 +419,40 @@ export function pickStory(facts, { usedTypes = [], lastType = '' } = {}) {
 // Запасные фразы на случай, если модель недоступна: под каждый сюжет
 // несколько вариантов, выбор зависит от группы — подписи не совпадают.
 const FALLBACK = {
-  new_leader: [s => s.text.replace(/\s*\(was \d+\w*\)/, ''), s => `New name on top: ${s.names[0]}.`],
+  new_leader: [s => s.text, s => `New name on top: ${s.names[0]}.`],
   climber: [s => s.text, s => `Big week for ${s.names[0]} — up the table.`],
-  faller: [s => s.text, s => `A tough week for ${s.names[0]}.`],
-  in_hand: [s => s.text, s => `Watch ${s.names[0]}: plenty of matches in hand.`],
-  not_started: [s => s.text, s => `Still waiting for a first match from ${s.names.join(', ')}.`],
+  perfect_week: [s => s.text, s => `A perfect week for ${s.names[0]}.`],
+  week_wins: [s => s.text, s => `Strong week for ${s.names[0]}.`],
+  first_win: [s => s.text, s => `First win of the season for ${s.names[0]}.`],
+  busy_week: [s => s.text, s => `Busiest week in the group: ${s.names[0]}.`],
+  busy_group: [s => s.text],
   unbeaten: [s => s.text, s => `Nobody has beaten ${s.names[0]} yet.`],
   streak: [s => s.text, s => `${s.names[0]} keeps on winning.`],
-  clinched: [s => s.text.replace(' mathematically', ''), s => `${s.names.join(', ')} — playoff place confirmed.`],
+  clinched: [s => s.text, s => `Playoff place confirmed: ${s.names.join(', ')}.`],
   race: [s => s.text, s => 'The fight for the playoff places is wide open.'],
-  out: [s => s.text],
   runaway: [s => s.text, s => `${s.names[0]} is pulling away at the top.`],
-  regular_done: [s => s.text],
-  playoff: [s => s.text],
+  regular_done: [s => s.text, s => 'Regular season complete — the playoff line-up is set.'],
+  playoff: [s => s.text, s => 'Playoff week is here.'],
   leader: [s => s.text, s => `${s.names[0]} sets the pace.`]
 };
+// Подпись должна влезать в сторис и в комментарий Instagram: одна фраза.
+export const CAPTION_MAX = 100;
+function fitCaption(t = '') {
+  const s = txt(t).replace(/\s+/g, ' ');
+  if (s.length <= CAPTION_MAX) return s;
+  const first = (s.match(/^.+?[.!?](?=\s|$)/) || [''])[0];
+  return first && first.length <= CAPTION_MAX ? first : '';
+}
 function fallbackCaption(pick, seed = '') {
   const s = pick.main;
   if (!s) return 'Standings updated.';
   const list = FALLBACK[s.type] || [x => x.text];
   const h = [...String(seed)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
-  return list[h % list.length](s);
+  for (let i = 0; i < list.length; i++) {
+    const c = fitCaption(list[(h + i) % list.length](s));
+    if (c) return c;
+  }
+  return 'Standings updated — new week, new results.';
 }
 
 async function askForCaption(prompt) {
@@ -432,9 +464,9 @@ async function askForCaption(prompt) {
       method: 'POST',
       headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: TEXT_MODEL, temperature: 0.9, max_tokens: 90,
+        model: TEXT_MODEL, temperature: 0.9, max_tokens: 50,
         messages: [
-          { role: 'system', content: 'You write the caption for an Instagram story showing an amateur tennis league table. ONE or TWO short English sentences, at most 28 words in total. Build it around the MAIN STORY you are given; you may add the SECOND STORY only if it fits naturally. Use only the facts given — never invent results, streaks or numbers. Match the tone to the season stage. Lively but not cheesy. No emoji, no hashtags, no quotes. Never name the division, the group or the season — the image already shows them. Do not start the way the listed other captions start.' },
+          { role: 'system', content: 'You write the caption for an Instagram story showing an amateur tennis league table. Exactly ONE short English sentence: at most 14 words and 90 characters. Celebrate a success from the past week, built around the MAIN STORY; add the SECOND STORY only if it still fits the limit. Positive only: never mention anyone who has not played yet, who dropped places or who is out of the race, and never mention losses. Use only the facts given — never invent results, streaks or numbers. Lively but not cheesy, no clichés like "heats up" or "every match counts". No emoji, no hashtags, no quotes. Never name the division, the group or the season — the image already shows them. Do not start the way the listed other captions start.' },
           { role: 'user', content: prompt }
         ]
       }),
@@ -452,12 +484,16 @@ const firstWords = (t = '', k = 3) => txt(t).split(/\s+/).slice(0, k).join(' ');
 export async function groupCaption(data, ctx = {}) {
   const facts = storyFacts(data, ctx);
   const key = groupKey(data.season, data.letter, data.group);
-  const last = ctx.lastCaptions?.[key] || {};
+  // Подписи этого же выпуска (повторный прогон в тот же день) прошлой неделей не считаем.
+  const stored = ctx.lastCaptions?.[key] || {};
+  const last = stored.issue && stored.issue === ctx.issue ? {} : stored;
   const pick = pickStory(facts, { usedTypes: ctx.usedTypes || [], lastType: last.type || '' });
   const avoid = [...(ctx.usedCaptions || []), last.caption].filter(Boolean).map(c => firstWords(c));
   const rows = (data.rows || []).slice(0, MAX_ROWS);
-  const table = rows.map(r => `${r.place}. ${r.name} — ${r.points} pts, ${r.matches} played, ${r.wins} won`
-    + (Number.isFinite(r.move) && r.move !== 0 ? `, ${r.move > 0 ? 'up' : 'down'} ${Math.abs(r.move)}` : '')).join('\n');
+  // Модель видит только тех, кто уже играл, и только движение вверх.
+  const table = rows.filter(r => Number(r.matches) > 0).map(r => `${r.place}. ${r.name} — ${r.points} pts, ${r.matches} played, ${r.wins} won`
+    + (r.move > 0 ? `, up ${r.move}` : '')
+    + (r.week?.played ? `; this week ${r.week.played} played, ${r.week.wins} won` : '')).join('\n');
   const prompt = [
     `SEASON STAGE: ${STAGE_TEXT[facts.stage]} ${facts.played} of ${facts.total} group matches played${facts.daysLeft !== null && facts.daysLeft >= 0 ? `, ${facts.daysLeft} days left in the regular season` : ''}.`,
     `MAIN STORY: ${pick.main?.text || 'The table after this week.'}`,
@@ -465,11 +501,11 @@ export async function groupCaption(data, ctx = {}) {
     avoid.length ? `Other captions start with: ${avoid.map(a => `"${a}"`).join(', ')}` : '',
     `TABLE:\n${table}`
   ].filter(Boolean).join('\n');
-  let caption = await askForCaption(prompt);
+  let caption = fitCaption(await askForCaption(prompt));
   if (!caption || avoid.includes(firstWords(caption))) caption = fallbackCaption(pick, key + (ctx.issue || ''));
   if (ctx.usedTypes && pick.main) ctx.usedTypes.push(pick.main.type);
   if (ctx.usedCaptions) ctx.usedCaptions.push(caption);
-  if (ctx.thisIssue) ctx.thisIssue[key] = { type: pick.main?.type || '', caption };
+  if (ctx.thisIssue) ctx.thisIssue[key] = { type: pick.main?.type || '', caption, issue: ctx.issue || '' };
   return caption;
 }
 
@@ -516,7 +552,7 @@ export async function buildStandingsStories(season = '', { now = Date.now(), onl
   for (const g of await standingsGroups(useSeason)) {
     const label = `${txt(g.letter).toUpperCase()}${txt(g.group).toUpperCase()}`;
     if (wanted && label !== wanted && txt(g.letter).toUpperCase() !== wanted) continue;
-    const data = await buildStandings(useSeason, g.letter, g.group, snapshots);
+    const data = await buildStandings(useSeason, g.letter, g.group, snapshots, issueLabel(now));
     if (!data) continue;
     const title = groupTitle(g.letter, g.group, g.title);
     const subtitle = `SEASON ${useSeason} · ${spanLabel(data, now)}`;
