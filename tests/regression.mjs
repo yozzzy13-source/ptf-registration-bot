@@ -1640,6 +1640,25 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const snapRows=[['2026-10-06','1'],['2026-10-13','5']].map(([issue,place])=>({issue,season:'2',division:'B',group:'',player:'P One',place,matches:'3',wins:'2',points:'7'}));
  const base=await st.lastSnapshot('2','B','',snapRows,'2026-10-13');
  check(base.issue==='2026-10-06'&&base.places.get('p one')===1,'Повторный прогон в день выпуска сравнивает с прошлой неделей, а не с собой');
+ const wed=await st.lastSnapshot('2','B','',snapRows,'2026-10-14');
+ check(wed.issue==='2026-10-06','Прогон в среду после вторника сравнивает с прошлым вторником, а не со вчера');
+ check((await st.lastSnapshot('2','B','',snapRows,'2026-10-20')).issue==='2026-10-13','Следующий вторник сравнивает с этим вторником');
+ // Серия из прошлого сезона не считается; не игравшие на неделе не называются.
+ const wkPrime={season:'2',letter:'PRIME',group:'',rows:[
+  {place:1,name:'Phil M',points:4,matches:2,wins:1,move:0,was:1,week:{played:0,wins:0,points:0,winsBefore:1}},
+  {place:2,name:'Louie M',points:3,matches:1,wins:1,move:0,was:2,week:{played:0,wins:0,points:0,winsBefore:1}},
+  {place:3,name:'Andrew P',points:3,matches:1,wins:1,move:2,was:5,week:{played:1,wins:1,points:3,winsBefore:0}},
+  {place:4,name:'Sergei S',points:1,matches:1,wins:0,move:0,was:4,week:{played:1,wins:0,points:1,winsBefore:0}}]};
+ const pf=st.storyFacts(wkPrime,{daysLeft:25,forms:new Map([['louiem',['W','W','W']]])});
+ check(!pf.stories.some(x=>x.type==='streak'),'Серия из прошлого сезона (у Louie 1 победа в сезоне) не превращается в «3 подряд»');
+ check(!pf.stories.some(x=>x.names.includes('Phil M')||x.names.includes('Louie M')),'Лидеры, не игравшие на этой неделе, в сюжеты не попадают');
+ check(!pf.stories.some(x=>x.type==='leader'),'Сюжета «просто лидирует» больше нет');
+ check(st.pickStory(pf,{}).main.names.includes('Andrew P'),'Главный сюжет — тот, кто выиграл на этой неделе');
+ const quietF=st.storyFacts({...wkPrime,rows:wkPrime.rows.map(r=>({...r,move:0,week:{played:0,wins:0,points:0,winsBefore:r.wins}}))},{daysLeft:25});
+ check(quietF.stories.length&&quietF.stories.every(x=>!x.names.length),'Пустая неделя — нейтральная фраза без имён');
+ const srcSt=await fs.readFile(path.join(root,'standings.js'),'utf8'),botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/captionsOnly \? null : await renderStandingsPoster/.test(srcSt)&&/if \(captionsOnly\) save = false/.test(srcSt),'/tables captions: без картинок и без сдвига точки отсчёта');
+ check(/captions\?/.test(botSrc)&&/draft\|captions/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'Режим captions разбирается командой и описан в /help');
  check(base.stats.size===1,'Из снимка берутся сыгранные, победы и очки — для сюжетов недели');
  const ctxSame={usedTypes:[],usedCaptions:[],thisIssue:{},issue:'2026-10-13',lastCaptions:{'2|B|':{type:'race',caption:'X',issue:'2026-10-13'}}};
  await st.groupCaption(late,ctxSame);
