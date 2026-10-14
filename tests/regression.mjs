@@ -1616,7 +1616,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const cap=await st.groupCaption({rows:[{name:'Alice One',place:1,points:21,matches:7,wins:7,move:2}]});
  check(!/#/.test(cap),'В подписи к сторис нет хэштегов');
  check(!/DIVISION|GROUP|SEASON/i.test(cap),'Дивизион, группа и сезон в тексте не повторяются — они на картинке');
- check(cap.split(/\s+/).length<=30,'Подпись — одна-две короткие фразы');
+ check(cap.length<=st.CAPTION_MAX,'Подпись короткая — влезает в сторис и комментарий');
  // Сюжет недели: стадия по сыгранным матчам, расчёт шансов, без повторов в выпуске.
  const late={season:'2',letter:'B',group:'',rows:[
   {place:1,name:'P One',points:19,matches:7,wins:6,move:0,was:1},{place:2,name:'P Two',points:15,matches:7,wins:4,move:1,was:3},
@@ -1626,7 +1626,24 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const lf=st.storyFacts(late,{daysLeft:10});
  check(lf.stage==='late','Почти все матчи сыграны и до конца регулярки 10 дней — финишная прямая');
  check(lf.stories.some(x=>x.type==='clinched'&&x.names.includes('P One')),'Тот, кого уже не догнать, — «точно в плей-офф»');
- check(lf.stories.some(x=>x.type==='in_hand'&&x.names.includes('P Seven')),'Игрок с матчами в запасе замечен');
+ check(!lf.stories.some(x=>['in_hand','faller','not_started','out'].includes(x.type)),'Только успехи: ни падений, ни «ещё не играл», ни «уже не догнать»');
+ const zero=st.storyFacts({...late,rows:[...late.rows,{place:9,name:'P Zero',points:0,matches:0,wins:0,move:-3,was:6}]},{daysLeft:10});
+ check(!zero.stories.some(x=>x.names.includes('P Zero')||/P Zero/.test(x.text)),'Игрок без матчей в подписи не появляется');
+ // Неделя: разница с прошлым снимком.
+ const wkRows=late.rows.map(r=>({...r,week:{played:0,wins:0,points:0,winsBefore:r.wins}}));
+ wkRows[1].week={played:2,wins:2,points:6,winsBefore:2};wkRows[7].week={played:1,wins:1,points:3,winsBefore:0};wkRows[7].wins=1;
+ wkRows[4].week={played:3,wins:2,points:7,winsBefore:1};wkRows[4].wins=3;
+ const wf=st.storyFacts({...late,rows:wkRows},{daysLeft:10});
+ check(wf.stories.some(x=>x.type==='perfect_week'&&x.names[0]==='P Two'),'«Все матчи недели выиграны» замечено');
+ check(wf.stories.some(x=>x.type==='first_win'&&x.names[0]==='P Eight'),'Первая победа в сезоне замечена');
+ check(wf.stories.some(x=>x.type==='week_wins'&&x.names[0]==='P Five')&&wf.stories.some(x=>x.type==='busy_week'),'Лучшая неделя и самая активная неделя замечены');
+ const snapRows=[['2026-10-06','1'],['2026-10-13','5']].map(([issue,place])=>({issue,season:'2',division:'B',group:'',player:'P One',place,matches:'3',wins:'2',points:'7'}));
+ const base=await st.lastSnapshot('2','B','',snapRows,'2026-10-13');
+ check(base.issue==='2026-10-06'&&base.places.get('p one')===1,'Повторный прогон в день выпуска сравнивает с прошлой неделей, а не с собой');
+ check(base.stats.size===1,'Из снимка берутся сыгранные, победы и очки — для сюжетов недели');
+ const ctxSame={usedTypes:[],usedCaptions:[],thisIssue:{},issue:'2026-10-13',lastCaptions:{'2|B|':{type:'race',caption:'X',issue:'2026-10-13'}}};
+ await st.groupCaption(late,ctxSame);
+ check(ctxSame.thisIssue[Object.keys(ctxSame.thisIssue)[0]].issue==='2026-10-13','Подпись помнит свой выпуск — повторный прогон не считает её прошлой неделей');
  check(lf.stories.some(x=>x.type==='race'),'Плотная борьба у черты плей-офф замечена');
  const early=st.storyFacts({...late,rows:late.rows.map(r=>({...r,matches:1,points:r.place<5?3:1,move:0}))},{daysLeft:10});
  check(early.stage!=='late','Стадия — по сыгранным матчам, а не по календарю');
@@ -1635,6 +1652,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(st.pickStory(lf,{lastType:p1.main.type}).main.type!==p1.main.type,'Сюжет прошлой недели в группе не повторяется');
  const ctxCap={usedTypes:[],usedCaptions:[],thisIssue:{},lastCaptions:{}};
  const c1=await st.groupCaption(late,ctxCap),c2=await st.groupCaption({...late,letter:'A'},ctxCap);
+ check(c1.length<=st.CAPTION_MAX&&c2.length<=st.CAPTION_MAX,'Все подписи выпуска не длиннее лимита');
  check(c1!==c2&&c1.split(' ').slice(0,3).join(' ')!==c2.split(' ').slice(0,3).join(' '),'Подписи групп в выпуске начинаются по-разному');
  check(Object.keys(ctxCap.thisIssue).length===2,'Подписи выпуска запоминаются для следующей недели');
  check(!/[А-Яа-я]/.test(cap),'Подпись только на английском');
