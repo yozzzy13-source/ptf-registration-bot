@@ -1022,6 +1022,37 @@ export function invalidateSheetCache() { cache.clear(); }
 const sheetGen = new Map();
 function forgetSheet(sheetName) { cache.delete(`rows:${sheetName}`); sheetGen.set(sheetName, (sheetGen.get(sheetName) || 0) + 1); }
 
+// Анкеты: id Telegram и язык приводим к одному виду прямо при чтении — тогда
+// все места, которые их сравнивают («=== 'ru'», «=== id»), видят одно и то же.
+// Раньше «English», «EN», « en» или id в виде «1,234,567,890» / «1.23E+9» (так
+// таблица показывает число в другом формате) одни места понимали, а другие —
+// нет: человек переключал язык, а часть сообщений продолжала идти по-русски.
+// Сырые значения остаются в _lang_raw / _id_raw для /lang_check.
+export function normTgId(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (/^\d+$/.test(s)) return s;
+  const n = Number(s.replace(/[\s,]/g, ''));
+  if (Number.isFinite(n) && n >= 1 && Number.isSafeInteger(Math.round(n))) return String(Math.round(n));
+  return s.replace(/\D+/g, '');
+}
+export function normLang(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return '';
+  // \b в JS не работает с кириллицей — русские слова проверяем началом строки.
+  if (/^(ru|rus|russian)(?![a-z])/.test(s) || s.startsWith('рус')) return 'ru';
+  if (/^(en|eng|english)(?![a-z])/.test(s) || s.startsWith('англ')) return 'en';
+  return '';
+}
+function normalizeApplicantRow(obj) {
+  obj._lang_raw = obj.language;
+  obj._id_raw = obj.telegram_id;
+  const lang = normLang(obj.language);
+  if (lang) obj.language = lang;
+  const id = normTgId(obj.telegram_id);
+  if (id) obj.telegram_id = id;
+  return obj;
+}
 // Последнее удачное чтение каждого листа — запасной вариант, если Google
 // в эту минуту отвечает «лимит». Для показа данных чуть устаревшая копия
 // лучше ошибки. Для записей не используется: там нужна точная картина листа.
@@ -1040,6 +1071,7 @@ function readSheet(sheetName, { shared = true } = {}) {
     const rows = values.slice(1).map((r, idx) => {
       const obj = { _rowNumber: idx + 2 };
       headers.forEach((h, i) => obj[h] = r[i] ?? '');
+      if (sheetName === SHEETS.applicants) normalizeApplicantRow(obj);
       return obj;
     });
     const out = { headers, rows, values };
@@ -1523,17 +1555,19 @@ export async function updateApplicantAdminTopic(telegramId, patch, user={}) {
 // боту, поэтому читаем лист из кэша (20 секунд). Любая запись в таблицу кэш
 // сбрасывает, так что свежесозданная анкета находится сразу.
 export async function findApplicantByTelegramId(telegramId) {
+  const id = normTgId(telegramId);
+  if (!id) return undefined;
   const { rows } = await getRows(SHEETS.applicants);
-  return rows.find(r => String(r.telegram_id) === String(telegramId));
+  return rows.find(r => normTgId(r.telegram_id) === id);
 }
 
 export async function findApplicantByTelegramIdentity(userOrProfile={}) {
   const { rows } = await getRows(SHEETS.applicants);
-  const telegramId = userOrProfile.id || userOrProfile.telegram_id || '';
+  const telegramId = normTgId(userOrProfile.id || userOrProfile.telegram_id || '');
   const usernameRaw = userOrProfile.username || userOrProfile.telegram_username || '';
   const username = String(usernameRaw || '').replace(/^@/,'').toLowerCase();
   if (telegramId) {
-    const byId = rows.find(r => String(r.telegram_id) === String(telegramId));
+    const byId = rows.find(r => normTgId(r.telegram_id) === telegramId);
     if (byId) return byId;
   }
   if (username) {
@@ -1544,6 +1578,16 @@ export async function findApplicantByTelegramIdentity(userOrProfile={}) {
     });
   }
   return null;
+}
+
+// Все строки одного человека: по id Telegram или по нику.
+export async function applicantRowsFor(user = {}, rowsIn = null) {
+  const rows = rowsIn || (await getRows(SHEETS.applicants)).rows;
+  const id = normTgId(user.id || user.telegram_id || '');
+  const username = String(user.username || user.telegram_username || '').replace(/^@/, '').toLowerCase();
+  const nick = r => [String(r.telegram_username || '').replace(/^@/, '').toLowerCase(),
+    String(r.telegram || '').replace(/^https?:\/\/t\.me\//, '').replace(/^t\.me\//, '').replace(/^@/, '').toLowerCase()];
+  return rows.filter(r => (id && normTgId(r.telegram_id) === id) || (username && nick(r).includes(username)));
 }
 
 // Строка игрока могла попасть в таблицу без telegram_id — анкету заводили руками
@@ -1571,6 +1615,11 @@ export async function setUserLanguage(user={}, language='en') {
   const existing = await findApplicantByTelegramIdentity({ id: telegramId, username });
   if (existing) {
     await updateObjectByRow(SHEETS.applicants, existing._rowNumber, { language: lang, telegram_id: telegramId || existing.telegram_id, telegram_username: username || existing.telegram_username, telegram: username ? `t.me/${username}` : existing.telegram, updated_at: nowISO() });
+    // Дубли того же человека (вторая строка с тем же id или ником) получают
+    // тот же язык: иначе бот, лента результатов и приложение могли читать
+    // разные строки, и смена языка «не срабатывала».
+    const twins = (await applicantRowsFor({ id: telegramId, username })).filter(r => r._rowNumber !== existing._rowNumber && r.language !== lang);
+    for (const r of twins) await updateObjectByRow(SHEETS.applicants, r._rowNumber, { language: lang, updated_at: nowISO() }).catch(e => console.error('language twin sync failed:', e.message));
     return { ...existing, language: lang };
   }
   const newRow = {
@@ -1838,8 +1887,8 @@ export async function getSegmentContacts(segment='all') {
     if (segment === 'payment') return status === 'payment';
     if (segment === 'missing_rating') return hasMissingRating(r);
     if (segment === 'missing_selfie') return status === 'active' && String(r.selfie_status || '').toLowerCase() !== 'received';
-    if (segment === 'ru') return r.language === 'ru';
-    if (segment === 'en') return r.language !== 'ru';
+    if (segment === 'ru') return normLang(r.language) === 'ru';
+    if (segment === 'en') return normLang(r.language) !== 'ru';
     if (segment === 'season2') return String(r.last_application_event || '').includes('Season 2') || String(r.last_application_event || '').includes('league_s2');
     return String(r.crm_tags || '').includes(segment) || status === canonicalStatus(segment);
   });
@@ -1978,12 +2027,12 @@ export async function getAllBotSubscribers() {
   const seen = new Set();
   const out = [];
   for (const r of rows) {
-    const id = String(r.telegram_id || '').trim();
+    const id = normTgId(r.telegram_id);
     if (!id || seen.has(id)) continue;
     if (isInactiveStatus(r.status)) continue;
     if (isResultsMuted(r)) continue;   // сам отписался от ленты результатов
     seen.add(id);
-    out.push({ telegram_id: id, name: r.name || '', language: r.language || '' });
+    out.push({ telegram_id: id, name: r.name || '', language: normLang(r.language) || r.language || '' });
   }
   return out;
 }

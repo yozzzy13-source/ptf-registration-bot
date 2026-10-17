@@ -51,12 +51,21 @@ function rememberPosterVariant(matchId, variant, data) {
 // Язык человека меняется раз в жизни, а спрашивали его у таблицы на каждое
 // действие. Держим в памяти: ответ мгновенный, а таблица перечитывается только
 // когда мы этого человека ещё не видели.
+// Память живёт 10 минут: язык, исправленный руками в таблице, доходит до бота
+// сам, без перезапуска (раньше бот помнил старый язык до следующего деплоя).
 const langMemory = new Map();
-function cachedLang(from = {}) { return langMemory.get(String(from.id || '')) || ''; }
+const LANG_MEMORY_MS = 10 * 60 * 1000;
+function cachedLang(from = {}) {
+  const hit = langMemory.get(String(from.id || ''));
+  if (!hit || Date.now() - hit.t > LANG_MEMORY_MS) return '';
+  return hit.v;
+}
 export function rememberLang(telegramId, lang) {
   const value = String(lang || '').toLowerCase();
-  if (telegramId && ['ru', 'en'].includes(value)) langMemory.set(String(telegramId), value);
+  if (telegramId && ['ru', 'en'].includes(value)) langMemory.set(String(telegramId), { v: value, t: Date.now() });
 }
+export function forgetLang(telegramId) { langMemory.delete(String(telegramId || '')); }
+export function langMemoryOf(telegramId) { const hit = langMemory.get(String(telegramId || '')); return hit ? { ...hit, fresh: Date.now() - hit.t <= LANG_MEMORY_MS } : null; }
 async function userLang(from) {
   const known = cachedLang(from);
   if (known) return known;
@@ -1617,6 +1626,26 @@ function findConfirmedSlot(done, wanted) {
           n++;
         }
         return sendMessage(chatId, `✅ Готово: ${n}.`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    // /lang_check — почему у игрока не меняется язык и у кого ещё так же.
+    // Без аргумента: все анкеты с дублями (один человек — несколько строк с
+    // разным языком), непонятным языком или id в странном виде. С именем,
+    // @ником или id — все строки этого человека и что видит каждый канал.
+    // «fix» — выровнять язык у дублей (по последней правке) и записать язык
+    // и id в обычном виде.
+    if (/^\/lang_check(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const raw = text.replace(/^\/lang_check(?:@\w+)?\s*/i, '').trim();
+      const fix = /(^|\s)fix$/i.test(raw);
+      const query = raw.replace(/(^|\s)fix$/i, '').trim();
+      try {
+        const lc = await import('./langcheck.js');
+        if (query) return sendMessage(chatId, await lc.personReport(query, { memoryOf: langMemoryOf }));
+        const report = await lc.scanApplicants();
+        if (!fix) return sendMessage(chatId, lc.scanText(report));
+        const done = await lc.fixApplicants(report);
+        for (const id of done.ids) forgetLang(id);
+        return sendMessage(chatId, lc.scanText(report) + `\n\n✅ Исправлено строк: ${done.rows}.`);
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
     // /league_model — модель лиги из общего журнала матчей: какой источник
