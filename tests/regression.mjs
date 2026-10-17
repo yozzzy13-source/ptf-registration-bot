@@ -2383,6 +2383,45 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const pRes=await request('post','/api/match/result','3',{challenge_id:'po-qf-player',kind:'played',winner:'3',perspective:'winner',sets:[{a:6,b:3},{a:6,b:4}]});
  check(pRes.body.ok&&!pRes.body.playoff&&(await db.findSlot('po-qf-player')).result_status==='pending','Счёт четвертьфинала от игрока — как обычно, ждёт подтверждения соперника');
 }
+// Язык игрока: дубли строк, «English» вместо «en», id в виде «1,234,567,890».
+// Смена языка должна доходить до всех каналов (бот, приложение, лента).
+{
+ const savedAp=structuredClone(tables.get('crm|Applicants'));
+ const rows=tables.get('crm|Applicants');const head=rows[0];
+ const mkRow=o=>head.map(h=>o[h]??'');
+ if(!head.includes('updated_at'))head.push('updated_at');
+ rows.push(mkRow({telegram_id:'7,700,000,001',name:'Chris Mitchell',status:'active',language:'Russian',telegram_username:'chrism',updated_at:'2026-09-01T10:00:00Z'}));
+ rows.push(mkRow({telegram_id:'7700000002',name:'Dup Player',status:'active',language:'ru',telegram_username:'dupp',updated_at:'2026-09-01T10:00:00Z'}));
+ rows.push(mkRow({telegram_id:'7.700000002E+9',name:'Dup Player',status:'lead',language:'EN',telegram_username:'',updated_at:'2026-10-10T10:00:00Z'}));
+ sheets.invalidateSheetCache();
+ const chris=await sheets.findApplicantByTelegramId(7700000001);
+ check(chris?.name==='Chris Mitchell'&&chris.language==='ru','Строка с id «7,700,000,001» и языком «Russian» находится и читается как ru');
+ check(sheets.normLang('English')==='en'&&sheets.normLang('Русский')==='ru'&&sheets.normLang('fr')===''&&sheets.normTgId('1.23456789E+9')==='1234567890','Язык и id приводятся к одному виду');
+ await sheets.setUserLanguage({id:7700000001,username:'chrism'},'en');
+ const after=await sheets.findApplicantByTelegramIdentity({id:'7700000001'});
+ check(after?.language==='en','Смена языка у Криса записалась туда же, откуда её читают');
+ const subs=await sheets.getAllBotSubscribers();
+ check(subs.find(x=>x.telegram_id==='7700000001')?.language==='en','Лента результатов видит новый язык Криса');
+ const lc=await load('langcheck.js');
+ const rep=await lc.scanApplicants();
+ const dup=rep.dupes.find(d=>d.rows.some(r=>r.name==='Dup Player'));
+ check(dup&&dup.conflict&&dup.target==='en','/lang_check находит одного человека в двух строках с разным языком и берёт последнюю правку');
+ check(rep.oddId.some(r=>r.name==='Dup Player'),'/lang_check находит id в странном виде');
+ check(/Дублей с разным языком|Один человек — несколько строк/.test(lc.scanText(rep))&&/lang_check fix/.test(lc.scanText(rep)),'Отчёт /lang_check предлагает исправление');
+ const fixed=await lc.fixApplicants(rep);
+ check(fixed.rows>=2&&fixed.ids.includes('7700000002'),'fix выравнивает язык и переписывает строки');
+ const again=lc.scanRows((await sheets.getRows('Applicants',{useCache:false})).rows);
+ check(!again.dupes.some(d=>d.conflict)&&!again.oddId.length,'После fix расхождений и странных id не остаётся');
+ await sheets.setUserLanguage({id:7700000002},'ru');
+ const both=(await sheets.getRows('Applicants',{useCache:false})).rows.filter(r=>r.name==='Dup Player');
+ check(both.length===2&&both.every(r=>r.language==='ru'),'Смена языка пишется во все строки человека — дубли больше не расходятся');
+ const person=await lc.personReport('Chris Mitchell',{memoryOf:()=>null});
+ check(/Бот: en/.test(person)&&/Приложение: en/.test(person)&&/Лента результатов: en/.test(person),'/lang_check по имени показывает язык в каждом канале');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/LANG_MEMORY_MS = 10 \* 60 \* 1000/.test(botSrc)&&/Date\.now\(\) - hit\.t > LANG_MEMORY_MS/.test(botSrc),'Память языка в боте живёт 10 минут — правка в таблице доходит без перезапуска');
+ check(/cmd:'lang_check'/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'/lang_check есть в /help и меню');
+ tables.set('crm|Applicants',savedAp);sheets.invalidateSheetCache();
+}
 // Модель лиги: при league_source = live статистика и история витрины идут из
 // общего журнала матчей, а не из таблицы профилей; откат — sheets.
 {
