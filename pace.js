@@ -120,10 +120,63 @@ const MONTHS_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July
 export const dateText = (iso, ru) => { const [, m, d] = iso.split('-').map(Number); return ru ? `${d} ${MONTHS_RU[m - 1]}` : `${d} ${MONTHS_EN[m - 1]}`; };
 const firstName = name => txt(name).split(/\s+/)[0] || txt(name);
 
+// Обращение по-русски: в таблицах имена записаны латиницей («Masha Geveling»),
+// а русскоязычному игроку пишем «Маша». Сначала словарь привычных форм
+// (Andrew → Андрей, Xenia → Ксения), иначе — транслитерация по звукам.
+const RU_NAMES = {
+  kostas: 'Костас', konstantin: 'Константин', masha: 'Маша', maria: 'Мария', mariya: 'Мария', marina: 'Марина',
+  aksinya: 'Аксинья', aksinia: 'Аксинья', dana: 'Дана', daria: 'Дарья', darya: 'Дарья', dasha: 'Даша',
+  elena: 'Елена', yelena: 'Елена', lena: 'Лена', irina: 'Ирина', ira: 'Ира', olga: 'Ольга', olya: 'Оля',
+  tatiana: 'Татьяна', tatyana: 'Татьяна', tanya: 'Таня', xenia: 'Ксения', ksenia: 'Ксения', kseniya: 'Ксения',
+  yana: 'Яна', anna: 'Анна', anya: 'Аня', anastasia: 'Анастасия', nastya: 'Настя', ekaterina: 'Екатерина',
+  katya: 'Катя', kate: 'Катя', natalia: 'Наталья', natalya: 'Наталья', natasha: 'Наташа', svetlana: 'Светлана',
+  yulia: 'Юлия', julia: 'Юлия', yuliya: 'Юлия', victoria: 'Виктория', viktoria: 'Виктория', alina: 'Алина',
+  polina: 'Полина', sofia: 'София', sofya: 'Софья', valeria: 'Валерия', kristina: 'Кристина', vera: 'Вера',
+  galina: 'Галина', lyudmila: 'Людмила', nadezhda: 'Надежда', evgenia: 'Евгения', alexandra: 'Александра',
+  nikita: 'Никита', roman: 'Роман', michael: 'Михаил', mikhail: 'Михаил', misha: 'Миша', ilia: 'Илья', ilya: 'Илья',
+  vlad: 'Влад', vladislav: 'Владислав', vladimir: 'Владимир', denys: 'Денис', denis: 'Денис', sergei: 'Сергей',
+  sergey: 'Сергей', serge: 'Сергей', andrew: 'Андрей', andrei: 'Андрей', andrey: 'Андрей', alexander: 'Александр',
+  alexandr: 'Александр', aleksandr: 'Александр', alex: 'Алекс', sasha: 'Саша', alexey: 'Алексей', alexei: 'Алексей',
+  aleksei: 'Алексей', danil: 'Данил', daniil: 'Даниил', timofei: 'Тимофей', timofey: 'Тимофей', boris: 'Борис',
+  ivan: 'Иван', dmitry: 'Дмитрий', dmitri: 'Дмитрий', dmitriy: 'Дмитрий', dima: 'Дима', pavel: 'Павел',
+  evgeny: 'Евгений', evgeniy: 'Евгений', yevgeny: 'Евгений', igor: 'Игорь', oleg: 'Олег', max: 'Макс',
+  maxim: 'Максим', maksim: 'Максим', artem: 'Артём', artyom: 'Артём', anton: 'Антон', kirill: 'Кирилл',
+  nikolay: 'Николай', nikolai: 'Николай', yuri: 'Юрий', yury: 'Юрий', vadim: 'Вадим', vasily: 'Василий',
+  gleb: 'Глеб', egor: 'Егор', yegor: 'Егор', stanislav: 'Станислав', stas: 'Стас', philipp: 'Филипп',
+  philip: 'Филипп', fedor: 'Фёдор', fyodor: 'Фёдор', georgy: 'Георгий', grigory: 'Григорий', ruslan: 'Руслан',
+  timur: 'Тимур', arseny: 'Арсений', arseniy: 'Арсений', leonid: 'Леонид', valentin: 'Валентин', mark: 'Марк',
+  lev: 'Лев', tom: 'Том', vid: 'Вид', nico: 'Нико', david: 'Давид', peter: 'Пётр', petr: 'Пётр', pyotr: 'Пётр'
+};
+const TRANSLIT = [['shch', 'щ'], ['sch', 'щ'], ['zh', 'ж'], ['kh', 'х'], ['ch', 'ч'], ['sh', 'ш'], ['ts', 'ц'],
+  ['yu', 'ю'], ['ya', 'я'], ['yo', 'ё'], ['ye', 'е'], ['ph', 'ф'], ['th', 'т'], ['x', 'кс'], ['a', 'а'], ['b', 'б'],
+  ['c', 'к'], ['d', 'д'], ['e', 'е'], ['f', 'ф'], ['g', 'г'], ['h', 'х'], ['i', 'и'], ['j', 'й'], ['k', 'к'], ['l', 'л'],
+  ['m', 'м'], ['n', 'н'], ['o', 'о'], ['p', 'п'], ['q', 'к'], ['r', 'р'], ['s', 'с'], ['t', 'т'], ['u', 'у'], ['v', 'в'],
+  ['w', 'в'], ['y', 'и'], ['z', 'з']];
+function translitRu(word = '') {
+  let low = word.toLowerCase(), out = '';
+  while (low) {
+    // «y» после гласной — «й» (Nikolay → Николай).
+    if (low[0] === 'y' && out && /[аеёиоуыэюя]$/.test(out) && !/^y[aueo]/.test(low)) { out += 'й'; low = low.slice(1); continue; }
+    const hit = TRANSLIT.find(([lat]) => low.startsWith(lat));
+    if (hit) { out += hit[1]; low = low.slice(hit[0].length); }
+    else { out += low[0]; low = low.slice(1); }
+  }
+  // «ia» в конце — «ия» (Natalia → Наталия, если нет в словаре).
+  out = out.replace(/иа$/, 'ия');
+  return out ? out[0].toUpperCase() + out.slice(1) : word;
+}
+export function ruFirstName(name = '') {
+  const first = firstName(name);
+  if (/[А-Яа-яЁё]/.test(first)) return first;
+  const key = first.toLowerCase().replace(/[^a-z]/g, '');
+  if (!key) return first;
+  return RU_NAMES[key] || translitRu(first.replace(/[^A-Za-z]/g, ''));
+}
+
 // Текст игроку. first=true — первое, подробное; иначе короткое и дружеское.
 // variant выбирает один из вариантов, чтобы недели не повторяли друг друга.
 export function paceMessage({ name, ru, pace, deadline, opponents = [], first = false, variant = 0 }) {
-  const n = firstName(name), when = dateText(deadline, ru), left = timeLeftText(pace.daysLeft, ru);
+  const n = ru ? ruFirstName(name) : firstName(name), when = dateText(deadline, ru), left = timeLeftText(pace.daysLeft, ru);
   const agreedRu = pace.agreed ? ` (${pace.agreed} уже ${pace.agreed === 1 ? 'назначен' : 'назначены'})` : '';
   const agreedEn = pace.agreed ? ` (${pace.agreed} already scheduled)` : '';
   const doneLine = ru ? `${pace.done} из ${pace.total}` : `${pace.done} of ${pace.total}`;
@@ -353,12 +406,12 @@ export function paceDue(now = Date.now(), cal = null, timeZone = TIMEZONE) {
   return weekday === 'Sat' && hour === 13 && today >= addDays(cal.start, 6) && today <= last;
 }
 
-// Получатель — личка организатора (первый из ADMIN_IDS): тексты он пересылает
-// сам, в общем админском чате они только мешают. Нет ADMIN_IDS — админский чат.
-async function digestChat() {
-  if (ADMIN_IDS[0]) return ADMIN_IDS[0];
+// Получатель — админский чат (как заявки и остальные уведомления). Админский
+// чат не настроен — тогда личка организатора (первый из ADMIN_IDS).
+export async function digestChat() {
   const { getAdminChatId } = await import('./admin.js');
-  return txt(await getAdminChatId().catch(() => ''));
+  const admin = txt(await getAdminChatId().catch(() => ''));
+  return admin || txt(ADMIN_IDS[0]);
 }
 
 // force — ручной запуск (/pace). save=false — предпросмотр: шорт-лист не меняется.
@@ -396,5 +449,5 @@ export async function runPaceDigest(now = Date.now(), { force = false, save = tr
     for (const u of plan.updates) if (u.row > 0) await updateObjectByRow(SHEET, u.row, u.patch).catch(e => console.error('pace watch update failed:', e.message));
     if (plan.appends.length) await appendObjects(SHEET, plan.appends).catch(e => console.error('pace watch append failed:', e.message));
   }
-  return { ok: true, sent: ordered.length, tracked: plan.tracked.length, fresh: plan.fresh.length, saved: save };
+  return { ok: true, sent: ordered.length, tracked: plan.tracked.length, fresh: plan.fresh.length, saved: save, to };
 }
