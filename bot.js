@@ -1648,9 +1648,11 @@ function findConfirmedSlot(done, wanted) {
       try {
         await sendMessage(chatId, '⏳ Считаю темп сезона…');
         const { runPaceDigest } = await import('./pace.js');
-        const r = await runPaceDigest(Date.now(), { force: true, save, chatId: String(chatId) });
+        // Сводка всегда уходит в админский чат, откуда бы ни запросили.
+        const r = await runPaceDigest(Date.now(), { force: true, save });
         if (!r.ok) return sendMessage(chatId, '⛔ ' + escapeHtml({ no_season: 'в листе Events нет строки сезона лиги с датами начала и конца', no_chat: 'некуда отправить' }[r.reason] || r.reason));
-        return sendMessage(chatId, save ? `✅ Сводка готова, шорт-лист обновлён: сообщений ${r.sent}.` : `👀 Это предпросмотр: шорт-лист не менялся. Чтобы отметить, кому написали, — <code>/pace save</code>.`);
+        const where = String(r.to) === String(chatId) ? '' : ' Сводка — в админском чате.';
+        return sendMessage(chatId, (save ? `✅ Сводка готова, шорт-лист обновлён: сообщений ${r.sent}.` : `👀 Это предпросмотр: шорт-лист не менялся. Чтобы отметить, кому написали, — <code>/pace save</code>.`) + where);
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
     // /result_resync <имя игрока> — заново записать подтверждённый результат
