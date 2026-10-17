@@ -38,6 +38,7 @@ import { startLogCleanup } from './retention.js';
 import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
 import { syncWaitlistEntry, syncAllWaitlists } from './waitlistsync.js';
 import { withPriority, sheetsQueueStats } from './google.js';
+import { leagueSource, peekSource, buildLiveLeague, storeSnapshot, loadStoredSnapshot, noteBootstrap, setRebuildHandler } from './leaguemodel.js';
 import { SEO_PAGES, seoLang, slugOf as seoSlug, divLabel as seoDivLabel, organizationLd, websiteLd, faqLd, personLd, eventsLd, ssrHtml, applySeo, robotsTxt, sitemapXml, webManifest, aboutSsr } from './seo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -779,6 +780,21 @@ async function matchViewer(initData, token = '') { return leagueViewer(initData,
 registerFantasyRoutes(app,{ viewer: leagueViewer });
 registerTournamentRoutes(app,{ viewer: leagueViewer });
 
+// История и профили в выбранном источнике: в режиме live — из снимка модели
+// (журнал матчей), иначе — из таблицы профилей, как было.
+async function leagueHistorySource() {
+  const source = await leagueSource().catch(() => 'sheets');
+  if (source === 'live') {
+    const v = await Promise.race([getLeagueSnapshot(), new Promise(r => setTimeout(() => r(null), 8000))]).catch(() => null);
+    if (v && v.source === 'live' && !v.model_failed) return { history: new Map(Object.entries(v.matches || {})), players: v.players || [] };
+  }
+  const [history, players] = await Promise.all([
+    getLeagueMatchHistory().catch(() => new Map()),
+    getLeagueProfiles().catch(() => [])
+  ]);
+  return { history, players };
+}
+
 // История матчей лиги для экрана матчей: плоская лента, по строке на матч.
 // В витрине она хранится по игрокам — один матч лежит в двух карточках, поэтому
 // схлопываем по номеру матча и паре имён.
@@ -786,10 +802,7 @@ app.get('/api/match/history', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const [history, players] = await Promise.all([
-      getLeagueMatchHistory().catch(() => new Map()),
-      getLeagueProfiles().catch(() => [])
-    ]);
+    const { history, players } = await leagueHistorySource();
     const nameById = new Map(players.map(p => [String(p.id), p.name]));
     const seen = new Set();
     const out = [];
@@ -1725,12 +1738,24 @@ export function invalidateLeagueSnapshot() {
 }
 async function buildLeagueSnapshot() {
   const started = Date.now();
-    const [rawPlayers, history, events, seasonList] = await Promise.all([
+    const [sheetPlayers, sheetHistory, events, seasonList, source] = await Promise.all([
       getLeagueProfiles(),
       getLeagueMatchHistory().catch(() => new Map()),
       getLeagueEvents().catch(() => []),
-      getSeasons().catch(() => [])
+      getSeasons().catch(() => []),
+      leagueSource().catch(() => 'sheets')
     ]);
+    // Источник статистики и истории (Settings → league_source):
+    //   sheets — таблица профилей, как было;
+    //   live   — общий журнал матчей, считаем сами (leaguemodel.js). Анкета
+    //            (фото, NTRP, страна) всё равно из таблицы профилей.
+    // Журнал не прочитался — тихо остаёмся на таблице, страница не ломается.
+    let rawPlayers = sheetPlayers, history = sheetHistory, modelFailed = false;
+    if (source === 'live') {
+      const live = await buildLiveLeague(sheetPlayers, sheetHistory)
+        .catch(e => { console.error('league model failed, беру таблицу профилей:', e.message); modelFailed = true; return null; });
+      if (live) { rawPlayers = live.players; history = live.history; }
+    }
     // У каждого сезона свой набор дивизионов: у прошедших таблицы есть,
     // у будущего пока пусто — фронт покажет заглушку вместо таблицы.
     const seasons = [];
@@ -1828,23 +1853,50 @@ async function buildLeagueSnapshot() {
         return Object.keys(patch).length ? { ...m, ...patch } : m;
       });
     }
-  console.log(`league snapshot: собран за ${Date.now() - started} мс, игроков ${players.length}`);
-  return { seasons, players, photoByName, matches, events, divisions, current };
+  console.log(`league snapshot: собран за ${Date.now() - started} мс, игроков ${players.length}, источник ${source}${modelFailed ? ' (журнал недоступен — таблица)' : ''}`);
+  return { seasons, players, photoByName, matches, events, divisions, current, source, model_failed: modelFailed, built_at: new Date().toISOString() };
 }
+// В режиме live готовый снимок хранится в JSON (файл на Диске или лист
+// League_Model). После перезапуска сервера страница берёт его сразу, а свежий
+// собирается в фоне — долгого первого входа больше нет.
+let storedSnapshotTried = false;
 async function getLeagueSnapshot() {
-  const stale = !leagueSnapshot.v || Date.now() - leagueSnapshot.t >= LEAGUE_SNAPSHOT_MS;
+  // Есть снимок — источник берём из памяти (Settings подтягивается в фоне),
+  // чтобы открытие страницы не ждало лишнего чтения таблицы.
+  const source = leagueSnapshot.v ? peekSource() : await leagueSource().catch(() => 'sheets');
+  if (!leagueSnapshot.v && !storedSnapshotTried && source === 'live') {
+    storedSnapshotTried = true;
+    const stored = await Promise.race([loadStoredSnapshot(), new Promise(r => setTimeout(() => r(null), 6000))]).catch(() => null);
+    if (stored && !leagueSnapshot.v) { leagueSnapshot.v = stored; leagueSnapshot.t = 0; }
+  }
+  // Переключили источник — снимок старого источника отдаём, пока собирается новый.
+  const switched = Boolean(leagueSnapshot.v) && (leagueSnapshot.v.source || 'sheets') !== source;
+  const stale = !leagueSnapshot.v || switched || Date.now() - leagueSnapshot.t >= LEAGUE_SNAPSHOT_MS;
   if (stale && !leagueSnapshot.building) {
     // Есть прошлый снимок — пересборка фоновая и не отнимает лимит у людей.
     const gen = snapshotGen;
     leagueSnapshot.building = withPriority(leagueSnapshot.v && leagueSnapshot.t ? 'low' : 'normal', buildLeagueSnapshot)
       // Пока собирали, пришёл новый результат — снимок годится, но сразу устарел.
-      .then(v => { leagueSnapshot.v = v; leagueSnapshot.t = gen === snapshotGen ? Date.now() : 0; return v; })
+      .then(v => {
+        leagueSnapshot.v = v; leagueSnapshot.t = gen === snapshotGen ? Date.now() : 0;
+        if (v?.source === 'live' && !v.model_failed) withPriority('low', () => storeSnapshot(v)).catch(e => console.error('league model store failed:', e.message));
+        return v;
+      })
       .finally(() => { leagueSnapshot.building = null; });
     leagueSnapshot.building.catch(e => console.error('league snapshot failed:', e.message));
   }
   // Есть хоть что-то — отдаём немедленно, даже если оно устарело.
   return leagueSnapshot.v || leagueSnapshot.building;
 }
+// /league_model rebuild: собрать заново прямо сейчас и дождаться.
+async function rebuildLeagueSnapshotNow() {
+  leagueSnapshot.t = 0;
+  snapshotGen++;
+  await getLeagueSnapshot();
+  if (leagueSnapshot.building) await leagueSnapshot.building;
+  return leagueSnapshot.v;
+}
+setRebuildHandler(rebuildLeagueSnapshotNow);
 
 // Меню для страниц, которые живут отдельно от витрины лиги («Мои матчи»):
 // те же вкладки, что видит этот человек в лиге, одним лёгким запросом.
@@ -1893,7 +1945,8 @@ app.get('/api/league/bootstrap', async (req, res) => {
     const fantasy = fantasyAccess.allowed && wantFantasy
       ? await getFantasyBootstrap(v.user.id, v.profile.name || '', v.lang, fantasyAccess.mode)
         .catch(e => { console.error('league fantasy:', e.message); return null; }) : null;
-    console.log(`league bootstrap: ${Date.now() - startedAt} мс${wantFantasy ? ', с Fantasy' : ''}`);
+    console.log(`league bootstrap: ${Date.now() - startedAt} мс${wantFantasy ? ', с Fantasy' : ''}, источник ${(leagueSnapshot.v && leagueSnapshot.v.source) || 'sheets'}`);
+    if (!wantFantasy) noteBootstrap(Date.now() - startedAt, (leagueSnapshot.v && leagueSnapshot.v.source) || 'sheets');
     res.json({
       ok: true,
       lang: v.lang,
@@ -2226,7 +2279,7 @@ app.get('/api/public/seasons', async (req, res) => {
     const isChampion = (a) => /champion|чемпион|winner|победител/i.test(`${a.type} ${a.title}`);
     // Сколько недель сезон реально шёл: по датам сыгранных матчей, а не по тому,
     // что стоит в строке события — там даты часто плановые.
-    const history = await getLeagueMatchHistory().catch(() => new Map());
+    const { history } = await leagueHistorySource();
     const span = new Map();
     // Сколько матчей сыграно и сколько игроков реально играло в сезоне — для
     // счётчика на сайте. Один матч лежит в истории у обоих игроков, поэтому
@@ -2632,6 +2685,12 @@ app.listen(PORT, () => withPriority('low', async () => {
       // Плей-офф: предварительная сетка на последней неделе, напоминание о
       // дедлайне регулярки и о несыгранных матчах.
       await import('./playoff.js').then(m => m.runPlayoffSweep(Date.now())).catch(e => console.error('playoff sweep failed:', e.message));
+      // Раз в сутки (с 10:00) — сверка журнала матчей с таблицей профилей.
+      // Расхождения приходят в админку; нет расхождений — тишина.
+      {
+        const diffChat = await getAdminChatId().catch(() => '');
+        await import('./leaguemodel.js').then(m => m.runDailyDiff(Date.now(), diffChat)).catch(e => console.error('league model diff failed:', e.message));
+      }
       // Напоминания по событиям идут тем же проходом: за сутки, за два часа и
       // про неоплаченный счёт.
       const { runEventReminders, runWaitlistOffers, runSignupNudges } = await import('./eventflow.js');

@@ -15,8 +15,10 @@ function getAuth() {
     creds.client_email,
     null,
     creds.private_key,
-    // Диск — только чтение: галерея сайта берёт фото из папки «PTF Gallery».
-    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly']
+    // Диск: галерея сайта читает фото из папки «PTF Gallery», а модель лиги
+    // перезаписывает свой JSON-файл (файл заводит организатор и даёт боту
+    // доступ редактора — своих файлов бот на Диске не создаёт).
+    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
   );
 }
 
@@ -166,7 +168,7 @@ export function sheets() {
   return sheetsClient;
 }
 
-// Google Диск (только чтение). Сейчас им пользуется галерея сайта. У Диска
+// Google Диск: галерея сайта (чтение) и файл модели лиги (перезапись). У Диска
 // свой лимит, поэтому очередь Таблиц он не занимает.
 export function drive() {
   if (!driveClient) {

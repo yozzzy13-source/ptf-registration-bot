@@ -1619,6 +1619,28 @@ function findConfirmedSlot(done, wanted) {
         return sendMessage(chatId, `✅ Готово: ${n}.`);
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+    // /league_model — модель лиги из общего журнала матчей: какой источник
+    // включён, когда и как быстро собиралась, где хранится, как быстро
+    // открывается страница. rebuild — пересобрать сейчас, diff — сверка с
+    // таблицей профилей. Переключатель источника — Settings → league_source.
+    if (/^\/league_model(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const arg = text.replace(/^\/league_model(?:@\w+)?\s*/i, '').trim().toLowerCase();
+      try {
+        const lm = await import('./leaguemodel.js');
+        if (arg === 'rebuild') {
+          await sendMessage(chatId, '⏳ Пересобираю витрину лиги…');
+          const started = Date.now();
+          const v = await lm.rebuildNow();
+          await sendMessage(chatId, `✅ Готово за ${Date.now() - started} мс. Источник: <b>${escapeHtml(v?.source || 'sheets')}</b>${v?.model_failed ? ' (журнал не прочитался — взята таблица профилей)' : ''}.`);
+          return sendMessage(chatId, await lm.statusText());
+        }
+        if (arg === 'diff') {
+          await sendMessage(chatId, '⏳ Сверяю журнал матчей с таблицей профилей…');
+          return sendMessage(chatId, lm.diffText(await lm.diffNow(), { limit: 60 }));
+        }
+        return sendMessage(chatId, await lm.statusText());
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     // /pace — сводка темпа сезона прямо сейчас. Без слова: предпросмотр,
     // шорт-лист не меняется. «/pace save» — как субботняя: с отметкой, кому писали.
     if (/^\/pace(?:@\w+)?(?:\s|$)/i.test(text)) {
