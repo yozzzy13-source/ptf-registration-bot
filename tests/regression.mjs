@@ -2383,4 +2383,46 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const pRes=await request('post','/api/match/result','3',{challenge_id:'po-qf-player',kind:'played',winner:'3',perspective:'winner',sets:[{a:6,b:3},{a:6,b:4}]});
  check(pRes.body.ok&&!pRes.body.playoff&&(await db.findSlot('po-qf-player')).result_status==='pending','Счёт четвертьфинала от игрока — как обычно, ждёт подтверждения соперника');
 }
+// Модель лиги: при league_source = live статистика и история витрины идут из
+// общего журнала матчей, а не из таблицы профилей; откат — sheets.
+{
+ const lmMod=await load('leaguemodel.js');
+ const WEB='1CZ2-B09kIxegOK1lYVl0KBucjbxxp1ZukMD0t1QQCiY';
+ const savedProf=tables.get(WEB+'|Frontend_Profile_All'),savedHist=tables.get(WEB+'|Match_History_All'),savedLog=tables.get('master|Cross_Division_Match_Log');
+ put(WEB,'Frontend_Profile_All',[['player_id','player_name','matches_played','wins','losses'],['31','Live One','3','2','1'],['32','Live Two','3','1','2'],['1','Alice One','0','0','0']]);
+ put(WEB,'Match_History_All',[['player_id','opponent_name','match','result','competition']]);
+ const H=Array(41).fill('');Object.assign(H,{0:'Match #',1:'Date',3:'Competition',4:'P1 ID',6:'P2 ID',8:'P1 Name',9:'P2 Name',23:'Completed?',24:'Winner ID'});
+ const mk=(no,a,ai,b,bi,w,s1,s2)=>{const r=Array(41).fill('');Object.assign(r,{0:no,1:46300+no,3:'Season 2',4:ai,6:bi,8:a,9:b,10:s1[0],11:s1[1],14:s2[0],15:s2[1],23:'Yes',24:w});return r};
+ tables.set('master|Cross_Division_Match_Log',[H,mk(1,'Live One','31','Live Two','32','31',[6,4],[6,3]),mk(2,'Live Two','32','Live One','31','32',[6,2],[6,2]),mk(3,'Live One','31','Live Two','32','31',[7,5],[6,4])]);
+ sheets.invalidateLeagueCache();
+ await sheets.setSetting('league_source','live');await lmMod.leagueSource();
+ const v=await lmMod.rebuildNow();
+ check(v.source==='live'&&!v.model_failed&&(v.matches['31']||[]).length===3,'live: история игрока собрана из журнала, хотя в Match_History_All пусто');
+ const one=v.players.find(p=>p.name==='Live One');
+ check(one.matches===3&&one.wins===2&&one.losses===1&&one.form.join('')==='WLW','live: матчи, победы и форма посчитаны из журнала');
+ check(v.matches['31'][0].score==='7:5 / 6:4'&&v.matches['31'][1].score==='2:6 / 2:6'&&v.matches['31'][1].opponent_id==='32','live: счёт глазами игрока, соперник узнан');
+ const boot=await request('get','/api/league/bootstrap','1');
+ check(boot.body?.players?.find(p=>p.name==='Live Two')?.matches===3&&(boot.body.matches['32']||[]).length===3,'live: приложение получает модель из журнала');
+ const feed=await request('get','/api/match/history','1');
+ check(feed.body?.ok&&feed.body.matches.length===3,'live: лента матчей тоже из журнала, каждый матч один раз');
+ await new Promise(r=>setTimeout(r,30));
+ const stored=tables.get('crm|League_Model')||[];
+ check(String(stored[0]?.[0])==='league_model'&&Number(stored[0]?.[1])>=1&&/"Live One"/.test(stored.slice(1).map(r=>r[0]).join('')),'live: снимок сохранён в JSON (лист League_Model)');
+ const loaded=await lmMod.loadStoredSnapshot();
+ check(loaded?.source==='live'&&(loaded.matches['31']||[]).length===3,'live: сохранённый снимок читается обратно при старте');
+ check(/live — журнал матчей/.test(await lmMod.statusText()),'/league_model показывает включённый источник');
+ // Журнал недоступен — страница не ломается, берётся таблица профилей.
+ tables.delete('master|Cross_Division_Match_Log');
+ const broken=await lmMod.rebuildNow();
+ check(broken.source==='live'&&broken.model_failed&&broken.players.find(p=>p.name==='Live One')?.matches===3,'live: журнал не прочитался — витрина на таблице профилей');
+ tables.set('master|Cross_Division_Match_Log',[H,mk(1,'Live One','31','Live Two','32','31',[6,4],[6,3])]);
+ // Откат: sheets — всё как было.
+ await sheets.setSetting('league_source','sheets');await lmMod.leagueSource();
+ const back=await lmMod.rebuildNow();
+ check(back.source==='sheets'&&!(back.matches['31']||[]).length,'Откат на sheets: история снова из таблицы профилей');
+ if(savedProf)tables.set(WEB+'|Frontend_Profile_All',savedProf);
+ if(savedHist)tables.set(WEB+'|Match_History_All',savedHist);else tables.delete(WEB+'|Match_History_All');
+ if(savedLog)tables.set('master|Cross_Division_Match_Log',savedLog);else tables.delete('master|Cross_Division_Match_Log');
+ sheets.invalidateLeagueCache();
+}
 console.log(`PASS: ${checks} regression checks; all Sheets and Telegram operations were mocked.`);
