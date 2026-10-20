@@ -231,6 +231,7 @@ for(const letter of ['C','W']) {
  check(view.body.groups?.length===2,letter+' API returns both groups');
  check(view.body.groups.every(g=>g.grouped&&!g.playoff.champion&&g.players.every(p=>p.zone==='playoff')),letter+' groups mark their top four as playoff seeds without declaring a champion');
  if(letter==='W')check((view.body.playoff?.qf||[]).length===1,'Grouped division API exposes the quarterfinal bracket');
+ if(letter==='W')check((tables.get('master|Playoff')||[]).filter(r=>r&&r[2]==='W'&&r[3]==='QF').length===4,'Счёт четвертьфинала до публикации встал в строку черновика, а не отдельной пятой');
 }
 const cross=await results.writeConfirmedResult({...result2,to_name:'Wendy Three',to_telegram_id:'9'});
 check(cross.status==='cross_division_blocked','Existing admin approval for cross-division results preserved');
@@ -1382,7 +1383,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const sponsorsSrc=await fs.readFile(path.join(root,'sponsors.js'),'utf8');
  check(/SPONSOR_FILE = path\.join\(ASSETS_DIR, 'sponsors\.png'\)/.test(sponsorsSrc),'Спонсоры читаются из assets/sponsors.png');
  const poster=await import(pathToFileURL(path.join(root,'matchposter.js')).href);
- check(poster.sponsorsAvailable()===false,'Без файла спонсоров лента просто не рисуется');
+ const sponsorsFile=await fs.access(path.join(root,'assets','sponsors.png')).then(()=>true,()=>false);
+ check(poster.sponsorsAvailable()===sponsorsFile,'Плашка спонсоров рисуется ровно тогда, когда есть файл assets/sponsors.png');
  check(poster.posterStageLabel({round:'SF'})==='PLAYOFF · SEMIFINAL','Стадия читается из round слота');
  check(poster.posterStageLabel({round:'QF'})==='PLAYOFF · QUARTERFINAL','Четвертьфинал подписан');
  check(poster.posterStageLabel({round:'Final'})==='PLAYOFF · FINAL','Финал подписывается финалом');
@@ -2333,6 +2335,28 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(!(await mdb2.findSameResult('4','3','2099-10-06')),'Другая дата — это другой матч');
  check(/cmd:'result_resync'/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'Команда /result_resync в меню и /help');
 }
+// Матч #193: строка журнала была «Dan — Carol» с их id, бот переписал её как
+// «Carol — Dan». id должны переехать вместе с игроками, иначе история на сайте
+// показывает каждому соперником его самого.
+{
+ const log=tables.get('master|Cross_Division_Match_Log');
+ const flip=Array(41).fill('');Object.assign(flip,{1:'01.10.2099',3:'Season 2',4:4,5:'C',6:3,7:'C',8:'Dan Four',9:'Carol Three',10:4,11:6,14:3,15:6,23:'Yes'});
+ log.push(flip);const flipRow=log.length;
+ const w=await results.writeConfirmedResult({...result2,challenge_id:'flip-193',log_row:String(flipRow),agreed_date:'2099-10-01',result_score:'6:4 6:3'});
+ const r=tables.get('master|Cross_Division_Match_Log')[flipRow-1];
+ check(w.row===flipRow&&r[8]==='Carol Three'&&r[9]==='Dan Four','Строка переписана в новом порядке игроков');
+ check(String(r[4])==='3'&&String(r[6])==='4','id игроков переехали вместе с именами — никто не играет сам с собой');
+ // Уже испорченная строка: /league_model ids находит и исправляет.
+ const bad=Array(41).fill('');Object.assign(bad,{1:'02.10.2099',3:'Season 2',4:4,5:'C',6:3,7:'C',8:'Carol Three',9:'Dan Four',10:6,11:1,14:6,15:1,23:'Yes'});
+ log.push(bad);const badRow=log.length;
+ const found=await results.checkCentralIds();
+ check(found.ok&&found.rows.some(x=>x.row===badRow&&x.kind==='swapped')&&!found.rows.some(x=>x.row===flipRow),'Проверка журнала находит строку с перепутанными id');
+ const fixed=await results.checkCentralIds({fix:true});
+ const rb=tables.get('master|Cross_Division_Match_Log')[badRow-1];
+ check(fixed.fixed>=1&&String(rb[4])==='3'&&String(rb[6])==='4'&&!(await results.checkCentralIds()).rows.some(x=>x.row===badRow),'ids fix переставляет id на место');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
+ check(/arg === 'ids' \|\| arg === 'ids fix'/.test(botSrc)&&/ids fix/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'/league_model ids есть в боте и в /help');
+}
 // Плей-офф: счёт полуфинала пары из одной группы не трогает их строку
 // регулярки в таблице дивизиона и подписывается стадией в общем журнале.
 {
@@ -2350,6 +2374,95 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(writes.slice(before2).some(w=>/Cross_Division_Match_Log!D\d+$/.test(w.range)&&w.values[0][0]==='Season 2'),'Обычный матч подписан «Season 2»');
  const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
  for(const c of ['playoff','playoff_result','pace'])check(new RegExp("cmd:'"+c+"'").test(tg),'Команда /'+c+' в меню и /help');
+}
+// Плей-офф дивизиона из одной группы (A, B, Prime): счёт пишется в строку
+// полуфинала таблицы дивизиона, финал и 3-е место таблица считает сама.
+{
+ const savedA=tables.get('a-test|Match_Log');
+ const H=['match','p1_id','player_1','p2_id','player_2','s1p1','s1p2'];
+ const rr=[[1,1,'A1',2,'A2'],[2,1,'A1',3,'A3'],[3,1,'A1',4,'A4'],[4,2,'A2',3,'A3'],[5,2,'A2',4,'A4'],[6,3,'A3',4,'A4']];
+ tables.set('a-test|Match_Log',[H,...rr,[7,1,'A1',4,'A4'],[8,2,'A2',3,'A3'],[9,'','','',''],[10,'','','','']]);
+ const before=writes.length;
+ const parsed={s1p1:6,s1p2:3,s2p1:6,s2p2:4};
+ const t=await results.writePlayoffTableRow({p1:'A4',p2:'A1',parsed,slot:{result_kind:'played'},season:'2',d1:'A'});
+ const mine=writes.slice(before).filter(w=>w.spreadsheetId==='a-test');
+ const f=mine.find(w=>/^Match_Log!F8:Q8$/.test(w.range)),r=mine.find(w=>/^Match_Log!R8:S8$/.test(w.range));
+ check(t.status==='saved'&&t.slot==='SF1'&&f&&String(f.values[0].slice(0,2))==='3,6'&&String(f.values[0].slice(4,6))==='4,6'&&r&&r.values[0][1]==='Yes','A: счёт полуфинала записан в строку SF1 таблицы со стороны первого в строке');
+ check(!mine.some(w=>/!F[2-7]:/.test(w.range)),'A: строки регулярки в таблице не тронуты');
+ check((await results.writePlayoffTableRow({p1:'A1',p2:'A2',parsed,slot:{},season:'2',d1:'A'})).status==='row_not_found','A: пары нет в сетке — в таблицу ничего не пишем');
+ const beforeC=writes.length;
+ check(!(await results.writePlayoffTableRow({p1:'Alice One',p2:'Bob Two',parsed,slot:{},season:'2',d1:'C'})).status.startsWith('saved')&&!writes.slice(beforeC).some(w=>/^c[12]$/.test(w.spreadsheetId)),'C (две группы): строки-заготовки в таблицах групп не пишутся');
+ tables.set('a-test|Match_Log',savedA);
+ const divSrc=await fs.readFile(path.join(root,'division.js'),'utf8');
+ check(/legacy \? \{ qf: \[\], sf: \[sf1, sf2\]/.test(divSrc),'Сетка по строкам таблицы — только для сезона таблиц S1, без отката на неё во втором сезоне');
+}
+// Матч назначает организатор: корт его, оба игрока получают сообщение,
+// переносит и отменяет только он; у игроков — «Связаться с организатором».
+{
+ messages.length=0;
+ const base={from_telegram_id:'3',to_telegram_id:'1',date:'2099-10-20',time:'18:00',court:'Court A',comment:'Корт на меня',stage:'regular',force:true};
+ check((await request('post','/api/match/assign','3',base)).code===403,'Назначить матч может только организатор');
+ const made=await request('post','/api/match/assign','99',base);
+ check(made.body.ok&&made.body.created&&made.body.notified===2,'Матч назначен, оба игрока получили сообщение');
+ const id=made.body.challenge_id,slot=await db.findSlot(id);
+ check(slot.match_type==='assigned'&&slot.status==='accepted'&&slot.court_confirmed_at&&String(slot.assigned_by)==='99'&&slot.agreed_date==='2099-10-20'&&slot.agreed_time==='18:00'&&slot.agreed_court==='Court A'&&!slot.stage&&slot.group==='cross','Матч сразу договорён, корт подтверждён, записано, кто назначил');
+ const toAlice=messages.find(m=>m.method==='sendMessage'&&String(m.args[0])==='1'),toCarol=messages.find(m=>m.method==='sendMessage'&&String(m.args[0])==='3');
+ check(/Организатор назначил вам матч/.test(toAlice?.args[1])&&/Carol Three/.test(toAlice.args[1])&&/Корт на меня/.test(toAlice.args[1]),'Сообщение по-русски: соперник, комментарий организатора');
+ check(/organiser has scheduled your match/.test(toCarol?.args[1])&&toCarol.args[2].reply_markup.inline_keyboard.flat().some(b=>b.text==='✉️ Contact the organiser'&&/^tg:\/\/user\?id=99$/.test(b.url)),'По-английски и с кнопкой «Связаться с организатором»');
+ check(!JSON.stringify(toCarol.args[2]).includes('match_cancel'),'У игрока нет кнопки отмены');
+ // Второй матч Carol в то же время — сначала предупреждение.
+ messages.length=0;
+ const ask=await request('post','/api/match/assign','99',{...base,to_telegram_id:'2',force:false});
+ check(ask.body.confirm&&ask.body.warnings.some(w=>/already has a match|уже матч/.test(w))&&!messages.some(m=>m.method==='sendMessage'),'Накладка по времени — предупреждение, без «назначить всё равно» ничего не создано');
+ const own=await request('post','/api/match/cancel','3',{challenge_id:id});
+ check(own.code===409&&own.body.code==='assign_by_organiser'&&/organiser/i.test(own.body.error),'Игрок не может отменить назначенный матч');
+ check((await db.proposeTimeChange(id,{telegram_id:'3'},'19:00')).reason==='assigned','Игрок не может перенести назначенный матч');
+ const boot=await request('get','/api/match/bootstrap','3');
+ const mine=boot.body.my_matches.find(x=>x.challenge_id===id);
+ check(mine&&mine.organiser_url==='tg://user?id=99','В «Моих матчах» у игрока есть связь с организатором');
+ const matchesMod=await load('matches.js');messages.length=0;
+ await matchesMod.notifyMatchReminder(await db.findSlot(id),'day');
+ const rem=messages.filter(m=>m.method==='sendMessage');
+ check(rem.length===2&&rem.every(m=>!JSON.stringify(m.args[2]).includes('match_cancel')&&m.args[2].reply_markup.inline_keyboard.flat().some(b=>/organiser|организатором/.test(b.text))),'Напоминание о назначенном матче — без отмены, со связью с организатором');
+ messages.length=0;
+ const moved=await request('post','/api/match/assign','99',{challenge_id:id,date:'2099-10-21',time:'19:30',court:'Court A'});
+ const after=await db.findSlot(id);
+ check(moved.body.ok&&moved.body.moved&&moved.body.notified===2&&after.agreed_date==='2099-10-21'&&after.agreed_time==='19:30'&&after.time_from==='19:30','Организатор переносит матч — новое время у обоих');
+ check(messages.some(m=>String(m.args[0])==='1'&&/Организатор перенёс матч/.test(m.args[1])&&/Было/.test(m.args[1])),'Игрокам пишут, что матч перенесён, и что было');
+ messages.length=0;
+ const gone=await request('post','/api/match/assign/cancel','99',{challenge_id:id});
+ check(gone.body.ok&&gone.body.notified===2&&(await db.findSlot(id)).status==='cancelled','Организатор отменяет матч');
+ check(messages.some(m=>String(m.args[0])==='3'&&/organiser cancelled/.test(m.args[1])),'Игроки узнают об отмене');
+ check((await request('post','/api/match/assign','99',{challenge_id:id,date:'2099-10-22',time:'18:00',court:'Court A'})).body.code==='assign_closed','Отменённый матч не переносится');
+ check((await request('post','/api/match/assign','99',{...base,date:'2000-01-01'})).body.code==='assign_past_date','Прошедшая дата не принимается');
+ const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8'),tgSrc=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check(/cmd:'assign'/.test(tgSrc)&&/\^\\\/assign/.test(botSrc)&&/Назначить матч/.test(botSrc),'/assign есть в боте, в /help и в списке команд');
+
+ // Плей-офф: время матча из раздела «Плей-офф» назначает матч игрокам.
+ const am=await load('assignmatch.js'),po=await load('playoff.js');
+ const sheet=tables.get('master|Playoff');
+ let idx=sheet.findIndex(r=>r&&r[1]==='2'&&r[2]==='C'&&r[4]==='3rd');
+ const saved3rd=idx>=0?[...sheet[idx]]:null;
+ if(idx<0){sheet.push(Array(24).fill(''));idx=sheet.length-1}
+ const row=sheet[idx];while(row.length<24)row.push('');
+ Object.assign(row,{0:'',1:'2',2:'C',3:'3rd',4:'3rd',5:'Alice One',6:'Bob Two',15:'tbd',16:'2099-11-08',17:'17:00',18:'The Peak',21:'2099-11-01'});
+ po.forgetPlayoffRows();
+ messages.length=0;
+ const c1=await am.syncPlayoffAssigned('C','2','3rd',{telegram_id:'99'});
+ const linked=(await po.divisionRows('C','2',{fresh:true})).find(r=>r.slot==='3rd');
+ const ps=c1.slot&&await db.findSlot(c1.slot.challenge_id);
+ check(c1.status==='created'&&ps.stage==='3rd'&&ps.match_type==='assigned'&&linked.match_id===ps.challenge_id&&linked.time==='17:00','Время матча за 3-е место → матч назначен игрокам и связан со строкой сетки');
+ check(messages.filter(m=>m.method==='sendMessage'&&['1','2'].includes(String(m.args[0]))).length===2&&messages.some(m=>String(m.args[0])==='2'&&/Матч за 3-е место/.test(m.args[1])),'Оба получили сообщение со стадией');
+ check((await am.syncPlayoffAssigned('C','2','3rd',{telegram_id:'99'})).status==='unchanged','Повторное сохранение того же времени ничего не шлёт');
+ await po.setSchedule('C','2','3rd',{date:'2099-11-08',time:'18:30',court:'The Peak'});
+ const c2=await am.syncPlayoffAssigned('C','2','3rd',{telegram_id:'99'});
+ check(c2.status==='moved'&&(await db.findSlot(ps.challenge_id)).agreed_time==='18:30','Новое время в сетке — матч у игроков перенесён');
+ sheet[idx][6]='Carol Three';po.forgetPlayoffRows();
+ const c3=await am.syncPlayoffAssigned('C','2','3rd',{telegram_id:'99'});
+ check(c3.status==='created'&&(await db.findSlot(ps.challenge_id)).status==='cancelled'&&c3.slot.to_name==='Carol Three','Игрока заменили — старый матч отменён, новый назначен');
+ sheet[idx][17]='';po.forgetPlayoffRows();
+ check((await am.syncPlayoffAssigned('C','2','QF9',{})).status==='not_found'&&am.playoffSyncText({status:'waiting'}).length>0,'Нет строки — ничего не делаем; подписи для организатора есть');
+ if(saved3rd)sheet[idx]=saved3rd;else sheet.splice(idx,1);po.forgetPlayoffRows();
 }
 // Плей-офф в ленте: результат не уходит карточкой — его забирает постер на
 // утверждение; с готовой картинкой (кнопка «Опубликовать») — уходит как обычно.

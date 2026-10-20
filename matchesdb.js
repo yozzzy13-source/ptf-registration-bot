@@ -46,7 +46,10 @@ const SLOT_HEADERS = [
   'log_row',
   // Стадия плей-офф (QF / SF / Final / 3rd). Пусто — матч регулярки. Отдельно
   // от round: round — номер раунда переговоров о времени.
-  'stage'
+  'stage',
+  // Матч назначил организатор (match_type = assigned): кто назначил и его ник
+  // для кнопки «Связаться с организатором». Переносит и отменяет только он.
+  'assigned_by', 'assigned_contact'
 ];
 const LOG_HEADERS = ['timestamp', 'challenge_id', 'action', 'actor_telegram_id', 'actor_name', 'division', 'details'];
 
@@ -399,6 +402,8 @@ export function cellToList(cell = '') {
 }
 
 // --- заявки -----------------------------------------------------------------
+// Матч назначил организатор: время и корт его, игроки их не меняют.
+export const isAssigned = (slot = {}) => String(slot?.match_type || '') === 'assigned' || Boolean(String(slot?.assigned_by || '').trim());
 export async function createSlot(slot) {
   await appendObject(MATCH_SHEETS.slots, SLOT_HEADERS, slot);
   await logMatchEvent('created', slot, { telegram_id: slot.from_telegram_id, name: slot.from_name },
@@ -1191,6 +1196,8 @@ export async function cancelMatchmaking(challengeId,actor={},now=Date.now()) {
     const me=String(actor.telegram_id||'');
     const sides=[String(slot.from_telegram_id||''),String(slot.to_telegram_id||'')].filter(Boolean);
     if(!sides.includes(me))return {ok:false,reason:'not_a_player',slot};
+    // Назначенный организатором матч отменяет только он.
+    if(isAssigned(slot))return {ok:false,reason:'assigned',slot};
     const status=String(slot.status||'').toLowerCase();
     if(!['open','pending','accepted'].includes(status))return {ok:false,reason:'not_pending',slot};
     if(String(slot.result_status||'').toLowerCase())return {ok:false,reason:'result_started',slot};
@@ -1278,6 +1285,7 @@ export async function proposeTimeChange(challengeId, actor = {}, newTime = '') {
     const sides = [String(slot.from_telegram_id), String(slot.to_telegram_id)];
     const me = String(actor.telegram_id || '');
     if (!sides.includes(me)) return { ok: false, reason: 'not_a_player', slot };
+    if (isAssigned(slot)) return { ok: false, reason: 'assigned', slot };
     // Корт бронирует один человек — он же и переносит. До подтверждения корта
     // кнопка есть только у него, после — только у того, кто подтвердил.
     if (String(slot.from_telegram_id) !== me) {

@@ -667,6 +667,7 @@ function renderAdmin(){
   if(!isAdmin){view.innerHTML='';return}
   if(adminMode==='playoff'){view.innerHTML=adminModeBar()+renderPlayoffAdmin();return}
   if(!adminLoaded){view.innerHTML='<div class="empty">…</div>';fetch('/api/match/admin-active?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');adminItems=j.items||[];adminLoaded=true;renderAdmin()}).catch(function(e){view.innerHTML='<div class="empty" style="color:var(--danger)">'+esc(e.message)+'</div>'});return}
+  if(assignForm){var form=renderAssignForm();if(form){view.innerHTML=adminModeBar()+form;var ed=assignEdit();if(ed&&$('aCourt'))$('aCourt').value=ed.agreed_court||'';return}}
   var divisions=[];adminItems.forEach(function(s){var d=String(s.division||'').trim();if(d&&divisions.indexOf(d)<0)divisions.push(d)});divisions.sort();
   var qSug=adminQuery.trim().toLowerCase();
   var nameSugs=(adminSugOpen&&qSug)?adminPlayers.filter(function(p){return String(p.name||'').toLowerCase().indexOf(qSug)>=0}).slice(0,6):[];
@@ -682,17 +683,85 @@ function renderAdmin(){
     if(s.from_contact&&s.from_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.from_contact.url)+'\')">💬 '+esc(s.from_name||'1')+'</button>';
     if(s.to_contact&&s.to_contact.url)acts+='<button class="mini" onclick="openLink(\''+esc(s.to_contact.url)+'\')">💬 '+esc(s.to_name||'2')+'</button>';
     if(resultStatus==='pending'){acts+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(adminOnlyConfirm(s)?X.confirmForPlayer:X.confirmResult)+'</button>';acts+='<button class="mini" onclick="resendResultConfirmation(\''+esc(s.challenge_id)+'\',this)">'+esc(X.resendConfirmation)+'</button>';}
-    if(resultStatus!=='pending')acts+=nudgeButton(s);
-    if(resultStatus!=='confirmed')acts+='<button class="mini" onclick="deleteAdminMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.deleteMatch)+'</button>';
+    var assigned=isAssignedSlot(s);
+    if(assigned&&!resultStatus){acts+='<button class="mini" onclick="openAssign(\''+esc(s.challenge_id)+'\')">🕐 '+esc(L?'Перенести':'Move')+'</button>';acts+='<button class="mini" onclick="cancelAssignedMatch(\''+esc(s.challenge_id)+'\',this)">✖️ '+esc(L?'Отменить':'Cancel')+'</button>';}
+    if(resultStatus!=='pending'&&!assigned)acts+=nudgeButton(s);
+    if(resultStatus!=='confirmed'&&!(assigned&&!resultStatus))acts+='<button class="mini" onclick="deleteAdminMatch(\''+esc(s.challenge_id)+'\',this)">'+esc(X.deleteMatch)+'</button>';
     acts+='</div>';
     return '<div class="slot"><div class="who">'+esc(s.from_name||'—')+' → '+esc(to)+'</div>'
-      +'<div class="meta"><span class="pill open">'+esc(label)+'</span> '+esc(s.division||'')+(s.group?' · '+esc(L?'Группа ':'Group ')+esc(s.group):'')+'</div>'
+      +'<div class="meta"><span class="pill open">'+esc(label)+'</span>'+(assigned?' <span class="pill acc">📅 '+esc(L?'назначил организатор':'set by the organiser')+'</span>':'')+(s.stage?' <span class="pill">'+esc(poStage(s.stage))+'</span>':'')+' '+esc(s.division||'')+(s.group?' · '+(s.group==='cross'?esc(L?'межгрупповой':'cross-group'):esc(L?'Группа ':'Group ')+esc(s.group)):'')+'</div>'
       +'<div class="when">📅 <b>'+dates.map(fmtDay).map(esc).join(' · ')+'</b>'+(time?' · 🕐 <b>'+esc(time)+'</b>':'')+'</div>'
       +(court?'<div class="meta">📍 '+esc(court)+'</div>':'')
       +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
       +acts+'</div>';
   }).join('');
-  view.innerHTML=adminModeBar()+controls+renderAnnouncePanel()+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
+  var assignBtn='<button class="primary" style="margin:0 0 12px" onclick="openAssign()">📅 '+esc(L?'Назначить матч':'Schedule a match')+'</button>';
+  view.innerHTML=adminModeBar()+assignBtn+controls+renderAnnouncePanel()+(cards||'<div class="empty">'+esc(X.adminEmpty)+'</div>');
+}
+// ---------------------------------------------------------------- назначить матч (организатор)
+// Два игрока, дата, время, корт: матч сразу договорён, корт — бронь
+// организатора. Перенести и отменить его может только организатор.
+var assignForm=new URLSearchParams(location.search).get('assign')==='1'?'new':'',assignBusy=false;
+function isAssignedSlot(s){return String(s&&s.match_type||'')==='assigned'||!!String(s&&s.assigned_by||'').trim()}
+function assignEdit(){return assignForm&&assignForm!=='new'?(adminItems.filter(function(s){return s.challenge_id===assignForm})[0]||null):null}
+function openAssign(id){assignForm=id||'new';adminMode='matches';if(mode!=='admin')showTab('admin');else renderAdmin();window.scrollTo(0,0)}
+function closeAssign(){assignForm='';renderAdmin()}
+function assignTimes(sel){var o=timeOptions(sel);if(sel&&o.indexOf('value="'+sel+'"')<0)o='<option value="'+esc(sel)+'" selected>'+esc(sel)+'</option>'+o;return o}
+function renderAssignForm(){
+  var edit=assignEdit();
+  if(assignForm!=='new'&&!edit){assignForm='';return ''}
+  var today=isoDate(new Date()),pick=L?'Выберите из списка или начните вводить имя':'Pick from the list or start typing a name';
+  var names=adminPlayers.map(manualLabel);
+  var players=edit
+    ?'<div class="who" style="margin:8px 0 2px">'+esc(edit.from_name)+' — '+esc(edit.to_name)+'</div><div class="meta">'+esc(edit.division||'')+(edit.stage?' · '+esc(poStage(edit.stage)):'')+'</div>'
+    :'<label>'+esc(L?'Первый игрок':'First player')+'</label>'+comboBox('aFrom',names,pick,'')+'<label>'+esc(L?'Второй игрок':'Second player')+'</label>'+comboBox('aOpp',names,pick,'');
+  var stage=edit?'':'<label>'+esc(L?'Этап':'Stage')+'</label><select id="aStage"><option value="">'+esc(L?'Определить по сетке плей-офф':'Detect from the playoff bracket')+'</option>'
+    +'<option value="regular">'+esc(L?'Регулярный матч':'Regular match')+'</option>'
+    +['QF','SF','Final','3rd'].map(function(k){return '<option value="'+k+'">'+esc(poStage(k))+'</option>'}).join('')+'</select>';
+  var courtNames=courts.map(function(c){return String(c&&c.name?c.name:c)});
+  return '<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(edit?(L?'🕐 Перенести матч':'🕐 Move the match'):(L?'📅 Назначить матч':'📅 Schedule a match'))+'</h3>'
+    +'<div class="hint">'+esc(L?'Матч сразу договорён, корт — ваша бронь. Оба игрока получат сообщение; перенести и отменить матч сможете только вы.':'The match is agreed at once and the court is your booking. Both players get a message; only you can move or cancel it.')+'</div>'
+    +players
+    +'<label>'+esc(X.pickDate)+'</label><input type="date" id="aDate" min="'+today+'" value="'+esc(edit?edit.agreed_date:today)+'">'
+    +'<label>'+esc(L?'Время':'Time')+'</label><select id="aTime">'+assignTimes(edit?edit.agreed_time:'18:00')+'</select>'
+    +'<label>'+esc(X.pickCourt)+'</label>'+comboBox('aCourt',courtNames,L?'Выберите из списка или впишите':'Pick from the list or type it','')
+    +stage
+    +'<label>'+esc(X.note)+'</label><textarea id="aNote" placeholder="'+esc(L?'Увидят оба игрока':'Both players will see it')+'">'+esc(edit?edit.comment||'':'')+'</textarea>'
+    +'<button class="primary" onclick="submitAssign(this,false)">'+esc(edit?(L?'Сохранить и сообщить игрокам':'Save and notify the players'):(L?'Назначить и сообщить игрокам':'Schedule and notify the players'))+'</button>'
+    +'<button onclick="closeAssign()">'+esc(X.back)+'</button><div id="aRes" class="res"></div></div>';
+}
+function submitAssign(btn,force){
+  if(assignBusy)return;
+  var res=$('aRes');res.className='res';
+  var edit=assignForm!=='new'?assignForm:'';
+  var body={initData:initData,t:linkToken,date:$('aDate').value,time:$('aTime').value,court:(($('aCourt')&&$('aCourt').value)||'').trim(),comment:(($('aNote')&&$('aNote').value)||'').trim(),force:!!force};
+  if(edit)body.challenge_id=edit;
+  else{
+    var a=manualPerson($('aFrom').value),b=manualPerson($('aOpp').value);
+    if(!a.telegram_id||!b.telegram_id){res.className='res err';res.textContent=L?'Выберите двух игроков из списка.':'Pick two players from the list.';return}
+    body.from_telegram_id=a.telegram_id;body.to_telegram_id=b.telegram_id;body.stage=$('aStage')?$('aStage').value:'';
+  }
+  assignBusy=true;btn.disabled=true;res.textContent=X.sending;
+  fetch('/api/match/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(j){
+    assignBusy=false;btn.disabled=false;
+    if(j.confirm){res.textContent='';poAsk((j.warnings||[]).join('\n')+'\n\n'+(L?'Назначить всё равно?':'Schedule anyway?'),function(){submitAssign(btn,true)});return}
+    if(!j.ok)throw new Error(j.error||'Error');
+    var note=edit
+      ?(j.moved?(L?'✅ Матч перенесён. Сообщений игрокам: ':'✅ Match moved. Messages sent: ')+(j.notified||0):(L?'✅ Сохранено':'✅ Saved'))
+      :(L?'✅ Матч назначен. Сообщений игрокам: ':'✅ Match scheduled. Messages sent: ')+(j.notified||0)
+        +(j.stage?' · '+poStage(j.stage)+(j.playoff?(L?', время записано в сетку плей-офф':', time written to the playoff bracket'):''):'');
+    poSay(note);assignForm='';adminLoaded=false;load(true);
+  }).catch(function(e){assignBusy=false;btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+}
+function cancelAssignedMatch(id,btn){
+  poAsk(L?'Отменить матч? Оба игрока получат сообщение.':'Cancel the match? Both players will get a message.',function(){
+    btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
+    fetch('/api/match/assign/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
+      .then(function(r){return r.json()}).then(function(j){
+        if(!j.ok)throw new Error(j.error||'Error');
+        poSay((L?'✅ Матч отменён. Сообщений игрокам: ':'✅ Match cancelled. Messages sent: ')+(j.notified||0));adminLoaded=false;load(true);
+      }).catch(function(e){btn.disabled=false;btn.textContent=old;poSay('⛔ '+e.message)});
+  });
 }
 // ---------------------------------------------------------------- плей-офф (организатор)
 // Всё по одному дивизиону за раз: несыгранные матчи → сетка (предварительная
@@ -717,6 +786,8 @@ function poAct(body,btn,okText,after){
     if(after)after(j);poOpen='';poState=null;poLoad(true);
   }).catch(function(e){poBusy=false;if(btn){btn.disabled=false;btn.textContent=old}poSay('⛔ '+e.message)});
 }
+function poSavedNote(j){return (L?'✅ Время сохранено':'✅ Saved')+(j&&j.assigned_note?'\n'+j.assigned_note:'')}
+function poReplacedNote(j){return (L?'✅ Заменено, игроки получат сообщение':'✅ Replaced, players notified')+(j&&j.assigned_note&&['created','moved'].indexOf(j.assigned)>=0?'\n'+j.assigned_note:'')}
 function poSay(t){if(tg&&tg.showAlert)tg.showAlert(t);else alert(t)}
 function poAsk(t,go){if(tg&&tg.showConfirm)tg.showConfirm(t,function(ok){if(ok)go()});else if(confirm(t))go()}
 var PO_STAGE={QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final'};
@@ -829,13 +900,13 @@ function poMatchCard(d,m){
     h+='<div style="margin-top:8px"><label>'+esc(L?'День':'Day')+'</label><select id="poDate">'+days.map(function(x){return '<option value="'+esc(x)+'"'+(x===m.date?' selected':'')+'>'+esc(fmtDay(x))+'</option>'}).join('')+'</select>'
       +'<label>'+esc(L?'Время':'Time')+'</label><input id="poTime" type="time" value="'+esc(m.time||'')+'">'
       +'<label>'+esc(L?'Корт':'Court')+'</label><input id="poCourt" value="'+esc(m.court||poState.court||'')+'">'
-      +'<button class="primary" onclick="poAct({action:\'schedule\',slot:\''+key+'\',date:$(\'poDate\').value,time:$(\'poTime\').value,court:$(\'poCourt\').value},this,L?\'✅ Время сохранено\':\'✅ Saved\')">'+esc(L?'Сохранить':'Save')+'</button></div>';
+      +'<button class="primary" onclick="poAct({action:\'schedule\',slot:\''+key+'\',date:$(\'poDate\').value,time:$(\'poTime\').value,court:$(\'poCourt\').value},this,poSavedNote)">'+esc(L?'Сохранить':'Save')+'</button></div>';
   }
   if(poOpen==='rp:'+key){
     var names=poNames(d);
     h+='<div style="margin-top:8px"><label>'+esc(L?'Кого заменить':'Whom to replace')+'</label><select id="rpSide"><option value="1">'+esc(m.player_1||poPh(d,m.slot,0))+'</option><option value="2">'+esc(m.player_2||poPh(d,m.slot,1))+'</option></select>'
       +'<label>'+esc(L?'На кого':'With')+'</label><select id="rpName">'+names.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>'}).join('')+'</select>'
-      +'<button class="primary" onclick="poAct({action:\'replace\',slot:\''+key+'\',side:$(\'rpSide\').value,name:$(\'rpName\').value},this,L?\'✅ Заменено, игроки получат сообщение\':\'✅ Replaced, players notified\')">'+esc(L?'Заменить':'Replace')+'</button></div>';
+      +'<button class="primary" onclick="poAct({action:\'replace\',slot:\''+key+'\',side:$(\'rpSide\').value,name:$(\'rpName\').value},this,poReplacedNote)">'+esc(L?'Заменить':'Replace')+'</button></div>';
   }
   return h+'</div>';
 }
@@ -914,7 +985,7 @@ function renderMine(){
     var opp=iAmAuthor?{name:s.to_name,username:s.to_username}:{name:s.from_name,username:s.from_username};
     return '<div class="slot'+(agreed?' agreed':'')+'">'
       +'<div class="slot-head"><div><div class="who">'+esc(opp.name||X.waiting)+'</div>'
-      +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(unfinished?X.unfinishedBadge:X.agreed)+'</span>':(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
+      +'<div class="meta">'+(agreed?'<span class="pill acc">'+esc(unfinished?X.unfinishedBadge:X.agreed)+'</span>'+(isAssignedSlot(s)?' <span class="pill">📅 '+esc(L?'назначил организатор':'set by the organiser')+'</span>':''):(pending?'<span class="pill open">'+esc(String(s.pending_by)===String(me&&me.id)?X.pendingLbl:X.yourTurn)+'</span>':'<span class="pill open">'+esc(X.waiting)+'</span>'))+(s.division?' <span class="pill">'+esc(s.division)+'</span>':'')+'</div></div></div>'
       +'<div class="when">📅 <b>'+(agreed?esc(fmtDay(s.agreed_date)):s.dates.map(fmtDay).map(esc).join(' · '))+'</b> · 🕐 <b>'+esc(agreed&&s.agreed_time?(s.agreed_time+'–'+min2hm(hm2min(s.agreed_time)+Number(s.duration_min||matchDuration))):s.time_from)+'</b></div>'
       +((agreed?s.agreed_court:s.courts.join(' · '))?'<div class="meta">📍 '+esc(agreed?s.agreed_court:s.courts.join(' · '))
          +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
@@ -1007,8 +1078,10 @@ function matchDayStarted(s){
 function canRetime(s){return String(s.from_telegram_id)===String(me&&me.id)}
 function agreedActions(s,opp){
   var b='<div class="acts">';
-  var contact=matchContactUrl(s,opp),st=String(s.result_status||'');
+  var contact=matchContactUrl(s,opp),st=String(s.result_status||''),assigned=isAssignedSlot(s);
   if(contact)b+='<button class="mini" onclick="openLink(\''+esc(contact)+'\')">💬 '+(L?'Написать':'Message')+'</button>';
+  // Матч назначил организатор: переносит и отменяет он — вместо этих кнопок связь с ним.
+  if(assigned&&s.organiser_url)b+='<button class="mini" onclick="openLink(\''+esc(s.organiser_url)+'\')">✉️ '+esc(L?'Связаться с организатором':'Contact the organiser')+'</button>';
   if(st==='pending'){
     if(canConfirmResult(s))b+='<button class="mini primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>';
     else if(byOrganiser(s))b+='<span class="hint">'+esc(X.waitingOther)+'</span>';
@@ -1023,6 +1096,7 @@ function agreedActions(s,opp){
     return b+'</div>';
   }
   if(matchDayStarted(s)&&!st&&amPlayer(s))b+='<button class="mini primary" onclick="openResultFromMine(\''+esc(s.challenge_id)+'\')">'+esc(X.resTitle)+'</button>';
+  if(assigned)return b+'</div>';
   if(canRetime(s)&&!s.court_confirmed_at&&!pendingTime(s))b+='<button class="mini'+(courtPending(s)?'':' primary')+'" onclick="bookingHelper(\''+esc(s.challenge_id)+'\',this)">'+esc(L?'📲 Забронировать корт':'📲 Book court')+'</button>';
   if(canRetime(s)&&courtPending(s))b+='<button class="mini primary" onclick="confirmCourtApp(\''+esc(s.challenge_id)+'\',this)">'+esc(X.courtBtn)+'</button>';
   if(canRetime(s)&&!pendingTime(s))b+='<button class="mini" onclick="openRetime(\''+esc(s.challenge_id)+'\')">'+esc(X.retime)+'</button>';

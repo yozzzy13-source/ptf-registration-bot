@@ -83,6 +83,25 @@ check(dana.model && dana.matches === 1 && applied.history.get('104').length === 
 const only = applied.players.find(p => p.id === '111');
 check(only.model && only.matches === 1 && applied.history.get('111')[0].season === '0', 'Сезон, которого в журнале нет совсем, берётся из таблицы профилей');
 
+// Луи «сыграл сам с собой»: соперника нет в профилях, а его id из
+// Players_Master совпал с id Луи в профилях. Теперь — только по имени.
+{
+  const lp = [{ id: '7', name: 'Louie Murray' }, { id: '8', name: 'Philipp Meyer-Galow' }];
+  const rows = lm.normalizeLog([header,
+    row({ no: 193, date: serial('2026-10-17'), comp: 'Season 2', p1: 'Louie Murray', id1: 3, p2: 'Sergei Sokolov', id2: 7, sets: [[6, 4], [1, 6], [10, 7]], win: 3 }),
+    row({ no: 194, date: serial('2026-10-18'), comp: 'Season 2', p1: 'Louie Murray', id1: 3, p2: 'Louie Murray', id2: 3, sets: [[6, 0], [6, 0]], win: 3 }),
+    row({ no: 195, date: serial('2026-10-18'), comp: 'Season 2', p1: 'Philipp Meyer-Galow', id1: 8, p2: 'Louie Murray', id2: 7, sets: [[6, 2], [6, 2]], win: 8 })
+  ]).matches;
+  const m2 = lm.buildModel(rows, lp, { sameName: (a, b) => a.toLowerCase() === b.toLowerCase() });
+  const louie = m2.byPlayer.get('7') || [];
+  check(louie.length === 2 && !louie.some(x => x.opponent_id === '7' || x.opponent === 'Louie Murray'), 'Луи не играет сам с собой: соперник не подменяется по совпавшему id');
+  check(louie.find(x => x.match_no === '193')?.opponent === 'Sergei Sokolov' && louie.find(x => x.match_no === '193')?.opponent_id === '', 'Соперник без профиля — по имени из журнала, без ссылки на чужую карточку');
+  check(m2.unmatched.some(u => u.name === 'Sergei Sokolov') && m2.selfMatches.length === 1 && m2.selfMatches[0].no === '194', 'Неузнанное имя и строка «сам с собой» попадают в отчёт, матч не учитывается');
+  const loose = lm.buildModel(lm.normalizeLog([header, row({ no: 1, date: serial('2026-10-01'), comp: 'Season 2', p1: 'Alex Kim', id1: 1, p2: 'Sam Lee', id2: 2, sets: [[6, 1], [6, 1]], win: 1 })]).matches,
+    [{ id: '1', name: 'Alex Kim' }, { id: '2', name: 'Alexander Kim' }], { sameName: () => true });
+  check((loose.byPlayer.get('1') || []).length === 1 && !(loose.byPlayer.get('2') || []).length, 'Точное имя важнее похожего; неоднозначная похожесть не угадывается');
+}
+
 // ---------------------------------------------------------------- сверка
 const diff = lm.diffModel(profiles, sheetHistory, applied);
 const dDavid = diff.find(r => r.name === 'David Berov');

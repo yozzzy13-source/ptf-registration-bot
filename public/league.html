@@ -630,6 +630,10 @@ position:sticky;left:0;z-index:1}
 .mt{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:11px;margin-bottom:8px;
 box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 .ponote{font-size:11.5px;color:var(--mute2);text-align:center;margin:-2px 0 10px}
+/* Черновик сетки: плашка «предварительно» + одна строка, карточки пунктиром */
+.podraft{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px 8px;margin:-2px 0 12px;font-size:11.5px;color:var(--mute2);text-align:center}
+.podraft b{display:inline-block;padding:2px 8px;border-radius:999px;border:1px dashed var(--accLine2,rgba(232,164,92,.5));color:var(--gold,#E8A45C);font-size:9.5px;font-weight:850;letter-spacing:1.2px;text-transform:uppercase}
+.draft .mbox{border-style:dashed}
 .stgw{text-align:center;margin:2px 0 4px}
 .stg{display:inline-block;padding:3px 10px;border-radius:999px;font-size:10.5px;font-weight:800;letter-spacing:.4px;color:#D9C7A3;background:rgba(201,167,106,.14);border:1px solid rgba(201,167,106,.45)}
 .stg.fin{color:#1b160f;background:linear-gradient(180deg,#E9D29E,#C9A76A);border-color:#C9A76A}
@@ -2651,7 +2655,7 @@ function playoffStages(po){
   if(has(po.final))stages.push({t:X.final,m:[po.final],fin:true});
   if(has(po.third))stages.push({t:L?'За 3-е место':'Third place',m:[po.third]});
   if(!stages.length)return '';
-  return '<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)+'<div class="playgrid">'+stages.map(function(st){return '<div class="playstage"><div class="playtitle">'+esc(st.t)+'</div>'+st.m.map(function(m,i){return poBox(st.t+(st.m.length>1?' · '+(i+1):''),m,st.fin)}).join('')+'</div>'}).join('')+'</div>';
+  return '<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)+'<div class="playgrid'+(po.preview?' draft':'')+'">'+stages.map(function(st){return '<div class="playstage"><div class="playtitle">'+esc(st.t)+'</div>'+st.m.map(function(m,i){return poBox(st.t+(st.m.length>1?' · '+(i+1):''),m,st.fin)}).join('')+'</div>'}).join('')+'</div>';
 }
 function renderDiv(){
   if(!divSeason)divSeason=String(season||(seasons.length?seasons[seasons.length-1].number:''))||'';
@@ -2695,10 +2699,10 @@ function renderDiv(){
   var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played)||po.published||(po.preview&&(po.sf1||po.sf2));
   if(hasPo){
     h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)
-      +'<div class="tree"><div class="col">'
+      +'<div class="tree'+(po.preview?' draft':'')+'"><div class="col">'
       +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
       +'</div><div class="conn"><i></i><u></u></div><div class="col">'
-      +poBox(X.final,po.final,true)+'</div></div>'+(po.third?'<div class="playgrid"><div class="playstage">'+poBox(L?'За 3-е место':'Third place',po.third)+'</div></div>':'');
+      +poBox(X.final,po.final,true)+'</div></div>'+(po.third?'<div class="playgrid'+(po.preview?' draft':'')+'"><div class="playstage">'+poBox(L?'За 3-е место':'Third place',po.third)+'</div></div>':'');
   }
   h+=standingsBlock(d,divLabel(d.division));
   // Дивизион может идти двумя группами: показываем вторую таблицу сразу под первой,
@@ -2747,8 +2751,11 @@ function standingsBlock(d,title){
 }
 // Пометка над сеткой: предварительная (по текущей таблице) или когда финалы.
 function poNote(po){
-  if(po&&po.preview)return '<div class="ponote">'+esc(L?'Предварительная сетка — по текущей таблице, меняется после каждого матча до конца регулярки.':'Provisional bracket — based on the current table, it changes after every match until the regular season ends.')+'</div>';
-  return '';
+  if(!po||!po.preview)return '';
+  // Коротко: что это черновик и до какого дня пары могут меняться.
+  var by=po.deadline?matchDate(po.deadline):'';
+  var line=L?('Пары по текущей таблице'+(by?' — могут меняться до '+by:'')):('Pairs follow the current table'+(by?' and may change until '+by:''));
+  return '<div class="podraft"><b>'+esc(L?'Предварительно':'Provisional')+'</b><span>'+esc(line)+'</span></div>';
 }
 // «Winner SF1» → «Победитель SF1»: кто встанет в пару, пока её нет.
 function poPlaceholder(t){

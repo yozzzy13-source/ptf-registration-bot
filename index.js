@@ -21,12 +21,12 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
   notifyProposal, notifyResultPrompt, notifyResultForVerification, notifyResultHalfConfirmed, notifyResultConfirmed, notifyCrossDivision, broadcastResult, notifyMatchUnfinished, sendCourtRequests,
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
-  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed, scheduleSlotCards } from './matches.js';
+  notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed, scheduleSlotCards, organiserContactUrl } from './matches.js';
 import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHandler, findSameResult, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
-  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin, confirmCourt, courtCloseAt, updateSlot } from './matchesdb.js';
+  courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin, confirmCourt, courtCloseAt, updateSlot, isAssigned } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
 import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
@@ -884,7 +884,10 @@ const PLAYOFF_ERRORS = {
   bad_date: 'Дата в формате ГГГГ-ММ-ДД.', bad_time: 'Время в формате ЧЧ:ММ.', bad_decision: 'Неизвестное решение.',
   no_columns: 'В Match_Log нет колонок P1/P2 TechLoss.', row_moved: 'Строка матча в таблице сдвинулась — обновите экран.',
   no_matches: 'На этот день нет матчей плей-офф.', no_preview: 'Сначала сделайте предпросмотр афиши.',
-  no_players: 'В паре ещё нет обоих игроков.'
+  no_players: 'В паре ещё нет обоих игроков.',
+  duplicate_player: 'Один игрок стоит в двух местах сетки — проверьте строки плей-офф в таблице дивизиона (/playoff_sheets).',
+  no_table_row: 'В таблице дивизиона нет строки этого полуфинала — проверьте /playoff_sheets.',
+  not_in_table: 'Этого игрока нет в таблице дивизиона.'
 };
 app.get('/api/playoff/state', async (req, res) => {
   try {
@@ -914,6 +917,13 @@ app.post('/api/playoff/action', async (req, res) => {
       default: return res.status(400).json({ ok:false, error:'Неизвестное действие' });
     }
     if (!r?.ok) return res.status(409).json({ ok:false, error: PLAYOFF_ERRORS[r?.reason] || r?.reason || 'Не получилось' });
+    // Время или игрок поменялись — назначенный матч у игроков следом.
+    if (['schedule', 'replace'].includes(String(b.action || ''))) {
+      const { syncPlayoffAssigned, playoffSyncText } = await import('./assignmatch.js');
+      const sync = await syncPlayoffAssigned(letter, season, String(b.slot || ''), { ...actor, username:v.user.username || v.profile?.telegram_username || '' })
+        .catch(e => ({ status:'error', reason:e.message }));
+      r = { ...r, assigned:sync.status, assigned_note:playoffSyncText(sync, v.lang !== 'en') };
+    }
     res.json({ ...r, ok:true });
   } catch (e) { console.error('playoff action failed:', e); res.status(500).json({ ok:false, error:e.message }); }
 });
@@ -1019,6 +1029,8 @@ app.get('/api/match/bootstrap', async (req, res) => {
       courts: cellToList(s.courts),
       from: byId.get(String(s.from_telegram_id)) || null,
       contact:contacts.get(s.challenge_id)||null,
+      // Матч назначил организатор: связь с ним вместо переноса и отмены.
+      organiser_url: isAssigned(s) ? organiserContactUrl(s) : '',
       // Когда матч снимется, если автор так и не подтвердит корт (0 — не грозит).
       court_close_at: courtCloseAt(s) || 0
     });
@@ -1559,6 +1571,51 @@ app.post('/api/match/manual', async (req,res)=>{
   }catch(e){console.error(e);res.status(500).json({ok:false,error:e.message})}
 });
 
+
+// Матч, назначенный организатором (assignmatch.js): двое игроков, дата, время,
+// корт. С challenge_id — перенос уже назначенного. Ответ reason=confirm с
+// warnings — показать предупреждения и спросить «назначить всё равно».
+// Ошибки — кодами: перевод на язык игрока делает общий слой (ui-errors.js).
+const assignError = reason => 'assign_' + String(reason || 'failed');
+function assignWarningText(w, ru) {
+  if (w.code === 'time_clash') return ru ? `У ${w.name} на это время уже матч${w.with ? ' с ' + w.with : ''} (${w.date} ${w.time}).` : `${w.name} already has a match at this time${w.with ? ' with ' + w.with : ''} (${w.date} ${w.time}).`;
+  if (w.code === 'already_paired') return ru ? `${w.name} и ${w.with} уже играли или договорились в этом сезоне.` : `${w.name} and ${w.with} have already played or arranged a match this season.`;
+  return '';
+}
+app.post('/api/match/assign', async (req, res) => {
+  try {
+    const b = req.body || {}, v = await matchViewer(b.initData || '', String(b.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'admin_required' });
+    const { assignMatch } = await import('./assignmatch.js');
+    const actor = { telegram_id:String(v.user.id), name:v.profile?.name || '', username:v.user.username || v.profile?.telegram_username || '' };
+    const r = await assignMatch(b, actor);
+    const ru = v.lang === 'ru';
+    if (!r.ok && r.reason === 'confirm') return res.json({ ok:false, confirm:true, warnings:(r.warnings || []).map(w => assignWarningText(w, ru)).filter(Boolean) });
+    if (!r.ok) return res.status(409).json({ ok:false, error:assignError(r.reason) });
+    invalidateDivisionCache();
+    res.json({ ok:true, challenge_id:r.slot.challenge_id, created:Boolean(r.created), moved:Boolean(r.moved), notified:r.notified || 0, stage:r.slot.stage || '', playoff:Boolean(r.playoff) });
+  } catch (e) { console.error('assign match failed:', e); res.status(500).json({ ok:false, error:e.message }); }
+});
+app.post('/api/match/assign/cancel', async (req, res) => {
+  try {
+    const b = req.body || {}, v = await matchViewer(b.initData || '', String(b.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'admin_required' });
+    const { cancelAssigned } = await import('./assignmatch.js');
+    const r = await cancelAssigned(String(b.challenge_id || ''), { telegram_id:String(v.user.id), name:v.profile?.name || '' });
+    if (!r.ok) return res.status(409).json({ ok:false, error:assignError(r.reason) });
+    invalidateDivisionCache();
+    res.json({ ok:true, notified:r.notified || 0 });
+  } catch (e) { console.error('assign cancel failed:', e); res.status(500).json({ ok:false, error:e.message }); }
+});
+// Время матча плей-офф из раздела «Плей-офф» и победители, вставшие в
+// следующий круг, → назначенный матч у игроков. Автоматически (после счёта)
+// матч назначается от имени главного организатора.
+import('./playoff.js').then(po => po.setAssignHook(async (letter, season, slot, actor) => {
+  const { syncPlayoffAssigned } = await import('./assignmatch.js');
+  return syncPlayoffAssigned(letter, season, slot, actor || { telegram_id:String(ADMIN_IDS[0] || ''), name:'' });
+})).catch(e => console.error('playoff assign hook failed:', e.message));
 
 // Витрина лиги: годовая гонка, список игроков, карточка игрока.
 // Пока открыта только админу — включим всем, когда утвердим вид.
@@ -2440,6 +2497,7 @@ app.post('/api/match/cancel', async (req, res) => {
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
     if (!v.canMatch && !v.isAdmin) return res.status(403).json({ok:false,error:'division_required'});
     const result = await cancelMatchmaking(req.body.challenge_id, { telegram_id:v.user.id, name:v.profile.name });
+    if (!result.ok && result.reason === 'assigned') return res.status(409).json({ ok:false, error:'assign_by_organiser' });
     if (!result.ok) {
       const code = result.reason === 'not_found' ? 404 : result.reason === 'not_a_player' ? 403 : 409;
       return res.status(code).json({ok:false,error:result.reason});
@@ -2484,6 +2542,7 @@ app.post('/api/match/retime', async (req, res) => {
         not_accepted: 'Матч ещё не согласован.',
         not_a_player: 'Это не ваш матч.',
         not_booker: 'Время меняет тот, кто бронировал корт.',
+        assigned: 'assign_by_organiser',
         same_time: 'Это и есть текущее время.',
         bad_time: 'Некорректное время.'
       };

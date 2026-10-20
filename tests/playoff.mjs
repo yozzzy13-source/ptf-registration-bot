@@ -21,12 +21,32 @@ function rangeInfo(id, range) {
   if (!m) throw Error('Unsupported range ' + range);
   return { key: id + '|' + m[1], c1: col(m[2]), r1: Number(m[3] || 1) - 1, c2: col(m[4] || m[2]), r2: m[5] ? Number(m[5]) - 1 : (m[4] ? Infinity : Number(m[3] || 1) - 1) };
 }
+// Таблица с формулами: рядом с листом лежит «#f» — что видно при чтении
+// формул (valueRenderOption FORMULA). Запись формулы считается просто:
+// «место k» — id k (в A id совпадают с местами), остальные формулы — пусто.
+const evalFormula = v => { const t = String(v ?? ''); if (!t.startsWith('=')) return v; const m = t.match(/MATCH\((\d+),/); return m ? m[1] : ''; };
+const sheetsOf = spreadsheetId => [...tables.keys()].filter(k => k.startsWith(spreadsheetId + '|') && !k.endsWith('#f'));
+const writeCells = (spreadsheetId, range, values) => {
+  const r = rangeInfo(spreadsheetId, range), rows = tables.get(r.key) || [], f = tables.get(r.key + '#f');
+  values.forEach((row, i) => { rows[r.r1 + i] ||= []; if (f) f[r.r1 + i] ||= []; row.forEach((v, j) => { rows[r.r1 + i][r.c1 + j] = f ? evalFormula(v) : v; if (f) f[r.r1 + i][r.c1 + j] = v; }); });
+  tables.set(r.key, rows);
+};
 const google = { spreadsheets: {
-  get: async ({ spreadsheetId }) => ({ data: { sheets: [...tables.keys()].filter(k => k.startsWith(spreadsheetId + '|')).map((k, i) => ({ properties: { title: k.split('|')[1], sheetId: i, gridProperties: { columnCount: 26 } } })) } }),
-  batchUpdate: async ({ spreadsheetId, requestBody }) => { for (const r of requestBody.requests || []) if (r.addSheet) put(spreadsheetId, r.addSheet.properties.title, []); return { data: {} }; },
+  get: async ({ spreadsheetId }) => ({ data: { sheets: sheetsOf(spreadsheetId).map((k, i) => ({ properties: { title: k.split('|')[1], sheetId: i, gridProperties: { columnCount: 26 } } })) } }),
+  batchUpdate: async ({ spreadsheetId, requestBody }) => {
+    for (const r of requestBody.requests || []) {
+      if (r.addSheet) put(spreadsheetId, r.addSheet.properties.title, []);
+      if (r.copyPaste) {
+        const key = sheetsOf(spreadsheetId)[r.copyPaste.source.sheetId], from = r.copyPaste.source.startRowIndex, to = r.copyPaste.destination.startRowIndex;
+        for (const k of [key, key + '#f']) { const t = tables.get(k); if (t) t[to] = structuredClone(t[from] || []); }
+      }
+    }
+    return { data: {} };
+  },
   values: {
-    get: async ({ spreadsheetId, range }) => { const r = rangeInfo(spreadsheetId, range), rows = tables.get(r.key) || []; return { data: { values: rows.slice(r.r1, Number.isFinite(r.r2) ? r.r2 + 1 : undefined).map(x => (x || []).slice(r.c1, r.c2 + 1)) } }; },
-    update: async ({ spreadsheetId, range, requestBody }) => { const r = rangeInfo(spreadsheetId, range), rows = tables.get(r.key) || []; requestBody.values.forEach((row, i) => { rows[r.r1 + i] ||= []; row.forEach((v, j) => { rows[r.r1 + i][r.c1 + j] = v; }); }); tables.set(r.key, rows); return { data: {} }; },
+    get: async ({ spreadsheetId, range, valueRenderOption }) => { const r = rangeInfo(spreadsheetId, range), key = valueRenderOption === 'FORMULA' && tables.has(r.key + '#f') ? r.key + '#f' : r.key, rows = tables.get(key) || []; return { data: { values: rows.slice(r.r1, Number.isFinite(r.r2) ? r.r2 + 1 : undefined).map(x => (x || []).slice(r.c1, r.c2 + 1)) } }; },
+    update: async ({ spreadsheetId, range, requestBody }) => { writeCells(spreadsheetId, range, requestBody.values); return { data: {} }; },
+    batchUpdate: async ({ spreadsheetId, requestBody }) => { for (const d of requestBody.data || []) writeCells(spreadsheetId, d.range, d.values); return { data: {} }; },
     append: async ({ spreadsheetId, range, requestBody }) => { const r = rangeInfo(spreadsheetId, range), rows = tables.get(r.key) || []; rows.push(...structuredClone(requestBody.values)); tables.set(r.key, rows); return { data: {} }; }
   }
 } };
@@ -37,7 +57,15 @@ const W1 = ['Wa1', 'Wa2', 'Wa3', 'Wa4', 'Wa5'], W2 = ['Wb1', 'Wb2', 'Wb3', 'Wb4'
 const all = [...A, ...W1, ...W2];
 const applicants = all.map((n, i) => ({ telegram_id: String(100 + i), name: n, language: i % 2 ? 'ru' : 'en', telegram_username: n.toLowerCase() }));
 // Строки «Match_Log» групп: несыгранная пара Eve–Fay (A) и Wa4–Wa5 (W1).
-put('sheetA', 'Match_Log', [['match', 'p1_id', 'player_1', 'p2_id', 'player_2', 's1', 's2', 'P1 TechLoss', 'P2 TechLoss'], [14, 5, 'Eve', 6, 'Fay', '', '', '', '']]);
+// Таблица A: круг на 6 мест (15 матчей), за ним строки плей-офф шаблона —
+// полуфинал 1 по формулам мест, полуфинал 2 испорчен (id вписаны руками, как в
+// реальных таблицах сезона 2), финал по формулам, строки матча за 3-е нет.
+const PF = k => `=INDEX(Division_Tracker!$J$7:$J$14, MATCH(${k}, Division_Tracker!$W$7:$W$14, 0))`;
+put('sheetA', 'Match_Log', [['match', 'p1_id', 'player_1', 'p2_id', 'player_2', 's1', 's2', 'P1 TechLoss', 'P2 TechLoss'], [14, 5, 'Eve', 6, 'Fay', '', '', '', ''],
+  [1, 1, 'Ann', 2, 'Ben'], [2, 3, 'Cid', 4, 'Dan'],
+  [16, 1, 'Ann', 4, 'Dan'], [17, 1, 'Ann', 5, 'Eve'], [18, '', '', '', '']]);
+put('sheetA', 'Match_Log#f', [[], [], [], [],
+  [16, PF(1), '=INDEX(...)', PF(4), '=INDEX(...)'], [17, 1, '=INDEX(...)', 5, '=INDEX(...)'], [18, '=IF(Y5="","",Y5)', '=IF(...)', '=IF(Y6="","",Y6)', '=IF(...)']]);
 put('sheetW1', 'Match_Log', [['match', 'p1_id', 'player_1', 'p2_id', 'player_2', 's1', 's2', 'P1 TechLoss', 'P2 TechLoss'], [10, 4, 'Wa4', 5, 'Wa5', '', '', '', '']]);
 put('master', 'Cross_Group_Match_Log', [['match_id', 'season', 'division', 'g1', 'p1', 'g2', 'p2', 'kind', 'score', 'winner', 'pp1', 'pp2', 'comment', 'status', 'date'],
   ['', '2', 'W', '2', 'Wb5', '1', 'Wa5', '', '', '', '', '', '', 'scheduled', '']]);
@@ -161,6 +189,45 @@ const P = playoff.namespace, T = pace.namespace;
   schedule = { A: [], W1: [], W2: [] };
 }
 
+// ------------------------------------------------------------ черновик в Google Sheets
+{
+  // A (одна группа): строки плей-офф в таблице дивизиона.
+  const chk = await P.checkTableBrackets('2');
+  const a = chk.divisions.find(d => d.letter === 'A'), w = chk.divisions.find(d => d.letter === 'W');
+  check(a.issues.some(i => /полуфинал 2: первый/.test(i)) && a.issues.some(i => /полуфинал 2: второй/.test(i)) && a.issues.some(i => /нет строки матча за 3-е/.test(i)), 'Проверка таблицы: испорченный полуфинал 2 и нет матча за 3-е место');
+  check(!a.issues.some(i => /полуфинал 1|финал:/.test(i)) && w.grouped && !w.issues.length, 'Правильные строки не трогаются; у C и W строки таблиц групп не проверяются');
+  check(/playoff_sheets fix/.test(P.tableCheckText(chk)), 'Отчёт предлагает исправить');
+  let st = await P.playoffState('2');
+  check(st.divisions.find(d => d.letter === 'A').preview.find(p => p.slot === 'SF2').player_1 === 'Ann', 'До починки черновик A — ровно то, что в таблице (даже испорченное)');
+  check(!(await P.publishBracket('A', '2', {})).ok, 'Испорченную сетку (Ann в двух парах) опубликовать нельзя');
+  const fixed = await P.checkTableBrackets('2', { fix: true });
+  const fa = tables.get('sheetA|Match_Log#f');
+  check(fixed.divisions.find(d => d.letter === 'A').fixed > 0 && fa[5][1] === P.placeFormula(2) && fa[5][3] === P.placeFormula(3), 'fix: полуфинал 2 — формулы мест 2 и 3');
+  check(tables.get('sheetA|Match_Log')[7][0] === 19 && fa[7][1] === '=IF(Y5="","",IF(Y5=B5,D5,B5))' && fa[7][3] === '=IF(Y6="","",IF(Y6=B6,D6,B6))', 'fix: добавлена строка матча за 3-е место — проигравшие полуфиналов');
+  check(!(await P.checkTableBrackets('2')).divisions.find(d => d.letter === 'A').issues.length, 'После fix проверка чистая');
+  st = await P.playoffState('2');
+  const pa = st.divisions.find(d => d.letter === 'A');
+  check(pa.draft_source === 'table' && pa.preview.find(p => p.slot === 'SF1').player_2 === 'Dan' && pa.preview.find(p => p.slot === 'SF2').player_1 === 'Ben' && pa.preview.find(p => p.slot === 'SF2').player_2 === 'Cid', 'Черновик A из таблицы: 1–4 и 2–3');
+
+  // W (две группы): бот сам ведёт черновик в листе Playoff.
+  const sync = await P.syncDrafts('2', { only: 'W' });
+  let rows = await P.divisionRows('W', '2', { fresh: true });
+  check(sync.ok && rows.length === 8 && rows.find(r => r.slot === 'QF1').player_1 === 'Wa1' && rows.find(r => r.slot === 'QF1').player_2 === 'Wb4' && rows.find(r => r.slot === 'QF1').status === 'draft', 'Черновик W записан в лист Playoff: пары 1A–4B и т.д., статус «draft», без новых строк');
+  check(!P.isPublished(rows) && !(await P.playoffState('2')).divisions.find(d => d.letter === 'W').published, 'Черновик с именами — не опубликованная сетка');
+  // Правка руками в листе: бот её не затирает.
+  const sheet = tables.get('master|Playoff'), qf2 = sheet.findIndex(r => r && r[4] === 'QF2');
+  sheet[qf2][5] = 'Wb5';
+  await P.syncDrafts('2', { only: 'W' });
+  rows = await P.divisionRows('W', '2', { fresh: true });
+  const pre = (await P.playoffState('2')).divisions.find(d => d.letter === 'W').preview.find(p => p.slot === 'QF2');
+  check(rows.find(r => r.slot === 'QF2').player_1 === 'Wb5' && pre.locked && pre.player_1 === 'Wb5', 'Строка, поправленная руками, остаётся как есть и видна в черновике');
+  sheet[qf2][5] = ''; sheet[qf2][6] = '';
+  await P.syncDrafts('2', { only: 'W' });
+  check((await P.divisionRows('W', '2', { fresh: true })).find(r => r.slot === 'QF2').player_1 === 'Wb2', 'Очистил имена — строка снова под автоматикой');
+  const preview = await P.sitePreview('W', '2', [{ group: '1', players: W1.map((n, i) => ({ name: n, place: i + 1 })) }, { group: '2', players: W2.map((n, i) => ({ name: n, place: i + 1 })) }]);
+  check(preview && preview.preview && preview.deadline === '2026-11-03' && preview.qf.length === 4 && preview.qf[0].first.name === 'Wa1', 'Сайт: черновик W с пометкой «предварительно» и дедлайном');
+}
+
 // ------------------------------------------------------------ публикация и сетка
 const mid = n => String(100 + all.indexOf(n));
 {
@@ -194,6 +261,9 @@ const mid = n => String(100 + all.indexOf(n));
 const win = (from, to, score, extra = {}) => ({ challenge_id: 'm-' + from + '-' + to, from_name: from, to_name: to, from_telegram_id: mid(from), to_telegram_id: mid(to), result_winner: mid(from), result_score: score, result_kind: 'played', agreed_date: '2026-11-05', ...extra });
 {
   // Счёт приходит со стороны from (здесь — второго в строке): в листе он со стороны player_1.
+  // Победители встают в следующий круг — назначенный матч у игроков следом (assignmatch.js).
+  const hooked = [];
+  P.setAssignHook(async (l, s, slot) => { hooked.push(l + ':' + slot); return { status: 'waiting' }; });
   const r = await P.recordPlayoffResult(win('Wb4', 'Wa1', '6:4 6:3'), 'QF', '2', 'W');
   let rows = await P.divisionRows('W', '2', { fresh: true });
   const qf1 = rows.find(x => x.slot === 'QF1');
@@ -205,6 +275,8 @@ const win = (from, to, score, extra = {}) => ({ challenge_id: 'm-' + from + '-' 
   rows = await P.divisionRows('W', '2', { fresh: true });
   check(rows.find(x => x.slot === 'SF1').player_1 === 'Wb4' && rows.find(x => x.slot === 'SF1').player_2 === 'Wb2' && rows.find(x => x.slot === 'SF1').status === 'scheduled', 'SF1 = победители QF1 и QF2');
   check(rows.find(x => x.slot === 'SF2').player_1 === 'Wa4' && rows.find(x => x.slot === 'SF2').player_2 === 'Wa2', 'SF2 = победители QF3 и QF4');
+  check(hooked.includes('W:SF1') && hooked.includes('W:SF2'), 'Пара полуфинала сложилась — назначенный матч проверяется (время могло стоять заранее)');
+  P.setAssignHook(null);
   check(!(await P.playoffOpponentsFor('Wb4', '2')).length, 'После сыгранного четвертьфинала соперник из списка уходит');
   // Исправление счёта четвертьфинала — та же строка.
   await P.recordPlayoffResult(win('Wb4', 'Wa1', '6:4 7:5'), 'QF', '2', 'W');
@@ -230,18 +302,24 @@ const win = (from, to, score, extra = {}) => ({ challenge_id: 'm-' + from + '-' 
   await P.setOverride('A', '2', 0, 4, 'Eve');
   let st = await P.playoffState('2');
   check(st.divisions.find(d => d.letter === 'A').preview.find(p => p.slot === 'SF1').player_2 === 'Eve', 'Замена до публикации видна в предварительной сетке');
+  check(tables.get('sheetA|Match_Log#f')[4][3] === 5, 'Замена в A пишется в таблицу дивизиона: id Eve в ячейке второго игрока полуфинала 1');
   const pub = await P.publishBracket('A', '2', {});
   let rows = await P.divisionRows('A', '2', { fresh: true });
   check(pub.ok && rows.find(r => r.slot === 'SF1').player_2 === 'Eve' && !rows.some(r => r.stage === 'QF'), 'Публикация A: полуфиналы с заменой, без четвертьфиналов');
   check(!JSON.parse(settings.get('playoff_overrides') || '{}')['2:A'], 'После публикации замены до неё очищены');
+  check(tables.get('sheetA|Match_Log#f')[4][1] === 1 && tables.get('sheetA|Match_Log#f')[5][1] === 2 && tables.get('sheetA|Match_Log#f')[5][3] === 3, 'Публикация фиксирует пары полуфиналов в таблице id игроков — таблица больше не гуляет');
   const semiMsg = sent.find(m => m.to === mid('Ann') && /полуфинал|semifinal/i.test(m.text));
   check(semiMsg && /Eve/.test(semiMsg.text) && !semiMsg.opts?.reply_markup, 'Полуфиналистам — сообщение без кнопки назначения: время ставит организатор');
   const rep = await P.replacePlayer('A', '2', 'SF1', 2, 'Fay', {});
   rows = await P.divisionRows('A', '2', { fresh: true });
   check(rep.ok && rows.find(r => r.slot === 'SF1').player_2 === 'Fay' && sent.some(m => m.to === mid('Fay')), 'Замена после публикации: новый игрок получает сообщение');
+  check(tables.get('sheetA|Match_Log#f')[4][3] === 6, 'Замена после публикации — и в строке таблицы дивизиона');
   check(!(await P.replacePlayer('A', '2', 'SF1', 1, 'Nobody', {})).ok, 'Игрока не из дивизиона поставить нельзя');
   check((await P.setSchedule('A', '2', 'SF1', { date: '2026-11-07', time: '9:00', court: '' })).row.time === '09:00', 'Время матча сохраняется в формате ЧЧ:ММ');
   await P.setSchedule('A', '2', 'SF2', { date: '2026-11-07', time: '10:30' });
+  check((await P.setSchedule('A', '2', 'SF2', { date: '2026-11-07', time: '10:30', match_id: 'm-sf2' })).row.match_id === 'm-sf2'
+    && (await P.setSchedule('A', '2', 'SF2', { date: '2026-11-07', time: '10:30' })).row.match_id === 'm-sf2', 'Номер назначенного матча пишется в строку и не теряется при правке времени');
+  await P.setSchedule('A', '2', 'SF2', { date: '2026-11-07', time: '10:30', match_id: '' });
   const day = await P.dayMatches('2026-11-07');
   check(day.length === 4 && day[0].slot === 'SF1' && day.some(m => m.divisionLabel === 'W'), 'Афиша дня: все полуфиналы дня, по времени');
   const cap = P.posterCaption('2026-11-07', day);
@@ -281,10 +359,16 @@ const win = (from, to, score, extra = {}) => ({ challenge_id: 'm-' + from + '-' 
   check(T.paceOf({ total: 7, played: 4 }, cal, cal.regularEnd, '2026-10-28').lagging && !T.paceOf({ total: 7, played: 4 }, cal, cal.regularEnd, '2026-10-14').lagging, 'За неделю до дедлайна хватает отставания на один матч');
   check(!T.paceOf({ total: 7, played: 7 }, cal, cal.regularEnd, '2026-11-01').lagging, 'Всё сыграно — не отстаёт');
   const first = T.paceMessage({ name: 'Roman V', ru: true, pace: behind, deadline: cal.regularEnd, opponents: ['A', 'B'], first: true });
-  check(/Привет, Roman!/.test(first) && /1 из 7/.test(first) && /5 ноября/.test(first) && /A, B/.test(first), 'Первое сообщение: сыграно, осталось, дедлайн, соперники');
+  check(/Привет, Роман!/.test(first) && /1 из 7/.test(first) && /5 ноября/.test(first) && /A, B/.test(first), 'Первое сообщение: сыграно, осталось, дедлайн, соперники');
   const v = [0, 1, 2].map(i => T.paceMessage({ name: 'Roman V', ru: true, pace: behind, deadline: cal.regularEnd, variant: i }));
   check(new Set(v).size === 3 && v.every(x => x.length < first.length && /1 из 7/.test(x)), 'Повторные сообщения короче и чередуются');
   check(!/[а-я]/i.test(T.paceMessage({ name: 'Tom', ru: false, pace: behind, deadline: cal.regularEnd, variant: 1 })), 'Английская версия для EN-игроков');
+  check(/^Hi Roman!/.test(T.paceMessage({ name: 'Roman V', ru: false, pace: behind, deadline: cal.regularEnd, opponents: [], first: true })), 'Иностранцу — обращение как в таблице, латиницей');
+  check(T.ruFirstName('Kostas Coconut') === 'Костас' && T.ruFirstName('Masha Geveling') === 'Маша' && T.ruFirstName('Aksinya') === 'Аксинья' && T.ruFirstName('Andrew Petukhov') === 'Андрей', 'Русскоязычным — привычная русская форма имени');
+  check(T.ruFirstName('Gerardo Tay') === 'Герардо' && T.ruFirstName('Nikolay X') === 'Николай' && T.ruFirstName('Иван Петров') === 'Иван', 'Имени нет в словаре — транслитерация; кириллица остаётся как есть');
+  check(/Маша, привет!/.test(T.paceMessage({ name: 'Masha Geveling', ru: true, pace: behind, deadline: cal.regularEnd, variant: 1 })), 'Повторное сообщение тоже с русским обращением');
+  check(await T.digestChat() === '999', 'Админский чат не настроен — сводка уходит организатору в личку');
+  check(/const admin = txt\(await getAdminChatId\(\)[^;]*\);\s*return admin \|\| txt\(ADMIN_IDS\[0\]\)/.test(await fs.readFile(path.join(root, 'pace.js'), 'utf8')), 'Сводка темпа приходит в админский чат, а не в личку бота');
   check(T.timeLeftText(21, true) === '3 недели' && T.timeLeftText(5, true) === '5 дней' && T.timeLeftText(1, false) === '1 day', 'Сколько осталось — по-русски с правильным склонением');
   const players = [
     { name: 'Lag One', letter: 'A', group: '', telegram_id: '1', ru: true, pace: behind, deadline: cal.regularEnd, opponents: [] },

@@ -586,15 +586,20 @@ export async function getDivisionTable(letter, season = '', group = '') {
     const c = players.get(final.winner_id);
     if (c) champion = { id: c.id, name: c.name, photo: c.photo };
   }
-  let playoff={qf:[],sf:[sf1,sf2].filter(Boolean),sf1,sf2,final,third,champion};
-  // Сезон 2 и дальше: сетка — в листе Playoff (для всех дивизионов). Есть
-  // опубликованные пары — показываем их; нет — остаётся старый путь сезона 1
-  // (строки плей-офф сразу после группового этапа в таблице дивизиона).
-  try {
+  // Сезон 1 — сетка из строк после группового этапа в таблице дивизиона
+  // (так она тогда и велась). Сезон 2 и дальше — только опубликованная сетка
+  // из листа Playoff; до публикации здесь пусто, а черновик на последней
+  // неделе приходит отдельно (playoff.sitePreview) с пометкой «предварительно».
+  // Раньше при сбое чтения листа Playoff код откатывался на правило сезона 1
+  // и показывал шаблонные строки таблиц групп C и W как «полуфиналы».
+  const empty = { qf: [], sf: [], sf1: null, sf2: null, final: null, third: null, champion: null };
+  const thisSeason = txt(season) || await latestSeason().catch(() => '');
+  const legacy = Boolean(thisSeason) && String(thisSeason) === String(await sheetsSeason());
+  let playoff = legacy ? { qf: [], sf: [sf1, sf2].filter(Boolean), sf1, sf2, final, third, champion } : empty;
+  if (!legacy) try {
     const po = await import('./playoff.js');
-    const rows = await po.divisionRows(key, season);
-    if (po.isPublished(rows)) playoff = po.sitePlayoff({ rows: rows.filter(r => r.player_1 || r.player_2 || r.published_at), grouped, portrait }) || playoff;
-    else if (grouped) playoff = { qf: [], sf: [], sf1: null, sf2: null, final: null, third: null, champion: null };
+    const rows = await po.divisionRows(key, thisSeason);
+    if (po.isPublished(rows)) playoff = po.sitePlayoff({ rows: rows.filter(r => txt(r.published_at) || txt(r.status).toLowerCase() === 'confirmed'), grouped, portrait }) || empty;
   } catch (e) { console.error('playoff rows read failed:', e.message); }
 
   const value = {

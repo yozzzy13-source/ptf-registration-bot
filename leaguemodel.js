@@ -176,15 +176,22 @@ export async function readCentralLog() {
 }
 
 // ------------------------------------------------------------- модель
-// Имя в журнале → id игрока в таблице профилей. Сначала по имени (терпимо),
-// потом по совпадению id: в журнал пишется id из Players_Master.
+// Имя в журнале → игрок из таблицы профилей. Только по имени: id в журнале —
+// из Players_Master, а у профилей своя нумерация. Раньше при неузнанном имени
+// бот сверял ещё и id — и соперник с id 7 в Players_Master становился игроком
+// с id 7 в профилях (так Луи «сыграл сам с собой»). Сначала точное имя, потом
+// терпимое сравнение — но только если оно указывает на одного человека.
+const plainName = v => txt(v).toLowerCase().replace(/\s+/g, ' ');
 function resolver(profiles = [], sameName) {
   const memo = new Map();
-  return (name, id) => {
-    const key = txt(name).toLowerCase() + '|' + txt(id);
+  return name => {
+    const key = plainName(name);
     if (memo.has(key)) return memo.get(key);
-    let hit = profiles.find(p => sameName(p.name, name));
-    if (!hit && id) hit = profiles.find(p => txt(p.id) === txt(id));
+    let hit = profiles.find(p => plainName(p.name) === key) || null;
+    if (!hit) {
+      const loose = profiles.filter(p => sameName(p.name, name));
+      if (loose.length === 1) hit = loose[0];
+    }
     const out = hit ? { id: txt(hit.id), name: hit.name } : null;
     memo.set(key, out);
     return out;
@@ -196,13 +203,22 @@ export function buildModel(matches = [], profiles = [], { sameName = (a, b) => t
   const byPlayer = new Map();
   const unmatched = new Map();
   const seasons = new Set();
+  const selfMatches = [];
   for (const m of matches) {
     if (m.season) seasons.add(String(m.season));
+    const found = { p1: who(m.p1.name), p2: who(m.p2.name) };
+    // Обе стороны указывают на одного игрока: либо в журнале одно имя дважды
+    // (ошибка в строке — матч не берём и показываем в /league_model), либо
+    // одно из имён узнано по похожести — его оставляем неузнанным.
+    if (found.p1 && found.p2 && found.p1.id === found.p2.id) {
+      if (plainName(m.p1.name) === plainName(m.p2.name)) { selfMatches.push({ row: m.row, no: m.no, name: m.p1.name }); continue; }
+      if (plainName(m.p2.name) !== plainName(found.p2.name)) found.p2 = null; else found.p1 = null;
+    }
     const sides = [['p1', 'p2'], ['p2', 'p1']];
     for (const [me, op] of sides) {
-      const self = who(m[me].name, m[me].id);
+      const self = found[me];
       if (!self) { unmatched.set(m[me].name, (unmatched.get(m[me].name) || 0) + 1); continue; }
-      const opp = who(m[op].name, m[op].id);
+      const opp = found[op];
       const won = m.winner === me;
       const item = {
         match_no: m.no,
@@ -223,7 +239,7 @@ export function buildModel(matches = [], profiles = [], { sameName = (a, b) => t
       byPlayer.get(self.id).push(item);
     }
   }
-  return { byPlayer, seasons, unmatched: [...unmatched.entries()].map(([name, count]) => ({ name, count })) };
+  return { byPlayer, seasons, selfMatches, unmatched: [...unmatched.entries()].map(([name, count]) => ({ name, count })) };
 }
 
 const seasonNo = m => Number(m.season || 0) || 0;
@@ -309,7 +325,7 @@ export async function buildLiveLeague(profiles = [], sheetHistory = new Map()) {
       at: new Date().toISOString(), ms: Date.now() - started,
       rows: log.matches.length, skipped: log.skipped,
       seasons: [...model.seasons].sort(), players: applied.fromLog,
-      fallback: applied.fallback, unmatched: model.unmatched
+      fallback: applied.fallback, unmatched: model.unmatched, selfMatches: model.selfMatches
     };
     state.error = '';
     console.log(`league model: журнал ${log.matches.length} матчей, игроков из журнала ${applied.fromLog}, на таблице ${applied.fallback.length}, не узнаны ${model.unmatched.length}, ${state.build.ms} мс`);
@@ -453,6 +469,7 @@ export async function statusText() {
     lines.push(`В журнале матчей: ${b.rows} (пропущено несыгранных строк: ${b.skipped}), сезоны: ${b.seasons.join(', ') || '—'}`);
     lines.push(`Игроков из журнала: ${b.players}; на таблице (журнал их не узнал): ${b.fallback.length}`);
     if (b.unmatched.length) lines.push(`Имена из журнала без профиля: ${b.unmatched.slice(0, 8).map(u => esc(u.name)).join(', ')}${b.unmatched.length > 8 ? ' …' : ''}`);
+    if (b.selfMatches?.length) lines.push(`⚠️ Строки журнала, где игрок записан против самого себя (не учтены): ${b.selfMatches.slice(0, 8).map(x => `стр. ${x.row} (${esc(x.name)})`).join(', ')}`);
   } else lines.push(source === 'live' ? 'Сборки ещё не было.' : 'Журнал не используется, пока источник — sheets.');
   if (state.error) lines.push(`⚠️ Ошибка сборки: ${esc(state.error)}`);
   const st = state.store;
@@ -464,7 +481,7 @@ export async function statusText() {
     if (s) lines.push(`Открытия страницы (${label}, сутки): ${s.count}, обычно ${s.median} мс, самое долгое ${s.max} мс`);
   }
   if (!fileId) lines.push(`\nЧтобы хранить в файле: загрузите на Диск файл <code>ptf-league-model.json</code>, дайте доступ редактора <code>${esc(botEmail())}</code> и впишите id файла в Settings → <code>${FILE_SETTING}</code>.`);
-  lines.push('\n<code>/league_model rebuild</code> — пересобрать сейчас\n<code>/league_model diff</code> — сверка с таблицей профилей');
+  lines.push('\n<code>/league_model rebuild</code> — пересобрать сейчас\n<code>/league_model diff</code> — сверка с таблицей профилей\n<code>/league_model ids</code> — id игроков в журнале против имён');
   return lines.join('\n');
 }
 
@@ -473,17 +490,18 @@ export async function diffNow() {
   const { getLeagueProfiles, getLeagueMatchHistory } = await import('./sheets.js');
   const [profiles, sheetHistory] = await Promise.all([getLeagueProfiles(), getLeagueMatchHistory().catch(() => new Map())]);
   const live = await buildLiveLeague(profiles, sheetHistory);
-  return { rows: diffModel(profiles, sheetHistory, live), unmatched: live.model.unmatched, total: profiles.length };
+  return { rows: diffModel(profiles, sheetHistory, live), unmatched: live.model.unmatched, selfMatches: live.model.selfMatches || [], total: profiles.length };
 }
 export function diffText(d, { limit = 30 } = {}) {
   const lines = ['🔎 <b>Сверка: журнал матчей ↔ таблица профилей</b>'];
-  if (!d.rows.length && !d.unmatched.length) { lines.push(`Расхождений нет (игроков: ${d.total}).`); return lines.join('\n'); }
+  if (!d.rows.length && !d.unmatched.length && !d.selfMatches?.length) { lines.push(`Расхождений нет (игроков: ${d.total}).`); return lines.join('\n'); }
   lines.push('Формат: профиль / история в таблице → журнал');
   for (const r of d.rows.slice(0, limit)) {
     lines.push(`• ${esc(r.name)}: ${r.sheetProfile} / ${r.sheetHist} → ${r.model === null ? 'нет в журнале' : r.model}`);
   }
   if (d.rows.length > limit) lines.push(`… и ещё ${d.rows.length - limit}`);
   if (d.unmatched.length) lines.push(`\nВ журнале, но без профиля: ${d.unmatched.slice(0, 15).map(u => `${esc(u.name)} (${u.count})`).join(', ')}`);
+  if (d.selfMatches?.length) lines.push(`\n⚠️ В журнале игрок записан против самого себя: ${d.selfMatches.slice(0, 10).map(x => `стр. ${x.row} (${esc(x.name)})`).join(', ')}`);
   return lines.join('\n');
 }
 
@@ -499,7 +517,7 @@ export async function runDailyDiff(now = Date.now(), chatId = '') {
   if (txt(await getSetting('league_model_diff_last').catch(() => '')) === day) return { ok: false, reason: 'already_done' };
   await setSetting('league_model_diff_last', day, 'Дата последней сверки модели лиги с таблицей профилей');
   const d = await diffNow();
-  if (!d.rows.length && !d.unmatched.length) return { ok: true, clean: true };
+  if (!d.rows.length && !d.unmatched.length && !d.selfMatches?.length) return { ok: true, clean: true };
   const { sendMessage } = await import('./telegram.js');
   await sendMessage(chatId, diffText(d, { limit: 20 }) + '\n\nПодробно — <code>/league_model diff</code>');
   return { ok: true, rows: d.rows.length };

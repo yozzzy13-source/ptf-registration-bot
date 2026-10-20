@@ -14,7 +14,7 @@ import { withPriority } from './google.js';
 import { sendMessage as telegramSendMessage, sendPhoto, sendPhotoBuffer, sendDocumentBuffer, editMessageMedia, editMessageText, deleteMessage, withBulkRetries, isChatDead } from './telegram.js';
 import { getSetting, setSetting, findApplicantByTelegramId, getDivisionOpponents, getAllBotSubscribers, getWebsiteProfileUrl } from './sheets.js';
 import { cellToScore, reverseScore, formatScore } from './tennis.js';
-import { findSlot, updateSlot, cellToList, listToCell, logMatchEvent, awaitingSide, proposerSide, getCourts, courtCloseAt } from './matchesdb.js';
+import { findSlot, updateSlot, cellToList, listToCell, logMatchEvent, awaitingSide, proposerSide, getCourts, courtCloseAt, isAssigned } from './matchesdb.js';
 import { slotScope } from './access.js';
 import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL, TIMEZONE } from './config.js';
 import { escapeHtml, nowISO } from './util.js';
@@ -139,7 +139,7 @@ function openSlotKeyboard(slot) {
 // бота) и собственные слоты бота (там матч виден сразу, ещё до того как
 // журнал пересчитается). Пару считаем занятой и когда матч уже согласован, но
 // ещё не сыгран: второй раз договариваться с тем же человеком незачем.
-async function alreadyPairedNames(slot) {
+export async function alreadyPairedNames(slot) {
   const { sameName } = await import('./sheets.js');
   const me = String(slot.from_name || '').trim();
   const myId = String(slot.from_telegram_id || '');
@@ -615,11 +615,68 @@ export async function notifyMatchReminder(slot,kind='day') {
      ?(ru?('Завтра матч'+(at?' в '+at:'')):('Match tomorrow'+(at?' at '+at:'')))
      :(ru?'Матч через 3 часа':'Match in 3 hours');
  const until=slot.court_confirmed_at?'':deadlineLabel(courtCloseAt(slot),lang);
- const tail=slot.court_confirmed_at?(ru?'Корт подтверждён. Если планы изменились — предупредите соперника.':'Court confirmed. Let your opponent know if your plans change.'):(author?(ru?'⚠️ Корт ещё не подтверждён. Проверьте ответ площадки и нажмите «Корт подтвердил» — без этого матч не считается согласованным.':'⚠️ The court isn’t confirmed yet. Check the venue’s reply and tap “Court confirmed” — until then the match isn’t final.'):(ru?'⚠️ Корт ещё не подтверждён: ждём бронь от автора вызова. Можно написать ему.':'⚠️ The court isn’t confirmed yet: waiting for the challenge creator to book it. You can message them.'))
+ const assigned=isAssigned(slot);
+ const tail=assigned?(ru?'Корт забронировал организатор. Если планы изменились — напишите ему.':'The organiser has booked the court. If your plans change, message the organiser.'):slot.court_confirmed_at?(ru?'Корт подтверждён. Если планы изменились — предупредите соперника.':'Court confirmed. Let your opponent know if your plans change.'):(author?(ru?'⚠️ Корт ещё не подтверждён. Проверьте ответ площадки и нажмите «Корт подтвердил» — без этого матч не считается согласованным.':'⚠️ The court isn’t confirmed yet. Check the venue’s reply and tap “Court confirmed” — until then the match isn’t final.'):(ru?'⚠️ Корт ещё не подтверждён: ждём бронь от автора вызова. Можно написать ему.':'⚠️ The court isn’t confirmed yet: waiting for the challenge creator to book it. You can message them.'))
    +(until?'\n⏳ '+(ru?'Если корт не подтвердить '+until+', матч снимется автоматически.':'If the court isn’t confirmed '+until+', the match will be removed automatically.'):'');
  const courtRow=!slot.court_confirmed_at&&author&&slot.match_type!=='manual'?[{text:'✅ Корт подтвердил',callback_data:'match_court_ok:'+slot.challenge_id}]:[];
- await sendMessage(id,'<b>🎾 '+head+'</b>\n\n'+agreedBlock(slot,lang)+'\n\n'+tail,{reply_markup:{inline_keyboard:[courtRow,await contactRow(slot,id,lang),[{text:ru?'✖️ Отменить матч':'✖️ Cancel match',callback_data:'match_cancel:'+slot.challenge_id}],[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]].filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
+ await sendMessage(id,'<b>🎾 '+head+'</b>\n\n'+agreedBlock(slot,lang)+'\n\n'+tail,{reply_markup:{inline_keyboard:[courtRow,await contactRow(slot,id,lang),assigned?organiserRow(slot,lang):[{text:ru?'✖️ Отменить матч':'✖️ Cancel match',callback_data:'match_cancel:'+slot.challenge_id}],[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]].filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
  }return {start:slot.agreed_time||slot.time_from||''};
+}
+
+// ---------------------------------------------------------------------------
+// Матч назначил организатор: дата, время и корт выбраны им, корт забронирован
+// им же. Переносит и отменяет только он — у игроков вместо этих кнопок
+// «Связаться с организатором».
+// ---------------------------------------------------------------------------
+export function organiserContactUrl(slot = {}) {
+  const u = String(slot.assigned_contact || '').replace(/^@/, '').trim();
+  if (u) return `https://t.me/${u}`;
+  return String(slot.assigned_by || '').trim() ? `tg://user?id=${encodeURIComponent(slot.assigned_by)}` : '';
+}
+export function organiserRow(slot = {}, lang = 'ru') {
+  const url = organiserContactUrl(slot);
+  return url ? [{ text: lang === 'ru' ? '✉️ Связаться с организатором' : '✉️ Contact the organiser', url }] : [];
+}
+const ASSIGNED_STAGE = { ru: { QF: 'Четвертьфинал', SF: 'Полуфинал', Final: 'Финал', '3rd': 'Матч за 3-е место' },
+  en: { QF: 'Quarterfinal', SF: 'Semifinal', Final: 'Final', '3rd': 'Third-place match' } };
+export function assignedMatchText(slot, lang = 'ru', { kind = 'new', previous = null, viewerId = '' } = {}) {
+  const ru = lang === 'ru', opp = opponentOf(slot, viewerId);
+  const head = kind === 'cancelled' ? (ru ? '✖️ Организатор отменил матч' : '✖️ The organiser cancelled your match')
+    : kind === 'moved' ? (ru ? '🕐 Организатор перенёс матч' : '🕐 The organiser rescheduled your match')
+    : (ru ? '📅 Организатор назначил вам матч' : '📅 The organiser has scheduled your match');
+  const stage = slot.stage ? (ASSIGNED_STAGE[ru ? 'ru' : 'en'][slot.stage] || slot.stage) : '';
+  const where = [slot.division, stage].filter(Boolean).map(escapeHtml).join(' · ');
+  const old = kind === 'moved' && previous
+    ? `\n${ru ? 'Было' : 'Was'}: <s>${escapeHtml(formatDate(previous.agreed_date, lang))} ${escapeHtml(previous.agreed_time || '')}${previous.agreed_court && previous.agreed_court !== slot.agreed_court ? ' · ' + escapeHtml(previous.agreed_court) : ''}</s>` : '';
+  const tail = kind === 'cancelled'
+    ? (ru ? 'Вопросы — напишите организатору.' : 'Questions? Message the organiser.')
+    : (ru ? 'Корт уже забронирован. Если не получается прийти — напишите организатору: перенести или отменить матч может только он.'
+      : 'The court is already booked. If you can’t make it, message the organiser — only they can move or cancel this match.');
+  return `<b>${head}</b>\n\n${ru ? 'Соперник' : 'Opponent'}: ${playerLink(opp.name, opp.username)}${where ? `\n🏆 ${where}` : ''}\n${agreedBlock(kind === 'cancelled' && previous ? previous : slot, lang)}${old}${slot.comment && kind !== 'cancelled' ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}\n\n${tail}`;
+}
+export async function notifyAssignedMatch(slot, { kind = 'new', previous = null } = {}) {
+  let sent = 0;
+  for (const id of [slot.from_telegram_id, slot.to_telegram_id]) {
+    if (!id) continue;
+    const lang = await nudgeLang(id), ru = lang === 'ru';
+    const text = assignedMatchText(slot, lang, { kind, previous, viewerId: id });
+    const rows = kind === 'cancelled'
+      ? [organiserRow(slot, lang)]
+      : [calendarRow(slot), await contactRow(slot, id, lang), organiserRow(slot, lang), [{ text: ru ? '🎾 Мои матчи' : '🎾 My matches', web_app: { url: PUBLIC_URL + '/match?tab=mine' } }]];
+    const markup = { reply_markup: { inline_keyboard: rows.filter(r => r.length) } };
+    // Ссылка tg://user на организатора без ника может не пройти (настройки
+    // приватности) — тогда шлём то же без этой кнопки, но шлём.
+    const ok = await sendMessage(id, text, markup).then(() => true).catch(async e => {
+      console.error('assigned match notice:', e.message);
+      const plain = { reply_markup: { inline_keyboard: rows.filter(r => r.length && !r.some(b => String(b.url || '').startsWith('tg://'))) } };
+      return sendMessage(id, text, plain).then(() => true).catch(() => false);
+    });
+    if (ok) sent++;
+  }
+  const label = kind === 'cancelled' ? '✖️ Организатор отменил матч' : kind === 'moved' ? '🕐 Организатор перенёс матч' : '📅 Организатор назначил матч';
+  const shown = kind === 'cancelled' && previous ? previous : slot;
+  await adminMatchCopy(slot, `<b>${label}</b>\n\n${playerLink(slot.from_name, slot.from_username)} — ${playerLink(slot.to_name, slot.to_username)}${slot.division ? `\n🏆 ${escapeHtml(slot.division)}` : ''}\n${agreedBlock(shown, 'ru')}`).catch(() => {});
+  return sent;
 }
 
 // Напоминание о дедлайне сезона: сколько матчей осталось и сколько дней.

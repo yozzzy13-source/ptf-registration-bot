@@ -240,24 +240,76 @@ async function centralMetaWrites(row, { p1, p2, pair, stage = '' }) {
   const master = await playersIndex().catch(() => ({}));
   const idOf = name => master[norm(name)]?.id ?? '';
   const divisionOf = (name, letter) => letter || master[norm(name)]?.division || '';
-  const wanted = [
-    ['D', label],
-    ['E', idOf(p1)],
-    ['F', divisionOf(p1, pair?.d1)],
-    ['G', idOf(p2)],
-    ['H', divisionOf(p2, pair?.d2)]
-  ];
-  const current = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!D${row}:H${row}`).catch(() => []);
+  // Читаем и прежние имена (I/J): строку могли переписать с другим порядком
+  // игроков. Так было с матчем #193: в строке стояло «Тибо — Луи» с их id, бот
+  // переписал имена и счёт как «Луи — Тибо», а id оставил старые — и история
+  // на сайте показала каждому соперником его самого.
+  const current = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!D${row}:J${row}`).catch(() => []);
   const have = current?.[0] || [];
+  const cell = i => String(have[i] ?? '').trim();
+  const oldP1 = cell(5), oldP2 = cell(6);
+  const flipped = Boolean(oldP1 && oldP2 && !sameName(oldP1, p1) && sameName(oldP1, p2) && sameName(oldP2, p1));
+  // id и дивизион идут за своим игроком: при смене порядка меняются местами.
+  const cur = flipped ? { E: cell(3), F: cell(4), G: cell(1), H: cell(2) } : { E: cell(1), F: cell(2), G: cell(3), H: cell(4) };
+  const id1 = String(idOf(p1) ?? '').trim(), id2 = String(idOf(p2) ?? '').trim();
+  const want = { E: id1 || cur.E, F: divisionOf(p1, pair?.d1) || cur.F, G: id2 || cur.G, H: divisionOf(p2, pair?.d2) || cur.H };
+  // id стоит «чужой» — соперника, — значит, строка уже перепутана.
+  const crossed = (id1 && cell(1) && cell(1) === id2 && cell(1) !== id1) || (id2 && cell(3) && cell(3) === id1 && cell(3) !== id2);
   const out = [];
-  wanted.forEach(([letter, value], i) => {
+  const curD = cell(0);
+  // Стадию плей-офф ставим и поверх автоматической «Season N» (её писал бот).
+  if (label && (!curD || (stage && /^season\s*\d+$/i.test(curD)))) out.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!D${row}`, values: [[label]] });
+  ['E', 'F', 'G', 'H'].forEach((letter, i) => {
+    const value = want[letter];
     if (value === '' || value === undefined || value === null) return;
-    const cur = String(have[i] ?? '').trim();
-    // Стадию плей-офф ставим и поверх автоматической «Season N» (её писал бот).
-    if (cur && !(letter === 'D' && stage && /^season\s*\d+$/i.test(cur))) return;
+    const now = cell(i + 1);
+    // Пустая ячейка — заполняем; порядок игроков сменился или id перепутаны —
+    // переписываем всю четвёрку. Иначе чужие пометки организатора не трогаем.
+    if (now && !flipped && !crossed) return;
+    if (now === String(value)) return;
     out.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!${letter}${row}`, values: [[value]] });
   });
   return out;
+}
+
+// Проверка общего журнала: id игроков (E/G) должны соответствовать именам
+// (I/J) по Players_Master. По этим id таблица профилей строит историю матчей,
+// поэтому перепутанные id дают «игрок против самого себя».
+// fix=true — переставить местами перепутанные (E↔G, F↔H) и вписать верные id.
+export async function checkCentralIds({ fix = false } = {}) {
+  if (!LEAGUE_RESULTS_SHEET_ID) return { ok: false, reason: 'LEAGUE_RESULTS_SHEET_ID не задан', rows: [] };
+  const [values, master] = await Promise.all([
+    getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!A${DATA_START_ROW}:J`),
+    playersIndex()
+  ]);
+  const idOf = name => String(master[norm(name)]?.id ?? '').trim();
+  const rows = [];
+  (values || []).forEach((r, i) => {
+    const row = i + DATA_START_ROW;
+    const p1 = String(r[8] || '').trim(), p2 = String(r[9] || '').trim();
+    if (!p1 || !p2) return;
+    const e = String(r[4] ?? '').trim().replace(/\.0+$/, ''), g = String(r[6] ?? '').trim().replace(/\.0+$/, '');
+    const id1 = idOf(p1), id2 = idOf(p2);
+    if (!id1 && !id2) return;
+    const swapped = Boolean(e && g && id1 && id2 && e === id2 && g === id1 && id1 !== id2);
+    const wrong = !swapped && ((id1 && e && e !== id1) || (id2 && g && g !== id2));
+    const same = Boolean(e && g && e === g);
+    if (!swapped && !wrong && !same) return;
+    rows.push({ row, no: String(r[0] || ''), p1, p2, e, g, id1, id2, kind: swapped ? 'swapped' : same ? 'same' : 'wrong',
+      f: String(r[5] ?? ''), h: String(r[7] ?? '') });
+  });
+  let fixed = 0;
+  if (fix && rows.length) {
+    const data = [];
+    for (const x of rows) {
+      if (x.kind === 'swapped') data.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!E${x.row}:H${x.row}`, values: [[x.g, x.h, x.e, x.f]] });
+      else data.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!E${x.row}`, values: [[x.id1 || x.e]] }, { range: `${LEAGUE_RESULTS_SHEETS.log}!G${x.row}`, values: [[x.id2 || x.g]] });
+      fixed++;
+    }
+    await batchUpdate(LEAGUE_RESULTS_SHEET_ID, data);
+    await refreshAfterResult().catch(() => {});
+  }
+  return { ok: true, rows, fixed };
 }
 
 async function findDivisionRow(spreadsheetId, sheetName, p1, p2) {
@@ -388,6 +440,37 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
   }
 }
 
+// Строка плей-офф в таблице дивизиона одной группы — только среди строк после
+// группового этапа: с этой же парой есть и матч круга, его не трогаем.
+export async function writePlayoffTableRow({ p1, p2, parsed, slot, season, d1 }) {
+  const po = await import('./playoff.js');
+  const b = await po.readTableBracket(d1, season, { fresh: true });
+  if (!b) return { status: 'config_missing' };
+  const hit = Object.values(b.slots).filter(Boolean)
+    .find(r => (sameName(r.p1, p1) && sameName(r.p2, p2)) || (sameName(r.p1, p2) && sameName(r.p2, p1)));
+  if (!hit) return { status: 'row_not_found' };
+  const reversed = !sameName(hit.p1, p1);
+  const p = reversed ? reverseScore(parsed) : parsed;
+  const kind = resultKind(slot);
+  const writes = [
+    { range: `Match_Log!F${hit.sheetRow}:Q${hit.sheetRow}`, values: [kind === 'technical' ? Array(12).fill('') : scoreValues(p).map(coerceNumber)] },
+    { range: `Match_Log!R${hit.sheetRow}:S${hit.sheetRow}`, values: [[kind === 'technical' ? '' : detectSet3Mode(p), kind === 'technical' ? '' : 'Yes']] }
+  ];
+  if (kind === 'technical') {
+    const { headers } = await matchLogHeaders(b.spreadsheetId).catch(() => ({ headers: [] }));
+    const fromWon = String(slot.result_winner) === String(slot.from_telegram_id);
+    const loserFirst = reversed ? fromWon : !fromWon;   // проиграл тот, кто в строке первым
+    const points = resultPoints(slot, reversed);
+    const a = namedWrite(headers, hit.sheetRow, ['p1_techloss'], loserFirst ? (points[0] === '' ? 0 : points[0]) : '');
+    const c = namedWrite(headers, hit.sheetRow, ['p2_techloss'], loserFirst ? '' : (points[1] === '' ? 0 : points[1]));
+    if (a) writes.push(a); if (c) writes.push(c);
+  }
+  await batchUpdate(b.spreadsheetId, writes);
+  po.forgetTableBracket?.();
+  return { status: 'saved', row: hit.sheetRow, slot: TABLE_SLOT_NAME(b, hit) };
+}
+const TABLE_SLOT_NAME = (b, row) => Object.entries(b.slots).find(([, r]) => r && r.sheetRow === row.sheetRow)?.[0] || '';
+
 async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal = null, centralRow = 0) {
   const pair = known && known.known !== undefined ? known : await divisionPair(p1, p2);
   if (!pair.known) return { status: 'player_not_found' };
@@ -400,6 +483,10 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
     const season=String(pair.season||slot.season||'').trim();
     if (journal) return { status:'saved', division:d1, playoff:true, stage, dry_run:true };
     const saved=await (await import('./playoff.js')).recordPlayoffResult(slot,stage,season,d1);
+    // Одна группа (A, B, Prime): счёт — и в строку плей-офф таблицы дивизиона,
+    // тогда финал и матч за 3-е место таблица подставит своими формулами.
+    if (!pair.group) saved.table = await writePlayoffTableRow({ p1, p2, parsed, slot, season, d1 })
+      .catch(e => { console.error('playoff table write failed:', e.message); return { status:'error', reason:e.message }; });
     await refreshAfterResult().catch(e=>console.error('refresh after playoff result failed:',e.message));
     return saved;
   }
@@ -694,6 +781,8 @@ export async function refreshAfterResult() {
   } catch (e) { console.error('division cache reset failed:', e.message); }
   scheduleCache.clear();
   crossLogCache = { t: 0, season: '', rows: null };
+  // Черновик плей-офф C, W в листе Playoff меняется вместе с местами в группах.
+  try { (await import('./playoff.js')).syncDraftsSoon?.(); } catch (e) { console.error('playoff drafts sync failed:', e.message); }
   try {
     const mode = String(await getSetting('PROFILE_REFRESH').catch(() => '') || '').trim().toLowerCase();
     // Пересчёт формул витрины — фон: человеку, нажавшему «Подтвердить», его

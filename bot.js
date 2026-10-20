@@ -679,6 +679,7 @@ const ADMIN_HELP_TAIL = {
     '• Возвраты переводом копятся во вкладке «Возвраты» — там же отмечаешь «отправил».',
     '• Рассылка умеет слать записанным на событие: во вкладке «Рассылка» переключи «Кому» на «По событию», выбери ивент и кого из записанных (все / участвуют / лист ожидания / не оплатили). Счётчик покажет число получателей до отправки. В тексте работают подстановки <code>{событие}</code>, <code>{дата}</code>, <code>{время}</code>, <code>{место}</code>.',
     '• Касса: игрок выбирается из списка, пополнение/списание/возврат — кнопками, комментарий обязателен.',
+    '• <b>📅 Назначить матч</b> — «Мои матчи» → вкладка «Контроль»: два игрока, дата, время, корт. Матч сразу договорён, корт — твоя бронь, игроки получают сообщение. Перенести и отменить его можешь только ты (кнопки на карточке матча там же); у игроков вместо этого — «Связаться с организатором». Пара из сетки плей-офф получает стадию, время пишется в лист Playoff. Время полуфинала или финала в разделе «Плей-офф» назначает матч само — и финалистам, как только они определятся.',
     '• Вкладка «Кнопки» — что видит каждая группа игроков: вкладки мини-приложения, кнопки под сообщением и нижняя клавиатура в чате. Там же «Прислать в бот» и «Открыть мини-апп» — посмотреть всё глазами выбранной группы, без второго аккаунта.',
     '', '📸 <b>Instagram</b>',
     '• Публикуем по умолчанию. Нет инстаграма — просто не отметим. Останавливает только явное «не публиковать меня».',
@@ -721,6 +722,7 @@ const ADMIN_HELP_TAIL = {
     '• Transfer refunds collect in the «Refunds» tab, where you mark them as sent.',
     '• Broadcasts can target an event: switch «To» to «By event», pick the event and who from it (all / playing / waitlist / unpaid). The counter shows the recipients before sending. Placeholders <code>{event}</code>, <code>{date}</code>, <code>{time}</code>, <code>{venue}</code> work in the text.',
     '• Balance: pick a player, then top up, charge or refund by buttons; a comment is required.',
+    '• <b>📅 Schedule a match</b> — My matches → «Admin» tab: two players, date, time, court. The match is agreed at once, the court is your booking, both players get a message. Only you can move or cancel it (buttons on the match card there); players get «Contact the organiser» instead. A pair from the playoff bracket gets its stage and the time goes to the Playoff sheet. Setting a semifinal or final time in «Playoffs» schedules the match by itself — for the finalists too, as soon as they are known.',
     '• The «Buttons» tab shows what each player group sees, and lets you preview it without a second account.',
     '', '🌐 <b>League website</b>',
     '• The server home page is the website: the same league interface as the mini app, in a browser.',
@@ -1570,6 +1572,22 @@ function findConfirmedSlot(done, wanted) {
         return sendMessage(chatId, withdrawalSummary(plan), { reply_markup: { inline_keyboard: [[{ text: '🚪 Снять', callback_data: 'wd_ok:' + key }, { text: 'Отмена', callback_data: 'wd_no' }]] } });
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+    // /assign — назначить матч двум игрокам: кнопка в форму (вкладка «Контроль»)
+    // и список матчей, которые уже назначил организатор.
+    if (/^\/assign(?:@\w+)?$/i.test(text)) {
+      try {
+        const { allSlots, isAssigned } = await import('./matchesdb.js');
+        const list = (await allSlots()).filter(s => isAssigned(s) && String(s.status || '').toLowerCase() === 'accepted' && !String(s.result_status || '').trim())
+          .sort((a, b) => `${a.agreed_date} ${a.agreed_time}`.localeCompare(`${b.agreed_date} ${b.agreed_time}`));
+        const lines = ['📅 <b>Матчи, назначенные организатором</b>', ''];
+        if (!list.length) lines.push('Сейчас таких нет.');
+        for (const s of list.slice(0, 25)) lines.push(`• ${escapeHtml(s.agreed_date)} ${escapeHtml(s.agreed_time)} · ${escapeHtml(s.from_name)} — ${escapeHtml(s.to_name)} · ${escapeHtml(s.agreed_court)}${s.stage ? ' · ' + escapeHtml(s.stage) : ''}`);
+        if (list.length > 25) lines.push(`…и ещё ${list.length - 25}`);
+        lines.push('', 'Назначить новый, перенести или отменить — кнопкой ниже (вкладка «Контроль»).');
+        const markup = PUBLIC_URL ? { reply_markup: { inline_keyboard: [[{ text: '📅 Назначить матч', web_app: { url: `${PUBLIC_URL}/match?tab=admin&assign=1` } }]] } } : {};
+        return sendMessage(chatId, lines.join('\n').slice(0, 4000), String(chatId).startsWith('-') ? {} : markup);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     // /playoff — состояние плей-офф по дивизионам и кнопка в раздел «Плей-офф».
     if (/^\/playoff(?:@\w+)?$/i.test(text)) {
       try {
@@ -1648,6 +1666,19 @@ function findConfirmedSlot(done, wanted) {
         return sendMessage(chatId, lc.scanText(report) + `\n\n✅ Исправлено строк: ${done.rows}.`);
       } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
     }
+    // /playoff_sheets — строки плей-офф в таблицах дивизионов одной группы
+    // (A, B, Prime): полуфиналы по местам 1–4 и 2–3, финал и матч за 3-е —
+    // победители и проигравшие полуфиналов. «fix» — починить формулы и
+    // добавить строку матча за 3-е место. Плюс сразу обновить черновик C, W.
+    if (/^\/playoff_sheets(?:@\w+)?(?:\s|$)/i.test(text)) {
+      const fix = /\bfix\b/i.test(text);
+      try {
+        const po = await import('./playoff.js');
+        const r = await po.checkTableBrackets('', { fix });
+        if (fix) await po.syncDrafts(r.season).catch(e => console.error('playoff drafts sync failed:', e.message));
+        return sendMessage(chatId, po.tableCheckText(r, { fixed: fix }));
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     // /league_model — модель лиги из общего журнала матчей: какой источник
     // включён, когда и как быстро собиралась, где хранится, как быстро
     // открывается страница. rebuild — пересобрать сейчас, diff — сверка с
@@ -1662,6 +1693,18 @@ function findConfirmedSlot(done, wanted) {
           const v = await lm.rebuildNow();
           await sendMessage(chatId, `✅ Готово за ${Date.now() - started} мс. Источник: <b>${escapeHtml(v?.source || 'sheets')}</b>${v?.model_failed ? ' (журнал не прочитался — взята таблица профилей)' : ''}.`);
           return sendMessage(chatId, await lm.statusText());
+        }
+        // ids — сверить id игроков в общем журнале с именами (по Players_Master):
+        // перепутанные id дают на сайте «игрок против самого себя». ids fix — исправить.
+        if (arg === 'ids' || arg === 'ids fix') {
+          const { checkCentralIds } = await import('./results.js');
+          const r = await checkCentralIds({ fix: arg === 'ids fix' });
+          if (!r.ok) return sendMessage(chatId, '⛔ ' + escapeHtml(r.reason));
+          if (!r.rows.length) return sendMessage(chatId, '✅ В общем журнале id игроков совпадают с именами.');
+          const kind = { swapped: 'id переставлены местами', same: 'один id у обоих', wrong: 'id не того игрока' };
+          const lines = r.rows.slice(0, 40).map(x => `• стр. ${x.row}${x.no ? ' (#' + escapeHtml(x.no) + ')' : ''}: ${escapeHtml(x.p1)} — ${escapeHtml(x.p2)} · id ${escapeHtml(x.e || '—')} / ${escapeHtml(x.g || '—')}, должно ${escapeHtml(x.id1 || '?')} / ${escapeHtml(x.id2 || '?')} — ${kind[x.kind]}`);
+          return sendMessage(chatId, `🔎 <b>Общий журнал: id не совпадают с именами — ${r.rows.length}</b>\n` + lines.join('\n') + (r.rows.length > 40 ? `\n… и ещё ${r.rows.length - 40}` : '')
+            + (arg === 'ids fix' ? `\n\n✅ Исправлено строк: ${r.fixed}. Таблица профилей пересчитает историю сама (обычно в течение получаса).` : '\n\nИсправить: <code>/league_model ids fix</code>'));
         }
         if (arg === 'diff') {
           await sendMessage(chatId, '⏳ Сверяю журнал матчей с таблицей профилей…');
@@ -2250,6 +2293,9 @@ export async function handleCallback(q) {
     const slot = await findMatchSlot(data.split(':')[1]);
     if (!slot) return answerCallbackQuery(q.id, lang === 'ru' ? 'Матч не найден.' : 'Not found.', true).catch(() => {});
     if (![String(slot.from_telegram_id), String(slot.to_telegram_id)].includes(String(from.id))) return null;
+    if (String(slot.match_type || '') === 'assigned' || String(slot.assigned_by || '').trim()) {
+      return answerCallbackQuery(q.id, lang === 'ru' ? 'Этот матч назначил организатор — перенести его может только он. Напишите ему.' : 'The organiser scheduled this match — only they can move it. Please message the organiser.', true).catch(() => {});
+    }
     if (String(slot.from_telegram_id) !== String(from.id)) {
       return answerCallbackQuery(q.id, lang === 'ru' ? 'Время меняет тот, кто бронировал корт.' : 'Only the player who booked can change the time.', true).catch(() => {});
     }
@@ -2262,6 +2308,7 @@ export async function handleCallback(q) {
     if (!r.ok) {
       const ru = lang === 'ru';
       const texts = { not_booker: ru ? 'Время меняет тот, кто бронировал корт.' : 'Only the booker can change the time.',
+        assigned: ru ? 'Этот матч назначил организатор — перенести его может только он.' : 'The organiser scheduled this match — only they can move it.',
         not_accepted: ru ? 'Матч ещё не согласован.' : 'Match is not agreed yet.',
         same_time: ru ? 'Это и есть текущее время.' : 'That is the current time.',
         bad_time: ru ? 'Некорректное время.' : 'Bad time.',
@@ -2304,7 +2351,7 @@ export async function handleCallback(q) {
     const id=data.split(':')[1];
     const result=await cancelMatchmaking(id,{telegram_id:from.id,name:from.first_name||''});
     if(!result.ok){
-      const errors={not_found:lang==='ru'?'Запрос не найден.':'Request not found.',not_a_player:lang==='ru'?'Это не ваш запрос.':'This is not your request.',already_closed:lang==='ru'?'Запрос уже закрыт.':'Request is already closed.',result_started:lang==='ru'?'Результат уже внесён.':'A result has already been submitted.'};
+      const errors={not_found:lang==='ru'?'Запрос не найден.':'Request not found.',not_a_player:lang==='ru'?'Это не ваш запрос.':'This is not your request.',already_closed:lang==='ru'?'Запрос уже закрыт.':'Request is already closed.',result_started:lang==='ru'?'Результат уже внесён.':'A result has already been submitted.',assigned:lang==='ru'?'Этот матч назначил организатор — отменить его может только он. Напишите ему.':'The organiser scheduled this match — only they can cancel it. Please message the organiser.'};
       return answerCallbackQuery(q.id,errors[result.reason]||uiError(result.reason,lang),true).catch(()=>{});
     }
     await notifyMatchCancelled(result.previous,{telegram_id:from.id,name:from.first_name||''},{backToOpen:result.backToOpen}).catch(e=>console.error('notifyMatchCancelled failed:',e.message));

@@ -1,70 +1,48 @@
-# PTF Registration Bot — patched version
+# Phuket Tennis Family — бот и сайт лиги
 
-Telegram bot + WebApp for Phuket Tennis Family registration, payments, admin inbox, broadcasts, and match challenges.
+Telegram-бот, мини-приложения и сайт phukettennis.com в одном сервисе:
+анкеты и оплаты, события, матчи лиги (окна, вызовы, корты, счёт), таблицы
+дивизионов, плей-офф, Fantasy, турниры, рассылки, карточки и постеры.
 
-## Main changes in this patch
+Сервер — Node.js (Express), данные — Google Таблицы (сервисный аккаунт),
+хостинг — Railway. Сборки нет: Railway ставит зависимости и запускает
+`npm start` (`node index.js`).
 
-- EN button text changed from Apply to Join.
-- Website submenu added: Home, Matches, Divisions, Yearly Race, Players, Regulations.
-- Contact Organizer now stays open until user closes chat or returns to main menu.
-- WebApp event selection screen now renders active event cards with THB fee, start date, limited spots notice and application count.
-- Form validation now shows specific missing fields and a separate event selection error.
-- Payment flow updated: Bank Transfer / USDT / Pay Later / Contact Organizer. USDT network is chosen only after selecting USDT.
-- Bank button text is Bank Transfer; Bangkok Bank details stay inside payment instructions.
-- Rejected/refunded messages are not auto-sent; they should be handled manually.
-- Waitlist and confirmed/active messages remain automatic.
-- Match Challenge module added.
+## Развернуть с нуля
 
-## Match Challenge logic
+1. Node.js 20.9 или новее.
+2. В Railway → Variables задать переменные из `.env.example` (обязательные —
+   в первом блоке). Сервисному аккаунту из `GOOGLE_CREDENTIALS` нужен доступ
+   на редактирование ко всем таблицам лиги.
+3. Задеплоить. Вебхук Telegram бот ставит сам на `PUBLIC_URL`.
+4. Один раз в админской группе — `/admin_init`, в теме ленты результатов —
+   `/results_here`.
+5. Только для новой пустой таблицы: `npm run setup:courts`,
+   `npm run setup:payments`, `npm run setup:events` создают служебные листы.
 
-Website/player profile can open bot with:
+## Где что лежит
 
-```text
-https://t.me/YOUR_BOT_USERNAME?start=challenge_TELEGRAM_ID
-```
+- `index.js` — сервер: страницы, API мини-приложений, фоновые проходы.
+- `bot.js`, `telegram.js` — бот: команды, кнопки, `/help` и список команд.
+- `sheets.js`, `google.js` — чтение и запись Google Таблиц (через очередь).
+- `matches.js`, `matchesdb.js`, `assignmatch.js` — матчи лиги: окна, вызовы,
+  корты, напоминания, матчи, назначенные организатором.
+- `results.js`, `division.js`, `standings.js`, `leaguemodel.js` — счёт,
+  таблицы дивизионов, подписи, витрина лиги.
+- `playoff.js`, `playoffmedia.js` — плей-офф: черновик, сетка, постеры.
+- `matchcard.js`, `matchposter.js`, `sponsors.js` — карточки и постеры.
+- `public/` — страницы: сайт и лига (`league.html`), матчи (`match.html`),
+  анкета, Fantasy, турниры, админка; `public/img` — картинки сайта.
+- `assets/` — шрифты карточек (все .ttf отсюда подхватываются сами), логотип
+  в `match-card-logos/`, полоса спонсоров `sponsors.png`.
+- `scripts/` — разовая подготовка листов в новой таблице.
+- `tests/` — проверки; Google и Telegram в них подменены.
 
-Only users with completed profile in Applicants can challenge players.
-
-If challenger has a public Telegram username, accepted challenge opens direct Telegram contact.
-If no username is available, bot opens temporary bot-mediated chat.
-
-## Required Railway variables
-
-```env
-BOT_TOKEN=
-PUBLIC_URL=https://your-railway-domain.up.railway.app
-SPREADSHEET_ID=1KAVMKdT3Jn7kzZTCFaqTm2EGFxfG_5ou6n0PezeJSig
-GOOGLE_CREDENTIALS={...full service account JSON...}
-CLUB_CHAT_URL=https://t.me/+mEkZr6wcpko4NmUy
-DEFAULT_USDT_AMOUNT=80
-TIMEZONE=Asia/Bangkok
-ADMIN_IDS=123456789
-NODE_ENV=production
-```
-
-After deploy, run `/admin_init` in the admin Telegram group.
-
-## Payment Methods and Payment Summary
-
-Current supported payment methods:
-
-- Thai bank transfer
-- USDT TRC20
-- USDT ERC20
-
-To change the Thai bank account without redeploy, edit Google Sheets → `Payment Methods` → row `thai_bank` → column `recipient`.
-
-To prepare payment methods and create the compact summary tab, run once:
+## Проверки
 
 ```bash
-npm run setup:payments
+npm install
+npm test
 ```
 
-The helper script updates `Payment Methods` and creates `Payment Summary` with basic payment balance formulas.
-
-## Latest operational notes
-
-- `/broadcast_poll` sends an anonymous native Telegram poll to all bot contacts. Results are stored in `Poll Results`; use `/poll_stats <broadcast_id>` for a quick summary.
-- Main menu payment entry is now `💳 Payment / Оплата`, replacing League Pass.
-- Event payments support separate `price_thb` and `price_usdt` fields in `Events`.
-- Contact organizer chat is a 2-hour quiet session without repeated delivery confirmations.
+Тесты ничего не пишут в настоящие таблицы и ничего не отправляют в Telegram.
