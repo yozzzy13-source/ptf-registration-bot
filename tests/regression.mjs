@@ -2333,6 +2333,29 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  await mdb2.createManualMatch({challenge_id:'dup-a',match_type:'manual',status:'accepted',from_telegram_id:'3',to_telegram_id:'4',from_name:'Carol Three',to_name:'Dan Four',agreed_date:'2099-10-05',dates:'2099-10-05',result_status:'pending'});
  check(Boolean(await mdb2.findSameResult('4','3','2099-10-05')),'Второй ввод того же матча (пара + дата) распознаётся');
  check(!(await mdb2.findSameResult('4','3','2099-10-06')),'Другая дата — это другой матч');
+ // Второй аккаунт того же человека (матч #193: Луи внёс матч, уже внесённый Тибо).
+ check(Boolean(await mdb2.findSameResult('44','3','2099-10-05',{fromName:'Dan Four',toName:'Carol Three'})),'Тот же матч с другого аккаунта узнаётся по именам игроков');
+ check(!(await mdb2.findSameResult('44','3','2099-10-05',{fromName:'Dan Four',toName:'Carol Three',exclude:'dup-a'})),'Своя же заявка дублем не считается');
+ check(/уже внёс Carol Three/.test(mdb2.sameResultText({from_telegram_id:'3',to_telegram_id:'4',from_name:'Carol Three',to_name:'Dan Four',result_by:'3',result_status:'pending',result_score:'6:4  6:3',agreed_date:'2099-10-05'},'ru')),'Пишем, кто уже внёс матч');
+ {
+  const apSaved=structuredClone(tables.get('crm|Applicants'));
+  tables.get('crm|Applicants').push(['12','Alice One','active','en','alice_two','']);sheets.invalidateSheetCache();
+  const first=await request('post','/api/match/manual','2',{to_telegram_id:'1',date:'2099-10-07',court:'Court A',kind:'played',winner:'2',sets:[{a:6,b:3},{a:6,b:4}]});
+  check(first.body.ok,'Bob вносит матч с Alice');
+  const twin=await request('post','/api/match/manual','12',{to_telegram_id:'2',date:'2099-10-07',court:'Court A',kind:'played',winner:'2',sets:[{a:6,b:3},{a:6,b:4}]});
+  check(twin.code===409&&twin.body.code==='result_duplicate'&&/Bob Two has already entered this match/.test(twin.body.detail),'Alice со второго аккаунта тот же матч второй раз не внесёт — ей говорят, кто уже внёс');
+  const back=await request('post','/api/match/manual','1',{to_telegram_id:'2',date:'2099-10-07',court:'Court A',kind:'played',winner:'2',sets:[{a:6,b:3},{a:6,b:4}]});
+  check(back.code===409&&back.body.code==='result_duplicate','И с основного аккаунта тоже');
+  const html=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+  check(/throw new Error\(j\.detail\|\|j\.error\|\|'Error'\);res\.className='res ok';res\.textContent=X\.resSent;resPhoto='';resultPopup\(true,j\)/.test(html),'Ручной ввод показывает игроку, почему матч не принят');
+  // Тот же матч, договорённый через бота отдельной заявкой: счёт в неё второй раз тоже не внести.
+  await db.createSlot({challenge_id:'dup-agreed',match_type:'direct',status:'accepted',division:'Division C',season:'2',group:'1',from_telegram_id:'12',from_name:'Alice One',to_telegram_id:'2',to_name:'Bob Two',agreed_date:'2099-10-07',agreed_time:'18:00',dates:'2099-10-07',court_confirmed_at:'x',created_at:'x'});
+  const viaSlot2=await request('post','/api/match/result','12',{challenge_id:'dup-agreed',kind:'played',winner:'2',perspective:'winner',sets:[{a:6,b:3},{a:6,b:4}]});
+  check(viaSlot2.code===409&&viaSlot2.body.code==='result_duplicate'&&!(await db.findSlot('dup-agreed')).result_status,'Счёт в другую заявку того же матча тоже не принимается');
+  await db.deleteMatchByAdmin('dup-agreed',{telegram_id:'99',name:'Admin'});
+  await db.deleteMatchByAdmin(first.body.challenge_id,{telegram_id:'99',name:'Admin'});
+  tables.set('crm|Applicants',apSaved);sheets.invalidateSheetCache();
+ }
  check(/cmd:'result_resync'/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'Команда /result_resync в меню и /help');
 }
 // Матч #193: строка журнала была «Dan — Carol» с их id, бот переписал её как

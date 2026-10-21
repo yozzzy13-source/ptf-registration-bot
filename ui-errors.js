@@ -4,6 +4,7 @@ const pairs = [
  ['Missing broadcast text: EN','Заполните английский текст рассылки: среди получателей есть игроки с языком EN.','Fill in the English broadcast text: there are EN recipients.'],
  ['Missing broadcast text: RU','Заполните русский текст рассылки: среди получателей есть игроки с языком RU.','Fill in the Russian broadcast text: there are RU recipients.'],
   ['not_booker','Корт бронирует и подтверждает автор вызова.','Only the challenge creator books and confirms the court.'],
+  ['result_duplicate','Этот матч уже внесён — второй раз вносить не нужно.','This match is already recorded — no need to enter it again.'],
   // Матч, назначенный организатором (assignmatch.js).
   ['assign_by_organiser','Этот матч назначил организатор — перенести или отменить его может только он. Напишите ему.','The organiser scheduled this match — only they can move or cancel it. Please message the organiser.'],
   ['assign_bad_date','Выберите дату.','Pick a date.'],

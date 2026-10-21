@@ -1453,16 +1453,41 @@ export async function addMatchUnfinishedEvidence(challengeId, actor = {}, eviden
 
 // Ручной матч: игроки договорились вне бота. Сразу создаётся согласованным,
 // результат так же уходит сопернику на подтверждение.
-// Результат этой пары на эту дату уже внесён (ждёт подтверждения или
-// подтверждён)? Тогда второй такой же не принимаем: двойное нажатие или
-// повторный ввод давали две записи одного матча — и две строки в журнале.
-export async function findSameResult(fromId, toId, date) {
+// Результат этой пары на эту дату уже внесён (ждёт подтверждения, подтверждён,
+// спорный или «не доигран»)? Тогда второй такой же не принимаем: двойное
+// нажатие или повторный ввод давали две записи одного матча — и две строки в
+// журнале. Пару узнаём и по Telegram, и по именам игроков: у человека бывает два
+// аккаунта (так матч #193 Тибо — Луи внесли дважды — Тибо, а потом Луи со
+// второго аккаунта, — и строка в журнале перепуталась).
+export async function findSameResult(fromId, toId, date, { fromName = '', toName = '', exclude = '' } = {}) {
   const ids = [String(fromId || ''), String(toId || '')].sort().join('|');
   const day = normDate(date);
-  return (await allSlots()).find(r => [String(r.from_telegram_id || ''), String(r.to_telegram_id || '')].sort().join('|') === ids
+  const { sameName } = await import('./sheets.js');
+  const byNames = r => Boolean(fromName && toName && r.from_name && r.to_name)
+    && ((sameName(r.from_name, fromName) && sameName(r.to_name, toName)) || (sameName(r.from_name, toName) && sameName(r.to_name, fromName)));
+  return (await allSlots()).find(r => String(r.challenge_id) !== String(exclude || '')
+    && ([String(r.from_telegram_id || ''), String(r.to_telegram_id || '')].sort().join('|') === ids || byNames(r))
     && normDate(r.agreed_date || '') === day
     && !['cancelled', 'declined', 'expired'].includes(String(r.status || '').toLowerCase())
-    && ['pending', 'confirmed', 'disputed'].includes(String(r.result_status || '').toLowerCase())) || null;
+    && ['pending', 'confirmed', 'disputed', 'unfinished'].includes(String(r.result_status || '').toLowerCase())) || null;
+}
+// Что сказать тому, кто вносит матч второй раз: кто уже внёс, какой счёт и что
+// с ним сейчас.
+export function sameResultText(slot = {}, lang = 'ru') {
+  const ru = lang !== 'en';
+  const by = String(slot.result_by || '');
+  const who = by === String(slot.from_telegram_id) ? slot.from_name : by === String(slot.to_telegram_id) ? slot.to_name : (ru ? 'организатор' : 'the organiser');
+  const score = String(slot.result_score || '').replace(/\s+/g, ' ').trim();
+  const match = `${slot.from_name || ''} — ${slot.to_name || ''}${score ? ' ' + score : ''}, ${normDate(slot.agreed_date || '')}`;
+  const st = String(slot.result_status || '').toLowerCase();
+  if (st === 'confirmed') return ru ? `Этот матч уже внесён и подтверждён (${match}). Второй раз вносить не нужно. Если счёт неверный — напишите организатору.`
+    : `This match is already recorded and confirmed (${match}). No need to enter it again. If the score is wrong, message the organiser.`;
+  if (st === 'disputed') return ru ? `Этот матч уже внесён (${match}), по счёту спор — организатор разберётся. Второй раз вносить не нужно.`
+    : `This match is already recorded (${match}) and the score is disputed — the organiser will sort it out. No need to enter it again.`;
+  if (st === 'unfinished') return ru ? `Этот матч уже внесён как не доигранный (${match}). Завершите его в «Моих матчах», второй раз вносить не нужно.`
+    : `This match is already recorded as unfinished (${match}). Finish it in My matches — no need to enter it again.`;
+  return ru ? `Этот матч уже внёс ${who} (${match}), он ждёт подтверждения. Второй раз вносить не нужно.`
+    : `${who} has already entered this match (${match}); it is waiting for confirmation. No need to enter it again.`;
 }
 
 export async function createManualMatch(row) {

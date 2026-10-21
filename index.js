@@ -22,7 +22,7 @@ import { sendBookingHelper, matchContact, publishOpenSlot, sendDirectChallenge, 
   notifyMatchCancelled, notifyTimeChange, notifyMatchReminder, notifyDeadline,
   notifyStuckNegotiation, notifyNegotiationExpired, notifyStuckTimeChange, notifyTimeChangeExpired,
   notifyStuckResult, notifyResultStalled, notifyStuckCourt, notifyStuckScore, notifyScoreStalled, notifyCourtConfirmed, scheduleSlotCards, organiserContactUrl } from './matches.js';
-import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHandler, findSameResult, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
+import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHandler, findSameResult, sameResultText, createSlot, findSlot, claimSlot, counterSlot, listOpenSlots, listMySlots, isSlotPast, listToCell, cellToList, getCourts,
   listResultTasks, listMatchesNeedingResultPrompt, markResultPromptSent, submitResult, submitResultByAdmin, confirmResult, confirmResultByAdmin, deleteMatchByAdmin, markMatchUnfinished, createManualMatch,
   proposeTimeChange, listMatchesNeedingReminder, markReminderSent, expireStaleSlots, findTimeConflict,
   listStuck, isStuckCurrent, markStuckNudge, closeStuckSlot, cancelMatchmaking, dropStuckTimeChange, agreedSchedule, courtUsage,
@@ -1403,6 +1403,12 @@ app.post('/api/match/result', async (req, res) => {
           ?'Соперник уже внёс счёт — подтвердите его или нажмите «Не согласен».'
           :'Your opponent already submitted the score — confirm it or tap “Disagree”.'});
     }
+    // Тот же матч (те же игроки, тот же день) уже внесён в другой заявке — второй
+    // счёт не принимаем, кто бы из двоих и с какого аккаунта его ни вносил.
+    if(!v.isAdmin&&!String(slot.result_status||'').trim()){
+      const same=await findSameResult(slot.from_telegram_id,slot.to_telegram_id,slot.agreed_date,{fromName:slot.from_name,toName:slot.to_name,exclude:slot.challenge_id}).catch(()=>null);
+      if(same)return res.status(409).json({ok:false,error:'result_duplicate',challenge_id:same.challenge_id,detail:sameResultText(same,v.lang)});
+    }
     const kind=['retired','technical'].includes(String(b.kind||'').toLowerCase())?String(b.kind).toLowerCase():'played';
     if(kind==='technical'&&!v.isAdmin)return res.status(403).json({ok:false,error:'Only the organiser can record W/L'});
     const requestedWinner=String(b.winner||'');
@@ -1537,7 +1543,7 @@ app.post('/api/match/manual', async (req,res)=>{
       result_kind:kind,result_points_from:pointsFrom,result_points_to:pointsTo,
       result_photo_file_id:photo.fileId,result_note:safe(b.note),result_submitted_at:nowISO(),created_at:nowISO(),responded_at:nowISO()};
     // Тот же матч (пара + дата) уже внесён — второй раз не принимаем.
-    const same=await findSameResult(row.from_telegram_id,row.to_telegram_id,row.agreed_date).catch(()=>null);
+    const same=await findSameResult(row.from_telegram_id,row.to_telegram_id,row.agreed_date,{fromName:row.from_name,toName:row.to_name}).catch(()=>null);
     // Плей-офф от организатора: подтверждения игроков не нужно, он сам на корте.
     // Повторный ввод того же матча — исправление счёта, а не новый матч.
     if(row.stage&&v.isAdmin){
@@ -1556,7 +1562,7 @@ app.post('/api/match/manual', async (req,res)=>{
       const done=await finishConfirmedWebResult(row);
       return res.json({ok:true,organiser:true,playoff:true,challenge_id:row.challenge_id,write:done.write,review:done.review});
     }
-    if(same)return res.status(409).json({ok:false,error:v.lang==='ru'?'Результат этого матча уже внесён ('+same.agreed_date+'). Если он неверный — исправьте или удалите его, а не вносите заново.':'This match result is already recorded ('+same.agreed_date+'). Edit or delete it instead of entering it again.'});
+    if(same)return res.status(409).json({ok:false,error:'result_duplicate',challenge_id:same.challenge_id,detail:sameResultText(same,v.lang)});
     await createManualMatch(row);
     let confirmationDelivered=false;
     try { confirmationDelivered=Boolean(await notifyResultForVerification(row)); }
