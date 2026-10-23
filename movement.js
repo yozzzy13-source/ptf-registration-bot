@@ -4,8 +4,8 @@
 // награды. Обычные смешанные дивизионы: #1 — автоматическое повышение, #2 —
 // стыковой матч с #7 дивизиона выше, #7 — стыковой матч с #2 дивизиона ниже,
 // #8 — автоматический вылет. Prime ↔ A: #1 A и #8 Prime меняются местами без
-// стыков. Дивизион из двух групп: для повышения сравниваются первые 4 места
-// обеих групп, для вылета — последние 4 обеих групп, по обычным критериям
+// стыков. Дивизион из двух групп: для повышения сравниваются первые 2 места
+// обеих групп, для вылета — последние 2 обеих групп, по обычным критериям
 // таблицы; число переходов задаёт граница между дивизионами, а не число групп.
 // Из C вылет в D есть всегда: D собирается заново каждый сезон (в сезоне, где
 // D нет, — только автоматический вылет худшего, без стыка). W: общий #1 может
@@ -27,7 +27,8 @@ const LADDER = ['PRIME', 'A', 'B', 'C', 'D'];
 const RELEGATES_INTO = { C: 'D' };
 // Женский дивизион: общий #1 может перейти в этот дивизион.
 const WOMEN_UP_TO = 'C';
-export const RACE_SIZE = 4;
+// Зоны: 2 верхних и 2 нижних места каждой группы (общий #1 и #2 всегда среди них).
+export const RACE_SIZE = 2;
 export const PROMOTION_STAGE = 'Promotion';
 const STORE_KEY = 'promotion_matches';
 const PLAYER_REMIND_DAYS = 5;
@@ -74,7 +75,7 @@ export function movementFrom(divs = {}, season = '') {
   const mixed = LADDER.filter(has);
   const out = {};
   const poUp = {}, poDown = {};
-  const make = L => (out[L] ||= { letter: L, grouped: Boolean(divs[L]?.grouped), marks: {}, top: null, bottom: null, notes: [] });
+  const make = L => (out[L] ||= { letter: L, grouped: Boolean(divs[L]?.grouped), marks: {}, top: null, bottom: null, showTop: false, showBottom: false, notes: [] });
   const mark = (L, r, k, to) => { if (!r) return; const m = make(L); if (m.marks[nk(r.name)]) return; m.marks[nk(r.name)] = { k, to }; r.mark = k; r.to = to; };
   mixed.forEach((L, i) => {
     const div = divs[L], m = make(L);
@@ -89,7 +90,12 @@ export function movementFrom(divs = {}, season = '') {
       mark(L, last, 'down', below);
       if (L !== 'PRIME' && belowReal) { mark(L, second, 'po_down', below); poDown[L] = second; }
     }
-    if (div.grouped) { m.top = top; m.bottom = below ? bottom : null; }
+    // Зоны подъёма и вылета: группы — 2 верхних / 2 нижних места каждой группы
+    // в общем порядке; одна таблица — 2 верхних и 2 нижних места.
+    m.top = div.grouped ? top : top.slice(0, RACE_SIZE);
+    m.bottom = div.grouped ? bottom : bottom.slice(-RACE_SIZE);
+    m.showTop = Boolean(above);
+    m.showBottom = true;
     if (L === 'PRIME') m.notes.push('prime');
     if (L === 'A' && above === 'PRIME') m.notes.push('a_prime');
     if (div.grouped) m.notes.push('groups');
@@ -99,7 +105,8 @@ export function movementFrom(divs = {}, season = '') {
   if (has('W')) {
     const div = divs.W, m = make('W'), top = topOf(div);
     mark('W', top[0], 'opt', WOMEN_UP_TO);
-    if (div.grouped) m.top = top;
+    m.top = div.grouped ? top : top.slice(0, RACE_SIZE);
+    m.showTop = true;
     m.notes.push('women');
     if (div.grouped) m.notes.push('groups');
   }
