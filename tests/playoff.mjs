@@ -24,15 +24,24 @@ function rangeInfo(id, range) {
 // Таблица с формулами: рядом с листом лежит «#f» — что видно при чтении
 // формул (valueRenderOption FORMULA). Запись формулы считается просто:
 // «место k» — id k (в A id совпадают с местами), остальные формулы — пусто.
-const evalFormula = v => { const t = String(v ?? ''); if (!t.startsWith('=')) return v; const m = t.match(/MATCH\((\d+),/); return m ? m[1] : ''; };
+// Регион таблицы (locales): 'ru_RU' — формулы через «;», «,» там даёт #ERROR!,
+// как в настоящих таблицах; 'broken' — таблица не принимает формул вообще.
+const locales = new Map();
+const commaOutside = t => { let q = false; for (const ch of t) { if (ch === '"') q = !q; else if (!q && ch === ',') return true; } return false; };
+const evalFormula = (v, id = '') => {
+  const t = String(v ?? ''); if (!t.startsWith('=')) return v;
+  const loc = locales.get(id);
+  if (loc === 'broken' || (loc === 'ru_RU' ? commaOutside(t) : t.includes(';'))) return '#ERROR!';
+  const m = t.match(/MATCH\((\d+)[,;]/); return m ? m[1] : '';
+};
 const sheetsOf = spreadsheetId => [...tables.keys()].filter(k => k.startsWith(spreadsheetId + '|') && !k.endsWith('#f'));
 const writeCells = (spreadsheetId, range, values) => {
   const r = rangeInfo(spreadsheetId, range), rows = tables.get(r.key) || [], f = tables.get(r.key + '#f');
-  values.forEach((row, i) => { rows[r.r1 + i] ||= []; if (f) f[r.r1 + i] ||= []; row.forEach((v, j) => { rows[r.r1 + i][r.c1 + j] = f ? evalFormula(v) : v; if (f) f[r.r1 + i][r.c1 + j] = v; }); });
+  values.forEach((row, i) => { rows[r.r1 + i] ||= []; if (f) f[r.r1 + i] ||= []; row.forEach((v, j) => { rows[r.r1 + i][r.c1 + j] = f ? evalFormula(v, spreadsheetId) : v; if (f) f[r.r1 + i][r.c1 + j] = v; }); });
   tables.set(r.key, rows);
 };
 const google = { spreadsheets: {
-  get: async ({ spreadsheetId }) => ({ data: { sheets: sheetsOf(spreadsheetId).map((k, i) => ({ properties: { title: k.split('|')[1], sheetId: i, gridProperties: { columnCount: 26 } } })) } }),
+  get: async ({ spreadsheetId }) => ({ data: { properties: { locale: locales.get(spreadsheetId) === 'ru_RU' ? 'ru_RU' : 'en_US' }, sheets: sheetsOf(spreadsheetId).map((k, i) => ({ properties: { title: k.split('|')[1], sheetId: i, gridProperties: { columnCount: 26 } } })) } }),
   batchUpdate: async ({ spreadsheetId, requestBody }) => {
     for (const r of requestBody.requests || []) {
       if (r.addSheet) put(spreadsheetId, r.addSheet.properties.title, []);
@@ -207,6 +216,36 @@ const P = playoff.namespace, T = pace.namespace;
   st = await P.playoffState('2');
   const pa = st.divisions.find(d => d.letter === 'A');
   check(pa.draft_source === 'table' && pa.preview.find(p => p.slot === 'SF1').player_2 === 'Dan' && pa.preview.find(p => p.slot === 'SF2').player_1 === 'Ben' && pa.preview.find(p => p.slot === 'SF2').player_2 === 'Cid', 'Черновик A из таблицы: 1–4 и 2–3');
+
+  // Таблица в регионе с «;» (как настоящие Prime, A, B): состояние после
+  // первой починки — формулы через «,», во всех ячейках строк плей-офф #ERROR!.
+  const snap = new Map([...tables].filter(([k]) => k.startsWith('sheetA|')).map(([k, v]) => [k, structuredClone(v)]));
+  locales.set('sheetA', 'ru_RU');
+  let v = tables.get('sheetA|Match_Log'), f = tables.get('sheetA|Match_Log#f');
+  // (имена C/E в строках 5–7 — готовые формулы таблицы, они пересчитаются сами;
+  // в строке матча за 3-е их вписывал бот — там они сломаны тоже)
+  for (const r of [4, 5, 6]) for (const c of [1, 3]) v[r][c] = '#ERROR!';
+  for (const c of [1, 2, 3, 4]) v[7][c] = '#ERROR!';
+  v[6][2] = v[6][4] = '';
+  const bad = (await P.checkTableBrackets('2')).divisions.find(d => d.letter === 'A');
+  check(bad.issues.some(i => /ошибка формулы/.test(i)) && bad.issues.some(i => /имя первого игрока не считается/.test(i)), 'Проверка видит #ERROR!, даже когда формула по смыслу верная');
+  const rf = await P.checkTableBrackets('2', { fix: true });
+  const af = rf.divisions.find(d => d.letter === 'A');
+  check(!af.failed.length && af.fixed > 0 && f[4][1] === P.placeFormula(1).replace(/,/g, ';') && v[4][1] === '1' && v[4][3] === '4' && v[5][1] === '2' && v[5][3] === '3', 'Таблица с «;»: формулы переписаны через «;», места считаются');
+  check(f[7][1] === '=IF(Y5="";"";IF(Y5=B5;D5;B5))' && !String(v[7][2]).startsWith('#'), 'Строка матча за 3-е: формулы через «;», имя считается');
+  check(!(await P.checkTableBrackets('2')).divisions.find(d => d.letter === 'A').issues.length, 'После починки проверка чистая: «;» и «,» — одна и та же формула');
+  const txtFixed = P.tableCheckText(rf, { fixed: true });
+  check(af.pairs.find(p => p.slot === 'SF1').p1 === 'Ann' && /Полуфинал 1: Ann — Dan/.test(txtFixed) && /Финал: ждёт полуфиналов/.test(txtFixed), 'Отчёт показывает, что теперь стоит в таблице');
+  // Таблица не принимает формулы — бот возвращает как было и честно об этом пишет.
+  locales.set('sheetA', 'broken');
+  const before = f[5][1];
+  v[5][1] = '#ERROR!';
+  const rb = await P.checkTableBrackets('2', { fix: true });
+  const ab = rb.divisions.find(d => d.letter === 'A');
+  check(ab.failed.includes('B6') && ab.fixed === 0 && P.sameFormula(f[5][1], before) && /не приняла формулы/.test(P.tableCheckText(rb, { fixed: true })) && !/исправлено ячеек/.test(P.tableCheckText(rb, { fixed: true })), 'Не получилось — откат к прежней формуле и отчёт без «✅ исправлено»');
+  for (const [k, val] of snap) tables.set(k, val);
+  locales.delete('sheetA');
+  P.forgetTableBracket();
 
   // W (две группы): бот сам ведёт черновик в листе Playoff.
   const sync = await P.syncDrafts('2', { only: 'W' });

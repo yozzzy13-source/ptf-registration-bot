@@ -2767,8 +2767,10 @@ app.listen(PORT, () => withPriority('low', async () => {
       const r = await clearWalkoverLogRow(211, 'Nikita Secret', 'Vid Randelovic');
       return r.cleared ? '🧹 Общий журнал: убрал W/O Nikita Secret — Vid Randelovic (строка 211). Он остаётся в таблице Division A и в шахматке.' : '';
     }).catch(e => console.error('once clear walkover row:', e.message));
-    // Плей-офф Prime, A, B: формулы полуфиналов и строка матча за 3-е место в таблицах дивизионов.
-    await runOnce('once_playoff_tables_fix', async () => {
+    // Плей-офф Prime, A, B: первая починка (once_playoff_tables_fix) записала формулы
+    // через «,», а таблицы в регионе с «;» — в строках плей-офф встал #ERROR!.
+    // Переписываем в формате таблицы, с проверкой результата и откатом.
+    await runOnce('once_playoff_tables_fix2', async () => {
       const po = await import('./playoff.js');
       const r = await po.checkTableBrackets('', { fix: true });
       return po.tableCheckText(r, { fixed: true });

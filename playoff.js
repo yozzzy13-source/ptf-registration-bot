@@ -275,7 +275,19 @@ const TABLE_SLOTS = ['SF1', 'SF2', 'Final', '3rd'];
 // Место в сетке ↔ ячейка: 1 и 4 — полуфинал 1, 2 и 3 — полуфинал 2.
 const SEAT_CELL = { 1: ['SF1', 1], 4: ['SF1', 2], 2: ['SF2', 1], 3: ['SF2', 2] };
 const isFormula = v => txt(v).startsWith('=');
-const sameFormula = (a, b) => txt(a).replace(/\s+/g, '').toLowerCase() === txt(b).replace(/\s+/g, '').toLowerCase();
+// Разделитель аргументов зависит от региона таблицы: в русском и европейских
+// регионах формулы пишутся через «;», в английском — через «,». Внутри
+// кавычек ничего не меняем. Сравнение формул от разделителя не зависит.
+function swapSep(f, from, to) {
+  let quoted = false, out = '';
+  for (const ch of String(f ?? '')) { if (ch === '"') quoted = !quoted; out += !quoted && ch === from ? to : ch; }
+  return out;
+}
+const commaForm = f => swapSep(f, ';', ',');
+export const formulaIn = (f, sep) => sep === ';' ? swapSep(commaForm(f), ',', ';') : commaForm(f);
+export const sameFormula = (a, b) => commaForm(txt(a)).replace(/\s+/g, '').toLowerCase() === commaForm(txt(b)).replace(/\s+/g, '').toLowerCase();
+// Ячейка, где Google не смог прочитать формулу (или неизвестная функция).
+const isBrokenShown = v => /^#(ERROR!|NAME\?)/.test(txt(v));
 
 export function tableBracketFrom(values = [], formulas = [], spreadsheetId = '') {
   const head = values.findIndex(r => (r || []).some(c => norm(c) === 'p1_id'));
@@ -286,7 +298,7 @@ export function tableBracketFrom(values = [], formulas = [], spreadsheetId = '')
     const r = values[i] || [], f = formulas[i] || [];
     const no = Number(txt(r[0]));
     if (!(no > 0)) continue;
-    rows.push({ sheetRow: i + 1, no, id1: txt(r[1]).replace(/\.0+$/, ''), n1: txt(r[2]), id2: txt(r[3]).replace(/\.0+$/, ''), n2: txt(r[4]), f1: f[1] ?? r[1], f2: f[3] ?? r[3] });
+    rows.push({ sheetRow: i + 1, no, id1: txt(r[1]).replace(/\.0+$/, ''), n1: txt(r[2]), id2: txt(r[3]).replace(/\.0+$/, ''), n2: txt(r[4]), f1: f[1] ?? r[1], f2: f[3] ?? r[3], fc1: f[2] ?? r[2], fc2: f[4] ?? r[4] });
   }
   for (const r of rows) for (const [id, n] of [[r.id1, r.n1], [r.id2, r.n2]]) {
     const k = Number(id);
@@ -337,12 +349,61 @@ export function tablePlan(bracket, standings = []) {
       source: 'table', table_row: r?.sheetRow || 0 };
   });
 }
-async function writeTableCells(bracket, cells) {
+// Регион таблицы → разделитель формул («;» там, где десятичная запятая).
+const sepCache = new Map();
+async function formulaSep(spreadsheetId) {
+  if (sepCache.has(spreadsheetId)) return sepCache.get(spreadsheetId);
+  let sep = ',';
+  try {
+    const r = await sheetsClient().spreadsheets.get({ spreadsheetId, fields: 'properties.locale' });
+    const loc = txt(r?.data?.properties?.locale).replace('_', '-');
+    if (loc && new Intl.NumberFormat(loc).format(1.5).includes(',')) sep = ';';
+  } catch {}
+  sepCache.set(spreadsheetId, sep);
+  return sep;
+}
+const isFormulaValue = v => typeof v === 'string' && v.startsWith('=');
+async function putCells(spreadsheetId, cells, sep) {
   if (!cells.length) return;
-  await sheetsClient().spreadsheets.values.batchUpdate({ spreadsheetId: bracket.spreadsheetId,
-    requestBody: { valueInputOption: 'USER_ENTERED', data: cells.map(([a1, v]) => ({ range: `Match_Log!${a1}`, values: [[v]] })) } });
-  forgetTableBracket();
-  import('./division.js').then(m => m.invalidateDivisionCache()).catch(() => {});
+  await sheetsClient().spreadsheets.values.batchUpdate({ spreadsheetId, requestBody: { valueInputOption: 'USER_ENTERED',
+    data: cells.map(([a1, v]) => ({ range: `Match_Log!${a1}`, values: [[isFormulaValue(v) ? formulaIn(v, sep) : v]] })) } });
+}
+// Какие из записанных формул таблица показывает ошибкой (#ERROR!, #NAME?).
+async function brokenCells(spreadsheetId, cells) {
+  const list = cells.filter(([a1, v]) => isFormulaValue(v) && /^[A-E]\d+$/.test(a1));
+  if (!list.length) return [];
+  const res = await sheetsClient().spreadsheets.values.get({ spreadsheetId, range: 'Match_Log!A1:E' });
+  const vals = res?.data?.values || [];
+  return list.filter(([a1]) => isBrokenShown(vals[Number(a1.slice(1)) - 1]?.[a1.charCodeAt(0) - 65]));
+}
+// Запись с проверкой: после записи бот смотрит, что показывают ячейки. Ошибка
+// формулы — пробует другой разделитель; не помогло — возвращает как было.
+async function putVerified(spreadsheetId, cells) {
+  const sep = await formulaSep(spreadsheetId);
+  await putCells(spreadsheetId, cells, sep);
+  const bad = await brokenCells(spreadsheetId, cells);
+  if (!bad.length) return [];
+  const other = sep === ';' ? ',' : ';';
+  await putCells(spreadsheetId, bad, other);
+  const still = await brokenCells(spreadsheetId, bad);
+  if (still.length < bad.length) sepCache.set(spreadsheetId, other);
+  return still;
+}
+async function writeTableCells(bracket, cells) {
+  if (!cells.length) return { ok: true, written: 0, bad: [] };
+  const id = bracket.spreadsheetId;
+  try {
+    const bad = await putVerified(id, cells);
+    if (!bad.length) return { ok: true, written: cells.length, bad: [] };
+    const old = new Map();
+    for (const r of bracket.rows || []) for (const [c, v] of [['B', r.f1], ['C', r.fc1], ['D', r.f2], ['E', r.fc2]]) old.set(`${c}${r.sheetRow}`, v ?? '');
+    await putVerified(id, cells.map(([a1]) => [a1, old.get(a1) ?? ''])).catch(e => console.error('playoff table restore failed:', e.message));
+    console.error('playoff table write rolled back:', bad.map(([a1]) => a1).join(', '));
+    return { ok: false, written: 0, bad: bad.map(([a1]) => a1) };
+  } finally {
+    forgetTableBracket();
+    import('./division.js').then(m => m.invalidateDivisionCache()).catch(() => {});
+  }
 }
 
 // План сетки до публикации. Две группы — расчёт по таблицам групп, поверх —
@@ -443,7 +504,13 @@ export async function checkTableBrackets(season = '', { fix = false } = {}) {
     const [sf1, sf2, fin, third] = TABLE_SLOTS.map(x => b.slots[x]);
     if (!sf1 || !sf2 || !fin) { item.issues.push(`нет строк полуфиналов и финала после матча №${b.regularMax}`); continue; }
     const cells = [];
-    const want = (r, col, f, label) => { const cur = col === 'B' ? r.f1 : r.f2; if (!sameFormula(cur, f)) { cells.push([`${col}${r.sheetRow}`, f]); item.issues.push(label); } };
+    // Неверная формула — или верная, но таблица показывает ошибку (не прочиталась).
+    const want = (r, col, f, label) => {
+      const cur = col === 'B' ? r.f1 : r.f2, shown = col === 'B' ? r.id1 : r.id2;
+      if (sameFormula(cur, f) && !isBrokenShown(shown)) return;
+      cells.push([`${col}${r.sheetRow}`, f]);
+      item.issues.push(sameFormula(cur, f) ? label.replace(/ не «.*»$/, ': ошибка формулы в ячейке') : label);
+    };
     // Пары полуфиналов чиним только до публикации: после неё в ячейках стоят
     // зафиксированные id опубликованных пар.
     if (!published) {
@@ -459,6 +526,13 @@ export async function checkTableBrackets(season = '', { fix = false } = {}) {
     else {
       want(third, 'B', loserFormula(sf1.sheetRow), 'матч за 3-е: первый игрок не «проигравший полуфинала 1»');
       want(third, 'D', loserFormula(sf2.sheetRow), 'матч за 3-е: второй игрок не «проигравший полуфинала 2»');
+      // Имена в строке матча за 3-е место бот вписывал сам — их тоже проверяем.
+      for (const [col, cur, shown, src] of [['C', third.fc1, third.n1, 'B'], ['E', third.fc2, third.n2, 'D']]) {
+        if (!txt(cur) || (isBrokenShown(shown) && !/^=\s*arrayformula/i.test(txt(cur)))) {
+          cells.push([`${col}${third.sheetRow}`, nameFormula(src, third.sheetRow)]);
+          item.issues.push(`матч за 3-е: имя ${src === 'B' ? 'первого' : 'второго'} игрока не считается`);
+        }
+      }
     }
     if (!fix || (!cells.length && !addThird)) continue;
     const api = sheetsClient();
@@ -478,8 +552,12 @@ export async function checkTableBrackets(season = '', { fix = false } = {}) {
         for (const col of ['F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S']) cells.push([`${col}${r}`, '']);
       }
     }
-    await writeTableCells(b, cells);
-    item.fixed = cells.length;
+    const w = await writeTableCells(b, cells);
+    item.fixed = w.written;
+    item.failed = w.bad;
+    // Что теперь показывает таблица — для отчёта.
+    const after = await readTableBracket(letter, s, { fresh: true }).catch(() => null);
+    item.pairs = TABLE_SLOTS.map(slot => { const r = after?.slots?.[slot]; return { slot, p1: txt(r?.p1), p2: txt(r?.p2) }; });
   }
   return { ok: true, season: s, divisions: out };
 }
@@ -490,7 +568,15 @@ export function tableCheckText(r, { fixed = false } = {}) {
     if (!d.issues.length) { lines.push(`• ${esc(d.title)}: ✅ всё по местам`); continue; }
     lines.push(`• ${esc(d.title)}${d.published ? ' (сетка опубликована)' : ''}:`);
     for (const i of d.issues) lines.push(`   – ${esc(i)}`);
-    if (fixed) lines.push(`   ✅ исправлено ячеек: ${d.fixed}`);
+    if (fixed && d.failed?.length) lines.push(`   ❌ таблица не приняла формулы (${esc(d.failed.join(', '))}) — вернул как было, нужно смотреть руками`);
+    else if (fixed) lines.push(`   ✅ исправлено ячеек: ${d.fixed}`);
+    if (fixed && d.pairs) {
+      const label = { SF1: 'Полуфинал 1', SF2: 'Полуфинал 2', Final: 'Финал', '3rd': 'За 3-е место' };
+      for (const p of d.pairs) {
+        const pair = p.p1 || p.p2 ? `${esc(p.p1 || '—')} — ${esc(p.p2 || '—')}` : 'ждёт полуфиналов';
+        lines.push(`   ${label[p.slot]}: ${pair}${isBrokenShown(p.p1) || isBrokenShown(p.p2) ? ' ⚠️' : ''}`);
+      }
+    }
   }
   return lines.join('\n');
 }
@@ -626,7 +712,8 @@ export async function setOverride(letter, season, gi, place, name) {
     if (!r) return { ok: false, reason: 'no_table_row' };
     const id = txt(name) ? idOfName(b, name) : '';
     if (txt(name) && !id) return { ok: false, reason: 'not_in_table' };
-    await writeTableCells(b, [[`${seat[1] === 1 ? 'B' : 'D'}${r.sheetRow}`, id ? Number(id) : placeFormula(Number(place))]]);
+    const w = await writeTableCells(b, [[`${seat[1] === 1 ? 'B' : 'D'}${r.sheetRow}`, id ? Number(id) : placeFormula(Number(place))]]);
+    if (!w.ok) return { ok: false, reason: 'table_write_failed' };
     const pre = await previewPlan(letter, season, { meta });
     return { ok: true, overrides: pre.overrides };
   }
