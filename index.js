@@ -29,7 +29,7 @@ import { allSlots, pendingActionsFor, setMatchChangeHandler, setWindowChangeHand
   courtsByPlayedMatch, courtKey, pendingAction, nightWindow, isNightHold, resultPromptDelayMin, confirmCourt, courtCloseAt, updateSlot, isAssigned } from './matchesdb.js';
 import { validateMatchScore, formatScore, detectSet3Mode } from './tennis.js';
 import { getUnplayedOpponents, writeConfirmedResult, describeWrite } from './results.js';
-import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups } from './division.js';
+import { getDivisionTable, availableDivisions, getSeasons, invalidateDivisionCache, divisionTitles, divisionGroups, onDivisionInvalidated, latestSeason } from './division.js';
 import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarReady, queueLength } from './avatars.js';
 
 import { uiError } from './ui-errors.js';
@@ -37,6 +37,39 @@ import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
 // Вид рассылки «объявление лиги» регистрируется при загрузке модуля — до того,
 // как очередь продолжит прерванные рассылки после перезапуска.
 import './notices.js';
+import { noteSpeed, timed, runSpeedReport } from './speed.js';
+
+// Витрина сайта: последняя копия ответа отдаётся сразу, а обновляется в фоне —
+// человек не ждёт Google-таблиц. Копия пересобирается сразу после нового счёта
+// (сброс кэшей дивизионов и лиги) и для страховки — раз в SITE_REFRESH_MS
+// (ручные правки в таблицах). Первая сборка после запуска — заранее (прогрев).
+const SITE_REFRESH_MS = 30 * 60 * 1000;
+function siteCache(build) {
+  const map = new Map();
+  const refresh = (key, args, priority = 'low') => {
+    const e = map.get(key) || { t: 0, v: null, building: null, args };
+    e.args = args; map.set(key, e);
+    if (e.building) return e.building;
+    e.building = withPriority(priority, () => build(...args))
+      .then(v => { if (v?.ok) { e.v = v; e.t = Date.now(); e.stale = false; } return v; })
+      .finally(() => { e.building = null; });
+    e.building.catch(e2 => console.error('site cache refresh failed:', e2.message));
+    return e.building;
+  };
+  return {
+    async get(key, args) {
+      const e = map.get(key);
+      if (e?.v) {
+        if (e.stale || Date.now() - e.t >= SITE_REFRESH_MS) refresh(key, args).catch(() => {});
+        return e.v;
+      }
+      return refresh(key, args, 'normal');
+    },
+    warm(key, args) { return refresh(key, args); },
+    // Новый счёт: все копии помечаются устаревшими и тут же пересобираются в фоне.
+    refreshAll() { for (const [k, e] of map) { e.stale = true; refresh(k, e.args).catch(() => {}); } }
+  };
+}
 import { startLogCleanup } from './retention.js';
 import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
 import { syncWaitlistEntry, syncAllWaitlists } from './waitlistsync.js';
@@ -2026,6 +2059,7 @@ app.get('/api/league/bootstrap', async (req, res) => {
         .catch(e => { console.error('league fantasy:', e.message); return null; }) : null;
     console.log(`league bootstrap: ${Date.now() - startedAt} мс${wantFantasy ? ', с Fantasy' : ''}, источник ${(leagueSnapshot.v && leagueSnapshot.v.source) || 'sheets'}`);
     if (!wantFantasy) noteBootstrap(Date.now() - startedAt, (leagueSnapshot.v && leagueSnapshot.v.source) || 'sheets');
+    noteSpeed('bootstrap', Date.now() - startedAt);
     res.json({
       ok: true,
       lang: v.lang,
@@ -2236,8 +2270,6 @@ app.get('/api/league/schedule', async (req, res) => {
 // свой дивизион. Один запрос вместо десятка — витрина берёт отсюда и чемпионов
 // на главной, и цифры в карточке игрока. Таблицы дивизионов кэшируются, поэтому
 // повторные обращения дешёвые.
-let seasonsSummaryCache = { t: 0, v: null };
-const SEASONS_SUMMARY_MS = 5 * 60 * 1000;
 
 // Лестница дивизионов. Женский дивизион (W) идёт отдельной веткой и в подъёмах
 // и вылетах не участвует — у него своя история.
@@ -2340,21 +2372,37 @@ async function buildSeasonsSummary() {
   return out;
 }
 
-app.get('/api/league/seasons-summary', async (req, res) => {
+const summaryPages = siteCache(async () => ({ ok: true, seasons: await buildSeasonsSummary() }));
+// Новый счёт (или правка таблиц ботом) — копии витрины пересобираются в фоне.
+let siteRefreshTimer = null;
+function kickSiteRefresh() {
+  if (siteRefreshTimer) return;
+  siteRefreshTimer = setTimeout(() => { siteRefreshTimer = null; divisionPages.refreshAll(); summaryPages.refreshAll(); }, 3000);
+  siteRefreshTimer.unref?.();
+}
+onDivisionInvalidated(kickSiteRefresh);
+onLeagueCacheInvalidated(kickSiteRefresh);
+// Прогрев после запуска: страницы дивизионов текущего сезона и итоги сезонов.
+async function warmSitePages() {
+  const s = String(await latestSeason().catch(() => '') || '');
+  for (const raw of await availableDivisions(s).catch(() => [])) {
+    const L = String(raw).replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
+    await divisionPages.warm(`${L}|${s}`, [L, s]).catch(() => {});
+  }
+  await summaryPages.warm('all', []).catch(() => {});
+}
+setTimeout(() => { warmSitePages().then(() => console.log('site pages warmed')).catch(e => console.error('site warm failed:', e.message)); }, 45 * 1000).unref?.();
+app.get('/api/league/seasons-summary', timed('summary', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    if (seasonsSummaryCache.v && Date.now() - seasonsSummaryCache.t < SEASONS_SUMMARY_MS) {
-      return res.json({ ok:true, seasons: seasonsSummaryCache.v });
-    }
-    const seasons = await buildSeasonsSummary();
-    seasonsSummaryCache = { t: Date.now(), v: seasons };
-    res.json({ ok:true, seasons });
+    const page = await summaryPages.get('all', []);
+    res.json({ ok:true, seasons: page?.seasons || [] });
   } catch (e) {
     console.error('seasons summary failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
-});
+}));
 
 // Витрина сезонов для тех, кто ещё не в лиге: сколько было дивизионов и
 // игроков, когда сезон шёл и кто стал чемпионом. Анкета для этого не нужна —
@@ -2494,41 +2542,45 @@ app.get('/api/public/seasons', async (req, res) => {
 
 // Таблица дивизиона: состав, перекрёстная сетка и плей-офф. Отдельным запросом,
 // чтобы стартовый экран не ждал чтения ещё четырёх таблиц.
-app.get('/api/league/division', async (req, res) => {
+// Ответ страницы дивизиона (не зависит от того, кто смотрит) — для копии витрины.
+async function buildDivisionPage(letter, season) {
+  const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };
+  // Дивизион может идти двумя группами — тогда отдаём обе таблицы одним ответом,
+  // и витрина показывает их одну под другой.
+  const groups = await divisionGroups(letter, season).catch(() => []);
+  if (groups.length > 1) {
+    const parts = [];
+    for (const g of groups) {
+      const t = await getDivisionTable(letter, season, g.group).catch(() => null);
+      if (!t?.ok) return { ok:false, code:503, error:messages.no_access };
+      parts.push({ group: g.group, group_title: g.title, group_title_en:g.title_en, ...t });
+    }
+    if (!parts.length) return { ok:false, code:404, error: messages.not_configured };
+    const preview = await import('./playoff.js').then(m => m.sitePreview(letter, parts[0].season || season, parts)).catch(() => null);
+    const movement = await import('./movement.js').then(m => m.movementFor(letter, parts[0].season || season)).catch(() => null);
+    return { ok:true, ...parts[0], ...(preview ? { playoff: preview } : {}), groups: parts, movement, built_at: new Date().toISOString() };
+  }
+  const data = await getDivisionTable(letter, season);
+  if (!data.ok) return { ok:false, code:404, error: messages[data.reason] || 'Дивизион недоступен' };
+  const preview = await import('./playoff.js').then(m => m.sitePreview(letter, data.season || season, [{ group: '', players: data.players }])).catch(() => null);
+  const movement = await import('./movement.js').then(m => m.movementFor(letter, data.season || season)).catch(() => null);
+  return { ok:true, ...data, ...(preview ? { playoff: preview } : {}), movement, built_at: new Date().toISOString() };
+}
+const divisionPages = siteCache(buildDivisionPage);
+app.get('/api/league/division', timed('division', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''), { allowGuest:true, lang:String(req.query.lang || '') });
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const letter = String(req.query.letter || '');
+    const letter = String(req.query.letter || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
     const season = String(req.query.season || '');
-    const messages = { not_configured:'Для этого дивизиона не задана таблица.', no_access:'Нет доступа к таблице дивизиона.' };
-    // Дивизион может идти двумя группами — тогда отдаём обе таблицы одним ответом,
-    // и витрина показывает их одну под другой.
-    const groups = await divisionGroups(letter, season).catch(() => []);
-    if (groups.length > 1) {
-      const parts = [];
-      for (const g of groups) {
-        const t = await getDivisionTable(letter, season, g.group).catch(() => null);
-        if (!t?.ok) return res.status(503).json({ok:false,error:messages.no_access});
-        parts.push({ group: g.group, group_title: g.title, group_title_en:g.title_en, ...t });
-      }
-      if (!parts.length) return res.status(404).json({ ok:false, error: messages.not_configured });
-      // Последняя неделя регулярки: предварительная сетка по текущим таблицам.
-      const preview = await import('./playoff.js').then(m => m.sitePreview(letter, parts[0].season || season, parts)).catch(() => null);
-      const movement = await import('./movement.js').then(m => m.movementFor(letter, parts[0].season || season)).catch(() => null);
-      return res.json({ ok:true, ...parts[0], ...(preview ? { playoff: preview } : {}), groups: parts, movement });
-    }
-    const data = await getDivisionTable(letter, season);
-    if (!data.ok) {
-      return res.status(404).json({ ok:false, error: messages[data.reason] || 'Дивизион недоступен' });
-    }
-    const preview = await import('./playoff.js').then(m => m.sitePreview(letter, data.season || season, [{ group: '', players: data.players }])).catch(() => null);
-    const movement = await import('./movement.js').then(m => m.movementFor(letter, data.season || season)).catch(() => null);
-    res.json({ ok:true, ...data, ...(preview ? { playoff: preview } : {}), movement });
+    const page = await divisionPages.get(`${letter}|${season}`, [letter, season]);
+    if (!page?.ok) return res.status(page?.code || 404).json({ ok:false, error: page?.error || 'Дивизион недоступен' });
+    res.json(page);
   } catch (e) {
     console.error('division api failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
-});
+}));
 
 // Свободная бронь корта: не привязана к матчу. Пока доступна админам —
 // COURT_BOOKING_OPEN=true открывает её всем активным игрокам.
@@ -2874,6 +2926,8 @@ app.listen(PORT, () => withPriority('low', async () => {
       // Стыковые матчи: пары на следующий день после финалов, напоминания
       // игрокам (раз в 5 дней) и сводка организатору (по понедельникам).
       await import('./movement.js').then(m => m.runPromotionSweep(Date.now())).catch(e => console.error('promotion sweep failed:', e.message));
+      // Скорость сайта: раз в сутки с 9:00, только если были медленные открытия.
+      await runSpeedReport(Date.now(), text => notifyAdmin(text)).catch(e => console.error('speed report failed:', e.message));
       // Раз в сутки (с 10:00) — сверка журнала матчей с таблицей профилей.
       // Расхождения приходят в админку; нет расхождений — тишина.
       {

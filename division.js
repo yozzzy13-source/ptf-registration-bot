@@ -22,7 +22,14 @@ const WO_LABEL = 'W/O';
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map();
 
-export function invalidateDivisionCache() { cache.clear(); placesCache.clear(); walkoverCache = { key: '', t: 0, v: null }; }
+// После нового счёта кэш сбрасывается, а подписчики (витрина сайта) тут же
+// пересобирают свои копии в фоне — людям при этом отдаётся последняя копия.
+const invalidateHooks = new Set();
+export function onDivisionInvalidated(fn) { if (typeof fn === 'function') invalidateHooks.add(fn); }
+export function invalidateDivisionCache() {
+  cache.clear(); placesCache.clear(); walkoverCache = { key: '', t: 0, v: null };
+  for (const fn of invalidateHooks) { try { fn(); } catch (e) { console.error('division invalidate hook:', e.message); } }
+}
 
 function norm(v = '') {
   return String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');

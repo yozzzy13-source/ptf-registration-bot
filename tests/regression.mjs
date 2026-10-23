@@ -233,6 +233,16 @@ for(const letter of ['C','W']) {
  if(letter==='W')check((view.body.playoff?.qf||[]).length===1,'Grouped division API exposes the quarterfinal bracket');
  if(letter==='W')check((tables.get('master|Playoff')||[]).filter(r=>r&&r[2]==='W'&&r[3]==='QF').length===4,'Счёт четвертьфинала до публикации встал в строку черновика, а не отдельной пятой');
 }
+// Витрина: страница дивизиона отдаётся из копии мгновенно; после нового счёта
+// (сброс кэша дивизионов) копия пересобирается в фоне сама.
+{
+ const a1=await request('get','/api/league/division','1',{letter:'C',season:'2'}),a2=await request('get','/api/league/division','1',{letter:'C',season:'2'});
+ check(a1.body.ok&&a1.body.built_at&&a2.body.built_at===a1.body.built_at,'Страница дивизиона: повторный заход — из копии, без чтения таблиц');
+ division.invalidateDivisionCache();
+ await new Promise(r=>setTimeout(r,3600));
+ const a3=await request('get','/api/league/division','1',{letter:'C',season:'2'});
+ check(a3.body.ok&&a3.body.built_at!==a1.body.built_at,'После нового счёта копия пересобрана в фоне — человек получает свежую таблицу без ожидания');
+}
 const cross=await results.writeConfirmedResult({...result2,to_name:'Wendy Three',to_telegram_id:'9'});
 check(cross.status==='cross_division_blocked','Existing admin approval for cross-division results preserved');
 const matches=await load('matches.js');messages.length=0;

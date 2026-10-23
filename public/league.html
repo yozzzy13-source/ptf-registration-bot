@@ -2005,9 +2005,20 @@ function topupOwn(){
 var summary=null,summaryLoaded=false;
 function loadSummary(){
   if(summaryLoaded)return;summaryLoaded=true;
+  var cachedSum=lsGet('ptf_summary');
+  var applySummary=function(){
+      divIndex=null;
+      if(openId){ var pl=byId(openId); if(pl)renderPlayer(pl); }
+      else if(mode==='home')renderHome();
+      else if(mode==='matches')renderFeed();
+      else if(mode==='div')renderDiv();
+  };
+  if(cachedSum&&cachedSum.ok){summary=cachedSum.seasons||[];setTimeout(applySummary,0)}
   fetch('/api/league/seasons-summary?initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
       if(!j||!j.ok)return;
+      lsSet('ptf_summary',j);
+      if(cachedSum&&sameData(cachedSum,j))return;
       summary=j.seasons||[];
       divIndex=null;
       // Итоги пришли позже первого рендера — перерисовываем то, что открыто:
@@ -2844,7 +2855,10 @@ function renderDiv(){
     +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
     +(showMx?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+mxTable(g)}).join(''):mxTable(d)):'')
     +(mv?'':spoiler(X.howDivT,groups.length>1?groupRules:rulesDiv()));
+  // Пришли свежие данные — раскрытые спойлеры остаются раскрытыми.
+  var openNow={};try{document.querySelectorAll('#viewDiv details[open]>summary').forEach(function(x){openNow[x.textContent]=1})}catch(e){}
   $('viewDiv').innerHTML=h;
+  try{document.querySelectorAll('#viewDiv details>summary').forEach(function(x){if(openNow[x.textContent])x.parentNode.open=true})}catch(e){}
 }
 // Турнирная таблица одного состава: используется и для обычного дивизиона,
 // и для каждой группы, когда дивизион разбит на две.
@@ -3089,14 +3103,23 @@ function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?
 function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv();syncUrl()}
 function toggleExt(){showExt=!showExt;renderDiv()}
 function toggleMx(){showMx=!showMx;renderDiv()}
+// Последние данные страниц храним в браузере (и в Telegram): таблица рисуется
+// сразу из прошлого захода, свежие цифры подменяются тихо, когда придут.
+function lsGet(k){try{var v=localStorage.getItem(k);return v?JSON.parse(v):null}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function sameData(a,b){try{var x=Object.assign({},a),y=Object.assign({},b);delete x.built_at;delete y.built_at;return JSON.stringify(x)===JSON.stringify(y)}catch(e){return false}}
 function loadDiv(){
-  divLoading=true;divErr='';
+  var want=divLetter+'|'+divSeason,key='ptf_div:'+want,cached=lsGet(key);
+  divErr='';
+  if(cached&&cached.ok){divData=cached;divLoading=false;renderDiv()}else divLoading=true;
   fetch('/api/league/division?letter='+encodeURIComponent(divLetter)+'&season='+encodeURIComponent(divSeason)+'&initData='+encodeURIComponent(initData)+tokQ,{cache:'no-store'})
     .then(function(r){return r.json()}).then(function(j){
+      if(divLetter+'|'+divSeason!==want)return;
       divLoading=false;
-      if(!j.ok){divErr=j.error||'Error';divData=null}else divData=j;
-      renderDiv();
-    }).catch(function(e){divLoading=false;divErr=e.message;renderDiv()});
+      if(!j.ok){if(!cached){divErr=j.error||'Error';divData=null;renderDiv()}return}
+      lsSet(key,j);
+      if(!cached||!sameData(cached,j)){divData=j;renderDiv()}
+    }).catch(function(e){if(divLetter+'|'+divSeason!==want)return;divLoading=false;if(!cached){divErr=e.message;renderDiv()}});
 }
 function extTable(d){
   return '<div class="ext"><div class="er hd"><span>#</span><span class="n">'+esc(X.colPlayer)+'</span>'
