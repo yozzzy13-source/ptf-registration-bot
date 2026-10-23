@@ -638,6 +638,69 @@ background:linear-gradient(180deg,var(--champ),var(--champ2))}
 .lab.mvlab,.legend2+.lab{margin-top:18px}
 .duel .dnote{font-size:11px;color:var(--dim);text-align:center;border-top:1px solid var(--line2);padding-top:9px;line-height:1.6}
 .duel .dnote .mvk{margin-right:2px;vertical-align:-2px}
+/* Сетка плей-офф — пирамида: чемпион → финал → 3-е место → полуфиналы → четвертьфиналы. */
+.pz{display:flex;flex-direction:column;gap:6px;padding:4px 0 2px}
+.pz-tier{display:grid;gap:8px}
+.pz-t1{grid-template-columns:1fr;padding:0 26px}
+.pz-t3{grid-template-columns:1fr;padding:0 58px}
+.pz-t2{grid-template-columns:1fr 1fr}
+.pz-t4{grid-template-columns:1fr 1fr;gap:6px 8px}
+.pz-conn{height:14px;position:relative}.pz-conn svg{position:absolute;inset:0;width:100%;height:100%}
+.pz-tl{font-size:7.5px;letter-spacing:1.6px;text-transform:uppercase;font-weight:800;color:var(--mute2);text-align:center;margin:4px 0 1px}
+.pz-champ{display:flex;align-items:center;justify-content:center;gap:8px;margin:2px 0 8px;font-size:9px;letter-spacing:2px;text-transform:uppercase;font-weight:800;color:var(--gold);cursor:pointer}
+.pz-champ .avr,.pz-champ .avph{width:30px;height:30px;flex:0 0 30px;font-size:11px;border:2px solid var(--goldLine)}
+.pz-champ b{font-size:15px;letter-spacing:0;text-transform:none;color:var(--text)}
+.pz-mb{background:var(--surf);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+.pz-mt{font-size:7.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--mute2);font-weight:800;padding:5px 8px;border-bottom:1px solid var(--line2);display:flex;justify-content:space-between;gap:6px;white-space:nowrap}
+.pz-mt .seed{color:var(--mute);letter-spacing:.4px}
+.pz-sl{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;align-items:center;padding:4px 8px;font-size:11.5px;font-weight:700;color:var(--dim);cursor:pointer}
+.pz-sl+.pz-sl{border-top:1px solid var(--line2)}
+.pz-sl .avr,.pz-sl .avph{width:18px;height:18px;flex:0 0 18px;font-size:7px;border-width:1px}
+.pz-sl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pz-sl b{font-size:10px;font-weight:800;color:var(--mute2);white-space:nowrap}
+.pz-sl.w{color:var(--text);background:linear-gradient(90deg,var(--finBg),transparent)}
+.pz-sl.w b{color:var(--amber)}
+.pz-sl.tbd{cursor:default;color:var(--mute2)}
+.pz-mb.fin{border-color:var(--goldLine);box-shadow:0 0 0 4px var(--goldBg);background:linear-gradient(180deg,var(--goldBg),var(--surf) 60%)}
+.pz-mb.fin .pz-mt{color:var(--gold);font-size:9px;padding:6px 10px}
+.pz-mb.fin .pz-sl{font-size:14px;padding:7px 10px;grid-template-columns:26px minmax(0,1fr) auto;gap:9px}
+.pz-mb.fin .pz-sl .avr,.pz-mb.fin .pz-sl .avph{width:26px;height:26px;flex:0 0 26px;font-size:9px}
+.pz-mb.fin .pz-sl b{font-size:12px}
+.pz-mb.third{opacity:.8;border-style:dashed}
+.pz-mb.third .pz-sl{font-size:10.5px;padding:3px 8px}
+.pz-note{font-size:10.5px;color:var(--mute);line-height:1.5;margin:0 2px 10px}
+/* Спойлеры страницы дивизиона: янтарные (сетка, зоны, стык) и спокойный (правила). */
+.asp{margin-top:12px;border:1px solid var(--accLine);border-radius:12px;background:linear-gradient(90deg,var(--accBg),var(--card2) 75%)}
+.asp>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;font-size:12.5px;font-weight:800;color:var(--text)}
+.asp>summary::-webkit-details-marker{display:none}
+.asp>summary small{display:block;font-size:10px;font-weight:600;color:var(--mute);margin-top:2px}
+.asp>summary .ar{width:24px;height:24px;flex:0 0 24px;border-radius:50%;display:grid;place-items:center;background:var(--amber);color:var(--onAcc);font-size:11px;transition:transform .15s}
+.asp[open]>summary .ar{transform:rotate(180deg)}
+.asp>summary .tg{margin-left:6px;font-size:8.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:2px 6px;border-radius:5px;border:1px solid var(--accLine);color:var(--amber);vertical-align:1px}
+.asp .asb{padding:2px 10px 12px}
+.asp+.lab,.asp+.panel{margin-top:18px}
+.asp.grey{border-color:var(--line2);background:var(--card2)}
+.asp.grey>summary .ar{background:var(--mute2)}
+.asp.grey .asb{font-size:11.5px;line-height:1.55;color:var(--dim);padding:0 12px 12px}
+.asp.grey .asb ul{margin:7px 0 0;padding-left:17px}.asp.grey .asb li{margin-bottom:4px}
+.asp.grey .asb h4{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--mute);margin:12px 0 4px}
+.asp.grey .asb h4:first-child{margin-top:0}
+/* Зоны подъёма и вылета. */
+.zn2{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surf)}
+.zh{font-size:8px;letter-spacing:1.6px;text-transform:uppercase;font-weight:800;padding:7px 10px;display:flex;justify-content:space-between;gap:8px}
+.zh.up{color:var(--win);background:var(--winBg)}.zh.dn{color:var(--lose);background:var(--loseBg)}
+.zn2 .zh+.zr,.zn2 .zr+.zh,.zn2 .zx+.zh{border-top:1px solid var(--line2)}
+.zr{display:grid;grid-template-columns:38px minmax(0,1fr) 20px 20px 28px 30px 28px 16px;gap:4px;align-items:center;padding:5px 10px;font-size:11px;border-top:1px solid var(--line2);color:var(--dim);cursor:pointer}
+.zr span{text-align:center}
+.zr .g{font-size:9px;color:var(--mute);font-weight:800;text-align:left;white-space:nowrap}
+.zr .n{display:flex;align-items:center;gap:7px;overflow:hidden;white-space:nowrap;text-align:left}
+.zr .n .avr,.zr .n .avph{width:24px;height:24px;flex:0 0 24px;font-size:8px}
+.zr .n em{font-style:normal;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.zr .p{font-weight:800;color:var(--amber)}
+.zr.hd{font-size:7.5px;letter-spacing:1.1px;font-weight:800;color:var(--mute2);cursor:default;padding-top:4px;padding-bottom:4px}
+.zr.m-up{background:linear-gradient(90deg,var(--zUpTint),transparent 70%)}.zr.m-pl{background:linear-gradient(90deg,var(--accBg),transparent 70%)}.zr.m-dn{background:linear-gradient(90deg,var(--zDownTint),transparent 70%)}
+.zx{padding:6px 10px 8px;font-size:10px;color:var(--mute);border-top:1px solid var(--line2);line-height:1.6}
+.zx .mvk{margin-right:3px}
 /* Заметная плашка «Как работают переходы и плей-офф». */
 .spo.big{margin-top:14px;border:1px solid var(--accLine);background:linear-gradient(180deg,var(--accBg),var(--card2) 70%)}
 .spo.big summary{display:flex;align-items:center;gap:10px;padding:12px 13px;font-size:12.5px;font-weight:800;color:var(--text)}
@@ -2712,16 +2775,6 @@ function crossGroupBlock(groups){
   var cards=all.map(function(m){var done=String(m.status||'').toLowerCase()==='confirmed',score=done?(m.score||'—'):'',middle=done?'<s>'+esc(score)+'</s>':'<i class="cross-vs">vs</i>';var a=q(m.player_1||''),b=q(m.player_2||'');return '<div class="mt cross-match"><div class="mtop">'+esc((L?'Группа ':'Group ')+(m.player_1_group||'?'))+' · '+esc((L?'Группа ':'Group ')+(m.player_2_group||'?'))+(m.date?' · '+esc(matchDate(m.date)):'')+'</div><div class="fm2"><div class="match-player-link" onclick="openPlayerByName(\''+a+'\',\'div\')">'+avL({name:m.player_1||''})+'</div><div class="mid"><div class="nm3"><b onclick="event.stopPropagation();openPlayerByName(\''+a+'\',\'div\')">'+esc(m.player_1||'')+'</b> '+middle+' <em onclick="event.stopPropagation();openPlayerByName(\''+b+'\',\'div\')">'+esc(m.player_2||'')+'</em></div><div style="margin-top:7px">'+divChip('W')+'</div></div><div class="match-player-link" onclick="openPlayerByName(\''+b+'\',\'div\')">'+avL({name:m.player_2||''})+'</div></div></div>';}).join('');
   return '<button class="more" onclick="toggleCross()">'+esc(title)+' <span>'+esc(crossOpen?(L?'Скрыть':'Hide'):(L?'Показать':'Show'))+'</span></button>'+(crossOpen?'<div class="crosslist">'+cards+'</div>':'');
 }
-function playoffStages(po){
-  po=po||{};var stages=[],has=function(m){return m&&(m.first||m.second||m.label_1||m.label_2)};
-  var qf=(po.qf||[]).filter(has),sf=(po.sf||[po.sf1,po.sf2]).filter(has);
-  if(qf.length)stages.push({t:L?'Четвертьфиналы':'Quarterfinals',m:qf});
-  if(sf.length)stages.push({t:L?'Полуфиналы':'Semifinals',m:sf});
-  if(has(po.final))stages.push({t:X.final,m:[po.final],fin:true});
-  if(has(po.third))stages.push({t:L?'За 3-е место':'Third place',m:[po.third]});
-  if(!stages.length)return '';
-  return '<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)+'<div class="playgrid'+(po.preview?' draft':'')+'">'+stages.map(function(st){return '<div class="playstage"><div class="playtitle">'+esc(st.t)+'</div>'+st.m.map(function(m,i){return poBox(st.t+(st.m.length>1?' · '+(i+1):''),m,st.fin)}).join('')+'</div>'}).join('')+'</div>';
-}
 function renderDiv(){
   if(!divSeason)divSeason=String(season||(seasons.length?seasons[seasons.length-1].number:''))||'';
   var list=seasons.length?seasonDivisions(divSeason):divisions;
@@ -2762,13 +2815,8 @@ function renderDiv(){
   // Сезон 1: сетка появлялась, когда что-то сыграно. Теперь — и опубликованная
   // (пары известны), и предварительная на последней неделе регулярки.
   var hasPo=(po.final&&po.final.played)||(po.sf1&&po.sf1.played)||(po.sf2&&po.sf2.played)||po.published||(po.preview&&(po.sf1||po.sf2));
-  if(hasPo){
-    h+='<div class="lab">'+esc(X.playoff)+'<span class="dot"></span>'+(divSeason?(L?'Сезон ':'Season ')+esc(divSeason):'')+'</div>'+poNote(po)
-      +'<div class="tree'+(po.preview?' draft':'')+'"><div class="col">'
-      +poBox(X.sf+' · #1 / #4',po.sf1)+poBox(X.sf+' · #2 / #3',po.sf2)
-      +'</div><div class="conn"><i></i><u></u></div><div class="col">'
-      +poBox(X.final,po.final,true)+'</div></div>'+(po.third?'<div class="playgrid'+(po.preview?' draft':'')+'"><div class="playstage">'+poBox(L?'За 3-е место':'Third place',po.third)+'</div></div>':'');
-  }
+  // Сетка плей-офф — пирамидой под спойлером наверху страницы.
+  if(hasPo)h+=bracketSpoiler(po,false);
   var mv=d.movement||null;
   h+=standingsBlock(d,divLabel(d.division),mv);
   // Дивизион может идти двумя группами: показываем вторую таблицу сразу под первой,
@@ -2777,20 +2825,20 @@ function renderDiv(){
   if(groups.length>1){
     h=chips;
     if(po.champion){h+='<div class="champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')"><div class="in"><div class="cl">'+esc(X.champion)+'</div>'+avL(po.champion)+'<div class="cn">'+esc(po.champion.name)+'</div><div class="cd">'+esc(divLabel(d.division))+(divSeason?(L?' · Сезон ':' · Season ')+esc(divSeason):'')+'</div></div></div>';}
-    h+=playoffStages(po);
+    h+=bracketSpoiler(po,true);
     for(var gi=0;gi<groups.length;gi++){
       var g=groups[gi];
       h+=standingsBlock(g,divLabel(d.division)+' · '+((L?g.group_title:g.group_title_en)||((L?'Группа ':'Group ')+g.group)),mv);
     }
-    if(mv){h+=raceBlock(mv,mv.top,'top')+raceBlock(mv,mv.bottom,'bottom')}
-    h+=crossGroupBlock(groups);
   }
-  if(mv)h+=duelsBlock(mv);
+  // Под таблицей регулярки — спойлеры: зоны подъёма и вылета, стыковой матч, правила.
+  if(mv)h+=zonesSpoiler(mv)+duelsSpoiler(mv);
   // С сезона 2 — заметная плашка с правилами переходов сразу под таблицами.
   var groupRules=L?
       '<p>В каждой группе отдельная таблица: победа — 3 очка, поражение — 1. Порядок при равенстве: победы, разница сетов, разница геймов, выигранные сеты. Межгрупповые матчи входят в общие очки группы; посев определяется местом внутри своей группы. Пары плей-офф организатор подтверждает отдельно.</p>':
       '<p>Each group has its own standings: 3 points for a win, 1 for a loss. Ties are ranked by wins, set difference, game difference, then sets won. Cross-group matches count toward group points; playoff seeding is based on the ranking within each group. The organiser confirms playoff pairs separately.</p>';
-  if(mv)h+=bigSpoiler(groups.length>1?groupRules+mvRules(mv):rulesDivMv(mv));
+  if(mv)h+=aSpoiler(L?'Как работают переходы и плей-офф':'How movement and the playoff work',L?'Коротко о правилах':'Rules in short',groups.length>1?groupRules+mvRules(mv):rulesDivMv(mv),{grey:true});
+  if(groups.length>1)h+=crossGroupBlock(groups);
   h+='<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
     +(showExt?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+extTable(g)}).join(''):extTable(d)):'')
     +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
@@ -2879,28 +2927,6 @@ function mvLegend(mv,seen,withStay){
   return '<div class="legend2">'+items.join('')+'</div>';
 }
 function signed(n){n=Number(n)||0;return (n>0?'+':'')+n}
-// «Борьба за повышение / сохранение» в дивизионе из двух групп: первые (или
-// последние) 4 места обеих групп в общем порядке, с подробной статистикой.
-function raceBlock(mv,list,kind){
-  if(!list||!list.length)return '';
-  var seen={};
-  var rows=list.map(function(r,i){
-    var m=r.mark?{k:r.mark,to:r.to}:null;if(m)seen[m.k]=seen[m.k]||{to:m.to};
-    var cls=m?(m.k==='up'||m.k==='opt'?' m-up':m.k==='down'?' m-dn':' m-pl'):'';
-    return '<div class="rrow'+cls+'" onclick="openPlayerByName(\''+q(r.name)+'\',\'div\')"><span class="p">'+(i+1)+'</span>'
-      +'<span class="n">'+avL({name:r.name,photo:r.photo})+'<span class="nm"><em>'+esc(r.name)+'</em><small>'+esc((L?'Гр. ':'Gr. ')+r.group+' · #'+r.place)+'</small></span></span>'
-      +'<span>'+r.matches+'</span><span>'+r.wins+'</span><span class="pt">'+r.points+'</span>'
-      +'<span>'+signed(r.setDiff)+'</span><span>'+signed(r.gameDiff)+'</span><span class="mk">'+mvGlyph(m)+'</span></div>';
-  }).join('');
-  var title=kind==='top'?(L?'Борьба за повышение':'Promotion race'):(L?'Борьба за сохранение':'Relegation race');
-  var legend=['up','opt','po_up','po_down','down'].filter(function(k){return seen[k]}).map(function(k){return '<div>'+mvGlyph({k:k}).replace('<span','<i').replace('</span>','</i>')+'<span>'+esc(mvText(k,seen[k],mv.letter,true))+'</span></div>'}).join('');
-  var note=kind==='top'
-    ?(L?'Сравниваются первые 4 места обеих групп: очки → победы → разница сетов → разница геймов → выигранные сеты.':'Places 1–4 of both groups are compared: points → wins → set difference → game difference → sets won.')
-    :(L?'Сравниваются последние 4 места обеих групп по тем же критериям.':'The bottom 4 places of both groups are compared by the same criteria.');
-  return '<div class="lab mvlab">'+esc(title)+'<span class="dot"></span>'+esc(mvDiv(mv.letter))+'</div>'
-    +'<div class="panel"><div class="rrow hd"><span>#</span><span class="n">'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span>±'+(L?'С':'S')+'</span><span>±'+(L?'Г':'G')+'</span><span></span></div>'+rows+'</div>'
-    +(legend?'<div class="legend2">'+legend+'</div>':'')+'<div class="rnote">'+esc(note)+'</div>';
-}
 // Стыковой матч: предварительно (по текущим таблицам), утверждён, назначен, сыгран.
 function duelCard(x){
   var tag=x.preview?(L?'предварительно':'provisional'):x.winner?(x.wo?'W/O':(L?'сыгран':'played')):x.date?((L?'назначен ':'scheduled ')+matchDate(x.date)+(x.time?' '+x.time:'')):(L?'пара утверждена':'pair confirmed');
@@ -2922,11 +2948,6 @@ function duelCard(x){
     +'<div class="x">'+mid+'</div>'
     +side(x.lower_player,x.lower_photo,mvDiv(x.lower)+' · '+x.lower_label,mvDiv(x.lower)+' · '+x.lower_label_en)+'</div>'
     +'<div class="dnote">'+note+'</div></div>';
-}
-function duelsBlock(mv){
-  var list=(mv&&mv.duels)||[];
-  if(!list.length)return '';
-  return '<div class="lab mvlab">'+esc(L?(list.length>1?'Стыковые матчи':'Стыковой матч'):(list.length>1?'Promotion playoffs':'Promotion playoff'))+'<span class="dot"></span>'+esc(mvDiv(mv.letter))+'</div>'+list.map(duelCard).join('');
 }
 // Раздел правил «Переходы между дивизионами»: общее + особенности дивизиона.
 var MV_FEAT={
@@ -2968,34 +2989,101 @@ function rulesDivMv(mv){
   if(a<0||b<0)return base+mvRules(mv);
   return base.slice(0,a)+places+mvRules(mv)+base.slice(b);
 }
-function bigSpoiler(html){
-  return '<details class="spo big"><summary><span class="ic">i</span><span>'+esc(L?'Как работают переходы и плей-офф':'How movement and the playoff work')+'</span><span class="ar">▼</span></summary><div class="in">'+html+'</div></details>';
+// ------------------------------------------------------ сетка-пирамида
+// Подпись пары — только в стартовом раунде (там, где пары взяты из таблицы).
+var PZ_SEED={QF1:['G1 #1','G2 #4'],QF2:['G2 #2','G1 #3'],QF3:['G2 #1','G1 #4'],QF4:['G1 #2','G2 #3'],SF1:['#1','#4'],SF2:['#2','#3']};
+function pzSeedText(s){s=String(s||'');var m=s.match(/^(\d+)·(.+)$/);if(m)return 'G'+m[2]+' #'+m[1];return s}
+function pzSeed(m,slot,first){
+  if(!first)return '';
+  var a=pzSeedText(m&&m.seed_1),b=pzSeedText(m&&m.seed_2),d=PZ_SEED[slot]||['',''];
+  return (a||d[0])+' · '+(b||d[1]);
 }
-// Пометка над сеткой: предварительная (по текущей таблице) или когда финалы.
-function poNote(po){
-  if(!po||!po.preview)return '';
-  // Коротко: что это черновик и до какого дня пары могут меняться.
-  var by=po.deadline?matchDate(po.deadline):'';
-  var line=L?('Пары по текущей таблице'+(by?' — могут меняться до '+by:'')):('Pairs follow the current table'+(by?' and may change until '+by:''));
-  return '<div class="podraft"><b>'+esc(L?'Предварительно':'Provisional')+'</b><span>'+esc(line)+'</span></div>';
-}
-// «Winner SF1» → «Победитель SF1»: кто встанет в пару, пока её нет.
-function poPlaceholder(t){
-  t=String(t||'');if(!t||t==='TBD')return '—';
-  var m=t.match(/^(Winner|Loser)\s+(\S+)$/);if(!m)return t;
-  return L?(m[1]==='Winner'?'Победитель ':'Проигравший ')+m[2]:t;
-}
-function poBox(title,m,isFinal){
-  if(!m)return '';
-  var side=function(pl,other,ph){
-    if(!pl)return '<div class="sl"><div class="avph">?</div><span class="nm2">'+esc(poPlaceholder(ph))+'</span><b></b></div>';
-    var win=m.winner_id&&String(m.winner_id)===String(pl.id);
-    var sc=m.score||'';
-    return '<div class="sl'+(win?' win':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'div\')">'
-      +avL(pl)+'<span class="nm2">'+esc(shortName(pl.name))+'</span><b>'+esc(win?sc:'')+'</b></div>';
+function pzBox(title,m,slot,cls,first){
+  var side=function(pl){
+    if(!pl)return '<div class="pz-sl tbd"><div class="avph">?</div><span>—</span><b></b></div>';
+    var win=m&&m.winner_id&&String(m.winner_id)===String(pl.id);
+    return '<div class="pz-sl'+(win?' w':'')+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'div\')">'+avL(pl)+'<span>'+esc(pl.name)+'</span><b>'+esc(win?(m.score||''):'')+'</b></div>';
   };
-  return '<div class="mbox'+(isFinal?' fin':'')+'"><div class="mtitle">'+esc(title)+'</div>'
-    +side(m.first,m.second,m.label_1)+side(m.second,m.first,m.label_2)+'</div>';
+  var seed=pzSeed(m,slot,first);
+  // Четвертьфинал: в заголовке только пара мест — название раунда стоит над ярусом.
+  var head=/^QF/.test(slot)?'<span class="seed">'+esc(seed)+'</span>':'<span>'+esc(title)+'</span>'+(seed?'<span class="seed">'+esc(seed)+'</span>':'');
+  return '<div class="pz-mb'+(cls?' '+cls:'')+'"><div class="pz-mt">'+head+'</div>'+side(m&&m.first)+side(m&&m.second)+'</div>';
+}
+function pzConn(path){return '<div class="pz-conn"><svg viewBox="0 0 100 14" preserveAspectRatio="none"><path d="'+path+'" stroke="var(--line3)" stroke-width="1.2" fill="none" vector-effect="non-scaling-stroke"/></svg></div>'}
+function pyramid(po,grouped){
+  var qf=(po.qf||[]),sf1=po.sf1||(po.sf||[])[0],sf2=po.sf2||(po.sf||[])[1];
+  var hasQf=grouped&&qf.length;
+  var h='<div class="pz">';
+  if(po.champion)h+='<div class="pz-champ" onclick="openPlayerByName(\''+q(po.champion.name)+'\',\'div\')">'+avL(po.champion)+'<span>'+esc(L?'Чемпион':'Champion')+'</span><b>'+esc(po.champion.name)+'</b></div>';
+  h+='<div class="pz-tier pz-t1">'+pzBox('🏆 '+(L?'Финал':'Final'),po.final,'Final','fin',false)+'</div>';
+  if(po.third)h+='<div class="pz-tl">'+esc(L?'Матч за 3-е место':'Third place')+'</div><div class="pz-tier pz-t3">'+pzBox(L?'За 3-е место':'3rd place',po.third,'3rd','third',false)+'</div>';
+  h+=pzConn('M25 14V7H75V14M50 7V0')+'<div class="pz-tl">'+esc(L?'Полуфиналы':'Semifinals')+'</div>'
+    +'<div class="pz-tier pz-t2">'+pzBox(L?'Полуфинал 1':'Semifinal 1',sf1,'SF1','',!hasQf)+pzBox(L?'Полуфинал 2':'Semifinal 2',sf2,'SF2','',!hasQf)+'</div>';
+  if(hasQf){
+    var at=function(k){return qf.filter(function(m){return m&&m.slot===k})[0]||qf[Number(k.slice(2))-1]||null};
+    var t=function(k){return (L?'Четвертьфинал ':'QF ')+k.slice(2)};
+    h+=pzConn('M12 14V7H38V14M25 7V0M62 14V7H88V14M75 7V0')+'<div class="pz-tl">'+esc(L?'Четвертьфиналы':'Quarterfinals')+'</div>'
+      +'<div class="pz-tier pz-t4">'+pzBox(t('QF1'),at('QF1'),'QF1','',true)+pzBox(t('QF3'),at('QF3'),'QF3','',true)
+      +pzBox(t('QF2'),at('QF2'),'QF2','',true)+pzBox(t('QF4'),at('QF4'),'QF4','',true)+'</div>';
+  }
+  return h+'</div>';
+}
+// Янтарный спойлер страницы дивизиона (grey — для правил).
+function aSpoiler(title,sub,body,o){
+  o=o||{};
+  return '<details class="asp'+(o.grey?' grey':'')+'"'+(o.open?' open':'')+'><summary><div>'+esc(title)+(o.tag?'<span class="tg">'+esc(o.tag)+'</span>':'')+(sub?'<small>'+esc(sub)+'</small>':'')+'</div><span class="ar"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5"/></svg></span></summary><div class="asb">'+body+'</div></details>';
+}
+function bracketSpoiler(po,grouped){
+  var any=po&&(po.final||po.sf1||po.sf2||(po.sf||[]).length||(po.qf||[]).length);
+  if(!any)return '';
+  var pre=Boolean(po.preview);
+  var by=po.deadline?matchDate(po.deadline):'';
+  var note=pre?'<div class="pz-note">'+esc(L?'Пары считаются по текущим таблицам: пока идут игры регулярки, они могут меняться. Окончательная сетка появится после конца регулярки'+(by?' ('+by+')':'')+'.'
+    :'Pairs follow the current tables and may change while regular-season matches are still being played. The final bracket appears when the regular season ends'+(by?' ('+by+')':'')+'.')+'</div>':'';
+  var sub=grouped?(L?'Четвертьфиналы → полуфиналы → финал':'Quarterfinals → semifinals → final'):(L?'Полуфиналы → финал':'Semifinals → final');
+  return aSpoiler(L?'Сетка плей-офф':'Playoff bracket',sub,note+pyramid(po,grouped),{open:!pre,tag:pre?(L?'предварительно':'provisional'):''});
+}
+// Зоны подъёма и вылета: 2 верхних и 2 нижних места (каждой группы).
+function zoneRow(r,grouped){
+  var m=r.mark?{k:r.mark,to:r.to}:null,cls=m?(m.k==='up'||m.k==='opt'?' m-up':m.k==='down'?' m-dn':' m-pl'):'';
+  return '<div class="zr'+cls+'" onclick="openPlayerByName(\''+q(r.name)+'\',\'div\')"><span class="g">'+esc((grouped?'G'+r.group+' ':'')+'#'+r.place)+'</span>'
+    +'<span class="n">'+avL({name:r.name,photo:r.photo})+'<em>'+esc(r.name)+'</em></span>'
+    +'<span>'+r.matches+'</span><span>'+r.wins+'</span><span>'+signed(r.setDiff)+'</span><span>'+signed(r.gameDiff)+'</span><span class="p">'+r.points+'</span><span class="mk">'+mvGlyph(m)+'</span></div>';
+}
+function zoneExplain(mv,list,grouped){
+  var seen={};(list||[]).forEach(function(r){if(r.mark&&!seen[r.mark])seen[r.mark]={to:r.to,place:r.place}});
+  var t=function(k){var to=seen[k]&&seen[k].to?mvDiv(seen[k].to):'';
+    if(L)return k==='up'?(grouped?'общий #1':'#1')+' — '+(seen.up.to==='PRIME'?'переход в Prime':'повышение'):k==='po_up'?(grouped?'общий #2':'#2')+' — стыковой матч':k==='po_down'?(grouped?'второй с конца':'#'+seen.po_down.place)+' — стыковой матч за сохранение':k==='down'?(grouped?'худший результат':'#'+seen.down.place)+' — вылет'+(to?' в '+to:''):k==='opt'?'общий #1 — право перейти в '+to+' (по желанию)':'';
+    return k==='up'?(grouped?'#1 overall':'#1')+' — '+(seen.up.to==='PRIME'?'moves up to Prime':'promoted'):k==='po_up'?(grouped?'#2 overall':'#2')+' — promotion playoff':k==='po_down'?(grouped?'second from bottom':'#'+seen.po_down.place)+' — relegation playoff':k==='down'?(grouped?'lowest result':'#'+seen.down.place)+' — relegated'+(to?' to '+to:''):k==='opt'?'#1 overall — option to move up to '+to:'';
+  };
+  return ['up','opt','po_up','po_down','down'].filter(function(k){return seen[k]}).map(function(k){return mi(k)+esc(t(k))}).join(' · ');
+}
+function zonesSpoiler(mv){
+  if(!mv||(!mv.showTop&&!mv.showBottom))return '';
+  var g=mv.grouped,h='<div class="zn2">';
+  var head='<div class="zr hd"><span class="g">'+esc(g?(L?'ГР':'GR'):'#')+'</span><span class="n" style="color:var(--mute2)">'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>±'+(L?'С':'S')+'</span><span>±'+(L?'Г':'G')+'</span><span>'+esc(X.colPts)+'</span><span></span></div>';
+  if(mv.showTop&&mv.top){
+    h+='<div class="zh up"><span>▲ '+esc(L?'Зона повышения':'Promotion zone')+'</span><span>'+esc(g?(L?'2 верхних · обе группы':'top 2 · both groups'):(L?'2 верхних':'top 2'))+'</span></div>'+head
+      +mv.top.map(function(r){return zoneRow(r,g)}).join('');
+    var ex=zoneExplain(mv,mv.top,g);if(ex)h+='<div class="zx">'+ex+'</div>';
+  }
+  if(mv.showBottom&&mv.bottom){
+    h+='<div class="zh dn"><span>▼ '+esc(L?'Зона вылета':'Bottom zone')+'</span><span>'+esc(g?(L?'2 нижних · обе группы':'last 2 · both groups'):(L?'2 нижних':'last 2'))+'</span></div>'+(mv.showTop?'':head)
+      +mv.bottom.map(function(r){return zoneRow(r,g)}).join('');
+    var lowest=(mv.notes||[]).indexOf('lowest')>=0;
+    var ex2=lowest?esc(L?'Нижний дивизион — вылета нет.':'Lowest division — no relegation.'):zoneExplain(mv,mv.bottom,g);
+    if((mv.notes||[]).indexOf('forms_D')>=0)ex2+=(ex2?'<br>':'')+esc(L?'Division D собирается заново к каждому сезону.':'Division D is formed anew every season.');
+    if(ex2)h+='<div class="zx">'+ex2+'</div>';
+  }
+  h+='</div>';
+  var sub=!mv.showTop?(L?'2 нижних места':'Bottom 2 places'):!mv.showBottom?(g?(L?'2 верхних места каждой группы':'Top 2 of each group'):(L?'2 верхних места':'Top 2 places')):(g?(L?'2 верхних и 2 нижних места каждой группы':'Top 2 and bottom 2 of each group'):(L?'2 верхних и 2 нижних места':'Top 2 and bottom 2 places'));
+  return aSpoiler(L?'Зоны подъёма и вылета':'Promotion & relegation zones',sub,h);
+}
+function duelsSpoiler(mv){
+  var list=(mv&&mv.duels)||[];
+  if(!list.length)return '';
+  return aSpoiler(L?(list.length>1?'Стыковые матчи':'Стыковой матч'):(list.length>1?'Promotion playoffs':'Promotion playoff'),
+    L?'#2 дивизиона ниже против #7 дивизиона выше':'#2 of the lower division vs #7 of the division above',list.map(duelCard).join(''));
 }
 function shortName(n){var p=String(n||'').trim().split(/\s+/);return p.length>1?p[0]+' '+p[1][0]+'.':p[0]}
 function pickDiv(d){divLetter=d;divData=null;divErr='';showExt=false;showMx=false;renderDiv();syncUrl()}
