@@ -591,7 +591,10 @@ color:var(--mute2);border-top:0;background:var(--surf2);cursor:default}
 .legend .zn{display:inline-block;width:3px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:4px;
 background:linear-gradient(180deg,var(--champ),var(--champ2))}
 /* Переходы между дивизионами (с сезона 2): значок справа и подсветка строки. */
-.drow .mk .mvk{font-size:15px;font-weight:900;line-height:1}
+.mvk{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle;line-height:0}
+.mvk svg{display:block}
+.mvk.in svg{width:11px;height:13px}
+.drow .mk .mvk{line-height:0}
 .mvk.up,.mvk.opt{color:var(--upArrow)}.mvk.opt{opacity:.8}.mvk.pl{color:var(--amber)}.mvk.dn{color:var(--lose)}.mvk.st{color:var(--mute2);font-size:11px}
 .drow.m-up{background:linear-gradient(90deg,var(--zUpTint),transparent 65%)}
 .drow.m-pl{background:linear-gradient(90deg,var(--accBg),transparent 65%)}
@@ -600,7 +603,7 @@ background:linear-gradient(180deg,var(--champ),var(--champ2))}
 .drow.m-dn .n em{color:var(--dim)}
 .legend2{display:grid;gap:5px;margin:11px 2px 0;font-size:10.5px;color:var(--mute);font-weight:600}
 .legend2 div{display:flex;gap:8px;align-items:baseline}
-.legend2 .mvk{width:14px;text-align:center;font-size:13px;font-weight:900;font-style:normal}
+.legend2 .mvk{width:14px;flex:0 0 14px;font-style:normal}
 .legend2 .zn{display:inline-block;width:3px;height:10px;border-radius:2px;margin:0 5.5px;background:linear-gradient(180deg,var(--champ),var(--champ2))}
 /* «Борьба за повышение / сохранение»: подробная статистика. */
 .rrow{display:grid;grid-template-columns:18px minmax(0,1fr) 20px 20px 28px 26px 30px 16px;gap:6px;align-items:center;
@@ -615,7 +618,7 @@ background:linear-gradient(180deg,var(--champ),var(--champ2))}
 .rrow .n em{font-style:normal;font-weight:700;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
 .rrow .n small{font-size:9.5px;color:var(--mute);font-weight:700;margin-top:2px}
 .rrow .p{font-weight:800;color:var(--mute3)}.rrow .pt{font-weight:800;font-size:13.5px;color:var(--amber)}
-.rrow .mk .mvk{font-size:14px;font-weight:900}
+.rrow .mk .mvk{line-height:0}
 .rrow.m-up{background:linear-gradient(90deg,var(--zUpTint),transparent 65%)}.rrow.m-up:before{background:linear-gradient(180deg,var(--champ),var(--champ2))}
 .rrow.m-pl{background:linear-gradient(90deg,var(--accBg),transparent 65%)}.rrow.m-pl:before{background:var(--amber2)}
 .rrow.m-dn{background:linear-gradient(90deg,var(--zDownTint),transparent 65%)}.rrow.m-dn:before{background:linear-gradient(180deg,var(--zDown1),var(--zDown2))}
@@ -634,7 +637,7 @@ background:linear-gradient(180deg,var(--champ),var(--champ2))}
 .duel .x b{display:block;color:var(--amber);font-size:12px}
 .lab.mvlab,.legend2+.lab{margin-top:18px}
 .duel .dnote{font-size:11px;color:var(--dim);text-align:center;border-top:1px solid var(--line2);padding-top:9px;line-height:1.6}
-.duel .dnote .up{color:var(--upArrow);font-weight:900}.duel .dnote .dn{color:var(--lose);font-weight:900}
+.duel .dnote .mvk{margin-right:2px;vertical-align:-2px}
 /* Заметная плашка «Как работают переходы и плей-офф». */
 .spo.big{margin-top:14px;border:1px solid var(--accLine);background:linear-gradient(180deg,var(--accBg),var(--card2) 70%)}
 .spo.big summary{display:flex;align-items:center;gap:10px;padding:12px 13px;font-size:12.5px;font-weight:800;color:var(--text)}
@@ -2833,10 +2836,21 @@ function standingsBlock(d,title,mv){
 }
 // ------------------------------------------------------ переходы (сезон 2+)
 function mvKey(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ')}
+// Значки переходов рисуем сами (SVG), а не символами: на iPhone стрелки
+// превращались в эмодзи Apple. Двойной шеврон — автоматически, одинарный
+// вверх-вниз — стыковой матч.
+var MV_SVG={
+  up:'<svg viewBox="0 0 14 16" width="13" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8 7 4l4 4"/><path d="M3 13l4-4 4 4"/></svg>',
+  down:'<svg viewBox="0 0 14 16" width="13" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l4 4 4-4"/><path d="M3 8l4 4 4-4"/></svg>',
+  pl:'<svg viewBox="0 0 14 16" width="13" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6 7 2.5 10.5 6"/><path d="M3.5 10 7 13.5 10.5 10"/></svg>',
+  st:'<svg viewBox="0 0 10 2" width="10" height="2" aria-hidden="true"><rect width="10" height="2" rx="1" fill="currentColor"/></svg>'
+};
 function mvGlyph(m){
-  if(!m)return '<span class="mvk st">—</span>';
-  var k=m.k;return '<span class="mvk '+(k==='up'?'up':k==='opt'?'opt':k==='down'?'dn':'pl')+'">'+(k==='up'||k==='opt'?'↑':k==='down'?'↓':'↕')+'</span>';
+  var k=m?m.k:'';
+  var cls=k==='up'?'up':k==='opt'?'opt':k==='down'?'dn':k?'pl':'st';
+  return '<span class="mvk '+cls+'">'+(k==='up'||k==='opt'?MV_SVG.up:k==='down'?MV_SVG.down:k?MV_SVG.pl:MV_SVG.st)+'</span>';
 }
+function mi(k){return mvGlyph({k:k}).replace('class="mvk','class="mvk in')}
 function mvDiv(l){return l==='PRIME'?'Prime':'Division '+l}
 // Подписи значков. Для таблицы — с номером места, для «борьбы» групп — общие.
 function mvText(k,info,letter,grouped){
@@ -2860,7 +2874,7 @@ function mvLegend(mv,seen,withStay){
   var items=['<div><span class="zn"></span><span>'+esc(L?'зона плей-офф (1–4)':'playoff zone (1–4)')+'</span></div>'];
   if(withStay){
     ['up','opt','po_up','po_down','down'].forEach(function(k){if(seen[k])items.push('<div>'+mvGlyph({k:k}).replace('<span','<i').replace('</span>','</i>')+'<span>'+esc(mvText(k,seen[k],mv.letter,false))+'</span></div>')});
-    items.push('<div><i class="mvk st">—</i><span>'+esc(L?'Остальные места остаются в дивизионе':'Other places stay in the division')+'</span></div>');
+    items.push('<div><i class="mvk st">'+MV_SVG.st+'</i><span>'+esc(L?'Остальные места остаются в дивизионе':'Other places stay in the division')+'</span></div>');
   }
   return '<div class="legend2">'+items.join('')+'</div>';
 }
@@ -2898,8 +2912,7 @@ function duelCard(x){
   var note;
   if(x.winner){
     var up=mvKey(x.winner)===mvKey(x.upper_player)?x.upper_player:x.lower_player,down=up===x.upper_player?x.lower_player:x.upper_player;
-    note=L?'<span class="up">↑</span> <b>'+esc(up)+'</b> — '+esc(mvDiv(x.upper))+'<br><span class="dn">↓</span> '+esc(down)+' — '+esc(mvDiv(x.lower))
-          :'<span class="up">↑</span> <b>'+esc(up)+'</b> — '+esc(mvDiv(x.upper))+'<br><span class="dn">↓</span> '+esc(down)+' — '+esc(mvDiv(x.lower));
+    note=mi('up')+' <b>'+esc(up)+'</b> — '+esc(mvDiv(x.upper))+'<br>'+mi('down')+' '+esc(down)+' — '+esc(mvDiv(x.lower));
   }else{
     note=L?'Победитель → <b>'+esc(mvDiv(x.upper))+'</b> в следующем сезоне<br>Проигравший → <b>'+esc(mvDiv(x.lower))+'</b>'
           :'Winner → <b>'+esc(mvDiv(x.upper))+'</b> next season<br>Loser → <b>'+esc(mvDiv(x.lower))+'</b>';
@@ -2934,14 +2947,14 @@ function mvRules(mv){
   var f=L?MV_FEAT.ru:MV_FEAT.en;
   var h=L
     ?'<h4>Переходы между дивизионами</h4><p>Переходы определяет регулярный сезон. Плей-офф определяет чемпиона дивизиона и награды плей-офф.</p>'
-      +'<ul><li><b>↑ #1</b> — автоматическое повышение.</li><li><b>↕ #2</b> — стыковой матч за повышение с #7 дивизиона выше.</li>'
-      +'<li><b>↕ #7</b> — стыковой матч за сохранение с #2 дивизиона ниже. Победитель играет в дивизионе выше, проигравший — в дивизионе ниже.</li>'
-      +'<li><b>↓ #8</b> — автоматический вылет.</li><li>Места 3–6 остаются в дивизионе.</li></ul>'
+      +'<ul><li><b>'+mi('up')+' #1</b> — автоматическое повышение.</li><li><b>'+mi('po_up')+' #2</b> — стыковой матч за повышение с #7 дивизиона выше.</li>'
+      +'<li><b>'+mi('po_down')+' #7</b> — стыковой матч за сохранение с #2 дивизиона ниже. Победитель играет в дивизионе выше, проигравший — в дивизионе ниже.</li>'
+      +'<li><b>'+mi('down')+' #8</b> — автоматический вылет.</li><li>Места 3–6 остаются в дивизионе.</li></ul>'
       +'<p>Организатор может выдать wildcard на повышение в исключительных случаях. Wildcard не действует для перехода в Prime.</p>'
     :'<h4>Division movement</h4><p>Division movement is determined by regular-season results. The playoff determines the Division Champion and playoff rewards.</p>'
-      +'<ul><li><b>↑ #1</b> — automatic promotion.</li><li><b>↕ #2</b> — promotion playoff against #7 of the division above.</li>'
-      +'<li><b>↕ #7</b> — relegation playoff against #2 of the division below. The winner plays in the higher division, the loser in the lower one.</li>'
-      +'<li><b>↓ #8</b> — automatic relegation.</li><li>Places 3–6 stay in the division.</li></ul>'
+      +'<ul><li><b>'+mi('up')+' #1</b> — automatic promotion.</li><li><b>'+mi('po_up')+' #2</b> — promotion playoff against #7 of the division above.</li>'
+      +'<li><b>'+mi('po_down')+' #7</b> — relegation playoff against #2 of the division below. The winner plays in the higher division, the loser in the lower one.</li>'
+      +'<li><b>'+mi('down')+' #8</b> — automatic relegation.</li><li>Places 3–6 stay in the division.</li></ul>'
       +'<p>The organizer may grant a promotion wildcard in exceptional cases. Wildcards do not apply to promotion into Prime.</p>';
   (mv.notes||[]).forEach(function(n){if(f[n])h+='<div class="feat">'+f[n]+'</div>'});
   return h;
