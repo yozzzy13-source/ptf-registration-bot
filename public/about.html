@@ -110,6 +110,7 @@ h2{font-size:22px;font-weight:900;letter-spacing:-.6px;margin:0 2px 14px;line-he
 .zn{border-radius:14px;padding:12px;border:1px solid var(--line2);background:var(--card2)}
 .zn b{display:block;font-size:18px;font-weight:900}
 .zn span{font-size:11.5px;color:var(--dim);line-height:1.4}
+.zn b svg{display:inline-block;vertical-align:-1px;margin-right:5px}
 .zn.up b{color:var(--win)}.zn.po b{color:var(--amber)}.zn.stay b{color:var(--dim)}.zn.down b{color:var(--lose)}
 .champs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
 .ch{background:var(--surf);border:1px solid var(--line);border-radius:18px;padding:16px 10px;text-align:center}
@@ -166,6 +167,13 @@ h2{font-size:22px;font-weight:900;letter-spacing:-.6px;margin:0 2px 14px;line-he
 <div class="grain"></div>
 <div class="wrap" id="app"><!--SSR--></div>
 <script>
+// Значки переходов — те же двойные/одинарные шевроны, что в таблицах лиги (не эмодзи).
+var ZONE_ICON=[
+  '<svg viewBox="0 0 14 16" width="14" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8 7 4l4 4"/><path d="M3 13l4-4 4 4"/></svg>',
+  '<svg viewBox="0 0 14 16" width="14" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6 7 2.5 10.5 6"/><path d="M3.5 10 7 13.5 10.5 10"/></svg>',
+  '',
+  '<svg viewBox="0 0 14 16" width="14" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l4 4 4-4"/><path d="M3 8l4 4 4-4"/></svg>'
+];
 (function(){
 var ru=window.PTFPrefs?PTFPrefs.lang()==='ru':String(navigator.language||'').toLowerCase().indexOf('ru')===0;
 var loggedIn=false,seasons=[],partners=[],gallery=[],ig=null,bot='';
@@ -187,7 +195,7 @@ var T={
         ['Таблица','Места определяются очками, затем победами, разницей сетов и геймов. Таблица показывает, кто стабилен на дистанции.'],
         ['Плей-офф','Места 1–4 выходят в плей-офф: полуфиналы и финал решают, кто заканчивает дивизион первым.'],
         ['Движение','Переходы между дивизионами решает регулярный сезон, плей-офф определяет чемпиона. Система растёт вместе с вами.']],
-  zones:[['↑ #1','автоматическое повышение'],['↕ #2 · #7','стыковые матчи за место в дивизионе выше'],['3–6','остаются в своём дивизионе'],['↓ #8','автоматический вылет']],
+  zones:[['#1','автоматическое повышение'],['#2 · #7','стыковые матчи за место в дивизионе выше'],['3–6','остаются в своём дивизионе'],['#8','автоматический вылет']],
   raceH:'Годовая гонка и Grand Final',
   race:'Каждый сезон приносит Year Ranking Points — очки годового рейтинга. Чем выше дивизион и результат, тем больше очков. Гонка показывает не одну удачную неделю, а стабильность за год, и по ней отбираются участники Grand Final — главного турнира года.',
   champsH:'Чемпионы',passH:'Что входит в участие',
@@ -230,7 +238,7 @@ var T={
         ['Standings','Places are decided by points, then wins, set and game difference. The table shows who is consistent over time.'],
         ['Playoffs','Places 1–4 go to the playoffs: semifinals and a final decide who finishes the division on top.'],
         ['Movement','Division movement is decided by the regular season; the playoff decides the champion. The system grows with you.']],
-  zones:[['↑ #1','automatic promotion'],['↕ #2 · #7','promotion playoffs for a place in the division above'],['3–6','stay in their division'],['↓ #8','automatic relegation']],
+  zones:[['#1','automatic promotion'],['#2 · #7','promotion playoffs for a place in the division above'],['3–6','stay in their division'],['#8','automatic relegation']],
   raceH:'Yearly Race and the Grand Final',
   race:'Every season earns Year Ranking Points. The higher the division and the result, the more points. The race rewards consistency across the year, not one lucky week — and it decides who plays the Grand Final, the biggest tournament of the year.',
   champsH:'Champions',passH:'What participation includes',
@@ -283,7 +291,7 @@ function render(){
     return '<div class="num"><div class="nh">'+esc(X.numS+s.number)+(String(s.status||'').toLowerCase()==='active'||String(s.status||'').toLowerCase()==='live'?' <em>LIVE</em>':'')+'</div>'
       +'<div class="nr"><div><b>'+esc(s.players||s.players_played||0)+'</b><span>'+esc(X.numP)+'</span></div><div><b>'+esc(s.matches_played||0)+'</b><span>'+esc(X.numM)+'</span></div></div></div>';
   }).join('')+'</div>';
-  h+='<div class="sec-h">'+esc(X.howH)+'</div><div class="flow">'+X.flow.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p>'+(i===3?'<div class="zones">'+X.zones.map(function(z,k){return '<div class="zn '+['up','po','stay','down'][k]+'"><b>'+esc(z[0])+'</b><span>'+esc(z[1])+'</span></div>'}).join('')+'</div>':'')+'</div></div>'}).join('')+'</div>';
+  h+='<div class="sec-h">'+esc(X.howH)+'</div><div class="flow">'+X.flow.map(function(f,i){return '<div class="fl"><div class="n">'+(i+1)+'</div><div><b>'+esc(f[0])+'</b><p>'+esc(f[1])+'</p>'+(i===3?'<div class="zones">'+X.zones.map(function(z,k){return '<div class="zn '+['up','po','stay','down'][k]+'"><b>'+(ZONE_ICON[k]||'')+esc(z[0])+'</b><span>'+esc(z[1])+'</span></div>'}).join('')+'</div>':'')+'</div></div>'}).join('')+'</div>';
   h+='<div class="sec-h">'+esc(X.raceH)+'</div><div class="cd"><div class="ic">'+ic('race')+'</div><p style="font-size:13.5px">'+esc(X.race)+'</p></div>';
   if(champs.length)h+='<div class="sec-h">'+esc(X.champsH)+'</div><div class="champs">'+champs.map(function(c){
     var ini=String(c.name||'').split(/\s+/).map(function(x){return x[0]||''}).join('').slice(0,2).toUpperCase();
