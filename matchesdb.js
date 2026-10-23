@@ -924,43 +924,6 @@ export function remindersDue(slot, now = Date.now(), win = nightWindowCache.v) {
 }
 function timeZoneOf() { return TIMEZONE; }
 
-// Разбор матча для организатора (/match_check): что бот видит и почему нет
-// напоминания или кнопки «внести счёт». Возвращает строки обычного текста.
-export async function explainSlot(slot, now = Date.now()) {
-  const delay = await resultPromptDelayMin().catch(() => RESULT_PROMPT_AFTER_MIN);
-  const win = await nightWindow().catch(() => null);
-  const fmt = ms => ms ? new Intl.DateTimeFormat('ru-RU', { timeZone: TIMEZONE, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(ms)) : '—';
-  const status = String(slot.status || '').toLowerCase();
-  const rs = String(slot.result_status || '').toLowerCase();
-  const start = slotStartMs(slot), day = matchDayStartMs(slot), open = resultOpenMs(slot, delay);
-  const sent = String(slot.reminder_sent || '').split(',').filter(Boolean);
-  const out = [];
-  out.push(`Статус: ${status || '—'}${rs ? ` · счёт: ${rs}` : ''}`);
-  out.push(`Дата и время: ${slot.agreed_date || '—'} ${slot.agreed_time || slot.time_from || ''}`.trim());
-  if (start === null) out.push('⛔ Бот не понимает дату/время матча — ни напоминаний, ни кнопки счёта. Проверьте agreed_date и agreed_time в Match Slots.');
-  else out.push(`Начало: ${fmt(start)} (Пхукет)`);
-  out.push(`Корт подтверждён: ${slot.court_confirmed_at ? 'да' : (slot.match_type === 'manual' ? 'не нужно (матч вне бота)' : 'нет')}`);
-  if (slot.time_change) out.push('⏳ Висит предложение перенести время — пока его не примут/отклонят, приглашение внести счёт не приходит.');
-  // Кнопка «внести счёт»
-  if (status !== 'accepted') out.push('Кнопка счёта: нет — матч не в статусе accepted (не согласован, снят или отменён).');
-  else if (rs === 'confirmed') out.push('Кнопка счёта: нет — счёт уже подтверждён.');
-  else if (rs === 'pending') out.push('Кнопка счёта: счёт внесён и ждёт подтверждения второй стороны.');
-  else if (day === null) out.push('Кнопка счёта: нет — непонятна дата матча.');
-  else out.push(`Кнопка счёта: ${now >= day ? 'есть' : 'появится ' + fmt(day)}`);
-  // Приглашение внести счёт
-  if (slot.result_prompt_sent_at) out.push(`Приглашение внести счёт: отправлено ${fmt(Date.parse(slot.result_prompt_sent_at))}`);
-  else if (status === 'accepted' && !rs && open !== null) {
-    const blockers = [slot.time_change ? 'перенос времени' : '', (!slot.court_confirmed_at && slot.match_type !== 'manual') ? 'корт не подтверждён' : ''].filter(Boolean);
-    out.push(blockers.length ? `Приглашение внести счёт: не придёт, пока ${blockers.join(' и ')}` : `Приглашение внести счёт: ${now > open ? 'уйдёт при ближайшей проверке (раз в 15 минут)' : 'придёт ' + fmt(open)}`);
-  }
-  // Напоминания до матча
-  if (start !== null && status === 'accepted') {
-    const due = remindersDue(slot, now, win);
-    out.push(`Напоминания до матча: отправлены ${sent.length ? sent.join(', ') : 'нет'}${due ? ` · сейчас должно уйти: ${due}` : ''}`);
-    if (!sent.length && start < now) out.push('Напоминаний не было: матч согласовали позже окон «накануне вечером», «за сутки» и «за 3 часа», либо окна пришлись на тихие ночные часы.');
-  }
-  return out;
-}
 
 export async function listMatchesNeedingReminder(now = Date.now()) {
   const rows = await allSlots();

@@ -22,7 +22,7 @@ const WO_LABEL = 'W/O';
 const CACHE_MS = 5 * 60 * 1000;
 const cache = new Map();
 
-export function invalidateDivisionCache() { cache.clear(); placesCache.clear(); }
+export function invalidateDivisionCache() { cache.clear(); placesCache.clear(); walkoverCache = { key: '', t: 0, v: null }; }
 
 function norm(v = '') {
   return String(v || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
@@ -288,6 +288,31 @@ export async function readMatchLog(spreadsheetId) {
     return o;
   });
   return { headers, rows };
+}
+
+// W/O сезона из таблиц дивизионов (колонки P1/P2 TechLoss). В общий журнал
+// они не пишутся — матч не сыгран, — но Fantasy засчитывает победителю победу
+// по неявке. Не явились оба — победителя нет.
+let walkoverCache = { key: '', t: 0, v: null };
+export async function seasonWalkovers(season) {
+  const key = String(season || '');
+  if (walkoverCache.v && walkoverCache.key === key && Date.now() - walkoverCache.t < 60_000) return walkoverCache.v;
+  const out = [];
+  for (const letter of await availableDivisions(key).catch(() => [])) {
+    const groups = await divisionGroups(letter, key).catch(() => []);
+    for (const g of (groups.length > 1 ? groups.map(x => x.group) : [''])) {
+      const id = await divisionSheetId(letter, key, g).catch(() => '');
+      if (!id) continue;
+      const { rows } = await readMatchLog(id).catch(() => ({ rows: [] }));
+      for (const r of rows) {
+        const a = filled(r.p1_techloss), b = filled(r.p2_techloss);
+        if (!(a || b) || !txt(r.player_1) || !txt(r.player_2)) continue;
+        out.push({ division: letter, group: g, match: txt(r.match), winner: a && b ? '' : (a ? txt(r.player_2) : txt(r.player_1)), loser: a && b ? '' : (a ? txt(r.player_1) : txt(r.player_2)), p1: txt(r.player_1), p2: txt(r.player_2) });
+      }
+    }
+  }
+  walkoverCache = { key, t: Date.now(), v: out };
+  return out;
 }
 
 // Живая «форма» игрока (W/L) из Match_Log, а не из витрины профилей: та

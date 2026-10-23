@@ -25,7 +25,8 @@ const sheets={
  findApplicantByTelegramId:async()=>({name:'Player 0'}),
  getPlayerLeagueInfo:async()=>({member:true})
 };
-const divisions={availableDivisions:async()=>[],divisionGroups:async()=>[],getDivisionTable:async()=>null,latestSeason:async()=>'2',seasonRoster:async()=>({players:roster})};
+let walkovers=[];
+const divisions={availableDivisions:async()=>[],divisionGroups:async()=>[],getDivisionTable:async()=>null,latestSeason:async()=>'2',seasonRoster:async()=>({players:roster}),seasonWalkovers:async()=>walkovers};
 const context=vm.createContext({console,Date,Map,Set,JSON,Number,String,Boolean,Math,Error,Promise});
 function synthetic(values){return new vm.SyntheticModule(Object.keys(values),function(){for(const[k,v]of Object.entries(values))this.setExport(k,v);},{context});}
 const imports={
@@ -169,5 +170,30 @@ check(wSwap.team.budget_spent>88,'Free transfer of a withdrawn player ignores th
 settings.set('fantasy_test_price_overrides','');
 await rejects(()=>f.transferFantasyPlayer('1',{team_slot:2,player_out_key:in12,player_in_key:squad[3]},'en','test'),'Paid transfers still closed');
 settings.set('FANTASY_TEST_ENTRY_OPEN','on');
+// Замена игрока во всех командах (Аксинья вместо Анны Ермолиной): то же место,
+// та же цена, роль капитана переходит, трансфер не тратится. Без go — ничего не пишется.
+{
+ const teamsNow=(await f.getFantasyBootstrap('1','Player 0','en','test')).teams;
+ const cap=teamsNow[0].captain_key,outName=bootstrap.players.find(p=>p.key===cap).name;
+ const used=new Set(teamsNow.flatMap(t=>t.picks.map(p=>p.key)));
+ const incoming=bootstrap.players.find(p=>!used.has(p.key));
+ const preview=await f.replaceFantasyPlayer(outName,incoming.name,{mode:'test'});
+ check(preview.ok&&!preview.applied&&preview.hits.length>=1&&(await f.getFantasyBootstrap('1','Player 0','en','test')).teams[0].captain_key===cap,'Замена без go только показывает команды');
+ const done=await f.replaceFantasyPlayer(outName,incoming.name,{mode:'test',apply:true});
+ const after=(await f.getFantasyBootstrap('1','Player 0','en','test')).teams[0];
+ const old=teamsNow[0].picks.find(p=>p.key===cap),neu=after.picks.find(p=>p.key===incoming.key);
+ check(done.applied&&neu&&!after.picks.some(p=>p.key===cap)&&after.captain_key===incoming.key&&neu.price===old.price&&neu.pool===old.pool&&after.transfers_used===teamsNow[0].transfers_used,'Заменённый игрок встал на то же место с той же ценой, стал капитаном, трансфер не потрачен');
+ check(!(await f.replaceFantasyPlayer(outName,'Nobody Here',{mode:'test'})).ok,'Нет такого игрока в Fantasy — ничего не трогаем');
+}
+// Победа по неявке (W/O) из таблицы дивизиона: 5 очков победителю, проигравшему ничего.
+{
+ const before=(await f.getFantasyBootstrap('1','Player 0','en','test')).player_leaderboard;
+ const pts=n=>before.find(x=>x.name===n)?.points||0;
+ walkovers=[{winner:'Player 5',loser:'Player 6',p1:'Player 6',p2:'Player 5'}];
+ const after=(await f.getFantasyBootstrap('1','Player 0','en','test')).player_leaderboard;
+ const pa=n=>after.find(x=>x.name===n)?.points||0;
+ check(pa('Player 5')===pts('Player 5')+5&&pa('Player 6')===pts('Player 6'),'W/O: победителю 5 очков Fantasy, без сетов и геймов; неявившемуся ничего');
+ walkovers=[];
+}
 console.log('PASS: '+checks+' Fantasy flow checks; all Sheets writes mocked.');
 

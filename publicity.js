@@ -12,13 +12,9 @@
 //     постером, карусель собирается по воскресеньям и тоже ждёт кнопки.
 import { sendMessage, sendDocumentAlbumBuffers, answerCallbackQuery, getFileBuffer } from './telegram.js';
 import { TIMEZONE } from './config.js';
-import {
-  getAllActiveLeaguePlayers, findApplicantByTelegramId, updateApplicantByTelegramId,
-  ensurePublicityColumns, setPhotoConsent, setPlayerInstagram, normalizeInstagramHandle,
-  publicationAllowed, getSetting, setSetting, getRows
-} from './sheets.js';
+import { findApplicantByTelegramId, ensurePublicityColumns, setPhotoConsent, setPlayerInstagram, normalizeInstagramHandle, publicationAllowed, getSetting, setSetting } from './sheets.js';
 import { IG_ACCOUNT, IG_PROFILE_URL, instagramEnabled, publishStory, publishCarousel, CAROUSEL_MAX } from './instagram.js';
-import { nowISO } from './util.js';
+
 
 const txt = v => String(v ?? '').trim();
 const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -45,36 +41,7 @@ export function instagramAskKeyboard(lang = 'ru') {
     [{ text: ru(lang) ? '🚫 Не публиковать меня' : '🚫 Don\'t publish me', callback_data: 'pub:no' }]
   ] };
 }
-export async function sendInstagramAsk(chatId, lang = 'ru') {
-  await ensurePublicityColumns().catch(() => {});
-  return sendMessage(chatId, instagramAskText(lang), { reply_markup: instagramAskKeyboard(lang) });
-}
 
-// Рассылка по всем активным игрокам лиги. Тем, кто уже ответил — и прислал
-// инстаграм, и отказался, — второй раз не пишем.
-export async function broadcastInstagramAsk(adminChatId, { force = false } = {}) {
-  await ensurePublicityColumns().catch(() => {});
-  const players = await getAllActiveLeaguePlayers().catch(() => []);
-  let sent = 0, skipped = 0, failed = 0;
-  for (const player of players) {
-    const id = txt(player.telegram_id);
-    if (!id) { skipped++; continue; }
-    const profile = await findApplicantByTelegramId(id).catch(() => null);
-    const answered = txt(profile?.instagram) || txt(profile?.photo_publication_consent);
-    if (answered && !force) { skipped++; continue; }
-    const lang = txt(profile?.language) === 'ru' ? 'ru' : 'en';
-    const ok = await sendInstagramAsk(id, lang).then(() => true).catch(e => {
-      console.error('instagram ask failed:', id, e.message); return false;
-    });
-    if (ok) sent++; else failed++;
-  }
-  if (adminChatId) {
-    await sendMessage(adminChatId,
-      `📸 <b>Опрос про Instagram разослан</b>\n\nОтправлено: <b>${sent}</b>\nПропущено (уже отвечали): <b>${skipped}</b>`
-      + (failed ? `\nНе доставлено: <b>${failed}</b>` : '')).catch(() => {});
-  }
-  return { sent, skipped, failed };
-}
 
 // ------------------------------------------------------------- ответы
 const awaiting = new Map();

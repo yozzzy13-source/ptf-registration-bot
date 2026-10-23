@@ -9,10 +9,10 @@
 // сохранён в таблице матчей, ничего не теряется.
 import { sheets as sheetsClient, withPriority } from './google.js';
 import { LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS, DIVISION_SPREADSHEETS, TIMEZONE } from './config.js';
-import { scoreValues, detectSet3Mode, reverseScore, cellToScore, formatScore } from './tennis.js';
+import { scoreValues, detectSet3Mode, reverseScore, cellToScore } from './tennis.js';
 import { divisionSheetId, divisionLetter, getDivisionTable, recentFormBefore, playerFormAcrossSeasons } from './division.js';
 import { getLeagueProfiles, getSetting, sameName } from './sheets.js';
-import { slotScope, sameScope, resolveWCrossPairs } from './access.js';
+import { slotScope, resolveWCrossPairs } from './access.js';
 import { rememberCardContext } from './matchcard.js';
 
 const DATA_START_ROW = 2;
@@ -129,14 +129,19 @@ async function matchLogHeaders(spreadsheetId) {
   // отваливались все именованные записи: сезон (Competition), result_kind,
   // очки за матч и технические поражения. Сравниваем нормализованное с
   // нормализованным — и колонки находятся.
-  const wanted = norm('p1_id');
-  const rowIndex = values.findIndex(r => (r || []).map(norm).includes(wanted));
+  // Но и так не находилось: norm('P1 ID') — «p1 id» (с пробелом), а
+  // norm('p1_id') — «p1id». Поэтому сравниваем ключи без пробелов и
+  // подчёркиваний: «P1 TechLoss» и p1_techloss — одно и то же. Из-за этой
+  // ошибки W/O никогда не попадал в таблицу дивизиона.
+  const wanted = hkey('p1_id');
+  const rowIndex = values.findIndex(r => (r || []).map(hkey).includes(wanted));
   if (rowIndex < 0) return { row: 1, headers: [] };
-  return { row: rowIndex + 1, headers: (values[rowIndex] || []).map(norm) };
+  return { row: rowIndex + 1, headers: (values[rowIndex] || []).map(hkey) };
 }
+const hkey = (s = '') => norm(s).replace(/[\s_]+/g, '');
 function namedWrite(headers, row, names, value) {
   for (const name of names) {
-    const i = headers.indexOf(norm(name));
+    const i = headers.indexOf(hkey(name));
     if (i >= 0) return { range: `Match_Log!${colToLetter(i + 1)}${row}`, values: [[value]] };
   }
   return null;
@@ -272,45 +277,6 @@ async function centralMetaWrites(row, { p1, p2, pair, stage = '' }) {
   return out;
 }
 
-// Проверка общего журнала: id игроков (E/G) должны соответствовать именам
-// (I/J) по Players_Master. По этим id таблица профилей строит историю матчей,
-// поэтому перепутанные id дают «игрок против самого себя».
-// fix=true — переставить местами перепутанные (E↔G, F↔H) и вписать верные id.
-export async function checkCentralIds({ fix = false } = {}) {
-  if (!LEAGUE_RESULTS_SHEET_ID) return { ok: false, reason: 'LEAGUE_RESULTS_SHEET_ID не задан', rows: [] };
-  const [values, master] = await Promise.all([
-    getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!A${DATA_START_ROW}:J`),
-    playersIndex()
-  ]);
-  const idOf = name => String(master[norm(name)]?.id ?? '').trim();
-  const rows = [];
-  (values || []).forEach((r, i) => {
-    const row = i + DATA_START_ROW;
-    const p1 = String(r[8] || '').trim(), p2 = String(r[9] || '').trim();
-    if (!p1 || !p2) return;
-    const e = String(r[4] ?? '').trim().replace(/\.0+$/, ''), g = String(r[6] ?? '').trim().replace(/\.0+$/, '');
-    const id1 = idOf(p1), id2 = idOf(p2);
-    if (!id1 && !id2) return;
-    const swapped = Boolean(e && g && id1 && id2 && e === id2 && g === id1 && id1 !== id2);
-    const wrong = !swapped && ((id1 && e && e !== id1) || (id2 && g && g !== id2));
-    const same = Boolean(e && g && e === g);
-    if (!swapped && !wrong && !same) return;
-    rows.push({ row, no: String(r[0] || ''), p1, p2, e, g, id1, id2, kind: swapped ? 'swapped' : same ? 'same' : 'wrong',
-      f: String(r[5] ?? ''), h: String(r[7] ?? '') });
-  });
-  let fixed = 0;
-  if (fix && rows.length) {
-    const data = [];
-    for (const x of rows) {
-      if (x.kind === 'swapped') data.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!E${x.row}:H${x.row}`, values: [[x.g, x.h, x.e, x.f]] });
-      else data.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!E${x.row}`, values: [[x.id1 || x.e]] }, { range: `${LEAGUE_RESULTS_SHEETS.log}!G${x.row}`, values: [[x.id2 || x.g]] });
-      fixed++;
-    }
-    await batchUpdate(LEAGUE_RESULTS_SHEET_ID, data);
-    await refreshAfterResult().catch(() => {});
-  }
-  return { ok: true, rows, fixed };
-}
 
 async function findDivisionRow(spreadsheetId, sheetName, p1, p2) {
   const values = await getValues(spreadsheetId, `${sheetName}!C2:E`);
@@ -396,6 +362,13 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
       }
     }
     const stage = stageOfSlot(slot);
+    // W/O (неявка соперника): только таблица дивизиона и шахматка (у межгрупповых
+    // матчей W — их журнал). В общий журнал — историю матчей и статистику
+    // игроков — не пишем: матч не сыгран. Так же, как W/O при снятии игрока.
+    if (resultKind(slot) === 'technical' && !stage) {
+      const division = await writeDivisionRow(p1, p2, parsed, pair, slot, journal, 0).catch(e => ({ status: 'error', reason: e.message }));
+      return { status: 'saved', row: 0, rewritten: false, walkover: true, division };
+    }
     const dateSerial = localDateSerial(slot.agreed_date);
     // Каждый подтверждённый матч — своя строка общего журнала. Никакой сверки
     // по именам и датам: пары повторяются (новый сезон, плей-офф, турниры), и
@@ -549,11 +522,17 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
     const winner = info.reversed
       ? (String(slot.result_winner) === String(slot.from_telegram_id) ? 'p2' : String(slot.result_winner) ? 'p1' : '')
       : (String(slot.result_winner) === String(slot.from_telegram_id) ? 'p1' : String(slot.result_winner) ? 'p2' : '');
-    const p1Loss = winner === 'p2' || !winner ? points[0] : '';
-    const p2Loss = winner === 'p1' || !winner ? points[1] : '';
+    // Пустые очки неявившемуся — это 0: пустая ячейка TechLoss таблицей не считается.
+    const z = v => (v === '' || v == null ? 0 : v);
+    const p1Loss = winner === 'p2' || !winner ? z(points[0]) : '';
+    const p2Loss = winner === 'p1' || !winner ? z(points[1]) : '';
     const a = namedWrite(headers, info.row, ['p1_techloss'], p1Loss);
     const b = namedWrite(headers, info.row, ['p2_techloss'], p2Loss);
     if (a) extra.push(a); if (b) extra.push(b);
+  } else {
+    // Сыгранный счёт вместо прежнего W/O — старую неявку из строки убираем,
+    // иначе таблица засчитала бы матч дважды.
+    for (const c of [namedWrite(headers, info.row, ['p1_techloss'], ''), namedWrite(headers, info.row, ['p2_techloss'], '')]) if (c) extra.push(c);
   }
   // Снимок для карточки результата: место в дивизионе, форма и очки Fantasy
   // «до» этого матча. Снимаем строго перед записью — после неё это состояние
@@ -902,6 +881,24 @@ async function unplayedCrossOpponents(playerName, season = '') {
   return { names, total: wanted.length };
 }
 
+// Строка общего журнала с W/O, записанная до того, как W/O перестали туда
+// писать: очищаем то, что писал бот (дата, сезон, id, имена, пометка, очки).
+// Формулы строки не трогаем. Только если в строке именно эта пара и W/O.
+export async function clearWalkoverLogRow(row, nameA, nameB) {
+  if (!LEAGUE_RESULTS_SHEET_ID || !row) return { cleared: false };
+  const v = (await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!A${row}:AO${row}`).catch(() => []))?.[0] || [];
+  const a = String(v[8] || ''), b = String(v[9] || ''), mark = String(v[27] || '').toUpperCase();
+  const pair = (sameName(a, nameA) && sameName(b, nameB)) || (sameName(a, nameB) && sameName(b, nameA));
+  if (!pair || !['W/L', 'L/W', 'L/L'].includes(mark) || String(v[23] || '').trim() === 'Yes') return { cleared: false };
+  const L = LEAGUE_RESULTS_SHEETS.log;
+  await batchUpdate(LEAGUE_RESULTS_SHEET_ID, [
+    { range: `${L}!B${row}`, values: [['']] }, { range: `${L}!D${row}:J${row}`, values: [['', '', '', '', '', '', '']] },
+    { range: `${L}!AB${row}`, values: [['']] }, { range: `${L}!AN${row}:AO${row}`, values: [['', '']] }
+  ]);
+  await refreshAfterResult().catch(() => {});
+  return { cleared: true };
+}
+
 export function describeWrite(result) {
   if (!result) return '';
   if (result.status === 'skipped') return 'таблицы лиги не подключены';
@@ -913,6 +910,7 @@ export function describeWrite(result) {
     return `в общем логе уже есть строка этой пары (строка ${result.row}) — вторую не добавлял, счёт дивизиона обновлён. Проверьте, совпадает ли счёт.`;
   }
   const d = result.division;
+  if (result.walkover && d?.status === 'saved') return `W/O: записано в таблицу Division ${d.division}${d.row ? ', строка ' + d.row : ''}${d.cross_group ? ' (межгрупповые матчи)' : ''}; в общий журнал и историю не идёт`;
   if (d?.status === 'saved' && d.playoff) return `плей-офф: записано в общий лог и в лист Playoff (Division ${d.division}, ${d.slot || d.stage})${d.dry_run ? ' — пробный прогон' : ''}`;
   if (d?.status === 'saved' && d.cross_group) return `записано в общий лог и в межгрупповые матчи (Division ${d.division})`;
   if (d?.status === 'saved') return `записано в общий лог и в таблицу Division ${d.division}, строка ${d.row}`;

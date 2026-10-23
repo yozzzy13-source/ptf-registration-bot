@@ -1,6 +1,6 @@
 import { ADMIN_IDS,SHEETS } from './config.js';
 import { appendObject,ensureExtraSheet,findApplicantByTelegramId,getLeagueMatchHistory,getPlayerLeagueInfo,getLeagueProfiles,getMasterPlayers,getRows,getSetting,updateObjectByRow } from './sheets.js';
-import { availableDivisions,divisionGroups,getDivisionTable,latestSeason,seasonRoster } from './division.js';
+import { availableDivisions,divisionGroups,getDivisionTable,latestSeason,seasonRoster,seasonWalkovers } from './division.js';
 import { cellToScore,getSets } from './tennis.js';
 import { nowISO,parseSeasonNumber,uid } from './util.js';
 import { assignSlots } from './public/fantasy-model.js';
@@ -177,6 +177,7 @@ async function scores(catalog,extras=[],{includeAll=false}={}){
  for(const raw of extras||[]){if(!raw?.key||all.has(raw.key))continue;const pf=profilesByName.get(nk(raw.name))||{};all.set(raw.key,{key:raw.key,name:raw.name,price:n(raw.price,10),profile_id:pf.id||''})}
  if(includeAll)for(const pf of profiles){const key=fantasyPlayerKey(pf.name);if(!key||all.has(key))continue;all.set(key,{key,name:pf.name,price:10,profile_id:pf.id||''})}
  const list=[...all.values()],byName=new Map(list.map(p=>[nk(p.name),p])),out=new Map(),cutoff=Date.parse(catalog.seasonEndAt||'');
+ const walkovers=await seasonWalkovers(catalog.season).catch(()=>[]);
  for(const p of list){
   const seen=new Set(),details=[];let total=0;
   for(const m of (p.profile_id?history.get(String(p.profile_id)):[])||[]){
@@ -184,6 +185,14 @@ async function scores(catalog,extras=[],{includeAll=false}={}){
    const playedAt=fantasyMatchTime(m.date);if(Number.isFinite(cutoff)&&Number.isFinite(playedAt)&&playedAt>cutoff)continue;
    const id=t(m.match_no)+'|'+nk(m.opponent)+'|'+t(m.date)+'|'+t(m.score);if(seen.has(id))continue;seen.add(id);
    const op=byName.get(nk(m.opponent)),points=scoreFantasyMatch(m,p.price,op?.price||10);total+=points.total;details.push({...m,points});
+  }
+  // Победа по неявке (W/O) — из таблицы дивизиона: в историю матчей она не
+  // идёт, но победивший не виноват — ему 5 очков (без сетов, геймов и выхода на корт).
+  for(const w of walkovers){
+   if(!w.winner||nk(w.winner)!==nk(p.name))continue;
+   if(details.some(d=>nk(d.opponent)===nk(w.loser)&&/W\/?O|W\/L|L\/W/i.test(t(d.score))))continue;
+   const m={match_no:'W/O',date:'',competition:'Season '+catalog.season,season:catalog.season,opponent:w.loser,score:'W/O',result:'WIN'};
+   const points=scoreFantasyMatch(m,p.price,10);total+=points.total;details.push({...m,points});
   }
   out.set(p.key,{key:p.key,name:p.name,total:r1(total),matches:details.length,details});
  }
@@ -356,6 +365,29 @@ export async function transferFantasyPlayer(id,input={},lang='en',mode='test'){
  const now=nowISO(),usedNext=forced?used:used+1;await appendObject(use.transfers,{transfer_id:uid('ft'),team_id:row.team_id,telegram_id:String(id),season:c.season,player_out_key:old.key,player_out_name:old.name,player_in_key:incoming.key,player_in_name:incoming.name,price_out:old.price,price_in:incoming.price,forced:forced?'yes':'no',created_at:now});
  await updateObjectByRow(use.teams,row._rowNumber,{picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext,updated_at:now});
  return{team:publicTeam({...row,picks_json:JSON.stringify(next),captain_key:captain,vice_key:vice,budget_spent:v.spent,transfers_used:usedNext}),forced,transfers_left:c.transfers-usedNext};
+}
+// Замена игрока во всех командах сезона: игрок сменил другого в турнире (так
+// Аксинья заменила Анну Ермолину в W). Новый встаёт на то же место, с той же
+// ценой — бюджет команды не меняется, трансфер не тратится. Был капитаном или
+// вице — новый получает ту же роль. apply=false — только показать, что изменится.
+export async function replaceFantasyPlayer(fromName,toName,{apply=false,mode='live',lang='ru'}={}){
+ const catalog=await buildFantasyCatalog({lang,mode,fresh:true}),use=storeFor(mode);await ensureSheets(mode);
+ const target=catalog.players.find(p=>nk(p.name)===nk(toName));
+ if(!target)return{ok:false,reason:'not_in_catalog',season:catalog.season,hits:[]};
+ const rows=(await getRows(use.teams,{useCache:false})).rows.filter(x=>String(x.season)===String(catalog.season));
+ const hits=[];
+ for(const row of rows){
+  const picks=js(row.picks_json,[]),i=picks.findIndex(p=>nk(p.name)===nk(fromName));
+  if(i<0)continue;
+  const out=picks[i],team=row.team_name||row.owner_name||'PTF';
+  if(picks.some(p=>p.key===target.key)){hits.push({team,owner:row.owner_name||'',skipped:'already'});continue}
+  const next=picks.map((p,j)=>j===i?{key:target.key,name:target.name,pool:out.pool,price:out.price}:p);
+  const captain=row.captain_key===out.key,vice=row.vice_key===out.key;
+  const patch={picks_json:JSON.stringify(next),captain_key:captain?target.key:row.captain_key,vice_key:vice?target.key:row.vice_key,updated_at:nowISO()};
+  if(apply)await updateObjectByRow(use.teams,row._rowNumber,patch);
+  hits.push({team,owner:row.owner_name||'',captain,vice});
+ }
+ return{ok:true,season:catalog.season,from:fromName,to:target.name,applied:Boolean(apply),hits};
 }
 export function registerFantasyRoutes(app,{viewer}){
  const auth=async(req,res)=>{const v=await viewer(req.body?.initData||req.query.initData||'',String(req.body?.t||req.query.t||''));if(!v.ok){res.status(v.code).json({ok:false,error:v.error});return null}const access=await fantasyAccessFor({telegramId:v.user.id,name:v.profile.name||'',username:v.profile.telegram_username||v.user.username||'',isAdmin:v.isAdmin,isLeagueMember:Boolean(v.isPlayersMasterMember)});if(!access.allowed){const ru=v.lang==='ru',error=access.reason==='players_master_required'?(ru?'Fantasy League доступна игрокам из Players_Master таблицы Match Log.':'Fantasy League is available to players listed in Match Log Players_Master.'):(ru?'Fantasy пока доступно только тестовой группе.':'Fantasy is currently available to the test group only.');res.status(403).json({ok:false,error,reason:access.reason});return null}return{...v,lang:['en','ru'].includes(req.body?.lang)?req.body.lang:v.lang,fantasy:access}};

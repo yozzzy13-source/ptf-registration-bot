@@ -1,0 +1,40 @@
+# Render: веб-сервис бота и сайта PTF.
+# Render → New → Blueprint → выбрать этот репозиторий: сервис создастся с этими
+# настройками, останется вписать значения переменных (sync: false).
+services:
+  - type: web
+    name: ptf
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: TIMEZONE
+        value: Asia/Bangkok
+      - key: BOT_TOKEN
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: GOOGLE_CREDENTIALS
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: SPREADSHEET_ID
+        sync: false
+      - key: MATCHES_SPREADSHEET_ID
+        sync: false
+      - key: LEAGUE_RESULTS_SHEET_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: IG_USER_ID
+        sync: false
+      - key: IG_ACCESS_TOKEN
+        sync: false

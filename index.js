@@ -798,6 +798,16 @@ async function leagueHistorySource() {
 // История матчей лиги для экрана матчей: плоская лента, по строке на матч.
 // В витрине она хранится по игрокам — один матч лежит в двух карточках, поэтому
 // схлопываем по номеру матча и паре имён.
+// Счёт в истории игрока — с его стороны. В ленте первым стоит победитель, а
+// матч берётся из записи того, кто попался первым, — иногда проигравшего. Его
+// счёт разворачиваем к победителю (так же делает лента на сайте), иначе
+// выходило «Chris Mitchell vs Louie Murray 1:6 / 1:6» при победе Криса 6:1 6:1.
+function winnerScore(score, win) {
+  const s = String(score || '');
+  if (win) return s;
+  if (/^\s*[WL]\/[WL]\s*$/i.test(s)) return s.replace(/([WL])\/([WL])/i, (_, a, b) => b + '/' + a);
+  return s.replace(/(\d+)\s*:\s*(\d+)/g, '$2:$1');
+}
 app.get('/api/match/history', async (req, res) => {
   try {
     const v = await matchViewer(req.query.initData || '', String(req.query.t || ''));
@@ -817,7 +827,7 @@ app.get('/api/match/history', async (req, res) => {
           no: m.match_no || '', date: m.date || '', season: m.season || '',
           division: (m.division || m.opponent_division || '').toString().toUpperCase(),
           winner: win ? me : m.opponent, loser: win ? m.opponent : me,
-          score: m.score || '', court: m.court || '', competition: m.competition || ''
+          score: winnerScore(m.score, win), court: m.court || '', competition: m.competition || ''
         });
       }
     }
@@ -885,8 +895,8 @@ const PLAYOFF_ERRORS = {
   no_columns: 'В Match_Log нет колонок P1/P2 TechLoss.', row_moved: 'Строка матча в таблице сдвинулась — обновите экран.',
   no_matches: 'На этот день нет матчей плей-офф.', no_preview: 'Сначала сделайте предпросмотр афиши.',
   no_players: 'В паре ещё нет обоих игроков.',
-  duplicate_player: 'Один игрок стоит в двух местах сетки — проверьте строки плей-офф в таблице дивизиона (/playoff_sheets).',
-  no_table_row: 'В таблице дивизиона нет строки этого полуфинала — проверьте /playoff_sheets.',
+  duplicate_player: 'Один игрок стоит в двух местах сетки — проверьте строки плей-офф в таблице дивизиона.',
+  no_table_row: 'В таблице дивизиона нет строки этого полуфинала — проверьте строки плей-офф в таблице дивизиона.',
   not_in_table: 'Этого игрока нет в таблице дивизиона.'
 };
 app.get('/api/playoff/state', async (req, res) => {
@@ -1951,7 +1961,7 @@ async function getLeagueSnapshot() {
   // Есть хоть что-то — отдаём немедленно, даже если оно устарело.
   return leagueSnapshot.v || leagueSnapshot.building;
 }
-// /league_model rebuild: собрать заново прямо сейчас и дождаться.
+// Пересборка витрины по запросу: собрать заново прямо сейчас и дождаться.
 async function rebuildLeagueSnapshotNow() {
   leagueSnapshot.t = 0;
   snapshotGen++;
@@ -2064,13 +2074,16 @@ function decodeDataUrl(value = '') {
 }
 
 // Что показывать игроку на экране аватарки.
-function avatarView(profile = {}) {
+function avatarView(profile = {}, { admin = false } = {}) {
   const status = String(profile.avatar_status || '').toLowerCase();
   const attempts = Number(profile.avatar_attempts || 0);
   return {
     status,
     attempts,
-    attempts_left: Math.max(0, MAX_ATTEMPTS - attempts),
+    // Организатору лимит попыток не действует (сервер и так его пропускает).
+    attempts_left: admin ? Math.max(1, MAX_ATTEMPTS - attempts) : Math.max(0, MAX_ATTEMPTS - attempts),
+    // «Загрузить эту аватарку» — готовая картинка как есть, без ИИ. Только организатор.
+    can_direct: Boolean(admin),
     stub: String(profile.avatar_stub || '') === 'yes',
     error: profile.avatar_error || '',
     has_selfie: Boolean(profile.selfie_file_id),
@@ -2084,8 +2097,30 @@ app.get('/api/avatar/status', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.query.initData || ''), String(req.query.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    res.json({ ok:true, ...avatarView({ ...v.profile, telegram_id: v.profile.telegram_id || v.user.id }) });
+    res.json({ ok:true, ...avatarView({ ...v.profile, telegram_id: v.profile.telegram_id || v.user.id }, { admin: v.isAdmin }) });
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+
+// Организатор ставит себе готовую аватарку как есть — без обработки ИИ и без
+// лимита попыток, сразу на витрину. Игрокам эта ручка закрыта: у них только
+// селфи → аватар в стиле лиги.
+app.post('/api/avatar/direct', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const v = await leagueViewer(b.initData || '', String(b.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    if (!v.isAdmin) return res.status(403).json({ ok:false, error:'admin_required' });
+    const telegramId = String(v.profile?.telegram_id || v.user.id);
+    const { buffer, mime } = decodeDataUrl(b.photo);
+    await ensureAvatarColumns().catch(() => {});
+    const sent = await sendPhotoBuffer(telegramId, buffer, mime, { caption: '🖼 Аватарка загружена и опубликована.' });
+    const fileId = (sent?.photo || []).slice(-1)[0]?.file_id || '';
+    if (!fileId) throw new Error('Telegram не принял фото');
+    await updateApplicantByTelegramId(telegramId, { avatar_file_id: fileId, avatar_status: AVATAR_STATUS.published, avatar_error: '', avatar_updated_at: nowISO() });
+    avatarFileOf.set(telegramId, fileId);
+    invalidateLeagueCache();
+    res.json({ ok:true, published:true });
+  } catch (e) { console.error('avatar direct failed:', e.message); res.status(400).json({ ok:false, error:e.message }); }
 });
 
 app.post('/api/avatar/upload', async (req, res) => {
@@ -2707,6 +2742,38 @@ app.listen(PORT, () => withPriority('low', async () => {
   };
   setTimeout(syncWCross, 3 * 60 * 1000).unref?.();
   setInterval(syncWCross, 30 * 60 * 1000).unref?.();
+  // Разовые действия: бот делает их сам один раз (через 3 минуты после запуска)
+  // и пишет отчёт в админский чат. Отметка «сделано» — в Settings, ключ once_*;
+  // повторно не запускаются. Отдельных команд под разовые дела нет.
+  const runOnce = async (key, fn) => {
+    if (String(await getSetting(key).catch(() => '') || '').trim()) return;
+    const report = await fn();
+    await setSetting(key, nowISO(), 'Разовое действие выполнено (пишет бот)');
+    if (report) await notifyAdmin(report).catch(() => {});
+  };
+  setTimeout(() => withPriority('low', async () => {
+    // Fantasy: Аксинья заменила Анну Ермолину в W — во всех командах сезона.
+    await runOnce('once_fantasy_aksinya', async () => {
+      const { replaceFantasyPlayer } = await import('./fantasy.js');
+      const r = await replaceFantasyPlayer('Anna Ermolina', 'Aksinya', { apply: true, mode: 'live' });
+      if (!r.ok) throw new Error('Aksinya не найдена в списке игроков Fantasy');
+      const list = r.hits.map(h => `• ${escapeHtml(h.team)}${h.owner ? ' (' + escapeHtml(h.owner) + ')' : ''}${h.skipped ? ' — уже есть Aksinya' : h.captain ? ' — капитан' : h.vice ? ' — вице-капитан' : ''}`).join('\n');
+      return `✅ <b>Fantasy: Anna Ermolina → Aksinya</b>, команд: ${r.hits.filter(h => !h.skipped).length}${list ? '\n' + list : ''}\nТрансферы не потрачены, цена места та же.`;
+    }).catch(e => console.error('once fantasy aksinya:', e.message));
+    // W/O Nikita Secret — Vid Randelovic (23.10) попал в общий журнал, строка 211.
+    // W/O туда больше не пишется — очищаем строку (только если в ней этот матч).
+    await runOnce('once_clear_walkover_row_211', async () => {
+      const { clearWalkoverLogRow } = await import('./results.js');
+      const r = await clearWalkoverLogRow(211, 'Nikita Secret', 'Vid Randelovic');
+      return r.cleared ? '🧹 Общий журнал: убрал W/O Nikita Secret — Vid Randelovic (строка 211). Он остаётся в таблице Division A и в шахматке.' : '';
+    }).catch(e => console.error('once clear walkover row:', e.message));
+    // Плей-офф Prime, A, B: формулы полуфиналов и строка матча за 3-е место в таблицах дивизионов.
+    await runOnce('once_playoff_tables_fix', async () => {
+      const po = await import('./playoff.js');
+      const r = await po.checkTableBrackets('', { fix: true });
+      return po.tableCheckText(r, { fixed: true });
+    }).catch(e => console.error('once playoff tables:', e.message));
+  }).catch(e => console.error('once tasks:', e.message)), 3 * 60 * 1000).unref?.();
   import('./sheets.js').then(m => m.addNewTabOnce('tournaments')).then(done => { if (done) console.log('tabs: «Турниры» добавлены группам'); }).catch(e => console.error('tabs add:', e.message));
   import('./sheets.js').then(m => m.addTabToGroupOnce('partners', 'guest')).then(done => { if (done) console.log('tabs: «Партнёры» добавлены гостям'); }).catch(e => console.error('tabs add partners:', e.message));
   console.log(`PTF Registration Bot listening on ${PORT}`);

@@ -1675,18 +1675,25 @@ function avatarInner(){
   } else {
     h+='<div class="hint" style="margin-top:9px">'+esc(X.avNoTries)+'</div>';
   }
+  // Только организатор: готовая картинка ставится как есть, без ИИ.
+  if(avState.can_direct){
+    h+='<input type="file" accept="image/*" id="avDirect" style="display:none" onchange="avPick(this,true)">'
+      +'<button class="chip avup" style="width:100%;margin-top:9px" onclick="document.getElementById(\'avDirect\').click()">'
+      +esc(avBusy?X.avSending:(L?'🖼 Загрузить эту аватарку':'🖼 Upload this avatar'))+'</button>'
+      +'<div class="hint" style="margin-top:6px">'+esc(L?'Только для организатора: картинка встанет как есть, без обработки, сразу на витрину.':'Organiser only: the image is used as is, no processing, published at once.')+'</div>';
+  }
   h+='<div class="hint" style="margin-top:6px">'+esc(X.avPrivacy)+'</div>';
   h+='<div id="avMsg" class="hint"></div>';
   return h;
 }
-function avPick(input){
+function avPick(input,direct){
   var f=input.files&&input.files[0];
   input.value='';
   if(!f)return;
   // 8 МБ — предел, дальше Telegram и сервер начнут ругаться, лучше сказать сразу.
   if(f.size>8*1024*1024){ avSay(X.avTooBig,true); return }
   var fr=new FileReader();
-  fr.onload=function(){ avSend(String(fr.result)) };
+  fr.onload=function(){ avSend(String(fr.result),direct) };
   fr.readAsDataURL(f);
 }
 function avSay(text,bad){
@@ -1694,15 +1701,15 @@ function avSay(text,bad){
   m.style.color=bad?'#C2695E':'';
   m.textContent=text;
 }
-function avSend(dataUrl){
+function avSend(dataUrl,direct){
   if(avBusy)return;
   avBusy=true;avSay(X.avSending);
-  fetch('/api/avatar/upload',{method:'POST',headers:{'Content-Type':'application/json'},
+  fetch(direct?'/api/avatar/direct':'/api/avatar/upload',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({initData:initData,t:linkToken,photo:dataUrl})})
     .then(function(r){return r.json()}).then(function(j){
       avBusy=false;
       if(!j.ok)throw new Error(j.error||'Error');
-      avSay(X.avAccepted);
+      avSay(direct?(L?'✅ Аватарка опубликована. На витрине обновится в течение нескольких минут.':'✅ Avatar published. It shows up on the site within a few minutes.'):X.avAccepted);
       loadAvatar();
     }).catch(function(e){avBusy=false;avSay('⛔ '+e.message,true)});
 }
@@ -3554,12 +3561,15 @@ function toggleFanTeam(id){fanTeamOpen=(fanTeamOpen===id?'':id);renderFantasy()}
 // По просьбе Костаса: рейтинг команд должен быть не скучным списком, а как
 // таблица гонки — с местом-медалью и возможностью раскрыть состав команды,
 // чтобы сразу увидеть, кто в неё входит и сколько очков принёс каждый игрок.
+function fanNum(v){var x=Math.round(Number(v||0)*10)/10;return L?String(x).replace('.',','):String(x)}
+function fanBoost(v){return fanNum(Number(v||0)*1.5)}
 function fanSquadList(picks){
   if(!picks||!picks.length)return '<div class="hint">'+esc(L?'Состав скрыт.':'Squad is hidden.')+'</div>';
   return '<div class="fansquad">'+picks.map(function(pk){
     return '<div class="fansquad-row" onclick="event.stopPropagation();openPlayerByName(\''+q(pk.name)+'\',\'fantasy\')">'
-      +'<span class="nm">'+esc(pk.name)+(pk.captain?' <b class="cap">'+esc(L?'К':'C')+'</b>':pk.vice?' <b class="cap vc">'+esc(L?'ВК':'VC')+'</b>':'')+'</span>'
-      +'<b class="pt">'+esc(pk.points||0)+'</b></div>';
+      +'<span class="nm">'+esc(pk.name)+(pk.captain?' <b class="cap">'+esc(L?'К':'C')+(pk.multiplied?' ×1.5':'')+'</b>':pk.vice?' <b class="cap vc">'+esc(L?'ВК':'VC')+(pk.multiplied?' ×1.5':'')+'</b>':'')+'</span>'
+      // Капитан (или вице на замене) приносит команде ×1.5: «49.5 (33 × 1.5)».
+      +'<b class="pt">'+(pk.multiplied?esc(fanBoost(pk.points))+' <span style="font-weight:500;color:var(--mute)">('+esc(fanNum(pk.points))+' × 1.5)</span>':esc(fanNum(pk.points)))+'</b></div>';
   }).join('')+'</div>';
 }
 var fanPlayerOpen='';

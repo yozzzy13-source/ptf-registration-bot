@@ -20,7 +20,7 @@ import { PUBLIC_URL, RESULTS_CHAT_ID, RESULTS_TOPIC_ID, WEBSITE_URL, TIMEZONE } 
 import { escapeHtml, nowISO } from './util.js';
 import { getAdminChatId, getOrCreatePlayerTopic, notifyAdmin } from './admin.js';
 
-const MATCH_BUTTON_EN = {"📲 Отправить в WhatsApp":"📲 Send via WhatsApp","📅 Google Календарь":"📅 Google Calendar","🍎 Apple Календарь":"🍎 Apple Calendar","🎾 Играю":"🎾 I’m in","📲 Забронировать корт":"📲 Book court","💬 Написать сопернику":"💬 Message opponent","👤 Профиль игрока":"👤 Player profile","🎾 Мои матчи":"🎾 My matches","✅ Выбрать время и принять":"✅ Choose time and respond","❌ Отклонить":"❌ Decline","📲 Отменить бронь корта":"📲 Cancel court booking","🎾 Создать окно":"🎾 Create slot","✅ Принять":"✅ Accept","🕐 Другое время":"🕐 Different time","📍 Другой корт":"📍 Different court","✅ Корт подтвердил":"✅ Court confirmed","🕐 Изменить время":"🕐 Change time","📲 Открыть WhatsApp":"📲 Open WhatsApp","📅 Добавить в календарь":"📅 Add to calendar","🎾 Матчи":"🎾 Matches","✅ Подходит":"✅ Works for me","❌ Не могу":"❌ Cannot play","🕐 Предложить снова":"🕐 Propose again","✅ Подтверждаю":"✅ Confirm","❌ Не согласен":"❌ Disagree","📅 Обновить в календаре":"📅 Update calendar","🕐 Предложить другое время":"🕐 Suggest another time","📝 Внести результат":"📝 Submit result","⏸ Матч не доигран":"⏸ Match unfinished","✅ Матч уже доигран":"✅ Match completed","✅ Записать всё равно":"✅ Record anyway","✖️ Отклонить":"✖️ Reject","📝 Внести заново":"📝 Resubmit","✖️ Отменить запрос":"✖️ Cancel request","✖️ Отменить матч":"✖️ Cancel match","🎯 Вызвать другого игрока":"🎯 Challenge another player"};
+const MATCH_BUTTON_EN = {"📲 Отправить в WhatsApp":"📲 Send via WhatsApp","📅 Google Календарь":"📅 Google Calendar","🍎 Apple Календарь":"🍎 Apple Calendar","🎾 Играю":"🎾 I’m in","📲 Забронировать корт":"📲 Book court","💬 Написать сопернику":"💬 Message opponent","👤 Профиль игрока":"👤 Player profile","🎾 Мои матчи":"🎾 My matches","✅ Выбрать время и принять":"✅ Choose time and respond","❌ Отклонить":"❌ Decline","📲 Отменить бронь корта":"📲 Cancel court booking","🎾 Создать окно":"🎾 Create slot","✅ Принять":"✅ Accept","🕐 Другое время":"🕐 Different time","📍 Другой корт":"📍 Different court","✅ Корт подтвердил":"✅ Court confirmed","🕐 Изменить время":"🕐 Change time","📲 Открыть WhatsApp":"📲 Open WhatsApp","📅 Добавить в календарь":"📅 Add to calendar","🎾 Матчи":"🎾 Matches","✅ Подходит":"✅ Works for me","❌ Не могу":"❌ Cannot play","🕐 Предложить снова":"🕐 Propose again","✅ Подтверждаю":"✅ Confirm","❌ Не согласен":"❌ Disagree","📅 Обновить в календаре":"📅 Update calendar","🕐 Предложить другое время":"🕐 Suggest another time","📝 Внести результат":"📝 Submit result","⏸ Матч не доигран":"⏸ Match unfinished","✅ Матч уже доигран":"✅ Match completed","✅ Записать всё равно":"✅ Record anyway","✖️ Отклонить":"✖️ Reject","📝 Внести заново":"📝 Resubmit","✖️ Отменить запрос":"✖️ Cancel request","✖️ Отменить матч":"✖️ Cancel match","🎯 Вызвать другого игрока":"🎯 Challenge another player","✉️ Организатору":"✉️ Organiser"};
 async function sendMessage(chatId,text,opts={}) {
   if (!opts.reply_markup || Number(chatId)<0) return telegramSendMessage(chatId,text,opts);
   const lang = (await findApplicantByTelegramId(chatId).catch(()=>null))?.language === 'ru' ? 'ru' : 'en';
@@ -619,7 +619,9 @@ export async function notifyMatchReminder(slot,kind='day') {
  const tail=assigned?(ru?'Корт забронировал организатор. Если планы изменились — напишите ему.':'The organiser has booked the court. If your plans change, message the organiser.'):slot.court_confirmed_at?(ru?'Корт подтверждён. Если планы изменились — предупредите соперника.':'Court confirmed. Let your opponent know if your plans change.'):(author?(ru?'⚠️ Корт ещё не подтверждён. Проверьте ответ площадки и нажмите «Корт подтвердил» — без этого матч не считается согласованным.':'⚠️ The court isn’t confirmed yet. Check the venue’s reply and tap “Court confirmed” — until then the match isn’t final.'):(ru?'⚠️ Корт ещё не подтверждён: ждём бронь от автора вызова. Можно написать ему.':'⚠️ The court isn’t confirmed yet: waiting for the challenge creator to book it. You can message them.'))
    +(until?'\n⏳ '+(ru?'Если корт не подтвердить '+until+', матч снимется автоматически.':'If the court isn’t confirmed '+until+', the match will be removed automatically.'):'');
  const courtRow=!slot.court_confirmed_at&&author&&slot.match_type!=='manual'?[{text:'✅ Корт подтвердил',callback_data:'match_court_ok:'+slot.challenge_id}]:[];
- await sendMessage(id,'<b>🎾 '+head+'</b>\n\n'+agreedBlock(slot,lang)+'\n\n'+tail,{reply_markup:{inline_keyboard:[courtRow,await contactRow(slot,id,lang),assigned?organiserRow(slot,lang):[{text:ru?'✖️ Отменить матч':'✖️ Cancel match',callback_data:'match_cancel:'+slot.challenge_id}],[{text:ru?'🎾 Мои матчи':'🎾 My matches',web_app:{url:PUBLIC_URL+'/match?tab=mine'}}]].filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
+ // С кем матч — сразу под заголовком; имя ведёт на страницу соперника в приложении.
+ const opp=opponentOf(slot,id),oppLine=opp.name?(ru?'Соперник: ':'Opponent: ')+await opponentLink(opp.name)+'\n':'';
+ await sendMessage(id,'<b>🎾 '+head+'</b>\n\n'+oppLine+agreedBlock(slot,lang)+'\n\n'+tail,{reply_markup:{inline_keyboard:[courtRow,await contactRow(slot,id,lang),assigned?organiserRow(slot,lang):[{text:ru?'✖️ Отменить матч':'✖️ Cancel match',callback_data:'match_cancel:'+slot.challenge_id}]].filter(r=>r.length)}}).catch(e=>console.error('player match notice:',e.message));
  }return {start:slot.agreed_time||slot.time_from||''};
 }
 
@@ -628,18 +630,32 @@ export async function notifyMatchReminder(slot,kind='day') {
 // им же. Переносит и отменяет только он — у игроков вместо этих кнопок
 // «Связаться с организатором».
 // ---------------------------------------------------------------------------
+// Связь с организатором — чат внутри бота, как кнопка «Связаться» в меню:
+// сообщение игрока приходит в его тему в админской группе. Из приложения —
+// ссылкой t.me/<бот>?start=go_contact, в сообщении бота — кнопкой.
 export function organiserContactUrl(slot = {}) {
+  if (cachedBotUsername) return `https://t.me/${cachedBotUsername}?start=go_contact`;
   const u = String(slot.assigned_contact || '').replace(/^@/, '').trim();
   if (u) return `https://t.me/${u}`;
   return String(slot.assigned_by || '').trim() ? `tg://user?id=${encodeURIComponent(slot.assigned_by)}` : '';
 }
 export function organiserRow(slot = {}, lang = 'ru') {
-  const url = organiserContactUrl(slot);
-  return url ? [{ text: lang === 'ru' ? '✉️ Связаться с организатором' : '✉️ Contact the organiser', url }] : [];
+  return [{ text: lang === 'ru' ? '✉️ Организатору' : '✉️ Organiser', callback_data: 'contact' }];
+}
+// Имя соперника в сообщении ведёт на его страницу в приложении лиги (прямая
+// ссылка на мини-приложение, как в ленте результатов). Нет короткого имени
+// приложения — просто жирное имя: личка соперника и так есть кнопкой.
+async function opponentLink(name) {
+  const bold = '<b>' + escapeHtml(name || 'Player') + '</b>';
+  if (!name || !cachedBotUsername) return bold;
+  const appShort = String(await getSetting('MINIAPP_SHORT_NAME').catch(() => '') || '').trim().replace(/^@/, '');
+  if (!appShort) return bold;
+  const pack = Buffer.from(String(name), 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return '<a href="' + escapeHtml('https://t.me/' + cachedBotUsername + '/' + appShort + '?startapp=p_' + pack) + '">' + bold + '</a>';
 }
 const ASSIGNED_STAGE = { ru: { QF: 'Четвертьфинал', SF: 'Полуфинал', Final: 'Финал', '3rd': 'Матч за 3-е место' },
   en: { QF: 'Quarterfinal', SF: 'Semifinal', Final: 'Final', '3rd': 'Third-place match' } };
-export function assignedMatchText(slot, lang = 'ru', { kind = 'new', previous = null, viewerId = '' } = {}) {
+export function assignedMatchText(slot, lang = 'ru', { kind = 'new', previous = null, viewerId = '', oppHtml = '' } = {}) {
   const ru = lang === 'ru', opp = opponentOf(slot, viewerId);
   const head = kind === 'cancelled' ? (ru ? '✖️ Организатор отменил матч' : '✖️ The organiser cancelled your match')
     : kind === 'moved' ? (ru ? '🕐 Организатор перенёс матч' : '🕐 The organiser rescheduled your match')
@@ -652,17 +668,18 @@ export function assignedMatchText(slot, lang = 'ru', { kind = 'new', previous = 
     ? (ru ? 'Вопросы — напишите организатору.' : 'Questions? Message the organiser.')
     : (ru ? 'Корт уже забронирован. Если не получается прийти — напишите организатору: перенести или отменить матч может только он.'
       : 'The court is already booked. If you can’t make it, message the organiser — only they can move or cancel this match.');
-  return `<b>${head}</b>\n\n${ru ? 'Соперник' : 'Opponent'}: ${playerLink(opp.name, opp.username)}${where ? `\n🏆 ${where}` : ''}\n${agreedBlock(kind === 'cancelled' && previous ? previous : slot, lang)}${old}${slot.comment && kind !== 'cancelled' ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}\n\n${tail}`;
+  return `<b>${head}</b>\n\n${ru ? 'Соперник' : 'Opponent'}: ${oppHtml || '<b>' + escapeHtml(opp.name || '') + '</b>'}${where ? `\n🏆 ${where}` : ''}\n${agreedBlock(kind === 'cancelled' && previous ? previous : slot, lang)}${old}${slot.comment && kind !== 'cancelled' ? `\n\n💬 ${escapeHtml(slot.comment)}` : ''}\n\n${tail}`;
 }
 export async function notifyAssignedMatch(slot, { kind = 'new', previous = null } = {}) {
   let sent = 0;
   for (const id of [slot.from_telegram_id, slot.to_telegram_id]) {
     if (!id) continue;
-    const lang = await nudgeLang(id), ru = lang === 'ru';
-    const text = assignedMatchText(slot, lang, { kind, previous, viewerId: id });
+    const lang = await nudgeLang(id);
+    const text = assignedMatchText(slot, lang, { kind, previous, viewerId: id, oppHtml: await opponentLink(opponentOf(slot, id).name) });
+    // Две строки по две кнопки: календари; соперник и организатор.
     const rows = kind === 'cancelled'
       ? [organiserRow(slot, lang)]
-      : [calendarRow(slot), await contactRow(slot, id, lang), organiserRow(slot, lang), [{ text: ru ? '🎾 Мои матчи' : '🎾 My matches', web_app: { url: PUBLIC_URL + '/match?tab=mine' } }]];
+      : [calendarRow(slot), await contactRow(slot, id, lang), organiserRow(slot, lang)];
     const markup = { reply_markup: { inline_keyboard: rows.filter(r => r.length) } };
     // Ссылка tg://user на организатора без ника может не пройти (настройки
     // приватности) — тогда шлём то же без этой кнопки, но шлём.
@@ -1246,7 +1263,8 @@ async function resultsChat() {
 export function winnerFirstScore(slot) {
   const raw = String(slot.result_score || '');
   if (!raw) return '';
-  if (String(slot.result_kind || '') === 'technical') return slot.result_winner ? 'W/L' : 'L/L';
+  // Техническое — это неявка: W/O. Не явились оба — L/L.
+  if (String(slot.result_kind || '') === 'technical') return slot.result_winner ? 'W/O' : 'L/L';
   const retired=/\bRET\b/i.test(raw);
   const score=String(slot.result_winner) === String(slot.from_telegram_id) ? formatScore(cellToScore(raw)) : formatScore(reverseScore(cellToScore(raw)));
   return score+(retired?' RET':'');
@@ -1461,6 +1479,12 @@ const slotStage = slot => {
 export function broadcastResult(slot, opts = {}) { return withPriority('low', () => broadcastResultNow(slot, opts)); }
 async function broadcastResultNow(slot, opts = {}) {
   const stage = slotStage(slot);
+  // W/O (неявка) не публикуем: матч не сыгран — он виден только в таблице
+  // дивизиона и в шахматке.
+  if (String(slot.result_kind || '').toLowerCase() === 'technical' && !stage) {
+    await logMatchEvent('result_broadcast_skipped', slot, { telegram_id: slot.result_by, name: '' }, 'W/O — не публикуется').catch(() => {});
+    return { sent: 0, failed: 0, skipped: 'walkover' };
+  }
   if (stage && !opts.media && !opts.asCard && playoffPosterHandler) {
     await playoffPosterHandler(slot).catch(e => console.error('playoff poster start failed:', e.message));
     await logMatchEvent('result_broadcast_held', slot, { telegram_id: slot.result_by, name: '' }, 'плей-офф: ждёт постер').catch(() => {});
@@ -1612,6 +1636,8 @@ export async function matchContact(slot,viewerId) {
  const username=String(applicant?.telegram_username || applicant?.username || opp.username || "").replace(/^@/,"");
  return {id:opp.id,name:opp.name,username,url:username?`https://t.me/${username}`:`tg://user?id=${encodeURIComponent(opp.id)}`};
 }
-async function contactRow(slot,id,lang) {const c=await matchContact(slot,id);return c?[{text:lang==="ru"?"💬 Написать":"💬 Message",url:c.url}]:[];}
+// «Написать сопернику» — личка соперника. Короткая подпись, чтобы кнопка
+// вставала в пару с «Организатору».
+async function contactRow(slot,id,lang) {const c=await matchContact(slot,id);return c?[{text:lang==="ru"?"💬 Написать сопернику":"💬 Message opponent",url:c.url}]:[];}
 
 

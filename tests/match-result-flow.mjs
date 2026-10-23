@@ -36,7 +36,7 @@ assert.match(matches,/poster:prepare:/);
 assert.match(matches,/poster:comment:/);
 assert.match(bot,/poster_comment/);
 assert.match(bot,/generatePosterBackgrounds/);
-assert.match(bot,/sendPhotoBuffer/);
+assert.match(bot,/sendDocumentBuffer/);
 assert.doesNotMatch(bot,/archivePosterJob/);
 assert.match(poster,/MATCH_POSTER_PROMPT/);
 assert.match(poster,/blocked_consent/);

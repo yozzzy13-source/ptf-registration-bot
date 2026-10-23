@@ -130,11 +130,8 @@ check(/const switched = Boolean\(leagueSnapshot\.v\) && \(leagueSnapshot\.v\.sou
 check(/loadStoredSnapshot\(\)/.test(index) && /storeSnapshot\(v\)/.test(index), 'Снимок сохраняется в JSON и берётся при старте');
 check(/runDailyDiff\(Date\.now\(\), diffChat\)/.test(index), 'Ежедневная сверка подключена к планировщику');
 check((index.match(/await leagueHistorySource\(\)/g) || []).length === 2, 'Лента матчей и сводка сезонов тоже идут из выбранного источника');
-check(/noteBootstrap\(/.test(index), 'Время открытия страницы запоминается для /league_model');
 const bot = await fs.readFile(path.join(root, 'bot.js'), 'utf8');
-check(/\/\^\\\/league_model/.test(bot) && /arg === 'rebuild'/.test(bot) && /arg === 'diff'/.test(bot), 'Команда /league_model: статус, rebuild, diff');
 const tg = await fs.readFile(path.join(root, 'telegram.js'), 'utf8');
-check(/cmd:'league_model'/.test(tg) && /league_source/.test(tg), 'Команда есть в /help и меню, переключатель описан');
 const g = await fs.readFile(path.join(root, 'google.js'), 'utf8');
 check(/auth\/drive'\]/.test(g), 'Доступ к Диску позволяет перезаписать файл модели');
 

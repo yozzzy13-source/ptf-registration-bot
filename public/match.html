@@ -277,7 +277,7 @@ var T={
       noTelegram:'У этого игрока пока нет Telegram в базе:',
       you:'ты',waiting:'ждёт соперника',agreed:'матч назначен',noOpp:'В твоём дивизионе пока нет игроков с активным Telegram.',
       tRes:'Результат',emptyRes:'Нет матчей, ожидающих результата. Можно внести матч, о котором договорились вне бота.',
-      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',resultType:'Тип результата',playedType:'Обычный',retiredType:'RET · снятие во время матча',technicalType:'W/L · технический',bothTechnical:'Обоим',pointsFor:'Очки в таблицу',editResult:'Изменить результат',
+      resTitle:'Результат матча',winner:'Кто победил',score:'Счёт по сетам',set:'Сет',tb:'Тай-брейк',resultType:'Тип результата',playedType:'Обычный',retiredType:'RET · снятие во время матча',technicalType:'W/O · неявка соперника',bothTechnical:'Обоим',pointsFor:'Очки в таблицу',editResult:'Изменить результат',
       unfinishedBadge:'матч не доигран',markUnfinished:'⏸ Матч не доигран',matchCompleted:'✅ Матч уже доигран',unfinishedTitle:'Матч не доигран',unfinishedHint:'Подтвердите статус — напоминания остановятся, а организатор получит уведомление. После завершения результат можно внести обычным способом.',unfinishedPhoto:'Фото-подтверждение (необязательно)',unfinishedNote:'Сообщение организатору (необязательно)',unfinishedNotePh:'Например: дождь, закрыли корт или не хватило времени',unfinishedConfirm:'Подтвердить и остановить напоминания',unfinishedSaved:'✅ Организатор уведомлён. Напоминания остановлены. Результат можно внести после завершения матча.',unfinishedNoNotify:'Напоминания остановлены, но уведомление организатору не доставлено. Свяжитесь с ним напрямую.',unfinishedResume:'Напоминания остановлены. Внесение счёта вернёт матч в обычный процесс подтверждения.',
       set3mode:'Решающий сет',full:'Полный сет',mtb:'Чемпионский тай-брейк',noSet3:'Не игрался',
       winnerFirst:'Сначала отметьте победителя — счёт пишется от него.',
@@ -321,7 +321,7 @@ var T={
       noTelegram:'This player has no Telegram on file yet:',
       you:'you',waiting:'waiting for opponent',agreed:'match agreed',noOpp:'No players with an active Telegram in your division yet.',
       tRes:'Result',emptyRes:'No matches awaiting a result. You can still add a match arranged outside the bot.',
-      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',resultType:'Result type',playedType:'Played',retiredType:'RET · retired during play',technicalType:'W/L · technical',bothTechnical:'Both',pointsFor:'Standings points',editResult:'Edit result',
+      resTitle:'Match result',winner:'Winner',score:'Set scores',set:'Set',tb:'Tie-break',resultType:'Result type',playedType:'Played',retiredType:'RET · retired during play',technicalType:'W/O · opponent no-show',bothTechnical:'Both',pointsFor:'Standings points',editResult:'Edit result',
       unfinishedBadge:'match unfinished',markUnfinished:'⏸ Match unfinished',matchCompleted:'✅ Match completed',unfinishedTitle:'Match unfinished',unfinishedHint:'Confirm this status to stop reminders and notify the organiser. You can submit the result normally after the match is completed.',unfinishedPhoto:'Evidence photo (optional)',unfinishedNote:'Message to the organiser (optional)',unfinishedNotePh:'For example: rain, court closed, or time ran out',unfinishedConfirm:'Confirm and stop reminders',unfinishedSaved:'✅ The organiser was notified. Reminders are paused. Submit the result when the match is completed.',unfinishedNoNotify:'Reminders are paused, but the organiser notification was not delivered. Contact the organiser directly.',unfinishedResume:'Reminders are paused. Submitting the score returns the match to the normal confirmation flow.',
       set3mode:'Deciding set',full:'Full set',mtb:'Match tie-break',noSet3:'Not played',
       winnerFirst:'Pick the winner first — the score is written from their side.',
@@ -692,7 +692,7 @@ function renderAdmin(){
       +'<div class="meta"><span class="pill open">'+esc(label)+'</span>'+(assigned?' <span class="pill acc">📅 '+esc(L?'назначил организатор':'set by the organiser')+'</span>':'')+(s.stage?' <span class="pill">'+esc(poStage(s.stage))+'</span>':'')+' '+esc(s.division||'')+(s.group?' · '+(s.group==='cross'?esc(L?'межгрупповой':'cross-group'):esc(L?'Группа ':'Group ')+esc(s.group)):'')+'</div>'
       +'<div class="when">📅 <b>'+dates.map(fmtDay).map(esc).join(' · ')+'</b>'+(time?' · 🕐 <b>'+esc(time)+'</b>':'')+'</div>'
       +(court?'<div class="meta">📍 '+esc(court)+'</div>':'')
-      +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
+      +(resultStatus==='pending'?'<div class="meta"><span class="pill open">'+esc(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval)+'</span> <b>'+esc(showScore(s))+'</b></div>':'')
       +acts+'</div>';
   }).join('');
   var assignBtn='<button class="primary" style="margin:0 0 12px" onclick="openAssign()">📅 '+esc(L?'Назначить матч':'Schedule a match')+'</button>';
@@ -702,6 +702,8 @@ function renderAdmin(){
 // Два игрока, дата, время, корт: матч сразу договорён, корт — бронь
 // организатора. Перенести и отменить его может только организатор.
 var assignForm=new URLSearchParams(location.search).get('assign')==='1'?'new':'',assignBusy=false;
+// Неявка хранится как W/L (кто победил), а показывается как W/O.
+function showScore(s){if(String(s&&s.result_kind||'')==='technical')return s.result_winner?'W/O':'L/L';return String(s&&s.result_score||'')}
 function isAssignedSlot(s){return String(s&&s.match_type||'')==='assigned'||!!String(s&&s.assigned_by||'').trim()}
 function assignEdit(){return assignForm&&assignForm!=='new'?(adminItems.filter(function(s){return s.challenge_id===assignForm})[0]||null):null}
 function openAssign(id){assignForm=id||'new';adminMode='matches';if(mode!=='admin')showTab('admin');else renderAdmin();window.scrollTo(0,0)}
@@ -991,7 +993,7 @@ function renderMine(){
          +(agreed&&s.court_confirmed_at?' <span class="pill acc">'+esc(X.courtOk)+'</span>':'')+'</div>':'')
       +(agreed?courtStatus(s,iAmAuthor):'')
       +(agreed&&pendingTime(s)?'<div class="meta"><span class="pill open">'+esc(X.timePending)+' '+esc(pendingTime(s))+'</span></div>':'')
-      +(agreed&&String(s.result_status||'')==='pending'?'<div class="meta"><span class="pill open">'+esc(String(s.result_by)===String(me&&me.id)?X.pendingRes:X.pendingApproval)+'</span> <b>'+esc(s.result_score||'')+'</b></div>':'')
+      +(agreed&&String(s.result_status||'')==='pending'?'<div class="meta"><span class="pill open">'+esc(String(s.result_by)===String(me&&me.id)?X.pendingRes:X.pendingApproval)+'</span> <b>'+esc(showScore(s))+'</b></div>':'')
       +(agreed?agreedActions(s,opp):(opp.name?requestActions(s,opp):(iAmAuthor?'<div class="acts"><button class="mini" onclick="cancelSlot(\''+esc(s.challenge_id)+'\',this)">'+esc(X.cancel)+'</button></div>':'')))
       +'</div>';
   }).join('')+historyBlock();
@@ -1377,7 +1379,7 @@ function renderRes(){
     return '<div class="slot'+(pending?' agreed':'')+'">'
       +'<div class="who">'+esc(opp.n||'')+'</div>'
       +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
-      +(pending?'<div class="meta"><span class="pill open">'+esc(mine&&!isAdmin?X.pendingRes:(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval))+'</span> <b>'+esc(s.result_score||'')+'</b></div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
+      +(pending?'<div class="meta"><span class="pill open">'+esc(mine&&!isAdmin?X.pendingRes:(adminOnlyConfirm(s)?X.awaitingPlayer:X.pendingApproval))+'</span> <b>'+esc(showScore(s))+'</b></div>':unfinished?'<div class="meta"><span class="pill acc">'+esc(X.unfinishedBadge)+'</span></div>':'')
       +actions+'</div>';
   }).join('');
   h+='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.manualTitle)+'</h3>'
@@ -1392,7 +1394,7 @@ function renderConfirmScreen(s){
   var byOrg=byOrganiser(s);
   $('viewRes').innerHTML='<div class="card"><h3 style="margin:0 0 4px;font-size:17px">'+esc(X.confirmTitle)+'</h3>'
     +'<div class="hint">'+esc(byOrg?X.byOrganiser:(who||'')+' '+X.confirmBy)+'</div>'
-    +'<div class="bigscore">'+esc(s.result_score||'')+'</div>'
+    +'<div class="bigscore">'+esc(showScore(s))+'</div>'
     +'<div class="meta">📅 '+esc(fmtDay(s.agreed_date))+(s.agreed_court?' · 📍 '+esc(s.agreed_court):'')+'</div>'
     +'<div class="hint" style="margin-top:10px">'+esc(X.confirmHint)+'</div>'
     +'<button class="primary" onclick="confirmPendingResult(\''+esc(s.challenge_id)+'\',this)">'+esc(X.confirmResult)+'</button>'
@@ -1679,7 +1681,7 @@ function submitManual(btn){
     initData:initData,t:linkToken,from_telegram_id:$('mFrom')?(manualPerson($('mFrom').value).telegram_id||''):'',to_telegram_id:manualPerson($('mOpp').value).telegram_id||'',date:$('mDate').value,
     court:(($('mCourt')&&$('mCourt').value)||'').trim(),round:$('mRound')?$('mRound').value:'',kind:resultKind,sets:sets,winner:selWinner,perspective:'winner',photo:resPhoto,note:(($('mNote')&&$('mNote').value)||'').trim(),
     points_from:$('mPts1')?$('mPts1').value:'',points_to:$('mPts2')?$('mPts2').value:''
-  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=X.resSent;resPhoto='';resultPopup(true,j)})
+  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.detail||j.error||'Error');res.className='res ok';res.textContent=X.resSent;resPhoto='';resultPopup(true,j)})
   .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;resultPopup(false,null,esc(e.message))});
 }
 function renderBook(){

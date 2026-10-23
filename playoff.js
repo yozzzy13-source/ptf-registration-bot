@@ -492,7 +492,6 @@ export function tableCheckText(r, { fixed = false } = {}) {
     for (const i of d.issues) lines.push(`   – ${esc(i)}`);
     if (fixed) lines.push(`   ✅ исправлено ячеек: ${d.fixed}`);
   }
-  if (!fixed && r.divisions.some(d => d.issues.length)) lines.push('\nИсправить: <code>/playoff_sheets fix</code>');
   return lines.join('\n');
 }
 
@@ -653,7 +652,7 @@ export async function publishBracket(letter, season, { actor = {}, notify = true
   if (existing.some(r => txt(r.status).toLowerCase() === 'confirmed')) return { ok: false, reason: 'already_played' };
   const firstStage = meta.grouped ? 'QF' : 'SF';
   if (plan.filter(p => p.stage === firstStage).some(p => !p.player_1 || !p.player_2)) return { ok: false, reason: 'not_enough_players' };
-  // Один игрок в двух местах — испорченные строки таблицы (/playoff_sheets).
+  // Один игрок в двух местах — испорченные строки таблицы (строки плей-офф в таблице дивизиона).
   const seated = plan.filter(p => p.stage === firstStage).flatMap(p => [p.player_1, p.player_2]);
   if (seated.some((n, i) => seated.findIndex(x => sameName(x, n)) !== i)) return { ok: false, reason: 'duplicate_player' };
   const stamp = new Date().toISOString();

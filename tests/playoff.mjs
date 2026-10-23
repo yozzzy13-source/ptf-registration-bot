@@ -196,7 +196,6 @@ const P = playoff.namespace, T = pace.namespace;
   const a = chk.divisions.find(d => d.letter === 'A'), w = chk.divisions.find(d => d.letter === 'W');
   check(a.issues.some(i => /полуфинал 2: первый/.test(i)) && a.issues.some(i => /полуфинал 2: второй/.test(i)) && a.issues.some(i => /нет строки матча за 3-е/.test(i)), 'Проверка таблицы: испорченный полуфинал 2 и нет матча за 3-е место');
   check(!a.issues.some(i => /полуфинал 1|финал:/.test(i)) && w.grouped && !w.issues.length, 'Правильные строки не трогаются; у C и W строки таблиц групп не проверяются');
-  check(/playoff_sheets fix/.test(P.tableCheckText(chk)), 'Отчёт предлагает исправить');
   let st = await P.playoffState('2');
   check(st.divisions.find(d => d.letter === 'A').preview.find(p => p.slot === 'SF2').player_1 === 'Ann', 'До починки черновик A — ровно то, что в таблице (даже испорченное)');
   check(!(await P.publishBracket('A', '2', {})).ok, 'Испорченную сетку (Ann в двух парах) опубликовать нельзя');

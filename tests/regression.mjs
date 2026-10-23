@@ -216,7 +216,7 @@ check(techSlot.result_score==='W/L'&&techSlot.result_kind==='technical'&&String(
 check((await db.confirmResult(techApi.body.challenge_id,{telegram_id:'9'})).ok,'Second player confirms admin-entered technical result');
 const techBefore=writes.length;const techWrite=await results.writeConfirmedResult({...techSlot,result_status:'confirmed'});
 check(techWrite.status==='saved'&&techWrite.division?.cross_group,'Confirmed technical cross-group result reaches central cross-group log');
-check(writes.slice(techBefore).some(w=>/!AB\d+$/.test(w.range)&&w.values[0][0]==='W/L')&&writes.slice(techBefore).some(w=>/!AN\d+:AO\d+$/.test(w.range)&&String(w.values[0])==='3,0'),'Technical marker and points are written to AB and AN:AO');
+check(techWrite.walkover&&!writes.slice(techBefore).some(w=>/Cross_Division_Match_Log/.test(w.range)),'W/O не пишется в общий журнал (историю матчей) — только в журнал межгрупповых матчей');
 const qfApi=await request('post','/api/match/manual','99',{from_telegram_id:'8',to_telegram_id:'10',date:'2099-09-19',court:'Court A',round:'QF',kind:'played',winner:'8',sets:[{a:6,b:2},{a:6,b:3}],points_from:'3',points_to:'1'});
 check(qfApi.body.ok,'Admin can mark a manual result as a quarterfinal');const qfSlot=await db.findSlot(qfApi.body.challenge_id);check(qfSlot.stage==='QF'&&!qfSlot.round,'Playoff stage is stored in the match slot (stage, not the negotiation round)');check(qfSlot.result_status==='confirmed'&&qfApi.body.playoff&&qfApi.body.organiser,'Playoff result entered by the organiser is confirmed at once, no player confirmation');check(!messages.some(m=>m.method==='sendPhoto'&&/Quarter-final/.test(String(m.args?.[2]?.caption||''))),'Playoff result is not broadcast as a card');const qfWrite=await results.writeConfirmedResult({...qfSlot,result_status:'confirmed'});check(qfWrite.division?.playoff&&tables.has('master|Playoff'),'Confirmed grouped quarterfinal is stored in the Playoff sheet');
 const retApi=await request('post','/api/match/manual','3',{to_telegram_id:'4',date:'2099-09-18',court:'Court A',kind:'retired',winner:'3',sets:[{a:6,b:4},{a:2,b:1}],note:'injury'});
@@ -1402,11 +1402,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const card=await fs.readFile(path.join(root,'matchcard.js'),'utf8');
  check(/round:slot\.round\|\|''/.test(card),'Стадия матча передаётся из слота в данные постера');
 
- // Команда на постер по уже сыгранному матчу есть и в /help, и в меню.
  const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- check(/cmd:'poster_test'/.test(tg),'Команда /poster_test попала в единый список команд');
  const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/text\.startsWith\('\/poster_test'\)/.test(bot),'Обработчик /poster_test на месте');
 }
 
 
@@ -1510,7 +1507,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  // Маршрут отдачи и команды на месте.
  check(routes.some(r=>r.method==='get'&&r.p==='/ig/:id.jpg'),'Маршрут отдачи картинок зарегистрирован');
  const tg=await fs.readFile(path.join(root,'telegram.js'),'utf8');
- for(const cmd of ['instagram_ask','instagram_status','instagram_week'])
+ for(const cmd of ['instagram_status','instagram_week'])
   check(new RegExp(`cmd:'${cmd}'`).test(tg),'Команда /'+cmd+' в едином списке команд');
  const bot=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/poster:ig:/.test(bot),'Под постером есть кнопка публикации в сторис');
@@ -1773,8 +1770,6 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/1 match played this week/.test(cap),'Число матчей считается по выбранному отрезку');
 
  const bot4=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/\btest\b/.test(bot4)&&/Так опрос выглядит у игрока/.test(bot4),'Есть превью опроса перед рассылкой');
- check(/instagramAskText\('ru'\)/.test(bot4)&&/instagramAskText\('en'\)/.test(bot4),'Превью показывает обе языковые версии');
  check(/parseRange\(text\.replace/.test(bot4),'Команды подборок принимают даты');
 
  // Анкета спрашивает согласие и прячет ник у отказавшихся.
@@ -2114,7 +2109,6 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/keepStatus/.test(idx),'Игрок идущего сезона, вставший в лист следующего, остаётся active');
  const adm=await fs.readFile(path.join(root,'admin.js'),'utf8');
  check(/syncWaitlistEntry\(app\.event_id\)/.test(adm),'Отклонение заявки пересобирает список участников');
- check(/cmd:'waitlist_sync', group:'Лига'/.test(telegramSource)&&/text === '\/waitlist_sync'/.test(await fs.readFile(path.join(root,'bot.js'),'utf8')),'Команда /waitlist_sync — в списке команд и в /help');
  // вернуть как было
  if(saved.ev)tables.set('crm|Events',saved.ev);else tables.delete('crm|Events');
  tables.set('crm|Applications',saved.apps);tables.set('crm|Applicants',saved.appl);
@@ -2243,13 +2237,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(tasks.some(t=>t.challenge_id==='day_test_1'&&t.agreed_date===today),'Счёт можно внести с начала дня матча, даже если назначенное время ещё впереди; дата в «02.10.2026» читается');
  const later=await mdb.listMatchesNeedingResultPrompt();
  check(!later.some(t=>t.challenge_id==='day_test_1'),'Приглашение «внесите счёт» всё равно приходит только после матча');
- const lines=await mdb.explainSlot((await mdb.findSlot('day_test_1')));
- check(lines.some(l=>/Кнопка счёта: есть/.test(l))&&lines.some(l=>/Приглашение внести счёт: придёт/.test(l)),'/match_check объясняет, что видит бот');
- const broken=await mdb.explainSlot({status:'accepted',agreed_date:'когда-нибудь',agreed_time:'вечером'});
- check(broken.some(l=>/не понимает дату/.test(l)),'/match_check говорит, если дата матча непонятна');
  const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
  check(/function matchDayStarted\(s\)/.test(mh)&&/if\(matchDayStarted\(s\)&&!st&&amPlayer\(s\)\)/.test(mh),'«Мои матчи»: кнопка счёта в день матча, бронь и перенос при этом не пропадают');
- check(/cmd:'match_check'/.test(telegramSource),'/match_check — в меню команд и в /help');
  // «9:00» без нуля (так время показывает Google Таблица) — реальный случай Banatskiy/Pierre.
  const nine={challenge_id:'nine_test',status:'accepted',from_telegram_id:'3',to_telegram_id:'4',from_name:'Carol Three',to_name:'Dan Four',agreed_date:'2026-10-02',agreed_time:'9:00',time_from:'9:00',duration_min:'120',court_confirmed_at:'x'};
  check(mdb.slotStartMs(nine)===Date.parse('2026-10-02T09:00:00+07:00'),'Время «9:00» без нуля понимается: напоминания и счёт работают');
@@ -2275,6 +2264,37 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(through.join('')==='WWLW','Постер старого матча — форма по этот матч включительно');
  check((await results.leagueFormBefore('Daria Kozitskaya',{throughPair:['Daria Kozitskaya','Olga Sauer']})).join('')==='WW','Форма на постере не забегает вперёд');
  if(saved)tables.set('master|Cross_Division_Match_Log',saved);else tables.delete('master|Cross_Division_Match_Log');
+}
+// --- Неявка (W/O) от организатора: таблица дивизиона и шахматка, без журнала, истории и ленты ---
+{
+ const savedLog=tables.get('c2|Match_Log'),savedCentral=structuredClone(tables.get('master|Cross_Division_Match_Log')||[]);
+ tables.set('c2|Match_Log',[['Match #','P1 ID','Player 1','P2 ID','Player 2','Set 1 P1','Set 1 P2','Set 1 TB P1','Set 1 TB P2','Set 2 P1','Set 2 P2','Set 2 TB P1','Set 2 TB P2','Set 3 P1','Set 3 P2','Set 3 TB P1','Set 3 TB P2','Set 3 Mode','Completed?','Tech Result','P1 Sets Won','P2 Sets Won','P1 Games Won','P2 Games Won','Winner ID','Key','Display P1','Display P2','Rec','Name1','URL','P1 TechLoss','P2 TechLoss'],['1','1','Carol Three','2','Dan Four']]);
+ const before=writes.length,msgBefore=messages.length;
+ const slot={...result2,challenge_id:'wo-1',from_name:'Dan Four',to_name:'Carol Three',from_telegram_id:'4',to_telegram_id:'3',result_kind:'technical',result_score:'W/L',result_winner:'4',result_points_from:3,result_points_to:0,agreed_date:'2099-10-23',log_row:'',stage:''};
+ const w=await results.writeConfirmedResult(slot);
+ const row=tables.get('c2|Match_Log')[1];
+ check(w.walkover&&w.division?.status==='saved'&&String(row[31])==='0'&&!String(row[32]??'')&&!String(row[18]??''),'W/O записан в таблицу дивизиона: неявившемуся 0 в его TechLoss, матч не «сыгран»');
+ check(!writes.slice(before).some(x=>/Cross_Division_Match_Log/.test(x.range))&&JSON.stringify(tables.get('master|Cross_Division_Match_Log')||[])===JSON.stringify(savedCentral),'W/O не попадает в общий журнал — ни в историю, ни в статистику');
+ check(/W\/O: записано в таблицу Division C/.test(results.describeWrite(w)),'Организатору сказано, куда записан W/O');
+ const mt=await load('matches.js');
+ const b=await mt.broadcastResult({...slot,result_status:'confirmed'});
+ check(b.skipped==='walkover'&&!messages.slice(msgBefore).some(m=>/sendPhoto|sendDocument/.test(m.method)),'W/O не публикуется в ленте');
+ check(mt.winnerFirstScore(slot)==='W/O','В сообщениях — W/O, а не W/L');
+ division.invalidateDivisionCache();
+ const tbl=await division.getDivisionTable('C','2','2');
+ check(tbl.players.find(p=>p.name==='Dan Four')?.wins>=1&&Object.values(tbl.matrix||{}).includes('W/O'),'В таблице дивизиона победа, в шахматке W/O');
+ const wo=await division.seasonWalkovers('2');
+ check(wo.some(x=>x.winner==='Dan Four'&&x.loser==='Carol Three'),'Fantasy видит победу по неявке из таблицы дивизиона');
+ // Старая строка с W/O в общем журнале очищается один раз.
+ const log=tables.get('master|Cross_Division_Match_Log');const old=Array(41).fill('');Object.assign(old,{1:'23.10.2099',3:'Season 2',4:4,5:'C',6:3,7:'C',8:'Dan Four',9:'Carol Three',27:'W/L',39:3,40:0});
+ log.push(old);const oldRow=log.length;
+ check(!(await results.clearWalkoverLogRow(oldRow,'Alice One','Bob Two')).cleared,'Чужую строку не трогаем');
+ const cl=await results.clearWalkoverLogRow(oldRow,'Carol Three','Dan Four');
+ const after=tables.get('master|Cross_Division_Match_Log')[oldRow-1];
+ check(cl.cleared&&!after[8]&&!after[9]&&!after[27]&&after[39]===''&&String(after[4]??'')==='','Строка W/O в общем журнале очищена');
+ tables.set('c2|Match_Log',savedLog);tables.set('master|Cross_Division_Match_Log',savedCentral);
+ const mh=await fs.readFile(path.join(root,'public','match.html'),'utf8');
+ check(/technicalType:'W\/O · неявка соперника'/.test(mh)&&/function showScore\(s\)/.test(mh),'В форме и карточках — W/O');
 }
 // --- Снятие игрока с сезона: W/O в таблицу, без журнала лиги и карточек -----
 {
@@ -2369,16 +2389,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const r=tables.get('master|Cross_Division_Match_Log')[flipRow-1];
  check(w.row===flipRow&&r[8]==='Carol Three'&&r[9]==='Dan Four','Строка переписана в новом порядке игроков');
  check(String(r[4])==='3'&&String(r[6])==='4','id игроков переехали вместе с именами — никто не играет сам с собой');
- // Уже испорченная строка: /league_model ids находит и исправляет.
- const bad=Array(41).fill('');Object.assign(bad,{1:'02.10.2099',3:'Season 2',4:4,5:'C',6:3,7:'C',8:'Carol Three',9:'Dan Four',10:6,11:1,14:6,15:1,23:'Yes'});
- log.push(bad);const badRow=log.length;
- const found=await results.checkCentralIds();
- check(found.ok&&found.rows.some(x=>x.row===badRow&&x.kind==='swapped')&&!found.rows.some(x=>x.row===flipRow),'Проверка журнала находит строку с перепутанными id');
- const fixed=await results.checkCentralIds({fix:true});
- const rb=tables.get('master|Cross_Division_Match_Log')[badRow-1];
- check(fixed.fixed>=1&&String(rb[4])==='3'&&String(rb[6])==='4'&&!(await results.checkCentralIds()).rows.some(x=>x.row===badRow),'ids fix переставляет id на место');
  const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
- check(/arg === 'ids' \|\| arg === 'ids fix'/.test(botSrc)&&/ids fix/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'/league_model ids есть в боте и в /help');
 }
 // Плей-офф: счёт полуфинала пары из одной группы не трогает их строку
 // регулярки в таблице дивизиона и подписывается стадией в общем журнале.
@@ -2431,7 +2442,9 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(slot.match_type==='assigned'&&slot.status==='accepted'&&slot.court_confirmed_at&&String(slot.assigned_by)==='99'&&slot.agreed_date==='2099-10-20'&&slot.agreed_time==='18:00'&&slot.agreed_court==='Court A'&&!slot.stage&&slot.group==='cross','Матч сразу договорён, корт подтверждён, записано, кто назначил');
  const toAlice=messages.find(m=>m.method==='sendMessage'&&String(m.args[0])==='1'),toCarol=messages.find(m=>m.method==='sendMessage'&&String(m.args[0])==='3');
  check(/Организатор назначил вам матч/.test(toAlice?.args[1])&&/Carol Three/.test(toAlice.args[1])&&/Корт на меня/.test(toAlice.args[1]),'Сообщение по-русски: соперник, комментарий организатора');
- check(/organiser has scheduled your match/.test(toCarol?.args[1])&&toCarol.args[2].reply_markup.inline_keyboard.flat().some(b=>b.text==='✉️ Contact the organiser'&&/^tg:\/\/user\?id=99$/.test(b.url)),'По-английски и с кнопкой «Связаться с организатором»');
+ check(/organiser has scheduled your match/.test(toCarol?.args[1])&&toCarol.args[2].reply_markup.inline_keyboard.flat().some(b=>b.text==='✉️ Organiser'&&b.callback_data==='contact'),'По-английски и с кнопкой «Организатору» — она открывает чат с организатором в боте');
+ const kb=toCarol.args[2].reply_markup.inline_keyboard;
+ check(kb.length===2&&kb.every(r=>r.length===2)&&kb.flat().some(b=>b.text==='💬 Message opponent')&&!JSON.stringify(kb).includes('My matches'),'Кнопки в два столбца: календари, соперник и организатор; без «Мои матчи»');
  check(!JSON.stringify(toCarol.args[2]).includes('match_cancel'),'У игрока нет кнопки отмены');
  // Второй матч Carol в то же время — сначала предупреждение.
  messages.length=0;
@@ -2446,7 +2459,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const matchesMod=await load('matches.js');messages.length=0;
  await matchesMod.notifyMatchReminder(await db.findSlot(id),'day');
  const rem=messages.filter(m=>m.method==='sendMessage');
- check(rem.length===2&&rem.every(m=>!JSON.stringify(m.args[2]).includes('match_cancel')&&m.args[2].reply_markup.inline_keyboard.flat().some(b=>/organiser|организатором/.test(b.text))),'Напоминание о назначенном матче — без отмены, со связью с организатором');
+ check(rem.length===2&&rem.every(m=>!JSON.stringify(m.args[2]).includes('match_cancel')&&m.args[2].reply_markup.inline_keyboard.flat().some(b=>/Organiser|Организатору/.test(b.text)&&b.callback_data==='contact')),'Напоминание о назначенном матче — без отмены, со связью с организатором');
+ check(rem.some(m=>String(m.args[0])==='1'&&/Соперник: <b>Carol Three<\/b>/.test(m.args[1]))&&rem.some(m=>String(m.args[0])==='3'&&/Opponent: <b>Alice One<\/b>/.test(m.args[1]))&&rem.every(m=>!JSON.stringify(m.args[2]).includes('My matches')&&!JSON.stringify(m.args[2]).includes('Мои матчи')),'В напоминании сказано, с кем матч; кнопки «Мои матчи» нет');
  messages.length=0;
  const moved=await request('post','/api/match/assign','99',{challenge_id:id,date:'2099-10-21',time:'19:30',court:'Court A'});
  const after=await db.findSlot(id);
@@ -2459,6 +2473,12 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check((await request('post','/api/match/assign','99',{challenge_id:id,date:'2099-10-22',time:'18:00',court:'Court A'})).body.code==='assign_closed','Отменённый матч не переносится');
  check((await request('post','/api/match/assign','99',{...base,date:'2000-01-01'})).body.code==='assign_past_date','Прошедшая дата не принимается');
  const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8'),tgSrc=await fs.readFile(path.join(root,'telegram.js'),'utf8');
+ check((await request('post','/api/avatar/direct','3',{photo:'data:image/png;base64,iVBORw0KGgo='})).code===403,'Готовую аватарку без ИИ ставит только организатор');
+ const lgSrc=await fs.readFile(path.join(root,'public','league.html'),'utf8');
+ check(/avState\.can_direct/.test(lgSrc)&&/\/api\/avatar\/direct/.test(lgSrc)&&/×1\.5/.test(lgSrc),'В приложении: «Загрузить эту аватарку» для организатора и ×1.5 у капитана в составах Fantasy');
+ const idxOnce=await fs.readFile(path.join(root,'index.js'),'utf8');
+ check(/runOnce\('once_fantasy_aksinya'/.test(idxOnce)&&/runOnce\('once_playoff_tables_fix'/.test(idxOnce)&&!/cmd:'(fantasy_replace|playoff_sheets|lang_check|league_model|test_match|poster_test)'/.test(tgSrc),'Разовые дела бот делает сам один раз, одноразовых команд в списке нет');
+ check(/healthCheckPath: \/health/.test(await fs.readFile(path.join(root,'render.yaml'),'utf8')),'Настройки Render лежат в репозитории');
  check(/cmd:'assign'/.test(tgSrc)&&/\^\\\/assign/.test(botSrc)&&/Назначить матч/.test(botSrc),'/assign есть в боте, в /help и в списке команд');
 
  // Плей-офф: время матча из раздела «Плей-офф» назначает матч игрокам.
@@ -2538,24 +2558,11 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(after?.language==='en','Смена языка у Криса записалась туда же, откуда её читают');
  const subs=await sheets.getAllBotSubscribers();
  check(subs.find(x=>x.telegram_id==='7700000001')?.language==='en','Лента результатов видит новый язык Криса');
- const lc=await load('langcheck.js');
- const rep=await lc.scanApplicants();
- const dup=rep.dupes.find(d=>d.rows.some(r=>r.name==='Dup Player'));
- check(dup&&dup.conflict&&dup.target==='en','/lang_check находит одного человека в двух строках с разным языком и берёт последнюю правку');
- check(rep.oddId.some(r=>r.name==='Dup Player'),'/lang_check находит id в странном виде');
- check(/Дублей с разным языком|Один человек — несколько строк/.test(lc.scanText(rep))&&/lang_check fix/.test(lc.scanText(rep)),'Отчёт /lang_check предлагает исправление');
- const fixed=await lc.fixApplicants(rep);
- check(fixed.rows>=2&&fixed.ids.includes('7700000002'),'fix выравнивает язык и переписывает строки');
- const again=lc.scanRows((await sheets.getRows('Applicants',{useCache:false})).rows);
- check(!again.dupes.some(d=>d.conflict)&&!again.oddId.length,'После fix расхождений и странных id не остаётся');
  await sheets.setUserLanguage({id:7700000002},'ru');
  const both=(await sheets.getRows('Applicants',{useCache:false})).rows.filter(r=>r.name==='Dup Player');
  check(both.length===2&&both.every(r=>r.language==='ru'),'Смена языка пишется во все строки человека — дубли больше не расходятся');
- const person=await lc.personReport('Chris Mitchell',{memoryOf:()=>null});
- check(/Бот: en/.test(person)&&/Приложение: en/.test(person)&&/Лента результатов: en/.test(person),'/lang_check по имени показывает язык в каждом канале');
  const botSrc=await fs.readFile(path.join(root,'bot.js'),'utf8');
  check(/LANG_MEMORY_MS = 10 \* 60 \* 1000/.test(botSrc)&&/Date\.now\(\) - hit\.t > LANG_MEMORY_MS/.test(botSrc),'Память языка в боте живёт 10 минут — правка в таблице доходит без перезапуска');
- check(/cmd:'lang_check'/.test(await fs.readFile(path.join(root,'telegram.js'),'utf8')),'/lang_check есть в /help и меню');
  tables.set('crm|Applicants',savedAp);sheets.invalidateSheetCache();
 }
 // Модель лиги: при league_source = live статистика и история витрины идут из
@@ -2580,6 +2587,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(boot.body?.players?.find(p=>p.name==='Live Two')?.matches===3&&(boot.body.matches['32']||[]).length===3,'live: приложение получает модель из журнала');
  const feed=await request('get','/api/match/history','1');
  check(feed.body?.ok&&feed.body.matches.length===3,'live: лента матчей тоже из журнала, каждый матч один раз');
+ check(feed.body.matches.every(m=>{const [a,b]=String(m.score).split('/')[0].split(':').map(Number);return a>b})&&feed.body.matches.some(m=>m.winner==='Live Two'&&m.score==='6:2 / 6:2'),'Лента «Моих матчей»: первым победитель и счёт с его стороны, даже если матч взят из записи проигравшего');
  await new Promise(r=>setTimeout(r,30));
  const stored=tables.get('crm|League_Model')||[];
  check(String(stored[0]?.[0])==='league_model'&&Number(stored[0]?.[1])>=1&&/"Live One"/.test(stored.slice(1).map(r=>r[0]).join('')),'live: снимок сохранён в JSON (лист League_Model)');
