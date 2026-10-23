@@ -1485,6 +1485,12 @@ async function broadcastResultNow(slot, opts = {}) {
     await logMatchEvent('result_broadcast_skipped', slot, { telegram_id: slot.result_by, name: '' }, 'W/O — не публикуется').catch(() => {});
     return { sent: 0, failed: 0, skipped: 'walkover' };
   }
+  // Стыковой матч: игроки из разных дивизионов — карточка ленты рассчитана на
+  // таблицу одного дивизиона. Итог виден на странице дивизиона (блок стыка).
+  if (/^promo/i.test(String(slot.stage || ''))) {
+    await logMatchEvent('result_broadcast_skipped', slot, { telegram_id: slot.result_by, name: '' }, 'стыковой матч — без карточки в ленте').catch(() => {});
+    return { sent: 0, failed: 0, skipped: 'promotion' };
+  }
   if (stage && !opts.media && !opts.asCard && playoffPosterHandler) {
     await playoffPosterHandler(slot).catch(e => console.error('playoff poster start failed:', e.message));
     await logMatchEvent('result_broadcast_held', slot, { telegram_id: slot.result_by, name: '' }, 'плей-офф: ждёт постер').catch(() => {});

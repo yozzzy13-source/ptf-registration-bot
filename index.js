@@ -34,6 +34,9 @@ import { enqueueAvatar, setAvatarHandler, AVATAR_STATUS, MAX_ATTEMPTS, avatarRea
 
 import { uiError } from './ui-errors.js';
 import { resumeBroadcasts, flushBroadcasts } from './broadcast.js';
+// Вид рассылки «объявление лиги» регистрируется при загрузке модуля — до того,
+// как очередь продолжит прерванные рассылки после перезапуска.
+import './notices.js';
 import { startLogCleanup } from './retention.js';
 import { webSessionMiddleware, registerWebAuthRoutes, setWebBotName, webBotName } from './webauth.js';
 import { syncWaitlistEntry, syncAllWaitlists } from './waitlistsync.js';
@@ -1109,6 +1112,9 @@ app.post('/api/match/create', async (req, res) => {
       slot.stage = opponent.playoff;
       if (opponent.cross_group) slot.group = 'cross';
     }
+    // Стыковой матч: соперник из соседнего дивизиона, в таблицы дивизионов
+    // счёт не идёт — только в историю и статистику (results.js).
+    if (isDirect && opponent?.promotion) { slot.stage = 'Promotion'; slot.group = 'cross'; }
     await createSlot(slot);
     if (isDirect) await sendDirectChallenge(slot).catch(e => console.error('sendDirectChallenge failed:', e.message));
     else await publishOpenSlot(slot).catch(e => console.error('publishOpenSlot failed:', e.message));
@@ -2313,6 +2319,22 @@ async function buildSeasonsSummary() {
       divisions.push({ letter, title: titles[letter] || '', champion, runner_up: runnerUp,
         final_score: final?.score || '', final: final || null, table, promoted, relegated });
     }
+    // С сезона 2 переходы — по новым правилам (movement.js): #1 и #8 —
+    // автоматически, стыковые матчи — по их итогам, W #1 — по желанию,
+    // wildcard — не в Prime. Сезон 1 остаётся как был.
+    if (Number(season.number) >= 2) {
+      const wild = [];
+      for (const d of divisions) for (const pl of d.table || []) {
+        if (!hasWildcard(achievements.get(String(pl.id)) || [], season.number)) continue;
+        const idx = DIVISION_LADDER.indexOf(d.letter);
+        wild.push({ id: String(pl.id || ''), name: pl.name, photo: pl.photo || '', from: d.letter, to: idx > 0 ? DIVISION_LADDER[idx - 1] : '' });
+      }
+      const res = await import('./movement.js').then(m => m.seasonResults(season.number, { wildcards: wild })).catch(e => { console.error('season movement failed:', e.message); return null; });
+      if (res) for (const d of divisions) {
+        d.promoted = res.promoted.filter(x => x.from === d.letter);
+        d.relegated = res.relegated.filter(x => x.from === d.letter);
+      }
+    }
     out.push({ number: season.number, label: season.label, status: season.status, divisions });
   }
   return out;
@@ -2492,14 +2514,16 @@ app.get('/api/league/division', async (req, res) => {
       if (!parts.length) return res.status(404).json({ ok:false, error: messages.not_configured });
       // Последняя неделя регулярки: предварительная сетка по текущим таблицам.
       const preview = await import('./playoff.js').then(m => m.sitePreview(letter, parts[0].season || season, parts)).catch(() => null);
-      return res.json({ ok:true, ...parts[0], ...(preview ? { playoff: preview } : {}), groups: parts });
+      const movement = await import('./movement.js').then(m => m.movementFor(letter, parts[0].season || season)).catch(() => null);
+      return res.json({ ok:true, ...parts[0], ...(preview ? { playoff: preview } : {}), groups: parts, movement });
     }
     const data = await getDivisionTable(letter, season);
     if (!data.ok) {
       return res.status(404).json({ ok:false, error: messages[data.reason] || 'Дивизион недоступен' });
     }
     const preview = await import('./playoff.js').then(m => m.sitePreview(letter, data.season || season, [{ group: '', players: data.players }])).catch(() => null);
-    res.json({ ok:true, ...data, ...(preview ? { playoff: preview } : {}) });
+    const movement = await import('./movement.js').then(m => m.movementFor(letter, data.season || season)).catch(() => null);
+    res.json({ ok:true, ...data, ...(preview ? { playoff: preview } : {}), movement });
   } catch (e) {
     console.error('division api failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
@@ -2775,6 +2799,34 @@ app.listen(PORT, () => withPriority('low', async () => {
       const r = await po.checkTableBrackets('', { fix: true });
       return po.tableCheckText(r, { fixed: true });
     }).catch(e => console.error('once playoff tables:', e.message));
+    // Предварительная сетка плей-офф открыта всем (за 2 недели до дедлайна) —
+    // объявление всем игрокам сезона; игрокам C и W — про четвертьфиналы.
+    await runOnce('once_playoff_preview_notice', async () => {
+      const { seasonCalendar, dateText, addDays } = await import('./pace.js');
+      const { divisionGroups } = await import('./division.js');
+      const cal = await seasonCalendar();
+      if (!cal?.live) throw new Error('сезон не идёт');
+      const players = (await getAllActiveLeaguePlayers()).filter(p => String(p.season) === String(cal.season));
+      const letters = [...new Set(players.map(p => String(p.division || '').replace(/^(division|дивизион)\s*/i, '').toUpperCase()).filter(Boolean))];
+      const divText = {};
+      for (const L of letters) {
+        const grouped = (await divisionGroups(L, cal.season).catch(() => [])).length > 1;
+        const end = grouped ? cal.groupedEnd : cal.regularEnd;
+        const qfBy = addDays(cal.finalsStart, -1);
+        divText[L] = grouped ? {
+          ru: `Регулярка в твоём дивизионе заканчивается ${dateText(end, true)}. После неё — четвертьфиналы: время и корт согласуйте с соперником сами и сыграйте до ${dateText(qfBy, true)} включительно — ${dateText(cal.finalsStart, true)} уже полуфиналы.`,
+          en: `The regular season in your division ends on ${dateText(end, false)}. Then come the quarterfinals: agree on the time and court with your opponent yourselves and play by ${dateText(qfBy, false)} — the semifinals are on ${dateText(cal.finalsStart, false)}.`
+        } : {
+          ru: `Регулярка в твоём дивизионе заканчивается ${dateText(end, true)}. Полуфиналы и финалы — ${dateText(cal.finalsStart, true)}–${dateText(cal.end, true)}.`,
+          en: `The regular season in your division ends on ${dateText(end, false)}. Semifinals and finals: ${dateText(cal.finalsStart, false)}–${dateText(cal.end, false)}.`
+        };
+      }
+      const { queueLeagueNotice } = await import('./notices.js');
+      await queueLeagueNotice({ recipients: players, divText, label: 'Предварительная сетка плей-офф',
+        ru: '🏆 <b>Предварительная сетка плей-офф</b>\n\nНа странице таблиц дивизионов открыта предварительная сетка плей-офф. Пары считаются по текущим таблицам и могут меняться до конца регулярки.\n\nТам же видно, кто сейчас идёт на повышение, на стыковой матч или на вылет: переходы между дивизионами решает регулярный сезон. Следи за таблицей и планируй оставшиеся матчи 🎾',
+        en: '🏆 <b>Provisional playoff bracket</b>\n\nThe provisional playoff bracket is now open on the division tables page. Pairs follow the current standings and may change until the regular season ends.\n\nThe same page shows who is currently heading for promotion, a promotion playoff or relegation: division movement is decided by the regular season. Follow the table and plan your remaining matches 🎾' });
+      return '';
+    }).catch(e => console.error('once playoff preview notice:', e.message));
   }).catch(e => console.error('once tasks:', e.message)), 3 * 60 * 1000).unref?.();
   import('./sheets.js').then(m => m.addNewTabOnce('tournaments')).then(done => { if (done) console.log('tabs: «Турниры» добавлены группам'); }).catch(e => console.error('tabs add:', e.message));
   import('./sheets.js').then(m => m.addTabToGroupOnce('partners', 'guest')).then(done => { if (done) console.log('tabs: «Партнёры» добавлены гостям'); }).catch(e => console.error('tabs add partners:', e.message));
@@ -2819,6 +2871,9 @@ app.listen(PORT, () => withPriority('low', async () => {
       // Плей-офф: предварительная сетка на последней неделе, напоминание о
       // дедлайне регулярки и о несыгранных матчах.
       await import('./playoff.js').then(m => m.runPlayoffSweep(Date.now())).catch(e => console.error('playoff sweep failed:', e.message));
+      // Стыковые матчи: пары на следующий день после финалов, напоминания
+      // игрокам (раз в 5 дней) и сводка организатору (по понедельникам).
+      await import('./movement.js').then(m => m.runPromotionSweep(Date.now())).catch(e => console.error('promotion sweep failed:', e.message));
       // Раз в сутки (с 10:00) — сверка журнала матчей с таблицей профилей.
       // Расхождения приходят в админку; нет расхождений — тишина.
       {

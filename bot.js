@@ -2086,6 +2086,40 @@ export async function handleCallback(q) {
       const r = await handleCallback(data);
       return sendMessage(chatId, r.text, msg?.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
     }
+    // Публикация окончательной сетки из сообщения «Регулярка закрыта».
+    if (data.startsWith('po_pub:')) {
+      const [, letter, season] = data.split(':');
+      await answerCallbackQuery(q.id, 'Публикую…').catch(() => {});
+      try {
+        const { publishBracket } = await import('./playoff.js');
+        const r = await publishBracket(letter, season, { actor: { telegram_id: from.id, name: from.first_name || '' } });
+        if (!r.ok) {
+          const why = { already_played: 'в дивизионе уже есть сыгранный матч плей-офф — публикация закрыта', not_enough_players: 'не хватает игроков в парах — проверьте таблицу', duplicate_player: 'один игрок стоит в двух парах — проверьте строки плей-офф в таблице' };
+          return sendMessage(chatId, '⛔ Не опубликовано: ' + escapeHtml(why[r.reason] || r.reason));
+        }
+        return sendMessage(chatId, `✅ Сетка опубликована. Сообщений парам: ${r.notified}, остальным игрокам дивизиона — объявление через рассылку.`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    // Стыковые матчи: подтвердить пары и разослать игрокам; W/O по паре.
+    if (data.startsWith('promo_ok:')) {
+      await answerCallbackQuery(q.id, 'Рассылаю…').catch(() => {});
+      try {
+        const { confirmPairs } = await import('./movement.js');
+        const r = await confirmPairs(data.slice('promo_ok:'.length), { telegram_id: from.id });
+        if (!r.ok) return sendMessage(chatId, r.reason === 'already' ? 'Пары уже подтверждены и разосланы.' : 'Пар для подтверждения нет.');
+        return sendMessage(chatId, `✅ Стыковые матчи подтверждены: пар ${r.pairs.length}, сообщений игрокам ${r.sent}. Напоминаю игрокам раз в 5 дней, тебе — сводка по понедельникам.`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
+    if (data.startsWith('promo_wo:')) {
+      const [, season, key, side] = data.split(':');
+      await answerCallbackQuery(q.id, 'Записываю W/O…').catch(() => {});
+      try {
+        const { walkoverPair } = await import('./movement.js');
+        const r = await walkoverPair(season, key, side, { telegram_id: from.id });
+        if (!r.ok) return sendMessage(chatId, r.reason === 'done' ? `Этот стык уже решён: победитель ${escapeHtml(r.pair.winner)}.` : 'Пара не найдена.');
+        return sendMessage(chatId, `✅ W/O: победитель ${escapeHtml(r.pair.winner)}. Игрокам сообщил.`);
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     // Афиша плей-офф: «Разослать всем» под предпросмотром.
     if (data.startsWith('po_send:')) {
       await answerCallbackQuery(q.id, 'Ставлю в рассылку…').catch(() => {});

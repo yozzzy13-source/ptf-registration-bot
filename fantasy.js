@@ -182,6 +182,8 @@ async function scores(catalog,extras=[],{includeAll=false}={}){
   const seen=new Set(),details=[];let total=0;
   for(const m of (p.profile_id?history.get(String(p.profile_id)):[])||[]){
    if(String(parseSeasonNumber(m.season,m.competition)||'')!==String(catalog.season))continue;
+   // Стыковой матч (переход между дивизионами) в Fantasy не идёт.
+   if(/promotion/i.test(t(m.competition)))continue;
    const playedAt=fantasyMatchTime(m.date);if(Number.isFinite(cutoff)&&Number.isFinite(playedAt)&&playedAt>cutoff)continue;
    const id=t(m.match_no)+'|'+nk(m.opponent)+'|'+t(m.date)+'|'+t(m.score);if(seen.has(id))continue;seen.add(id);
    const op=byName.get(nk(m.opponent)),points=scoreFantasyMatch(m,p.price,op?.price||10);total+=points.total;details.push({...m,points});
@@ -202,7 +204,7 @@ async function seasonMatchCount(name,season){
  const [history,profiles]=await Promise.all([getLeagueMatchHistory().catch(()=>new Map()),getLeagueProfiles().catch(()=>[])]);
  const p=profiles.find(x=>nk(x.name)===nk(name));if(!p?.id)return 0;
  const seen=new Set();
- for(const m of history.get(String(p.id))||[]){if(String(parseSeasonNumber(m.season,m.competition)||'')!==String(season))continue;seen.add(t(m.match_no)+'|'+nk(m.opponent)+'|'+t(m.date)+'|'+t(m.score))}
+ for(const m of history.get(String(p.id))||[]){if(String(parseSeasonNumber(m.season,m.competition)||'')!==String(season)||/promotion/i.test(t(m.competition)))continue;seen.add(t(m.match_no)+'|'+nk(m.opponent)+'|'+t(m.date)+'|'+t(m.score))}
  return seen.size;
 }
 // Игрок выбыл из лиги (его больше нет в составе сезона) и очков не набрал —

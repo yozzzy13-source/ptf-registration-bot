@@ -582,7 +582,9 @@ export async function listOpenSlots(division, viewerTelegramId = '', season = ''
     const approvedCross = viewer && String(viewer.season) === String(scope.season)
       && divisionLetter(viewer.letter || viewer.division) === divisionLetter(scope.letter)
       && isWCrossGroupPair(r.from_name, viewer.name, scope.letter);
-    if (sameGroup || approvedCross) out.push(r);
+    // Вызов на стыковой матч приходит игроку соседнего дивизиона.
+    const promotion = /^promo/i.test(String(r.stage || '')) && String(r.to_telegram_id) === String(viewerTelegramId);
+    if (sameGroup || approvedCross || promotion) out.push(r);
   }
   return out.sort((a,b) => firstDateMillis(a) - firstDateMillis(b));
 }

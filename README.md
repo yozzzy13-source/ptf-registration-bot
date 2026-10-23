@@ -5,13 +5,13 @@ Telegram-бот, мини-приложения и сайт phukettennis.com в �
 дивизионов, плей-офф, Fantasy, турниры, рассылки, карточки и постеры.
 
 Сервер — Node.js (Express), данные — Google Таблицы (сервисный аккаунт),
-хостинг — Render (настройки — `render.yaml`). Сборки нет: Render ставит
-зависимости (`npm ci`) и запускает `npm start` (`node index.js`).
+хостинг — Railway. Сборки нет: Railway ставит зависимости и запускает
+`npm start` (`node index.js`).
 
 ## Развернуть с нуля
 
 1. Node.js 20.9 или новее.
-2. В Render → Environment задать переменные из `.env.example` (обязательные —
+2. В Railway → Variables задать переменные из `.env.example` (обязательные —
    в первом блоке). Сервисному аккаунту из `GOOGLE_CREDENTIALS` нужен доступ
    на редактирование ко всем таблицам лиги.
 3. Задеплоить. Вебхук Telegram бот ставит сам на `PUBLIC_URL`.

@@ -73,6 +73,11 @@ export async function authorizeSlot(slot, actor, { joining = false } = {}) {
     return { ok: false, reason: 'not_a_player' };
   }
   if (isLeagueAdmin(id)) return { ok: true, scope: await slotScope(slot) };
+  // Стыковой матч — пара из соседних дивизионов, утверждённая организатором.
+  if (/^promo/i.test(String(slot.stage || ''))) {
+    const pair = await import('./movement.js').then(m => m.isPromotionPair(slot.from_name, slot.to_name)).catch(() => false);
+    if (pair) return { ok: true, scope: { ...(await slotScope(slot)), group: 'cross' } };
+  }
   const info = await getPlayerLeagueInfo({ telegram_id: id });
   if (!info.member) return { ok: false, reason: 'league_access_denied' };
   if (!info.found) return { ok: false, reason: 'division_required' };

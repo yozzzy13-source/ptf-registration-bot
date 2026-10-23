@@ -82,7 +82,7 @@ put('master', 'Cross_Group_Match_Log', [['match_id', 'season', 'division', 'g1',
 put('master', 'Playoff', [['match_id', 'season', 'division', 'stage', 'slot', 'player_1', 'player_2', 'player_1_group', 'player_2_group', 'result_kind', 'score', 'winner', 'player_1_points', 'player_2_points', 'comment', 'status', 'date'],
   ...['QF1', 'QF2', 'QF3', 'QF4', 'SF1', 'SF2', '3rd', 'Final'].map(s => ['', '2', 'W', s.replace(/\d/, ''), s, '', '', '', '', '', '', '', '', '', '', 'scheduled', ''])]);
 
-const settings = new Map(), sent = [], appended = new Map(), photos = [], published = [], bracketPreviews = [];
+const settings = new Map(), sent = [], appended = new Map(), photos = [], published = [], bracketPreviews = [], notices = [];
 let schedule = { A: [{ row: 2, match: 14, p1: 'Eve', p2: 'Fay', played: false }], W1: [{ row: 2, match: 10, p1: 'Wa4', p2: 'Wa5', played: false }], W2: [] };
 const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 const extraSheets = new Map();
@@ -105,8 +105,11 @@ const mods = {
     appendObject: async (name, obj) => { extraSheets.set(name, [...(extraSheets.get(name) || []), obj]); },
     appendObjects: async (name, list) => { extraSheets.set(name, [...(extraSheets.get(name) || []), ...list]); },
     updateObjectByRow: async (name, row, patch) => { const l = extraSheets.get(name); Object.assign(l[row - 2], patch); },
-    getSegmentContacts: async () => applicants
+    getSegmentContacts: async () => applicants,
+    getAllActiveLeaguePlayers: async () => applicants.map(a => ({ ...a, division: A.includes(a.name) ? 'A' : 'W', season: '2' }))
   }),
+  // Объявления через очередь рассылок — здесь важно, кому и что ставится.
+  'notices.js': syn({ queueLeagueNotice: async (o) => { notices.push(o); return { recipients: o.recipients.length }; } }),
   'division.js': syn({
     divisionGroups: async l => (l === 'W' ? [{ group: '1' }, { group: '2' }] : []),
     divisionDisplayName: l => (l === 'W' ? 'Division W' : 'Division ' + l),
@@ -134,7 +137,7 @@ async function load(file) {
   const src = await fs.readFile(path.join(root, file), 'utf8');
   const m = new vm.SourceTextModule(src, { context, identifier: file, importModuleDynamically: async spec => {
     const key = spec.replace('./', '');
-    if (key === 'tennis.js') return tennis; if (key === 'pace.js') return pace; if (key === 'playoff.js') return playoff;
+    if (key === 'tennis.js') return tennis; if (key === 'pace.js') return pace; if (key === 'playoff.js') return playoff; if (key === 'movement.js' && movement) return movement;
     const d = mods[key]; if (!d) throw Error('no mock for ' + spec);
     if (d.status === 'unlinked') await d.link(() => {}); if (d.status === 'linked') await d.evaluate(); return d;
   } });
@@ -150,7 +153,7 @@ async function load(file) {
 }
 const tennis = new vm.SourceTextModule(await fs.readFile(path.join(root, 'tennis.js'), 'utf8'), { context, identifier: 'tennis.js' });
 await tennis.link(() => {}); await tennis.evaluate();
-let pace = null, playoff = null;
+let pace = null, playoff = null, movement = null;
 pace = await load('pace.js');
 playoff = await load('playoff.js');
 const P = playoff.namespace, T = pace.namespace;
@@ -342,6 +345,8 @@ const win = (from, to, score, extra = {}) => ({ challenge_id: 'm-' + from + '-' 
   check(st.divisions.find(d => d.letter === 'A').preview.find(p => p.slot === 'SF1').player_2 === 'Eve', 'Замена до публикации видна в предварительной сетке');
   check(tables.get('sheetA|Match_Log#f')[4][3] === 5, 'Замена в A пишется в таблицу дивизиона: id Eve в ячейке второго игрока полуфинала 1');
   const pub = await P.publishBracket('A', '2', {});
+  const notice = notices.find(n => /Division A/.test(n.label || ''));
+  check(notice && notice.recipients.length === 2 && notice.recipients.every(r => ['Dan', 'Fay'].includes(r.name)) && /окончательная сетка/.test(notice.ru), 'Первая публикация: остальным игрокам дивизиона — объявление (пары получают личные сообщения)');
   let rows = await P.divisionRows('A', '2', { fresh: true });
   check(pub.ok && rows.find(r => r.slot === 'SF1').player_2 === 'Eve' && !rows.some(r => r.stage === 'QF'), 'Публикация A: полуфиналы с заменой, без четвертьфиналов');
   check(!JSON.parse(settings.get('playoff_overrides') || '{}')['2:A'], 'После публикации замены до неё очищены');
@@ -446,6 +451,62 @@ const win = (from, to, score, extra = {}) => ({ challenge_id: 'm-' + from + '-' 
   const last = sent.slice(-again.sent - 1);
   check(again.ok && /предпросмотр/.test(sent[sent.length - again.sent - 1].text) && last.some(m => /🔁/.test(m.text) && /Ann/.test(m.text)), 'Через неделю тому же игроку — повторное (короткое) сообщение');
   check(Number(watch.find(w => w.player === 'Ann').messages) === 1, 'Предпросмотр шорт-лист не меняет');
+}
+
+// ------------------------------------------------------------ предварительная сетка за 2 недели
+{
+  const cal = { season: '2', start: '2026-09-14', end: '2026-11-08', regularEnd: '2026-11-05', groupedEnd: '2026-11-03', finalsStart: '2026-11-07' };
+  check(P.previewWindow(cal, false, '2026-10-24') && P.previewWindow(cal, true, '2026-10-20') && !P.previewWindow(cal, false, '2026-10-21'), 'Предварительная сетка — за 2 недели до дедлайна регулярки');
+}
+
+// ------------------------------------------------------------ вечер дня дедлайна: итог и кнопка публикации
+{
+  const b0 = sent.length;
+  await P.runPlayoffSweep(Date.parse('2026-11-05T14:30:00Z')); // 5 ноября, 21:30 — дедлайн A
+  const note = sent.slice(b0).find(m => /Регулярка закрыта \(A, B, Prime\)/.test(m.text));
+  check(note && /Division A/.test(note.text) && /SF1/.test(note.text), 'В день дедлайна вечером — итоговая сетка организатору');
+  const b1 = sent.length;
+  await P.runPlayoffSweep(Date.parse('2026-11-05T15:30:00Z'));
+  check(!sent.slice(b1).some(m => /Регулярка закрыта/.test(m.text)), 'Итог дедлайна — один раз');
+}
+
+// ------------------------------------------------------------ стыковые матчи (хранилище, рассылка, итог, W/O)
+{
+  movement = await load('movement.js');
+  const M = movement.namespace;
+  const pair = (key, upper, lower, up, low) => ({ key, upper, lower, upper_player: up, lower_player: low, upper_label: '#7', upper_label_en: '#7', lower_label: '#2', lower_label_en: '#2', status: 'proposed', winner: '', score: '' });
+  settings.set('promotion_matches', JSON.stringify({ '2': { created_at: '2026-11-09', pairs: [pair('A-B', 'A', 'B', 'Eve', 'Wa1'), pair('B-C', 'B', 'C', 'Fay', 'Wa2')] } }));
+  check(!(await M.isPromotionPair('Eve', 'Wa1')), 'До подтверждения пара не открывает матч');
+  const before = sent.length;
+  const r = await M.confirmPairs('2', { telegram_id: '999' });
+  const mine = sent.slice(before);
+  check(r.ok && r.sent === 4 && mine.some(m => m.to === mid('Eve') && /Wa1/.test(m.text) && /Division A/.test(m.text) && /Division B/.test(m.text)), 'Подтверждение: обоим игрокам каждой пары — кто соперник и что на кону');
+  check(mine.every(m => m.opts?.reply_markup?.inline_keyboard?.[0]?.[0]?.web_app?.url?.includes('/match?opponent=')), 'В сообщении — кнопка «Назначить матч» с соперником');
+  check(!(await M.confirmPairs('2', {})).ok, 'Повторное подтверждение ничего не рассылает');
+  check(await M.isPromotionPair('Wa1', 'Eve'), 'Подтверждённая пара — стыковой матч разрешён (в любом порядке)');
+  const rec = await M.recordPromotionResult({ from_name: 'Wa1', to_name: 'Eve', from_telegram_id: mid('Wa1'), to_telegram_id: mid('Eve'), result_winner: mid('Wa1'), result_score: '6:4 6:3', challenge_id: 'm1', agreed_date: '2026-11-12' });
+  const stored = JSON.parse(settings.get('promotion_matches'))['2'].pairs.find(p => p.key === 'A-B');
+  check(rec.ok && stored.winner === 'Wa1' && stored.score === '6:4 6:3' && stored.status === 'done', 'Счёт стыка записан: победитель нижнего дивизиона поднимается');
+  const wo = await M.walkoverPair('2', 'B-C', 'upper', { telegram_id: '999' });
+  check(wo.ok && wo.pair.winner === 'Fay' && wo.pair.wo && !(await M.walkoverPair('2', 'B-C', 'lower', {})).ok, 'W/O по паре — один раз');
+  // Напоминание: раз в 5 дней, пока матч не договорён (здесь все решены — тишина).
+  const b2 = sent.length;
+  await M.runPromotionSweep(Date.parse('2026-11-20T06:00:00Z'));
+  check(sent.length === b2, 'Решённые стыки не напоминают');
+  // Ещё одна открытая пара: напоминание игрокам через 5 дней, сводка организатору в понедельник.
+  const st = JSON.parse(settings.get('promotion_matches'));
+  st['2'].pairs.push({ ...pair('C-D', 'C', 'D', 'Ben', 'Wb1'), status: 'confirmed', reminded_on: '2026-11-10' });
+  settings.set('promotion_matches', JSON.stringify(st));
+  const b3 = sent.length;
+  await M.runPromotionSweep(Date.parse('2026-11-16T05:00:00Z')); // понедельник, 12:00 по Пхукету
+  const fresh = sent.slice(b3);
+  check(fresh.some(m => m.to === mid('Ben') && /Напоминание/.test(m.text)) && fresh.some(m => m.to === mid('Wb1')), 'Игрокам висящего стыка — напоминание через 5 дней');
+  check(fresh.some(m => m.to === '999' && /ещё не сыграны/.test(m.text) && /Ben/.test(m.text) && JSON.stringify(m.opts).includes('promo_wo:2:C-D:upper')), 'Организатору в понедельник — сводка с кнопками W/O');
+  const b4 = sent.length;
+  await M.runPromotionSweep(Date.parse('2026-11-16T06:00:00Z'));
+  check(sent.length === b4, 'В тот же день повторно не пишет');
+  const res = await M.seasonResults('2');
+  check(res && res.promoted.some(x => x.name === 'Wa1' && x.via === 'playoff' && x.to === 'A') && res.relegated.some(x => x.name === 'Eve' && x.via === 'playoff') && res.pending.some(p => p.key === 'C-D'), 'Итоги сезона: победитель стыка — в повышениях, проигравший — в понижениях, несыгранный — в ожидании');
 }
 
 console.log(`PASS: ${checks} playoff + pace checks; all Sheets and Telegram operations were mocked.`);

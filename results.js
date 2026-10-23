@@ -237,11 +237,12 @@ async function playersIndex() {
 // цепляет матч к профилям — без них матч не попадал ни в историю игрока, ни в
 // сезонные цифры, и сезон приходилось проставлять руками.
 // Пишем только в пустые ячейки: чужие пометки организатора не трогаем.
-async function centralMetaWrites(row, { p1, p2, pair, stage = '' }) {
+async function centralMetaWrites(row, { p1, p2, pair, stage = '', label: forced = '' }) {
   const season = String(pair?.season || '').trim();
   // Матч плей-офф подписываем стадией: «Semifinal S2». По этой подписи сайт
-  // ставит значок стадии, а Fantasy и история понимают сезон (S2).
-  const label = stage && season ? (await import('./playoff.js')).competitionLabel(stage, season) : (season ? `Season ${season}` : '');
+  // ставит значок стадии, а Fantasy и история понимают сезон (S2). Стыковой
+  // матч — «Promotion Playoff S2» (forced).
+  const label = forced || (stage && season ? (await import('./playoff.js')).competitionLabel(stage, season) : (season ? `Season ${season}` : ''));
   const master = await playersIndex().catch(() => ({}));
   const idOf = name => master[norm(name)]?.id ?? '';
   const divisionOf = (name, letter) => letter || master[norm(name)]?.division || '';
@@ -263,7 +264,7 @@ async function centralMetaWrites(row, { p1, p2, pair, stage = '' }) {
   const out = [];
   const curD = cell(0);
   // Стадию плей-офф ставим и поверх автоматической «Season N» (её писал бот).
-  if (label && (!curD || (stage && /^season\s*\d+$/i.test(curD)))) out.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!D${row}`, values: [[label]] });
+  if (label && (!curD || ((stage || forced) && /^season\s*\d+$/i.test(curD)))) out.push({ range: `${LEAGUE_RESULTS_SHEETS.log}!D${row}`, values: [[label]] });
   ['E', 'F', 'G', 'H'].forEach((letter, i) => {
     const value = want[letter];
     if (value === '' || value === undefined || value === null) return;
@@ -338,6 +339,10 @@ export async function writeConfirmedResult(slot, { force = false, journal = null
   const parsed = cellToScore(slot.result_score);
 
   try {
+    // Стыковой матч: игроки из соседних дивизионов. Счёт — в общий журнал
+    // (история и статистика игроков) с подписью «Promotion Playoff S2», в
+    // таблицы дивизионов не идёт; итог пары — в хранилище стыков (movement.js).
+    if (/^promo/i.test(String(slot.stage || ''))) return await writePromotionResult(slot, p1, p2, parsed, journal);
     // Матч между разными дивизионами в зачёт не идёт. Раньше он молча уезжал в
     // общий лог и портил историю; теперь не пишем никуда, пока организатор не
     // подтвердит. Если игрока нет в Players_Master, дивизион неизвестен —
@@ -443,6 +448,41 @@ export async function writePlayoffTableRow({ p1, p2, parsed, slot, season, d1 })
   return { status: 'saved', row: hit.sheetRow, slot: TABLE_SLOT_NAME(b, hit) };
 }
 const TABLE_SLOT_NAME = (b, row) => Object.entries(b.slots).find(([, r]) => r && r.sheetRow === row.sheetRow)?.[0] || '';
+
+async function writePromotionResult(slot, p1, p2, parsed, journal) {
+  const mv = await import('./movement.js');
+  const store = await mv.readStore();
+  let season = String(slot.season || ''), pairRec = null;
+  for (const [k, v] of Object.entries(store)) {
+    const p = (v?.pairs || []).find(x => (sameName(x.upper_player, p1) && sameName(x.lower_player, p2)) || (sameName(x.upper_player, p2) && sameName(x.lower_player, p1)));
+    if (p) { season = k; pairRec = p; break; }
+  }
+  if (!pairRec) return { status: 'error', reason: 'стыковой пары с этими игроками нет' };
+  const d1 = sameName(pairRec.upper_player, p1) ? pairRec.upper : pairRec.lower, d2 = d1 === pairRec.upper ? pairRec.lower : pairRec.upper;
+  const pair = { known: true, season, d1, d2 };
+  const known = Number(slot.log_row || logRowMemo.get(String(slot.challenge_id || '')) || 0);
+  let row = 0, rewritten = false;
+  if (known >= DATA_START_ROW) {
+    const cur = await getValues(LEAGUE_RESULTS_SHEET_ID, `${LEAGUE_RESULTS_SHEETS.log}!I${known}:J${known}`).catch(() => []);
+    const [a = '', b = ''] = cur?.[0] || [];
+    if ((sameName(a, p1) && sameName(b, p2)) || (sameName(a, p2) && sameName(b, p1))) { row = known; rewritten = true; }
+  }
+  if (!row) row = await nextEmptyRow(LEAGUE_RESULTS_SHEET_ID, LEAGUE_RESULTS_SHEETS.log, COL_P1_NAME, DATA_START_ROW);
+  await batchUpdate(LEAGUE_RESULTS_SHEET_ID, [
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!B${row}`, values: [[localDateSerial(slot.agreed_date)]] },
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!I${row}:J${row}`, values: [[p1, p2]] },
+    ...centralWrites(row, slot, parsed),
+    ...await centralMetaWrites(row, { p1, p2, pair, label: `Promotion Playoff S${season}` })
+  ], journal);
+  if (journal) return { status: 'saved', row, rewritten, promotion: true, division: { status: 'saved', promotion: true, dry_run: true } };
+  logRowMemo.set(String(slot.challenge_id || ''), row);
+  if (slot.challenge_id && Number(slot.log_row || 0) !== row) {
+    try { const { updateSlot } = await import('./matchesdb.js'); await updateSlot(slot.challenge_id, { log_row: String(row) }); }
+    catch (e) { console.error('log_row save failed:', e.message); }
+  }
+  const rec = await mv.recordPromotionResult(slot).catch(e => ({ ok: false, reason: e.message }));
+  return { status: 'saved', row, rewritten, promotion: true, division: { status: 'saved', promotion: true, upper: pairRec.upper, lower: pairRec.lower, recorded: Boolean(rec?.ok) } };
+}
 
 async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal = null, centralRow = 0) {
   const pair = known && known.known !== undefined ? known : await divisionPair(p1, p2);
@@ -910,6 +950,7 @@ export function describeWrite(result) {
     return `в общем логе уже есть строка этой пары (строка ${result.row}) — вторую не добавлял, счёт дивизиона обновлён. Проверьте, совпадает ли счёт.`;
   }
   const d = result.division;
+  if (result.promotion) return `стыковой матч: записано в общий лог (история и статистика игроков), в таблицы дивизионов не идёт${d?.dry_run ? ' — пробный прогон' : ''}`;
   if (result.walkover && d?.status === 'saved') return `W/O: записано в таблицу Division ${d.division}${d.row ? ', строка ' + d.row : ''}${d.cross_group ? ' (межгрупповые матчи)' : ''}; в общий журнал и историю не идёт`;
   if (d?.status === 'saved' && d.playoff) return `плей-офф: записано в общий лог и в лист Playoff (Division ${d.division}, ${d.slot || d.stage})${d.dry_run ? ' — пробный прогон' : ''}`;
   if (d?.status === 'saved' && d.cross_group) return `записано в общий лог и в межгрупповые матчи (Division ${d.division})`;

@@ -765,10 +765,27 @@ export async function publishBracket(letter, season, { actor = {}, notify = true
   // таблица больше не гуляет вместе с местами, а счёт ляжет в эти же строки.
   if (!meta.grouped) await freezeTablePairs(letter, season, plan).catch(e => console.error('playoff table freeze failed:', e.message));
   const notified = notify ? await notifyPairs(changed, { cal, grouped: meta.grouped, title: meta.title }) : 0;
+  // Первая публикация: остальным игрокам дивизиона — объявление (через очередь
+  // рассылок: ночью ждёт утра).
+  if (notify && !isPublished(existing)) await announcePublished(letter, season, plan, meta, cal).catch(e => console.error('playoff publish notice failed:', e.message));
   await logAdmin(`🏆 <b>Сетка плей-офф опубликована: ${esc(meta.title)}</b>\n` + changed.map(r => `• ${esc(r.slot)}: ${esc(r.player_1)} — ${esc(r.player_2)}`).join('\n') + (notify ? `\nСообщений игрокам: ${notified}` : ''), actor);
   // Сразу — картинка сетки на утверждение (разослать всем / в сторис).
   if (notify) await import('./playoffmedia.js').then(m => m.previewBracket(letter, season)).catch(e => console.error('bracket preview failed:', e.message));
   return { ok: true, rows: (await divisionRows(letter, season, { fresh: true })), changed: changed.length, notified };
+}
+async function announcePublished(letter, season, plan, meta, cal) {
+  const { getAllActiveLeaguePlayers } = await import('./sheets.js');
+  const seated = plan.flatMap(p => [p.player_1, p.player_2]).filter(Boolean);
+  const rest = (await getAllActiveLeaguePlayers().catch(() => []))
+    .filter(p => letterOf(p.division) === letterOf(letter) && String(p.season || season) === String(season) && !seated.some(n => sameName(n, p.name)));
+  if (!rest.length) return 0;
+  const days = cal ? `${dateText(cal.finalsStart, true)}–${dateText(cal.end, true)}` : '';
+  const daysEn = cal ? `${dateText(cal.finalsStart, false)}–${dateText(cal.end, false)}` : '';
+  const { queueLeagueNotice } = await import('./notices.js');
+  const r = await queueLeagueNotice({ recipients: rest, label: `Плей-офф опубликован: ${meta.title}`,
+    ru: `🏆 <b>Регулярка в ${esc(meta.title)} закончена</b>\n\nОпубликована окончательная сетка плей-офф${days ? `, финальные дни — ${days}` : ''}. Пары, итоговая таблица и переходы между дивизионами — на странице таблиц. Спасибо за сезон! 🎾`,
+    en: `🏆 <b>The ${esc(meta.title)} regular season is over</b>\n\nThe final playoff bracket is published${daysEn ? `, finals days ${daysEn}` : ''}. Pairs, the final table and division movement are on the tables page. Thanks for the season! 🎾` });
+  return r.recipients;
 }
 async function freezeTablePairs(letter, season, plan) {
   const b = await readTableBracket(letter, season, { fresh: true });
@@ -1121,11 +1138,13 @@ export async function sitePreview(letter, season, tables = [], { now = Date.now(
   const site = sitePlayoff({ plan, grouped, portrait: n => photos.get(norm(n)) || '' });
   return site ? { ...site, preview: true, published: false, deadline: deadlineFor(cal, grouped) } : null;
 }
-// Показывать ли предварительную сетку на сайте: последняя неделя перед дедлайном и до публикации.
+// Показывать ли предварительную сетку на сайте: за две недели до дедлайна
+// регулярки и до публикации — чтобы игроки видели, за что борются.
+export const PREVIEW_DAYS = 14;
 export function previewWindow(cal, grouped, today = dayIn()) {
   if (!cal) return false;
   const deadline = deadlineFor(cal, grouped);
-  return today >= addDays(deadline, -7) && today <= cal.end;
+  return today >= addDays(deadline, -PREVIEW_DAYS) && today <= cal.end;
 }
 
 // ------------------------------------------------------------ фоновые напоминания
@@ -1152,21 +1171,38 @@ export async function runPlayoffSweep(now = Date.now()) {
   };
   const types = [['single', cal.regularEnd, 'A, B, Prime'], ['grouped', cal.groupedEnd, 'C, W']];
   for (const [type, deadline, who] of types) {
-    // За неделю до дедлайна, в полдень: предварительная сетка уже на сайте.
-    if (today === addDays(deadline, -7) && hour >= 12) await once(`preview_${type}`, () => say(`🏆 <b>Последняя неделя регулярки (${who})</b>\n\nНа сайте появилась предварительная сетка плей-офф — она пересчитывается после каждого матча. Дедлайн: ${dateText(deadline, true)}.`));
-    // Утро после дедлайна: несыгранные матчи и публикация.
-    if (today === addDays(deadline, 1) && hour >= 9) await once(`deadline_${type}`, async () => {
-      const st = await playoffState(cal.season, now).catch(() => null);
-      const list = (st?.divisions || []).filter(d => (type === 'grouped') === d.grouped);
-      const lines = list.map(d => `• ${esc(d.title)}: несыгранных матчей ${d.unplayed.length}${d.published ? ' · сетка опубликована' : ''}`);
-      await say(`⏰ <b>Регулярка закрыта (${who})</b>\n\n${lines.join('\n')}\n\nРешите судьбу несыгранных матчей (W/O одному или «не засчитывать») и опубликуйте сетку — в «Мои матчи → Контроль → Плей-офф».`);
-    });
+    // За две недели до дедлайна, в полдень: предварительная сетка уже на сайте.
+    if (today === addDays(deadline, -PREVIEW_DAYS) && hour >= 12) await once(`preview_${type}`, () => say(`🏆 <b>До конца регулярки две недели (${who})</b>\n\nНа сайте открыта предварительная сетка плей-офф — она пересчитывается после каждого матча. Дедлайн: ${dateText(deadline, true)}.`));
+    // Вечер дня дедлайна: итоговая сетка, несыгранные матчи и кнопка публикации.
+    if (today === deadline && hour >= 21) await once(`deadline_${type}`, () => deadlineNote(cal, type, who, now, say));
   }
   // Четвертьфиналы без договорённости — каждый день в 11:00, до дня перед финалами.
   if (hour >= 11 && today <= addDays(cal.finalsStart, -1) && today >= cal.groupedEnd) {
     await once(`qf_${today}`, () => remindQuarterfinals(cal, now));
   }
   return { ok: true };
+}
+// Итог регулярки организатору: сетка по итоговым таблицам, несыгранные матчи
+// и кнопка «Опубликовать» на каждый дивизион. После публикации пары получают
+// личные сообщения, остальные игроки дивизиона — объявление.
+async function deadlineNote(cal, type, who, now, say) {
+  const st = await playoffState(cal.season, now).catch(() => null);
+  const list = (st?.divisions || []).filter(d => (type === 'grouped') === d.grouped);
+  const blocks = list.map(d => {
+    const head = `<b>${esc(d.title)}</b>${d.published ? ' · сетка опубликована' : ''}${d.unplayed.length ? ` · несыгранных матчей: ${d.unplayed.length}` : ''}`;
+    const pairs = (d.published ? d.rows : d.preview).filter(m => m.stage === (d.grouped ? 'QF' : 'SF'))
+      .map(m => `• ${esc(m.slot)}: ${esc(txt(m.player_1) || '—')} — ${esc(txt(m.player_2) || '—')}`);
+    const left = d.unplayed.map(m => `   ⚠️ ${esc(m.p1)} — ${esc(m.p2)}`);
+    return [head, ...pairs, ...left].join('\n');
+  });
+  const kb = list.filter(d => !d.published).map(d => [{ text: `✅ Опубликовать: ${d.title}`, callback_data: `po_pub:${d.letter}:${cal.season}` }]);
+  if (PUBLIC_URL) kb.push([{ text: '🏆 Открыть плей-офф', web_app: { url: `${PUBLIC_URL}/match?tab=admin&po=1` } }]);
+  const { sendMessage } = await import('./telegram.js');
+  const to = ADMIN_IDS[0] || txt(await (await import('./admin.js')).getAdminChatId().catch(() => ''));
+  const text = `⏰ <b>Регулярка закрыта (${who})</b>\n\nИтоговая сетка по таблицам:\n\n${blocks.join('\n\n')}\n\n`
+    + (list.some(d => d.unplayed.length) ? 'Сначала решите несыгранные матчи (W/O одному или «не засчитывать») в разделе «Плей-офф» — сетка пересчитается. ' : '')
+    + 'Публикация: пары получат личные сообщения, остальные игроки дивизиона — объявление.';
+  if (to) await sendMessage(to, text, { reply_markup: { inline_keyboard: kb } }).catch(e => console.error('playoff deadline note:', e.message));
 }
 async function remindQuarterfinals(cal, now) {
   const rows = (await readPlayoff({ fresh: true })).filter(r => txt(r.season) === String(cal.season) && r.stage === 'QF' && txt(r.status).toLowerCase() === 'scheduled');

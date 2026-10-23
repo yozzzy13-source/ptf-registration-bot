@@ -2478,7 +2478,7 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(/avState\.can_direct/.test(lgSrc)&&/\/api\/avatar\/direct/.test(lgSrc)&&/×1\.5/.test(lgSrc),'В приложении: «Загрузить эту аватарку» для организатора и ×1.5 у капитана в составах Fantasy');
  const idxOnce=await fs.readFile(path.join(root,'index.js'),'utf8');
  check(/runOnce\('once_fantasy_aksinya'/.test(idxOnce)&&/runOnce\('once_playoff_tables_fix2'/.test(idxOnce)&&!/cmd:'(fantasy_replace|playoff_sheets|lang_check|league_model|test_match|poster_test)'/.test(tgSrc),'Разовые дела бот делает сам один раз, одноразовых команд в списке нет');
- check(/healthCheckPath: \/health/.test(await fs.readFile(path.join(root,'render.yaml'),'utf8')),'Настройки Render лежат в репозитории');
+ check(!(await fs.stat(path.join(root,'render.yaml')).then(()=>true).catch(()=>false))&&/Railway/.test(await fs.readFile(path.join(root,'README.md'),'utf8')),'Хостинг — Railway: настроек Render в репозитории нет');
  check(/cmd:'assign'/.test(tgSrc)&&/\^\\\/assign/.test(botSrc)&&/Назначить матч/.test(botSrc),'/assign есть в боте, в /help и в списке команд');
 
  // Плей-офф: время матча из раздела «Плей-офф» назначает матч игрокам.

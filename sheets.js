@@ -2346,5 +2346,31 @@ export async function getDivisionOpponents(division, excludeTelegramId = '', sea
         photo_url: hit.avatar_file_id ? `${(await import('./config.js')).PUBLIC_URL}/avatar/${hit.telegram_id}.png` : sp.photo_url || '' });
     }
   } catch (e) { console.error('playoff opponents failed:', e.message); }
+  // Соперник по стыковому матчу (пары подтверждены организатором) — из
+  // соседнего дивизиона: с ним договариваются, как с обычным соперником.
+  try {
+    const mine = applicants.find(a => String(a.telegram_id) === String(excludeTelegramId));
+    if (mine) {
+      const { readStore } = await import('./movement.js');
+      const store = await readStore();
+      for (const s of Object.values(store)) {
+        if (!s?.confirmed_at) continue;
+        for (const p of s.pairs || []) {
+          if (p.winner) continue;
+          const opp = sameName(p.upper_player, mine.name) ? p.lower_player : sameName(p.lower_player, mine.name) ? p.upper_player : '';
+          if (!opp) continue;
+          const hit = nameKeys(opp).map(k => byKey.get(k)).find(Boolean);
+          if (!hit) continue;
+          const already = out.find(x => String(x.telegram_id) === String(hit.telegram_id));
+          if (already) { already.promotion = true; continue; }
+          const sp = nameKeys(opp).map(k => siteByKey.get(k)).find(Boolean) || {};
+          out.push({ telegram_id: String(hit.telegram_id), name: opp, username: hit.telegram_username || '', rating: hit.ntrp || hit.rating || '',
+            status: hit.status || '', language: hit.language || '', promotion: true, cross_division: true,
+            division: sameName(p.upper_player, opp) ? p.upper : p.lower, profile_url: sp.profile_url || '',
+            photo_url: hit.avatar_file_id ? `${(await import('./config.js')).PUBLIC_URL}/avatar/${hit.telegram_id}.png` : sp.photo_url || '' });
+        }
+      }
+    }
+  } catch (e) { console.error('promotion opponents failed:', e.message); }
   return out.sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity:'base' }));
 }

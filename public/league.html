@@ -407,6 +407,7 @@ h3.tap{cursor:pointer}.h3go{font-style:normal;color:var(--mute);font-weight:700}
 .mv .path i{font-style:normal;font-weight:900;font-size:13px;vertical-align:-1px;padding:0 2px}
 .mv.up .path i{color:var(--upArrow)}
 .mv.down .path i{color:var(--lose)}
+.mv .via{margin-left:6px;font-size:9px;padding:2px 6px;border-radius:999px;border:1px solid var(--line3);color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
 .mv .wc{margin-left:6px;font-size:9px;padding:2px 6px;border-radius:999px;
   border:1px solid var(--accLine);color:var(--amber);text-transform:uppercase;letter-spacing:.5px}
 /* Правила под спойлером. */
@@ -589,6 +590,59 @@ color:var(--mute2);border-top:0;background:var(--surf2);cursor:default}
 .legend .u i{color:var(--gold)}.legend .d i{color:var(--lose)}
 .legend .zn{display:inline-block;width:3px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:4px;
 background:linear-gradient(180deg,var(--champ),var(--champ2))}
+/* Переходы между дивизионами (с сезона 2): значок справа и подсветка строки. */
+.drow .mk .mvk{font-size:15px;font-weight:900;line-height:1}
+.mvk.up,.mvk.opt{color:var(--upArrow)}.mvk.opt{opacity:.8}.mvk.pl{color:var(--amber)}.mvk.dn{color:var(--lose)}.mvk.st{color:var(--mute2);font-size:11px}
+.drow.m-up{background:linear-gradient(90deg,var(--zUpTint),transparent 65%)}
+.drow.m-pl{background:linear-gradient(90deg,var(--accBg),transparent 65%)}
+.drow.m-dn{background:linear-gradient(90deg,var(--zDownTint),transparent 65%)}
+.drow.m-dn:before{background:linear-gradient(180deg,var(--zDown1),var(--zDown2))}
+.drow.m-dn .n em{color:var(--dim)}
+.legend2{display:grid;gap:5px;margin:11px 2px 0;font-size:10.5px;color:var(--mute);font-weight:600}
+.legend2 div{display:flex;gap:8px;align-items:baseline}
+.legend2 .mvk{width:14px;text-align:center;font-size:13px;font-weight:900;font-style:normal}
+.legend2 .zn{display:inline-block;width:3px;height:10px;border-radius:2px;margin:0 5.5px;background:linear-gradient(180deg,var(--champ),var(--champ2))}
+/* «Борьба за повышение / сохранение»: подробная статистика. */
+.rrow{display:grid;grid-template-columns:18px minmax(0,1fr) 20px 20px 28px 26px 30px 16px;gap:6px;align-items:center;
+  padding:0 10px 0 12px;height:48px;font-size:12px;color:var(--dim);border-top:1px solid var(--line2);position:relative;cursor:pointer}
+.rrow span:not(.n){text-align:center}
+.rrow:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--zStay)}
+.rrow.hd{height:30px;font-size:8px;letter-spacing:1.2px;text-transform:uppercase;font-weight:800;color:var(--mute2);border-top:0;background:var(--surf2);cursor:default}
+.rrow.hd:before{display:none}
+.rrow .n{display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;text-align:left}
+.rrow .n .avr,.rrow .n .avph{width:30px;height:30px;flex:0 0 30px;font-size:10px}
+.rrow .n .nm{display:flex;flex-direction:column;min-width:0;line-height:1.2;text-align:left}
+.rrow .n em{font-style:normal;font-weight:700;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.rrow .n small{font-size:9.5px;color:var(--mute);font-weight:700;margin-top:2px}
+.rrow .p{font-weight:800;color:var(--mute3)}.rrow .pt{font-weight:800;font-size:13.5px;color:var(--amber)}
+.rrow .mk .mvk{font-size:14px;font-weight:900}
+.rrow.m-up{background:linear-gradient(90deg,var(--zUpTint),transparent 65%)}.rrow.m-up:before{background:linear-gradient(180deg,var(--champ),var(--champ2))}
+.rrow.m-pl{background:linear-gradient(90deg,var(--accBg),transparent 65%)}.rrow.m-pl:before{background:var(--amber2)}
+.rrow.m-dn{background:linear-gradient(90deg,var(--zDownTint),transparent 65%)}.rrow.m-dn:before{background:linear-gradient(180deg,var(--zDown1),var(--zDown2))}
+.rnote{font-size:10.5px;color:var(--mute);line-height:1.5;margin:8px 2px 0}
+/* Стыковой матч. */
+.duel{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:13px 13px 12px;margin-bottom:10px}
+.duel .dh{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--mute)}
+.duel .tag{background:var(--accBg);border:1px solid var(--accLine);color:var(--amber);border-radius:6px;padding:2px 7px;font-size:9px;letter-spacing:.6px;white-space:nowrap}
+.duel .vs{display:grid;grid-template-columns:1fr 30px 1fr;align-items:center;margin:12px 0 10px;text-align:center}
+.duel .sd{cursor:pointer}
+.duel .sd .avr,.duel .sd .avph{width:46px;height:46px;flex:0 0 46px;font-size:14px;margin:0 auto 6px}
+.duel .sd b{display:block;font-size:13px}
+.duel .sd span{display:block;font-size:10.5px;color:var(--mute);font-weight:700;margin-top:2px}
+.duel .sd.win b{color:var(--upArrow)}
+.duel .x{font-size:11px;font-weight:800;color:var(--mute2)}
+.duel .x b{display:block;color:var(--amber);font-size:12px}
+.lab.mvlab,.legend2+.lab{margin-top:18px}
+.duel .dnote{font-size:11px;color:var(--dim);text-align:center;border-top:1px solid var(--line2);padding-top:9px;line-height:1.6}
+.duel .dnote .up{color:var(--upArrow);font-weight:900}.duel .dnote .dn{color:var(--lose);font-weight:900}
+/* Заметная плашка «Как работают переходы и плей-офф». */
+.spo.big{margin-top:14px;border:1px solid var(--accLine);background:linear-gradient(180deg,var(--accBg),var(--card2) 70%)}
+.spo.big summary{display:flex;align-items:center;gap:10px;padding:12px 13px;font-size:12.5px;font-weight:800;color:var(--text)}
+.spo.big summary .ic{width:24px;height:24px;flex:0 0 24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:var(--accBg2);border:1px solid var(--accLine);color:var(--amber);font-weight:900;font-size:13px}
+.spo.big summary .ar{margin-left:auto;color:var(--amber);font-size:11px}
+.spo.big[open] summary .ar{transform:rotate(180deg)}
+.spo .feat{margin-top:10px;padding:8px 10px;border-left:2px solid var(--amber2);background:var(--accBg);border-radius:0 8px 8px 0}
 /* сетка плей-офф */
 .tree{display:grid;grid-template-columns:1fr 26px 1fr;align-items:center;margin-bottom:22px}
 .col{display:flex;flex-direction:column;gap:14px}
@@ -1993,7 +2047,8 @@ function champCard(d){
 function mvLine(pl,cls,arrow){
   return '<div class="mv '+cls+'" onclick="openPlayerByName(\''+q(pl.name)+'\',\'home\')">'
     +avL(pl)+'<div><div class="nm2">'+esc(pl.name)
-    +(pl.wildcard?'<span class="wc">wildcard</span>':'')+'</div>'
+    +(pl.wildcard?'<span class="wc">wildcard</span>':'')
+    +(pl.via==='playoff'?'<span class="via">'+esc(L?'стык':'playoff')+'</span>':pl.via==='optional'?'<span class="via">'+esc(L?'по желанию':'optional')+'</span>':'')+'</div>'
     +'<div class="path">'+esc(divLabel(pl.from))+' <i>'+arrow+'</i> '+esc(divLabel(pl.to))+'</div></div></div>';
 }
 function championsBlock(){
@@ -2593,7 +2648,7 @@ function badgeInfo(kind,id,i){
     infoSheet('🎾',divLabel(p.division)+(pos?' · #'+pos:''),p.name,
       '<p>'+(L?'Дивизион, в котором '+nm+' играет в текущем сезоне'+(pos?', и место в таблице прямо сейчас — <b>'+esc(pos)+'</b>.':'.')
               :'The division '+nm+' plays in this season'+(pos?', and the current place in its table — <b>'+esc(pos)+'</b>.':'.'))+'</p>'
-      +'<p class="imute">'+esc(L?'Места 1–2 — повышение, 1–4 — плей-офф, 5–6 остаются, 7–8 — вылет.':'Places 1–2 promote, 1–4 reach the playoff, 5–6 stay, 7–8 relegate.')+'</p>',
+      +'<p class="imute">'+esc(L?'Места 1–4 — плей-офф. #1 — повышение, #2 и #7 — стыковые матчи, #8 — вылет.':'Places 1–4 reach the playoff. #1 moves up, #2 and #7 play promotion playoffs, #8 moves down.')+'</p>',
       [{label:L?'Открыть таблицу':'Open the table',js:'openDivFrom(\''+q(season||'')+'\',\''+q(p.division||'')+'\')'}]);
   }else if(kind==='race'){
     var r=raceNo(p);
@@ -2711,7 +2766,8 @@ function renderDiv(){
       +'</div><div class="conn"><i></i><u></u></div><div class="col">'
       +poBox(X.final,po.final,true)+'</div></div>'+(po.third?'<div class="playgrid'+(po.preview?' draft':'')+'"><div class="playstage">'+poBox(L?'За 3-е место':'Third place',po.third)+'</div></div>':'');
   }
-  h+=standingsBlock(d,divLabel(d.division));
+  var mv=d.movement||null;
+  h+=standingsBlock(d,divLabel(d.division),mv);
   // Дивизион может идти двумя группами: показываем вторую таблицу сразу под первой,
   // без переключателей — так проще сравнивать составы.
   var groups=d.groups||[];
@@ -2721,40 +2777,186 @@ function renderDiv(){
     h+=playoffStages(po);
     for(var gi=0;gi<groups.length;gi++){
       var g=groups[gi];
-      h+=standingsBlock(g,divLabel(d.division)+' · '+((L?g.group_title:g.group_title_en)||((L?'Группа ':'Group ')+g.group)));
+      h+=standingsBlock(g,divLabel(d.division)+' · '+((L?g.group_title:g.group_title_en)||((L?'Группа ':'Group ')+g.group)),mv);
     }
+    if(mv){h+=raceBlock(mv,mv.top,'top')+raceBlock(mv,mv.bottom,'bottom')}
     h+=crossGroupBlock(groups);
   }
+  if(mv)h+=duelsBlock(mv);
+  // С сезона 2 — заметная плашка с правилами переходов сразу под таблицами.
+  var groupRules=L?
+      '<p>В каждой группе отдельная таблица: победа — 3 очка, поражение — 1. Порядок при равенстве: победы, разница сетов, разница геймов, выигранные сеты. Межгрупповые матчи входят в общие очки группы; посев определяется местом внутри своей группы. Пары плей-офф организатор подтверждает отдельно.</p>':
+      '<p>Each group has its own standings: 3 points for a win, 1 for a loss. Ties are ranked by wins, set difference, game difference, then sets won. Cross-group matches count toward group points; playoff seeding is based on the ranking within each group. The organiser confirms playoff pairs separately.</p>';
+  if(mv)h+=bigSpoiler(groups.length>1?groupRules+mvRules(mv):rulesDivMv(mv));
   h+='<button class="more" onclick="toggleExt()">'+esc(X.ext)+(showExt?' ▲':' ▼')+'</button>'
     +(showExt?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+extTable(g)}).join(''):extTable(d)):'')
     +'<button class="more" onclick="toggleMx()">'+esc(X.mx)+(showMx?' ▲':' ▼')+'</button>'
     +(showMx?(groups.length>1?groups.map(function(g){return '<div class="lab">'+esc((L?'Группа ':'Group ')+g.group)+'</div>'+mxTable(g)}).join(''):mxTable(d)):'')
-    +spoiler(X.howDivT,groups.length>1?(L?
-      '<p>В каждой группе отдельная таблица: победа — 3 очка, поражение — 1. Порядок при равенстве: победы, разница сетов, разница геймов, выигранные сеты. Межгрупповые матчи входят в общие очки группы; посев определяется местом внутри своей группы. Пары плей-офф организатор подтверждает отдельно.</p>':
-      '<p>Each group has its own standings: 3 points for a win, 1 for a loss. Ties are ranked by wins, set difference, game difference, then sets won. Cross-group matches count toward group points; playoff seeding is based on the ranking within each group. The organiser confirms playoff pairs separately.</p>'):rulesDiv());
+    +(mv?'':spoiler(X.howDivT,groups.length>1?groupRules:rulesDiv()));
   $('viewDiv').innerHTML=h;
 }
 // Турнирная таблица одного состава: используется и для обычного дивизиона,
 // и для каждой группы, когда дивизион разбит на две.
-function standingsBlock(d,title){
+function standingsBlock(d,title,mv){
+  // С сезона 2 значки переходов считает сервер (mv): в обычной таблице — у
+  // мест, в таблицах групп — нет (у групп отдельные блоки «борьбы»).
+  var marks=mv&&!mv.grouped?(mv.marks||{}):null,seen={};
+  var rows=d.players.map(function(p){
+    var mk,zone,promo='',mvc='';
+    if(mv){
+      var m=marks?marks[mvKey(p.name)]:null;
+      if(m){seen[m.k]=seen[m.k]||{to:m.to,place:p.place};mvc=m.k==='up'||m.k==='opt'?' m-up':m.k==='dn'||m.k==='down'?' m-dn':' m-pl'}
+      mk=mvGlyph(m);
+      zone=p.place<=4?'z-up':'z-stay';
+    }else{
+      // ▲ только у первых двух — они поднимаются. 3–6 остаются, 7–8 вылетают.
+      mk=d.grouped?'':(p.place<=2?'▲':(p.zone==='relegation'?'▼':'—'));
+      zone=p.zone==='playoff'?'z-up':(p.zone==='relegation'?'z-down':'z-stay');
+      promo=!d.grouped&&p.place<=2?' promo':'';
+    }
+    return '<div class="drow '+zone+promo+mvc+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
+      +'<span class="p">'+p.place+'</span>'
+      +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em>'+myFantasyMarks(p.name)+'</span>'
+      +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
+      +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
+  }).join('');
+  var legend;
+  if(mv)legend=mvLegend(mv,seen,Boolean(marks));
+  else legend=d.grouped?'': '<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
+    +'<span class="u"><i>▲</i> '+esc(X.zPromo)+'</span>'
+    +'<span><i>—</i> '+esc(X.zStay)+'</span>'
+    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>';
   return '<div class="lab">'+esc(X.standings)+'<span class="dot"></span>'+esc(title)+'</div>'
     +'<div class="panel"><div class="drow hd"><span class="p">#</span><span class="n"><em>'+esc(X.colPlayer)+'</em></span>'
     +'<span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span></span></div>'
-    +d.players.map(function(p){
-      // ▲ только у первых двух — они поднимаются. 3–6 остаются, 7–8 вылетают.
-      var mk=d.grouped?'':(p.place<=2?'▲':(p.zone==='relegation'?'▼':'—'));
-      var zone=p.zone==='playoff'?'z-up':(p.zone==='relegation'?'z-down':'z-stay');
-      var promo=!d.grouped&&p.place<=2?' promo':'';
-      return '<div class="drow '+zone+promo+'" onclick="openPlayerByName(\''+q(p.name)+'\',\'div\')">'
-        +'<span class="p">'+p.place+'</span>'
-        +'<span class="n">'+avZoom(p)+'<em>'+esc(p.name)+'</em>'+myFantasyMarks(p.name)+'</span>'
-        +'<span>'+p.matches+'</span><span>'+p.wins+'</span>'
-        +'<span class="pt">'+p.points+'</span><span class="mk">'+mk+'</span></div>';
-    }).join('')+'</div>'
-    +(d.grouped?'': '<div class="legend"><span><span class="zn"></span>'+esc(X.zPlayoff)+'</span>'
-    +'<span class="u"><i>▲</i> '+esc(X.zPromo)+'</span>'
-    +'<span><i>—</i> '+esc(X.zStay)+'</span>'
-    +'<span class="d"><i>▼</i> '+esc(X.zDown)+'</span></div>');
+    +rows+'</div>'+legend;
+}
+// ------------------------------------------------------ переходы (сезон 2+)
+function mvKey(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ')}
+function mvGlyph(m){
+  if(!m)return '<span class="mvk st">—</span>';
+  var k=m.k;return '<span class="mvk '+(k==='up'?'up':k==='opt'?'opt':k==='down'?'dn':'pl')+'">'+(k==='up'||k==='opt'?'↑':k==='down'?'↓':'↕')+'</span>';
+}
+function mvDiv(l){return l==='PRIME'?'Prime':'Division '+l}
+// Подписи значков. Для таблицы — с номером места, для «борьбы» групп — общие.
+function mvText(k,info,letter,grouped){
+  var at=info&&info.place?'#'+info.place:'',to=info&&info.to?mvDiv(info.to):'';
+  if(L){
+    if(k==='up')return info&&info.to==='PRIME'?(at||'#1')+' регулярки → Prime':'Автоматическое повышение — '+(grouped?'общий #1':(at||'#1')+' регулярки');
+    if(k==='po_up')return 'Стыковой матч за повышение — '+(grouped?'общий #2':(at||'#2')+' регулярки');
+    if(k==='po_down')return 'Стыковой матч за сохранение — '+(grouped?'второй с конца':(at||'#7')+' регулярки');
+    if(k==='down')return letter==='PRIME'?(at||'#8')+' Prime → Division A':'Автоматический вылет'+(to?' в '+to:'')+' — '+(grouped?'худший результат':(at||'#8')+' регулярки');
+    if(k==='opt')return 'Право на переход в '+to+' — по желанию';
+  }else{
+    if(k==='up')return info&&info.to==='PRIME'?'Regular season '+(at||'#1')+' → Prime':'Automatic Promotion — '+(grouped?'overall #1':'regular season '+(at||'#1'));
+    if(k==='po_up')return 'Promotion Playoff — '+(grouped?'overall #2':'regular season '+(at||'#2'));
+    if(k==='po_down')return 'Relegation Playoff — '+(grouped?'second from bottom':'regular season '+(at||'#7'));
+    if(k==='down')return letter==='PRIME'?'Prime '+(at||'#8')+' → Division A':'Automatic Relegation'+(to?' to '+to:'')+' — '+(grouped?'lowest result':'regular season '+(at||'#8'));
+    if(k==='opt')return 'Option to move up to '+to+' — player’s choice';
+  }
+  return '';
+}
+function mvLegend(mv,seen,withStay){
+  var items=['<div><span class="zn"></span><span>'+esc(L?'зона плей-офф (1–4)':'playoff zone (1–4)')+'</span></div>'];
+  if(withStay){
+    ['up','opt','po_up','po_down','down'].forEach(function(k){if(seen[k])items.push('<div>'+mvGlyph({k:k}).replace('<span','<i').replace('</span>','</i>')+'<span>'+esc(mvText(k,seen[k],mv.letter,false))+'</span></div>')});
+    items.push('<div><i class="mvk st">—</i><span>'+esc(L?'Остальные места остаются в дивизионе':'Other places stay in the division')+'</span></div>');
+  }
+  return '<div class="legend2">'+items.join('')+'</div>';
+}
+function signed(n){n=Number(n)||0;return (n>0?'+':'')+n}
+// «Борьба за повышение / сохранение» в дивизионе из двух групп: первые (или
+// последние) 4 места обеих групп в общем порядке, с подробной статистикой.
+function raceBlock(mv,list,kind){
+  if(!list||!list.length)return '';
+  var seen={};
+  var rows=list.map(function(r,i){
+    var m=r.mark?{k:r.mark,to:r.to}:null;if(m)seen[m.k]=seen[m.k]||{to:m.to};
+    var cls=m?(m.k==='up'||m.k==='opt'?' m-up':m.k==='down'?' m-dn':' m-pl'):'';
+    return '<div class="rrow'+cls+'" onclick="openPlayerByName(\''+q(r.name)+'\',\'div\')"><span class="p">'+(i+1)+'</span>'
+      +'<span class="n">'+avL({name:r.name,photo:r.photo})+'<span class="nm"><em>'+esc(r.name)+'</em><small>'+esc((L?'Гр. ':'Gr. ')+r.group+' · #'+r.place)+'</small></span></span>'
+      +'<span>'+r.matches+'</span><span>'+r.wins+'</span><span class="pt">'+r.points+'</span>'
+      +'<span>'+signed(r.setDiff)+'</span><span>'+signed(r.gameDiff)+'</span><span class="mk">'+mvGlyph(m)+'</span></div>';
+  }).join('');
+  var title=kind==='top'?(L?'Борьба за повышение':'Promotion race'):(L?'Борьба за сохранение':'Relegation race');
+  var legend=['up','opt','po_up','po_down','down'].filter(function(k){return seen[k]}).map(function(k){return '<div>'+mvGlyph({k:k}).replace('<span','<i').replace('</span>','</i>')+'<span>'+esc(mvText(k,seen[k],mv.letter,true))+'</span></div>'}).join('');
+  var note=kind==='top'
+    ?(L?'Сравниваются первые 4 места обеих групп: очки → победы → разница сетов → разница геймов → выигранные сеты.':'Places 1–4 of both groups are compared: points → wins → set difference → game difference → sets won.')
+    :(L?'Сравниваются последние 4 места обеих групп по тем же критериям.':'The bottom 4 places of both groups are compared by the same criteria.');
+  return '<div class="lab mvlab">'+esc(title)+'<span class="dot"></span>'+esc(mvDiv(mv.letter))+'</div>'
+    +'<div class="panel"><div class="rrow hd"><span>#</span><span class="n">'+esc(X.colPlayer)+'</span><span>'+esc(X.colM)+'</span><span>'+esc(X.colW)+'</span><span>'+esc(X.colPts)+'</span><span>±'+(L?'С':'S')+'</span><span>±'+(L?'Г':'G')+'</span><span></span></div>'+rows+'</div>'
+    +(legend?'<div class="legend2">'+legend+'</div>':'')+'<div class="rnote">'+esc(note)+'</div>';
+}
+// Стыковой матч: предварительно (по текущим таблицам), утверждён, назначен, сыгран.
+function duelCard(x){
+  var tag=x.preview?(L?'предварительно':'provisional'):x.winner?(x.wo?'W/O':(L?'сыгран':'played')):x.date?((L?'назначен ':'scheduled ')+matchDate(x.date)+(x.time?' '+x.time:'')):(L?'пара утверждена':'pair confirmed');
+  var side=function(name,photo,label,label_en){
+    var win=x.winner&&mvKey(x.winner)===mvKey(name);
+    return '<div class="sd'+(win?' win':'')+'" onclick="openPlayerByName(\''+q(name)+'\',\'div\')">'+avL({name:name,photo:photo})+'<b>'+esc(name)+'</b><span>'+esc(L?label:(label_en||label))+'</span></div>';
+  };
+  var mid=x.winner&&!x.wo&&x.score?'<b>'+esc(x.score)+'</b>':'VS';
+  var note;
+  if(x.winner){
+    var up=mvKey(x.winner)===mvKey(x.upper_player)?x.upper_player:x.lower_player,down=up===x.upper_player?x.lower_player:x.upper_player;
+    note=L?'<span class="up">↑</span> <b>'+esc(up)+'</b> — '+esc(mvDiv(x.upper))+'<br><span class="dn">↓</span> '+esc(down)+' — '+esc(mvDiv(x.lower))
+          :'<span class="up">↑</span> <b>'+esc(up)+'</b> — '+esc(mvDiv(x.upper))+'<br><span class="dn">↓</span> '+esc(down)+' — '+esc(mvDiv(x.lower));
+  }else{
+    note=L?'Победитель → <b>'+esc(mvDiv(x.upper))+'</b> в следующем сезоне<br>Проигравший → <b>'+esc(mvDiv(x.lower))+'</b>'
+          :'Winner → <b>'+esc(mvDiv(x.upper))+'</b> next season<br>Loser → <b>'+esc(mvDiv(x.lower))+'</b>';
+  }
+  return '<div class="duel"><div class="dh"><span>'+esc(L?'Стыковой матч':'Promotion playoff')+'</span><span class="tag">'+esc(tag)+'</span></div>'
+    +'<div class="vs">'+side(x.upper_player,x.upper_photo,mvDiv(x.upper)+' · '+x.upper_label,mvDiv(x.upper)+' · '+x.upper_label_en)
+    +'<div class="x">'+mid+'</div>'
+    +side(x.lower_player,x.lower_photo,mvDiv(x.lower)+' · '+x.lower_label,mvDiv(x.lower)+' · '+x.lower_label_en)+'</div>'
+    +'<div class="dnote">'+note+'</div></div>';
+}
+function duelsBlock(mv){
+  var list=(mv&&mv.duels)||[];
+  if(!list.length)return '';
+  return '<div class="lab mvlab">'+esc(L?(list.length>1?'Стыковые матчи':'Стыковой матч'):(list.length>1?'Promotion playoffs':'Promotion playoff'))+'<span class="dot"></span>'+esc(mvDiv(mv.letter))+'</div>'+list.map(duelCard).join('');
+}
+// Раздел правил «Переходы между дивизионами»: общее + особенности дивизиона.
+var MV_FEAT={
+  ru:{prime:'<b>Prime ↔ Division A.</b> #8 Prime переходит в Division A, #1 Division A — в Prime. Стыковых матчей между Prime и A нет.',
+      a_prime:'<b>Division A ↔ Prime.</b> #1 переходит в Prime. Стыкового матча за место в Prime нет.',
+      groups:'<b>Две группы.</b> У каждой группы своя таблица. Места для перехода определяются сравнением лидеров (и замыкающих) обеих групп по стандартным критериям.',
+      lowest:'<b>Нижний дивизион.</b> Вылета нет.',
+      forms_D:'<b>Division D</b> собирается заново к каждому сезону: худший результат дивизиона переходит в D.',
+      women:'<b>Женский дивизион.</b> Победительница общего зачёта может по желанию перейти в Division C. Стыковых матчей и вылета нет.'},
+  en:{prime:'<b>Prime ↔ Division A.</b> Prime #8 moves to Division A, Division A #1 moves to Prime. No promotion playoff between Prime and A.',
+      a_prime:'<b>Division A ↔ Prime.</b> #1 moves up to Prime. There is no promotion playoff for a Prime place.',
+      groups:'<b>Two groups.</b> Each group keeps its own table. Movement positions are determined by comparing the leading (and trailing) players from both groups using the standard ranking criteria.',
+      lowest:'<b>Lowest division.</b> No relegation.',
+      forms_D:'<b>Division D</b> is formed anew every season: the lowest result of the division moves to D.',
+      women:'<b>Women’s division.</b> The overall #1 may move up to Division C if she chooses. No promotion playoff or relegation.'}
+};
+function mvRules(mv){
+  var f=L?MV_FEAT.ru:MV_FEAT.en;
+  var h=L
+    ?'<h4>Переходы между дивизионами</h4><p>Переходы определяет регулярный сезон. Плей-офф определяет чемпиона дивизиона и награды плей-офф.</p>'
+      +'<ul><li><b>↑ #1</b> — автоматическое повышение.</li><li><b>↕ #2</b> — стыковой матч за повышение с #7 дивизиона выше.</li>'
+      +'<li><b>↕ #7</b> — стыковой матч за сохранение с #2 дивизиона ниже. Победитель играет в дивизионе выше, проигравший — в дивизионе ниже.</li>'
+      +'<li><b>↓ #8</b> — автоматический вылет.</li><li>Места 3–6 остаются в дивизионе.</li></ul>'
+      +'<p>Организатор может выдать wildcard на повышение в исключительных случаях. Wildcard не действует для перехода в Prime.</p>'
+    :'<h4>Division movement</h4><p>Division movement is determined by regular-season results. The playoff determines the Division Champion and playoff rewards.</p>'
+      +'<ul><li><b>↑ #1</b> — automatic promotion.</li><li><b>↕ #2</b> — promotion playoff against #7 of the division above.</li>'
+      +'<li><b>↕ #7</b> — relegation playoff against #2 of the division below. The winner plays in the higher division, the loser in the lower one.</li>'
+      +'<li><b>↓ #8</b> — automatic relegation.</li><li>Places 3–6 stay in the division.</li></ul>'
+      +'<p>The organizer may grant a promotion wildcard in exceptional cases. Wildcards do not apply to promotion into Prime.</p>';
+  (mv.notes||[]).forEach(function(n){if(f[n])h+='<div class="feat">'+f[n]+'</div>'});
+  return h;
+}
+// Новые правила дивизиона: «Места в таблице» без старой схемы переходов,
+// раздел «Переходы» — сразу после него.
+function rulesDivMv(mv){
+  var base=rulesDiv(),a=base.indexOf(L?'<h4>Места в таблице</h4>':'<h4>Table positions</h4>'),b=base.indexOf(L?'<h4>Тай-брейки</h4>':'<h4>Tie-breaks</h4>');
+  var places=L?'<h4>Места в таблице</h4><ul><li>Места 1–4 выходят в плей-офф.</li><li>За итоговое место начисляются очки годовой гонки (YRP).</li></ul>'
+              :'<h4>Table positions</h4><ul><li>Places 1-4 qualify for the playoffs.</li><li>Players also receive YRP points based on their final position.</li></ul>';
+  if(a<0||b<0)return base+mvRules(mv);
+  return base.slice(0,a)+places+mvRules(mv)+base.slice(b);
+}
+function bigSpoiler(html){
+  return '<details class="spo big"><summary><span class="ic">i</span><span>'+esc(L?'Как работают переходы и плей-офф':'How movement and the playoff work')+'</span><span class="ar">▼</span></summary><div class="in">'+html+'</div></details>';
 }
 // Пометка над сеткой: предварительная (по текущей таблице) или когда финалы.
 function poNote(po){
@@ -3541,13 +3743,13 @@ function renderAbout(){
   var rules=L?[
     'Победа — <b>3</b> очка, поражение — <b>1</b>.',
     'При равенстве: очки → разница сетов → разница геймов → выигранные сеты.',
-    'Места <b>1–2</b> — повышение, <b>1–4</b> — плей-офф, <b>5–6</b> остаются, <b>7–8</b> — вылет.',
+    'Места <b>1–4</b> — плей-офф. Переходы решает регулярка: <b>#1</b> — вверх, <b>#2</b> и <b>#7</b> — стыковые матчи, <b>#8</b> — вниз.',
     'Тай-брейк в сете показан в счёте. Чемпионский тай-брейк считается сетом, но не влияет на разницу геймов.',
     'Техническое поражение: сопернику 3 очка, сеты и геймы не начисляются.'
   ]:[
     'A win is <b>3</b> points, a loss is <b>1</b>.',
     'Ties: points → set difference → game difference → sets won.',
-    'Places <b>1–2</b> promote, <b>1–4</b> reach the playoff, <b>5–6</b> stay, <b>7–8</b> relegate.',
+    'Places <b>1–4</b> reach the playoff. Movement follows the regular season: <b>#1</b> moves up, <b>#2</b> and <b>#7</b> play promotion playoffs, <b>#8</b> moves down.',
     'Set tie-breaks show in the score. A match tie-break counts as a set but not towards game difference.',
     'A walkover gives the opponent 3 points; no sets or games are added.'
   ];

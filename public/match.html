@@ -793,7 +793,7 @@ function poReplacedNote(j){return (L?'✅ Заменено, игроки пол�
 function poSay(t){if(tg&&tg.showAlert)tg.showAlert(t);else alert(t)}
 function poAsk(t,go){if(tg&&tg.showConfirm)tg.showConfirm(t,function(ok){if(ok)go()});else if(confirm(t))go()}
 var PO_STAGE={QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final'};
-function poStage(st){return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final'})[st]||st}
+function poStage(st){return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final',Promotion:L?'Стыковой матч':'Promotion playoff'})[st]||st}
 function poSeed(s){var m=String(s||'').match(/^(\d+)·(.+)$/);if(m)return m[1]+(L?' гр.'+m[2]:' gr.'+m[2]);return String(s||'')}
 function poPh(d,slot,side){var t=(d.template||[]).filter(function(x){return x.slot===slot})[0];if(!t||!t.from)return '—';var f=t.from[side];return (f[1]==='W'?(L?'Победитель ':'Winner '):(L?'Проигравший ':'Loser '))+f[0]}
 function poDivision(){return (poState&&poState.divisions||[]).filter(function(d){return d.letter===poDiv})[0]||null}
@@ -1758,7 +1758,7 @@ function renderNew(){
     return '<div class="chip'+(selCourts.indexOf(c.name)>=0?' on':'')+'" onclick="toggleCourt(\''+esc(c.name).replace(/'/g,"\\'")+'\')">'+esc(c.name)+'</div>';
   }).join('')||'<div class="hint">'+esc(X.courtAny)+'</div>';
   var oppList=opponents.length
-    ? opponents.slice().sort(function(a,b){return (b.playoff?1:0)-(a.playoff?1:0)}).map(function(o){return '<div class="opp'+(String(o.telegram_id)===String(selOpp)?' sel':'')+'" onclick="pickOpp(\''+esc(o.telegram_id)+'\')">'+avatar(o)+'<div><div class="who">'+esc(o.name)+'</div><div class="meta">'+(o.playoff?'<span class="stg">🏆 '+esc(L?'Соперник в плей-офф':'Playoff opponent')+'</span> ':'')+(o.rating?'NTRP '+esc(o.rating):'')+'</div></div></div>'}).join('')
+    ? opponents.slice().sort(function(a,b){return (b.playoff||b.promotion?1:0)-(a.playoff||a.promotion?1:0)}).map(function(o){return '<div class="opp'+(String(o.telegram_id)===String(selOpp)?' sel':'')+'" onclick="pickOpp(\''+esc(o.telegram_id)+'\')">'+avatar(o)+'<div><div class="who">'+esc(o.name)+'</div><div class="meta">'+(o.playoff?'<span class="stg">🏆 '+esc(L?'Соперник в плей-офф':'Playoff opponent')+'</span> ':'')+(o.promotion?'<span class="stg">↕ '+esc(L?'Стыковой матч':'Promotion playoff')+(o.division?' · '+esc(o.division==='PRIME'?'Prime':'Division '+o.division):'')+'</span> ':'')+(o.rating?'NTRP '+esc(o.rating):'')+'</div></div></div>'}).join('')
     : '<div class="hint">'+esc(X.noOpp)+'</div>';
 
   // Возврат к списку вызовов: «Создать» больше не вкладка, уйти отсюда иначе некуда.
