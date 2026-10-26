@@ -545,8 +545,12 @@ export async function warnMissedIssues(now = Date.now(), adminChatId = '', { tab
     const last = txt(await getSetting(def.marker).catch(() => ''));
     if (last && last >= day) continue;
     const warnKey = `pub_missed_${kind}`;
-    if (txt(await getSetting(warnKey).catch(() => '')) === day) continue;
+    const warned = txt(await getSetting(warnKey).catch(() => ''));
+    if (warned === day) continue;
     await setSetting(warnKey, day, `Предупреждение о пропущенном выпуске отправлено: ${def.title}`).catch(() => {});
+    // Первый запуск после обновления: старые пропуски уже собраны руками —
+    // запоминаем их молча, кнопки придут только на новые пропуски.
+    if (!warned) continue;
     const target = await instagramTarget(adminChatId).catch(() => ({ chatId: adminChatId }));
     if (!target.chatId) continue;
     await sendMessage(target.chatId, `⏰ <b>Пропущен выпуск: ${esc(def.title)}</b> за ${esc(day)} — в окно выпуска бот не успел его собрать.`,
