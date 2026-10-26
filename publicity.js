@@ -147,11 +147,30 @@ export function localParts(now = Date.now(), timeZone = TIMEZONE) {
   const get = t => p.find(x => x.type === t)?.value || '';
   return { weekday: get('weekday'), hour: Number(get('hour')), minute: Number(get('minute')) };
 }
-// Воскресенье, 19:00 по местному времени. Проверяем раз в пятнадцать минут,
-// поэтому попадание в час, а не в минуту; повтор отсекается отметкой в Settings.
+// Окно выпуска: с 19:00 своего дня недели до 12:00 следующего дня. Раньше
+// выпуск жил только в часе 19:00–19:59 и пропадал, если сервер в этот час
+// лежал или был занят. Возвращает дату выпуска (день по расписанию) или ''.
+const NEXT_DAY = { Sun: 'Mon', Mon: 'Tue', Tue: 'Wed', Wed: 'Thu', Thu: 'Fri', Fri: 'Sat', Sat: 'Sun' };
+export function issueWindow(now = Date.now(), weekday = 'Sun', timeZone = TIMEZONE) {
+  const { weekday: wd, hour } = localParts(now, timeZone);
+  if (wd === weekday && hour >= 19) return dayKey(now, timeZone);
+  if (wd === NEXT_DAY[weekday] && hour < 12) return dayKey(now - 24 * 3600 * 1000, timeZone);
+  return '';
+}
+// Последний день выпуска, окно которого уже закрылось (для «пропущенных»).
+export function lastClosedIssue(now = Date.now(), weekday = 'Sun', timeZone = TIMEZONE) {
+  for (let back = 1; back <= 8; back++) {
+    const t = now - back * 24 * 3600 * 1000;
+    if (localParts(t, timeZone).weekday !== weekday) continue;
+    const day = dayKey(t, timeZone);
+    const closes = Date.parse(`${day}T12:00:00+07:00`) + 24 * 3600 * 1000;
+    if (closes <= now) return day;
+  }
+  return '';
+}
+// Воскресенье, с 19:00 (до 12:00 понедельника).
 export function carouselDue(now = Date.now(), timeZone = TIMEZONE) {
-  const { weekday, hour } = localParts(now, timeZone);
-  return weekday === 'Sun' && hour === 19;
+  return Boolean(issueWindow(now, 'Sun', timeZone));
 }
 
 // Какой отрезок собираем. По умолчанию последние семь дней, но подборку можно
@@ -402,8 +421,7 @@ export function photosCaption(matches = [], span = Date.now(), handles = []) {
 // Четверг, 19:00. Отдельный день от карточек нарочно: две подборки в один
 // вечер читаются как спам.
 export function photosDue(now = Date.now(), timeZone = TIMEZONE) {
-  const { weekday, hour } = localParts(now, timeZone);
-  return weekday === 'Thu' && hour === 19;
+  return Boolean(issueWindow(now, 'Thu', timeZone));
 }
 
 // Матчи недели, к которым игрок приложил фото. Фото живёт в Telegram по
@@ -450,38 +468,90 @@ export async function publishWeeklyPhotos(prepared, index = 0) {
   return publishCarousel(post.images, { caption: post.caption, handles: post.handles });
 }
 
-export async function runWeeklyPhotos(now = Date.now(), adminChatId = '', { force = false, range = null } = {}) {
-  if (!force && !photosDue(now)) return { ok: false, reason: 'not_due' };
-  const key = dayKey(now);
-  if (!force) {
-    const last = await getSetting('instagram_photos_last').catch(() => '');
-    if (txt(last) === key) return { ok: false, reason: 'already_done' };
-    await setSetting('instagram_photos_last', key, 'Дата последней подборки фотографий для Instagram');
-  }
-  const target = await instagramTarget(adminChatId);
-  if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
-  const prepared = await buildWeeklyPhotos(now, range);
-  await deliverWeeklyCarousel(prepared, {
-    ...target, canPublish: instagramEnabled(),
-    title: `Фотографии · ${prepared.range.label}`, action: 'igphotos:go',
-    empty: 'За этот отрезок никто не прикладывал фото к результату.'
-  });
-  return { ok: true, prepared, key, target };
+// Еженедельные выпуски. Отметка «сделано» ставится только после доставки: если
+// сборка упала, организатору приходит строка с причиной, и выпуск пробуется
+// снова на следующем проходе (до трёх раз). Пока выпуск собирается, второй
+// проход его не трогает.
+const running = new Set();
+const failures = new Map();
+const PUB_MAX_ATTEMPTS = 3;
+export const PUB_KINDS = {
+  cards: { weekday: 'Sun', marker: 'instagram_weekly_last', title: 'Карточки матчей', command: '/instagram_week' },
+  photos: { weekday: 'Thu', marker: 'instagram_photos_last', title: 'Фото с корта', command: '/instagram_photos' },
+  tables: { weekday: 'Tue', marker: 'standings_weekly_last', title: 'Таблицы дивизионов', command: '/tables' }
+};
+export async function runIssue(kind, now, adminChatId, work, { force = false, issue = '' } = {}) {
+  const def = PUB_KINDS[kind];
+  const key = issue || (force ? dayKey(now) : issueWindow(now, def.weekday));
+  if (!force && !key) return { ok: false, reason: 'not_due' };
+  if (!force && txt(await getSetting(def.marker).catch(() => '')) === key) return { ok: false, reason: 'already_done' };
+  if (running.has(kind)) return { ok: false, reason: 'busy' };
+  running.add(kind);
+  try {
+    const out = await work(key);
+    if (!force && out?.ok !== false) {
+      await setSetting(def.marker, key, `Дата последнего выпуска: ${def.title}`);
+      failures.delete(`${kind}:${key}`);
+    }
+    return { ...out, key };
+  } catch (e) {
+    if (force) throw e;
+    const id = `${kind}:${key}`, n = (failures.get(id) || 0) + 1;
+    failures.set(id, n);
+    const target = await instagramTarget(adminChatId).catch(() => ({ chatId: adminChatId }));
+    const last = n >= PUB_MAX_ATTEMPTS;
+    if (last) await setSetting(def.marker, key, `Дата последнего выпуска: ${def.title} (не собрался)`).catch(() => {});
+    if (target.chatId) await sendMessage(target.chatId, `⚠️ <b>${esc(def.title)}</b> за ${esc(key)} не собрались: ${esc(e.message)}
+`
+      + (last ? `Попыток было ${n} — соберите руками: ${def.command}` : `Попробую ещё раз через 10 минут (попытка ${n} из ${PUB_MAX_ATTEMPTS}).`)).catch(() => {});
+    return { ok: false, reason: 'failed', error: e.message, key };
+  } finally { running.delete(kind); }
+}
+// Сборка «за неделю до дня выпуска» — даже если собираем утром следующего дня.
+const issueAt = key => Date.parse(`${key}T19:00:00+07:00`);
+
+export async function runWeeklyPhotos(now = Date.now(), adminChatId = '', { force = false, range = null, issue = '' } = {}) {
+  return runIssue('photos', now, adminChatId, async key => {
+    const target = await instagramTarget(adminChatId);
+    if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
+    const prepared = await buildWeeklyPhotos(force && !issue ? now : issueAt(key), range);
+    await deliverWeeklyCarousel(prepared, {
+      ...target, canPublish: instagramEnabled(),
+      title: `Фотографии · ${prepared.range.label}`, action: 'igphotos:go',
+      empty: 'За этот отрезок никто не прикладывал фото к результату.'
+    });
+    return { ok: true, prepared, target };
+  }, { force, issue });
 }
 
-// Один раз в неделю: помечаем в Settings, чтобы пятнадцатиминутный проход не
-// собрал карусель четыре раза подряд.
-export async function runWeeklyCarousel(now = Date.now(), adminChatId = '', { force = false, range = null } = {}) {
-  if (!force && !carouselDue(now)) return { ok: false, reason: 'not_due' };
-  const key = dayKey(now);
-  if (!force) {
-    const last = await getSetting('instagram_weekly_last').catch(() => '');
-    if (txt(last) === key) return { ok: false, reason: 'already_done' };
-    await setSetting('instagram_weekly_last', key, 'Дата последней еженедельной подборки для Instagram');
+export async function runWeeklyCarousel(now = Date.now(), adminChatId = '', { force = false, range = null, issue = '' } = {}) {
+  return runIssue('cards', now, adminChatId, async key => {
+    const target = await instagramTarget(adminChatId);
+    if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
+    const prepared = await buildWeeklyCarousel(force && !issue ? now : issueAt(key), range);
+    await deliverWeeklyCarousel(prepared, { ...target, canPublish: instagramEnabled(), title: `Матчи · ${prepared.range.label}` });
+    return { ok: true, prepared, target };
+  }, { force, issue });
+}
+
+// Окно выпуска закрылось, а выпуска не было (сервер лежал весь вечер и утро):
+// организатору — строка с кнопкой «Собрать». Один раз на каждый пропуск.
+export async function warnMissedIssues(now = Date.now(), adminChatId = '', { tablesFrom = '', tablesTo = '' } = {}) {
+  const out = [];
+  for (const [kind, def] of Object.entries(PUB_KINDS)) {
+    const day = lastClosedIssue(now, def.weekday);
+    if (!day) continue;
+    if (kind === 'tables' && ((tablesFrom && day < tablesFrom) || (tablesTo && day > tablesTo))) continue;
+    const last = txt(await getSetting(def.marker).catch(() => ''));
+    if (last && last >= day) continue;
+    const warnKey = `pub_missed_${kind}`;
+    if (txt(await getSetting(warnKey).catch(() => '')) === day) continue;
+    await setSetting(warnKey, day, `Предупреждение о пропущенном выпуске отправлено: ${def.title}`).catch(() => {});
+    const target = await instagramTarget(adminChatId).catch(() => ({ chatId: adminChatId }));
+    if (!target.chatId) continue;
+    await sendMessage(target.chatId, `⏰ <b>Пропущен выпуск: ${esc(def.title)}</b> за ${esc(day)} — в окно выпуска бот не успел его собрать.`,
+      { ...(target.threadId ? { message_thread_id: target.threadId } : {}), reply_markup: { inline_keyboard: [[{ text: '📦 Собрать сейчас', callback_data: `pubrun:${kind}:${day}` }]] } }).catch(() => {});
+    out.push({ kind, day });
   }
-  const target = await instagramTarget(adminChatId);
-  if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
-  const prepared = await buildWeeklyCarousel(now, range);
-  await deliverWeeklyCarousel(prepared, { ...target, canPublish: instagramEnabled(), title: `Матчи · ${prepared.range.label}` });
-  return { ok: true, prepared, key, target };
+  return out;
 }

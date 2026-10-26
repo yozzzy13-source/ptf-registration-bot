@@ -2086,6 +2086,28 @@ export async function handleCallback(q) {
       const r = await handleCallback(data);
       return sendMessage(chatId, r.text, msg?.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
     }
+    // Пропущенный еженедельный выпуск (карточки, фото, таблицы): «Собрать сейчас».
+    if (data.startsWith('pubrun:')) {
+      const [, kind, day] = data.split(':');
+      await answerCallbackQuery(q.id, 'Собираю…').catch(() => {});
+      try {
+        const pub = await import('./publicity.js');
+        const def = pub.PUB_KINDS[kind];
+        if (!def || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return sendMessage(chatId, 'Не понял, какой выпуск собрать.');
+        const at = Date.parse(`${day}T19:00:00+07:00`);
+        if (kind === 'tables') {
+          const { runWeeklyStandings } = await import('./standings.js');
+          const out = await runWeeklyStandings(at, chatId, { force: true, issue: day });
+          if (out.prepared) setTableBatch(out.prepared);
+        } else {
+          const run = kind === 'photos' ? pub.runWeeklyPhotos : pub.runWeeklyCarousel;
+          const out = await run(at, chatId, { force: true, issue: day });
+          if (out.prepared) setWeeklyBatch(kind, out.prepared);
+        }
+        await setSetting(def.marker, day, `Дата последнего выпуска: ${def.title}`).catch(() => {});
+        return null;
+      } catch (e) { return sendMessage(chatId, '⛔ ' + escapeHtml(e.message)); }
+    }
     // Публикация окончательной сетки из сообщения «Регулярка закрыта».
     if (data.startsWith('po_pub:')) {
       const [, letter, season] = data.split(':');

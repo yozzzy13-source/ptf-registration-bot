@@ -2898,6 +2898,30 @@ app.listen(PORT, () => withPriority('low', async () => {
     catch(e) { console.error('stuck nudges failed:',e.message); }
     finally { stuckSweepBusy=false; }
   },5*60*1000).unref?.();
+  // Еженедельные материалы для Instagram — своим таймером раз в 10 минут, не
+  // внутри большого прохода: тот бывает долгим и съедал час выпуска.
+  //   воскресенье 19:00 — карточки матчей, четверг 19:00 — фото с корта,
+  //   вторник 19:00 — таблицы дивизионов (только внутри сезона).
+  // Окно — до 12:00 следующего дня; пропустили окно целиком — кнопка «Собрать».
+  let weeklyBusy = false;
+  setInterval(async () => {
+    if (weeklyBusy) return;
+    weeklyBusy = true;
+    try {
+      const evAdmin = await getAdminChatId().catch(() => '');
+      const { setWeeklyBatch, setTableBatch } = await import('./bot.js');
+      const weekly = await runWeeklyCarousel(Date.now(), evAdmin).catch(e => ({ ok: false, error: e.message }));
+      if (weekly.ok && weekly.prepared?.images?.length) setWeeklyBatch('cards', weekly.prepared);
+      const photos = await runWeeklyPhotos(Date.now(), evAdmin).catch(e => ({ ok: false, error: e.message }));
+      if (photos.ok && photos.prepared?.images?.length) setWeeklyBatch('photos', photos.prepared);
+      const { runWeeklyStandings, WEEKLY_FROM, SEASON_END } = await import('./standings.js');
+      const tables = await runWeeklyStandings(Date.now(), evAdmin).catch(e => ({ ok: false, error: e.message }));
+      if (tables.ok && tables.prepared?.items?.length) setTableBatch(tables.prepared);
+      const { warnMissedIssues } = await import('./publicity.js');
+      await warnMissedIssues(Date.now(), evAdmin, { tablesFrom: WEEKLY_FROM, tablesTo: SEASON_END });
+    } catch (e) { console.error('weekly instagram failed:', e.message); }
+    finally { weeklyBusy = false; }
+  }, 10 * 60 * 1000).unref?.();
   let resultSweepBusy = false;
   setInterval(async () => {
     if (resultSweepBusy) return;
@@ -2944,26 +2968,6 @@ app.listen(PORT, () => withPriority('low', async () => {
       const { getAdminChatId } = await import('./admin.js');
       const evAdmin = await getAdminChatId().catch(() => '');
       await runWaitlistOffers(Date.now(), evAdmin).catch(e => console.error('waitlist offers failed:', e.message));
-      // Воскресенье, 19:00 — собираем подборку недели и складываем её туда,
-      // куда привязана тема командой /instagram_here. Публикация в ленту без
-      // человека не происходит: кнопка появляется только когда Instagram
-      // подключён.
-      try {
-        const { setWeeklyBatch } = await import('./bot.js');
-        const weekly = await runWeeklyCarousel(Date.now(), evAdmin);
-        if (weekly.ok && weekly.prepared?.images?.length) setWeeklyBatch('cards', weekly.prepared);
-        // Четверг, 19:00 — фотографии с корта. Отдельный день от карточек:
-        // две подборки в один вечер читаются как спам.
-        const photos = await runWeeklyPhotos(Date.now(), evAdmin);
-        if (photos.ok && photos.prepared?.images?.length) setWeeklyBatch('photos', photos.prepared);
-        // Вторник, 19:00 — таблицы дивизионов, по картинке на группу. Первый
-        // автоматический выпуск 6 октября, после 8 ноября сезон закончился и
-        // выпуски прекращаются сами.
-        const { runWeeklyStandings } = await import('./standings.js');
-        const { setTableBatch } = await import('./bot.js');
-        const tables = await runWeeklyStandings(Date.now(), evAdmin);
-        if (tables.ok && tables.prepared?.items?.length) setTableBatch(tables.prepared);
-      } catch (e) { console.error('weekly carousel failed:', e.message); }
     } catch (e) {
       console.error('match sweep failed:', e.message);
     } finally { resultSweepBusy = false; }

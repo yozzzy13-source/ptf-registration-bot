@@ -214,9 +214,21 @@ function scoreLines(score = '') {
   }
   return out.length ? out.slice(0, 4) : ['—'];
 }
+// Строка сета: сам счёт, тай-брейк в скобках и пометка (RET, W/O) — пометка
+// и тай-брейк рисуются отдельной маленькой строкой под счётом, иначе «6:1 RET»
+// крупным кеглем залезает на портреты.
+const TAG_RE = /\s+(RET|W\.?O\.?|DEF|WO)$/i;
+function lineParts(line = '') {
+  let rest = txt(line), tag = '';
+  const t = rest.match(TAG_RE);
+  if (t) { tag = t[1].toUpperCase(); rest = rest.slice(0, t.index).trim(); }
+  const tie = rest.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
+  const sub = [tie ? `(${tie[2]})` : '', tag].filter(Boolean).join(' · ');
+  return { main: tie ? tie[1] : rest, sub };
+}
 // Подбираем кегль так, чтобы самая длинная строка влезла в просвет.
 function scoreSize(lines, room = 330) {
-  const longest = lines.reduce((n, l) => Math.max(n, l.replace(/\s*\([^)]*\)/g, '').length), 1);
+  const longest = lines.reduce((n, l) => Math.max(n, lineParts(l).main.length), 1);
   const byRows = [92, 92, 76, 64, 54][lines.length] || 54;
   return Math.max(34, Math.min(byRows, Math.floor(room / (longest * 0.62))));
 }
@@ -476,22 +488,7 @@ export async function renderInstagramMatchCard(match = {}) {
   const first = Math.round(scoreCenter + fs * 0.34 - (lines.length - 1) * step / 2);
   // Тайбрейк — маленькой строкой под счётом сета, по центру: справа от счёта
   // ему не хватает места, длинный «(10:8)» уезжал под портрет.
-  const scoreSvg = (() => {
-    const tbGap = Math.round(fs * 0.5); // лишняя высота под строку тайбрейка
-    const extra = lines.filter(l => /\(\d+:\d+\)$/.test(l)).length * tbGap;
-    let y = Math.round(scoreCenter + fs * 0.34 - ((lines.length - 1) * step + extra) / 2);
-    return lines.map(line => {
-      const tie = line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
-      const main = tie ? tie[1] : line;
-      const out = `<text x="${IW / 2}" y="${y}" text-anchor="middle" font-family="${FONT}"
-        font-size="${fs}" font-weight="800" fill="${C.amber}" letter-spacing="1">${esc(main)}</text>`
-        + (tie ? `<text x="${IW / 2}" y="${y + Math.round(fs * 0.42)}" text-anchor="middle"
-        font-family="${FONT}" font-size="${Math.max(22, Math.round(fs * 0.38))}" font-weight="800"
-        fill="${C.amber}" fill-opacity="0.85" letter-spacing="1">(${esc(tie[2])})</text>` : '');
-      y += step + (tie ? tbGap : 0);
-      return out;
-    }).join('');
-  })();
+  const scoreSvg = scoreBlockSvg(m.score, IW / 2, scoreCenter, C.amber, fs);
   const rank = (meta, cx) => {
     if (!meta) return '';
     const pos = meta.position || {};
@@ -682,19 +679,20 @@ export function forgetPhotoCache() { photoCache.clear(); }
 //  • золотые ленты сверху и снизу, тёплое золотое свечение за счётом;
 //  • вместо «места в дивизионе» — итог стадии: «TO THE FINAL» / «SEMIFINALIST»;
 //  • в финале — кубок и «CHAMPION», победитель подсвечен сильнее.
-function scoreBlockSvg(score, cx, cy, color = C.amber) {
+// Счёт столбиком: крупно — сет, мелко под ним — тай-брейк и пометка RET / W/O.
+function scoreBlockSvg(score, cx, cy, color = C.amber, size = 0) {
   const lines = scoreLines(score);
-  const fs = Math.min(68, Math.max(38, scoreSize(lines, 300)));
+  const fs = size || Math.min(68, Math.max(38, scoreSize(lines, 300)));
   const step = Math.round(fs * 1.16), tbGap = Math.round(fs * 0.5);
-  const extra = lines.filter(l => /\(\d+:\d+\)$/.test(l)).length * tbGap;
+  const parts = lines.map(lineParts);
+  const extra = parts.filter(p => p.sub).length * tbGap;
   let y = Math.round(cy + fs * 0.34 - ((lines.length - 1) * step + extra) / 2);
-  return lines.map(line => {
-    const tie = line.match(/^(\d+:\d+)\s*\((\d+:\d+)\)$/);
+  return parts.map(p => {
     const out = `<text x="${cx}" y="${y}" text-anchor="middle" font-family="${FONT}" font-size="${fs}"
-      font-weight="800" fill="${color}" letter-spacing="1">${esc(tie ? tie[1] : line)}</text>`
-      + (tie ? `<text x="${cx}" y="${y + Math.round(fs * 0.42)}" text-anchor="middle" font-family="${FONT}"
-      font-size="${Math.max(22, Math.round(fs * 0.38))}" font-weight="800" fill="${color}" fill-opacity="0.85">(${esc(tie[2])})</text>` : '');
-    y += step + (tie ? tbGap : 0);
+      font-weight="800" fill="${color}" letter-spacing="1">${esc(p.main)}</text>`
+      + (p.sub ? `<text x="${cx}" y="${y + Math.round(fs * 0.42)}" text-anchor="middle" font-family="${FONT}"
+      font-size="${Math.max(22, Math.round(fs * 0.38))}" font-weight="800" fill="${color}" fill-opacity="0.85" letter-spacing="1">${esc(p.sub)}</text>` : '');
+    y += step + (p.sub ? tbGap : 0);
     return out;
   }).join('');
 }

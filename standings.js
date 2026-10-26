@@ -623,28 +623,37 @@ export async function publishStandingsStory(item) {
 
 // Вторник, 19:00, но только внутри сезона и только начиная с WEEKLY_FROM:
 // раньше этой даты выпуски делаются руками, позже SEASON_END не делаются вовсе.
+// Окно — с 19:00 вторника до 12:00 среды (если сервер был занят или лежал).
+// Возвращает дату выпуска (вторник) или ''.
+export async function standingsIssue(now = Date.now()) {
+  const { issueWindow } = await import('./publicity.js');
+  const day = issueWindow(now, 'Tue');
+  return day && day >= WEEKLY_FROM && day <= SEASON_END ? day : '';
+}
 export function standingsDue(now = Date.now(), timeZone = TIMEZONE) {
   const p = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', hour12: false }).formatToParts(new Date(now));
   const weekday = p.find(x => x.type === 'weekday')?.value || '';
   const hour = Number(p.find(x => x.type === 'hour')?.value || -1);
-  const day = dayIn(now);
-  return weekday === 'Tue' && hour === 19 && day >= WEEKLY_FROM && day <= SEASON_END;
+  const day = dayIn(now), yesterday = dayIn(now - 24 * 3600 * 1000);
+  if (weekday === 'Tue' && hour >= 19) return day >= WEEKLY_FROM && day <= SEASON_END;
+  if (weekday === 'Wed' && hour < 12) return yesterday >= WEEKLY_FROM && yesterday <= SEASON_END;
+  return false;
 }
 
 // force — ручной прогон командой: расписание и отметку «уже делали» не смотрим.
 // save=false — черновой прогон: картинки будут, но точка отсчёта не сдвинется.
-export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { force = false, only = '', save = true, season = '', captionsOnly = false } = {}) {
+export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { force = false, only = '', save = true, season = '', captionsOnly = false, issue: wanted = '' } = {}) {
   if (captionsOnly) save = false;   // только тексты — снимок мест не трогаем
   if (!force && !standingsDue(now)) return { ok: false, reason: 'not_due' };
-  const issue = issueLabel(now);
-  if (!force) {
-    const last = await getSetting('standings_weekly_last').catch(() => '');
-    if (txt(last) === issue) return { ok: false, reason: 'already_done' };
-    await setSetting('standings_weekly_last', issue, 'Дата последнего выпуска таблиц дивизионов');
-  }
-  const { instagramTarget } = await import('./publicity.js');
+  const day = wanted || (force ? issueLabel(now) : await standingsIssue(now));
+  if (!force && !day) return { ok: false, reason: 'not_due' };
+  // Отметка «сделано» — только после доставки; сбой — строка организатору и повтор.
+  const { runIssue, instagramTarget } = await import('./publicity.js');
+  return runIssue('tables', now, adminChatId, async issue => {
   const target = await instagramTarget(adminChatId);
   if (!target.chatId) return { ok: false, reason: 'no_admin_chat' };
+  // Выпуск, собираемый утром среды, — на вечер вторника.
+  if (!force || wanted) now = Date.parse(`${issue}T19:00:00+07:00`);
   const prepared = await buildStandingsStories(season, { now, only, captionsOnly });
   await deliverStandings(prepared, { ...target, canPublish: instagramEnabled(), captionsOnly });
   // Снимок кладём ПОСЛЕ отправки: если что-то упало по дороге, точка отсчёта
@@ -655,4 +664,5 @@ export async function runWeeklyStandings(now = Date.now(), adminChatId = '', { f
       .catch(e => console.error('standings snapshot failed:', e.message));
   }
   return { ok: true, prepared, issue, target, saved: save };
+  }, { force, issue: day });
 }
