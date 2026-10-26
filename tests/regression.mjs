@@ -1462,7 +1462,9 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  const at=iso=>Date.parse(iso);
  check(pub.carouselDue(at('2099-01-04T12:00:00Z')),'Воскресенье 19:00 по Пхукету — время карусели');
  check(!pub.carouselDue(at('2099-01-04T09:00:00Z')),'В воскресенье утром карусель не собирается');
- check(!pub.carouselDue(at('2099-01-05T12:00:00Z')),'В понедельник карусель не собирается');
+ check(!pub.carouselDue(at('2099-01-05T12:00:00Z')),'В понедельник вечером карусель не собирается');
+ check(pub.carouselDue(at('2099-01-05T03:00:00Z'))&&pub.issueWindow(at('2099-01-05T03:00:00Z'),'Sun')==='2099-01-04','Сервер был занят в воскресенье вечером — карусель за воскресенье соберётся утром понедельника (до 12:00)');
+ check(pub.lastClosedIssue(at('2099-01-05T06:00:00Z'),'Sun')==='2099-01-04'&&pub.lastClosedIssue(at('2099-01-05T04:00:00Z'),'Sun')!=='2099-01-04','Пропуск засчитывается только после закрытия окна (понедельник, 12:00)');
 
  // Подпись к посту — короткий обзор недели, а не список счетов.
  const week=[{slot:{from_name:'Alice One',to_name:'Bob Two',division:'Division C'}},
@@ -1615,7 +1617,8 @@ check(partsHtml.includes("season=")&&partsHtml.includes('data.season'),'Стра
  check(st.WEEKLY_FROM==='2026-10-06','Автовыпуски начинаются 6 октября');
  check(st.SEASON_END==='2026-11-08','После 8 ноября автоматика молчит');
  check(st.standingsDue(at('2026-10-06T12:00:00Z')),'Вторник 19:00 по Пхукету — время таблиц');
- check(!st.standingsDue(at('2026-10-07T12:00:00Z')),'В среду выпуск не собирается');
+ check(!st.standingsDue(at('2026-10-07T12:00:00Z')),'В среду вечером выпуск не собирается');
+ check(st.standingsDue(at('2026-10-07T03:00:00Z')),'Таблицы, не собранные во вторник вечером, собираются утром среды');
  check(!st.standingsDue(at('2026-10-06T09:00:00Z')),'Во вторник утром выпуск не собирается');
  check(!st.standingsDue(at('2026-09-29T12:00:00Z')),'До 6 октября автоматических выпусков нет — только руками');
  check(!st.standingsDue(at('2026-11-10T12:00:00Z')),'После конца сезона выпусков нет');
