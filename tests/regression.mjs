@@ -531,6 +531,74 @@ put('crm','Event_Signups',[['signup_id','event_id','telegram_id','status','amoun
 check(!(await flow.payFromDeposit({signupId:'past-signup',telegramId:'1',lang:'en'})).ok,'Past event cannot charge a new deposit payment');
 check(!(await flow.cancelSignup({signupId:'past-signup',telegramId:'1',lang:'en'})).ok,'Past event cannot cancel attendance using an old button');
 
+// Гости на событиях: участие бесплатное, гость платный; имена обязательны;
+// гости в одной строке с участником; добавить/убрать после записи.
+{
+ const base={status:'published',date:'14.09.2099',time:'10:00',signup_deadline:'13.09.2099',audience:'all',guests_allowed:'TRUE'};
+ const row=e=>ev.REGISTRY_HEADERS.map(h=>e[h]??'');
+ put('crm','Event_Registry',[ev.REGISTRY_HEADERS,
+  row({...base,event_id:'gst',title_ru:'Турнир',title_en:'Cup',price_thb:'0',guest_price_thb:'500',max_guests:'2',capacity:'6',refund_hours:'12'}),
+  row({...base,event_id:'gpay',title_ru:'Платный',title_en:'Paid',price_thb:'300',guest_price_thb:'200',max_guests:'2'}),
+  row({...base,event_id:'gdrop',title_ru:'Снятие',title_en:'Drop',price_thb:'0',guest_price_thb:'400',max_guests:'1'}),
+  row({...base,event_id:'gfree',title_ru:'Бесплатно',title_en:'Free',price_thb:'0',guest_price_thb:'',max_guests:'1'})]);
+ put('crm','Event_Signups',[ev.SIGNUP_HEADERS]);
+ put('crm','Transactions',[ev.TX_HEADERS]);put('crm','Balances',[ev.BALANCE_HEADERS]);
+ const gst=await ev.findEvent('gst');
+ check(gst.payment_required&&ev.guestPriceOf(gst)===500&&ev.priceFor(gst,0)===0&&ev.priceFor(gst,2)===1000,'Free entry with paid guest makes the event paid by prices alone');
+ check(!(await ev.findEvent('gfree')).payment_required,'Zero prices keep the event free');
+ check(ev.isPaidByPrices(0,null,true)===false&&ev.isPaidByPrices(0,300,false)===false&&ev.isPaidByPrices(0,300,true),'Guest price only matters when guests are allowed');
+ const card=flow.eventCard(gst,'ru');
+ check(card.includes('бесплатно')&&card.includes('500 ฿'),'Event card shows free entry and the guest price');
+ check(flow.signupKeyboard(gst,'ru').inline_keyboard.flat().some(b=>b.callback_data==='ev_jg:gst'),'Card offers sign-up with guests');
+ const j=await flow.joinEvent({telegramId:'3',name:'Carol Three',lang:'en',eventId:'gst',guestNames:['Anna Smith','Petr Ivanov'],group:'active'});
+ check(j.ok&&j.signup.status==='confirmed'&&j.signup.guests===0&&j.signup.extra_guests===2&&j.signup.extra_amount_thb===1000&&j.needsInvoice,'Free member is confirmed at once, guests wait for a separate invoice');
+ check(await ev.takenSeats('gst')===3,'Unpaid guests hold their places');
+ const inv=await flow.invoiceText(gst,j.signup,'en',0);
+ check(inv.includes('Anna Smith')&&inv.includes('1000 ฿')&&inv.includes('guests'),'Guest invoice names the guests and the amount');
+ check(!(await flow.payFromDeposit({signupId:j.signup.signup_id,telegramId:'4',lang:'en'})).ok,'Another player cannot pay or touch someone else\'s signup');
+ await ev.addTransaction({telegramId:'3',name:'Carol Three',type:'пополнение',amount:1000});
+ const paid=await flow.payFromDeposit({signupId:j.signup.signup_id,telegramId:'3',name:'Carol Three',lang:'en'});
+ let s=(await ev.listSignups('gst'))[0];
+ check(paid.ok&&s.guests===2&&s.extra_guests===0&&s.paid_thb===1000&&s.guest_names==='Anna Smith; Petr Ivanov'&&s.status==='confirmed','Deposit payment moves guests into the lineup');
+ check(flow.whoLine(s,{html:false})==='Carol Three + Anna Smith, Petr Ivanov','Guests are shown in one line with the player');
+ check(!(await flow.addGuests({signupId:s.signup_id,telegramId:'3',names:['Third Guest'],lang:'en'})).ok,'Guest limit per player is enforced');
+ const early=Date.parse('2099-09-01T00:00:00Z');
+ const plan=flow.guestRemovePlan(gst,s,1,early);
+ check(plan.kind==='refund'&&plan.amount===500&&flow.guestRemoveText(gst,plan,'en').includes('500'),'Early guest removal is announced as a deposit refund');
+ check(!(await flow.removeGuest({signupId:s.signup_id,idx:1,count:5,telegramId:'3',lang:'en'})).ok,'Stale guest buttons are rejected');
+ const rm=await flow.removeGuest({signupId:s.signup_id,idx:1,count:2,telegramId:'3',lang:'en',now:early});
+ s=(await ev.listSignups('gst'))[0];
+ check(rm.ok&&s.guests===1&&s.guest_names==='Anna Smith'&&s.paid_thb===500&&await ev.getBalance('3')===500,'Removing a paid guest early refunds the guest price to the deposit');
+ const add=await flow.addGuests({signupId:s.signup_id,telegramId:'3',names:['Olga K'],lang:'en'});
+ s=(await ev.listSignups('gst'))[0];
+ check(add.ok&&add.needsInvoice&&s.extra_guests===1&&s.extra_amount_thb===500&&s.extra_guest_names==='Olga K','A guest added after payment gets its own invoice');
+ const rev=await flow.reviewEventProof({signupId:s.signup_id,approve:true});
+ s=(await ev.listSignups('gst'))[0];
+ check(rev.ok&&s.guests===2&&s.guest_names==='Anna Smith; Olga K'&&s.paid_thb===1000&&s.extra_guests===0,'Confirmed receipt for guests moves them into the lineup');
+ const view=(await flow.eventsForViewer('3',true,false)).find(e=>e.event_id==='gst');
+ check(view.participants[0].guest_list.map(g=>g.name).join(', ')==='Anna Smith, Olga K'&&view.my_guest_list.length===2&&view.guest_room===0,'Participants list carries guest names; no room left for more guests');
+ // Платное участие: один счёт на игрока и гостей, гость дописывается в счёт.
+ const pj=await flow.joinEvent({telegramId:'4',name:'Dan Four',lang:'ru',eventId:'gpay',guestNames:['Ivan'],group:'active'});
+ check(pj.ok&&pj.signup.status==='invoiced'&&pj.signup.amount_thb===500&&pj.signup.guests===1,'Paid entry: one invoice for player and guests');
+ const pa=await flow.addGuests({signupId:pj.signup.signup_id,telegramId:'4',names:['Maria'],lang:'ru'});
+ check(pa.ok&&pa.signup.amount_thb===700&&pa.signup.guests===2&&pa.signup.extra_guests===0&&pa.needsInvoice,'A guest added before payment joins the same invoice');
+ // Конец записи: неоплаченные гости снимаются, игрок остаётся.
+ const dj=await flow.joinEvent({telegramId:'9',name:'Wendy Three',lang:'en',eventId:'gdrop',guestNames:['Late Guest'],group:'active'});
+ check(dj.signup.extra_guests===1,'Drop scenario starts with an unpaid guest');
+ await flow.runEventReminders(Date.parse('2099-09-13T18:00:00Z'));
+ const dropped=(await ev.listSignups('gdrop'))[0];
+ check(dropped.extra_guests===0&&dropped.status==='confirmed'&&/сняты/.test(dropped.note),'Unpaid guests are removed when sign-up closes, the player stays');
+ // Имя гостя спрашиваем в чате; пустое/короткое не принимаем.
+ messages.length=0;
+ await flow.startGuestJoin({chatId:'10',telegramId:'10',lang:'en',eventId:'gfree',group:'active'});
+ check(flow.isAwaitingGuestName('10'),'Bot waits for the guest name');
+ check(await flow.handleGuestNameText({chatId:'10',telegramId:'10',name:'Wendy Four',lang:'en',text:'x',group:'active'})&&flow.isAwaitingGuestName('10'),'Too short guest name is asked again');
+ await flow.handleGuestNameText({chatId:'10',telegramId:'10',name:'Wendy Four',lang:'en',text:'Ivan Petrov',group:'active'});
+ const fr=(await ev.listSignups('gfree')).find(x=>x.telegram_id==='10');
+ check(!flow.isAwaitingGuestName('10')&&fr.status==='confirmed'&&fr.guests===1&&fr.guest_names==='Ivan Petrov','Free event with a named guest confirms both at once');
+ check(messages.some(m=>m.method==='sendMessage'&&/Ivan Petrov/.test(String(m.args[1]))),'Confirmation names the guest');
+}
+
 const links=await load('links.js');
 const two=links.parseTemplate(links.panelBroadcastText({message_ru:'Привет! {matches}',message_en:'Hello! {matches}'}));
 check(links.renderText(two,'en')==='Hello!'&&links.renderText(two,'ru')==='Привет!','Broadcast selects complete text by recipient language');
