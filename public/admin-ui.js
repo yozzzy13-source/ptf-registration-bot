@@ -35,6 +35,7 @@ async function reload(){try{status(AUI("Загружаю…"));const j=await api
     return `<option value="${esc(k)}">${esc(d)}</option>`;
   }).join('');
   initEventPickers();evRenderInvited();evAudienceChanged();
+  if(!evEditing){evCatsSet('Send',['season']);evCatsSet('Join',['season'])}
   renderCodes(j.link_codes||[]);renderTable();status(AUI("Готово"))}catch(e){status(e.message,true)}}
 function renderCodes(list){const html=list.map(c=>`<span onclick="insertCode('${esc(c.code)}')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('');$('codeChips').innerHTML=html;
   const d=$('directCodeChips');if(d)d.innerHTML=list.map(c=>`<span onclick="insertCode('${esc(c.code)}','directText')" title="${esc(c.label)}">${esc(c.label)}</span>`).join('')}
@@ -197,6 +198,10 @@ let evInvited=new Map(),evPickIdx=-1,evPickRows=[];
 function evAudienceChanged(){
   $('evPickWrap').classList.toggle('hidden',$('evAudience').value!=='personal');
 }
+// Галочки категорий: карточка (рассылка) и запись (кто может записаться).
+const EV_CATS=['season','past','waitlist','others'];
+function evCatsGet(kind){return EV_CATS.filter(c=>$('ev'+kind+'_'+c).checked)}
+function evCatsSet(kind,list){EV_CATS.forEach(c=>$('ev'+kind+'_'+c).checked=(list||[]).includes(c))}
 function evRenderInvited(){
   const box=$('evInvited');
   const list=[...evInvited.values()];
@@ -246,6 +251,7 @@ function evForm(){return{
   guests_allowed:$('evGuests').checked,
   max_guests:$('evMaxGuests').value||'',refund_hours:$('evRefund').value||'',
   audience:$('evAudience').value,
+  send_to:evCatsGet('Send'),join_by:evCatsGet('Join'),hidden:$('evHidden').checked,
   audience_division:$('evDivision').value,
   invite_only:$('evInviteOnly').checked,
   invited_ids:[...evInvited.keys()]
@@ -253,7 +259,8 @@ function evForm(){return{
 function newEvent(){
   evEditing='';
   ['evTitleRu','evTitleEn','evDescRu','evDescEn','evDate','evTime','evEndTime','evPlace','evPlaceUrl','evPrice','evGuestPrice','evCapacity','evDeadline','evMaxGuests','evRefund'].forEach(id=>$(id).value='');
-  $('evAudience').value='all';$('evDivision').value='';$('evInviteOnly').checked=false;
+  $('evAudience').value='cat';$('evDivision').value='';$('evInviteOnly').checked=false;$('evHidden').checked=false;
+  evCatsSet('Send',['season']);evCatsSet('Join',['season']);
   evInvited=new Map();evRenderInvited();evAudienceChanged();
   $('evResult').textContent=AUI("Новая карточка");
 }
@@ -285,7 +292,8 @@ function editEvent(id){
   $('evCapacity').value=e.capacity||'';evSetSelect('evDeadline',e.signup_deadline||'');
   $('evMaxGuests').value=e.max_guests||'';$('evRefund').value=e.refund_hours||'';
   $('evGuests').checked=!!e.guests_allowed;
-  $('evAudience').value=e.audience||'all';
+  $('evAudience').value=e.audience==='personal'?'personal':'cat';
+  evCatsSet('Send',e.send_to||[]);evCatsSet('Join',e.join_by||[]);$('evHidden').checked=!!e.hidden;
   $('evDivision').value=e.audience_division||'';
   $('evInviteOnly').checked=!!e.invite_only;
   evInvited=new Map();

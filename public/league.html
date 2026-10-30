@@ -3362,7 +3362,9 @@ function eventCard(e,compact){
   if(e.place)meta.push('<span>📍 '+(e.place_url
     ? '<a class="lnk" href="'+esc(e.place_url)+'" onclick="event.preventDefault();openLink(\''+q(e.place_url)+'\')">'+esc(e.place)+'</a>'
     : esc(e.place))+'</span>');
-  if(e.payment_required)meta.push('<span>💳 '+(Number(e.price_thb)?esc(e.price_thb)+' ฿':esc(X.evFreeMember))
+  // Цена — своя для зрителя: участник сезона платит цену участника, остальные — цену гостя.
+  var own=(e.my_price!==undefined&&e.my_price!==null)?e.my_price:e.price_thb;
+  if(e.payment_required)meta.push('<span>💳 '+(Number(own)?esc(own)+' ฿':esc(e.my_category&&e.my_category!=='season'?X.evFree:X.evFreeMember))
     +(e.guests_allowed?' · '+esc(X.evGuest)+' '+(Number(e.guest_price)?esc(e.guest_price)+' ฿':esc(X.evFree)):'')+'</span>');
   else if(!e.past)meta.push('<span>🎟 '+esc(L?'Бесплатно':'Free')+(e.guests_allowed?' · '+esc(X.evGuestsOk):'')+'</span>');
   if(e.signup_deadline&&!e.past)meta.push('<span>⏳ '+esc(X.evUntil)+' '+esc(dayLabel(e.signup_deadline))+'</span>');
@@ -3419,7 +3421,8 @@ function evPeople(e){
 // оплачен (это видит только организатор).
 function evGuestNames(p){
   var g=p.guest_list||[];
-  if(g.length)return ' <span class="sub">+ '+g.map(function(x){return esc(x.name)+(x.pending?' ⏳':'')}).join(', ')+'</span>';
+  if(g.length)return ' <span class="sub">+ '+g.map(function(x,i){return esc(x.name)+(x.pending?' ⏳':'')
+    +(evAdmin&&p.signup_id?' <span class="rm" title="'+esc(L?'Убрать гостя':'Remove guest')+'" onclick="evDropGuest(\''+q(p.signup_id)+'\','+i+','+g.length+',\''+q(x.name)+'\')">✕</span>':'')}).join(', ')+'</span>';
   return p.guests?' <span class="sub">+'+p.guests+'</span>':'';
 }
 function evPriceHint(e){
@@ -3530,6 +3533,14 @@ function evDrop(sid){
   // поэтому говорим, куда смотреть.
   evPost('/api/league/event-roster',{action:'remove',signup_id:sid},function(j){
     if(j&&j.ok)PTFNotice.info(X.evToTopic);else evSay(j);
+  });
+}
+// Организатор убирает гостя: неоплаченного — сразу, про оплаченного бот спросит в теме игрока.
+function evDropGuest(sid,i,c,name){
+  if(!confirm((L?'Убрать гостя ':'Remove guest ')+name+'?'))return;
+  evPost('/api/league/event-roster',{action:'remove_guest',signup_id:sid,index:i,count:c},function(j){
+    if(j&&j.ok)PTFNotice.show({kind:j.asked?'info':'ok',title:j.asked?(L?'Вопрос в теме игрока':'Question sent to the player topic'):(L?'Гость убран':'Guest removed'),text:j.text});
+    else evSay(j);
   });
 }
 function evAddInput(el,eventId){

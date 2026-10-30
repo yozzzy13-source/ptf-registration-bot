@@ -123,6 +123,13 @@
     }
 
     /* Список получателей и подсказки по имени. */
+    .evcats{margin-top:4px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+    .evcats .h,.evcats .row{display:grid;grid-template-columns:1fr 78px 78px;align-items:center}
+    .evcats .h span{font-size:11px;font-weight:700;color:var(--muted);text-align:center;padding:7px 4px}
+    .evcats .row{border-top:1px solid var(--line);min-height:44px}
+    .evcats .row span:first-child{padding:0 10px;font-size:13px}
+    .evcats .row span:not(:first-child){display:flex;justify-content:center}
+    .evcats input{width:22px;height:22px;margin:0}
     .rcp{border:1px solid var(--line);border-radius:12px;background:#141518;max-height:320px;overflow:auto;margin:6px 0 3px}
     .rcp .r{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;min-height:40px}
     .rcp .r:last-child{border-bottom:0}
@@ -285,17 +292,27 @@
       <div><label>Дата</label><select id="evDate"></select></div>
       <div><label>Время</label><select id="evTime"></select></div><div><label>Окончание (необязательно)</label><input id="evEndTime" type="time"></div>
       <div><label>Запись до</label><select id="evDeadline"></select></div>
-      <div><label>Цена для участника, ฿</label><input id="evPrice" type="number" placeholder="0 = бесплатно"/></div>
-      <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = как у участника"/></div>
+      <div><label>Цена для участников сезона, ฿</label><input id="evPrice" type="number" placeholder="0 = бесплатно"/></div>
+      <div><label>Цена для гостей и остальных, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = как у участника"/></div>
       <div><label>Вместимость</label><input id="evCapacity" type="number" placeholder="16"/></div>
       <div><label>Максимум гостей</label><input id="evMaxGuests" type="number" placeholder="1"/></div>
       <div><label>Возврат, часов до</label><input id="evRefund" type="number" placeholder="12"/></div>
       <div><label>Кому</label><select id="evAudience" onchange="evAudienceChanged()">
-        <option value="all">Всем в боте</option>
-        <option value="active">Только активным игрокам</option>
+        <option value="cat">По категориям</option>
         <option value="personal">Лично выбранным</option>
       </select></div>
       <div><label>Дивизион</label><select id="evDivision"><option value="">Любой</option></select></div>
+    </div>
+    <div id="evCatWrap" style="margin-top:8px">
+      <label>Категории игроков</label>
+      <div class="evcats">
+        <div class="h"><span></span><span>Карточка</span><span>Запись</span></div>
+        <div class="row"><span>Участники текущего сезона</span><span><input type="checkbox" id="evSend_season"></span><span><input type="checkbox" id="evJoin_season"></span></div>
+        <div class="row"><span>Игроки прошлых сезонов</span><span><input type="checkbox" id="evSend_past"></span><span><input type="checkbox" id="evJoin_past"></span></div>
+        <div class="row"><span>Лист ожидания</span><span><input type="checkbox" id="evSend_waitlist"></span><span><input type="checkbox" id="evJoin_waitlist"></span></div>
+        <div class="row"><span>Остальные пользователи бота</span><span><input type="checkbox" id="evSend_others"></span><span><input type="checkbox" id="evJoin_others"></span></div>
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:4px">«Карточка» — кому уйдёт рассылка. «Запись» — кто может записаться и видит событие во вкладке «События». Участники сезона платят «цену для участников», остальные допущенные — «цену для гостей и остальных». Добавил категорию после рассылки — в боте нажми «Дослать», карточка уйдёт только новым.</div>
     </div>
     <div id="evPickWrap" class="hidden" style="margin-top:6px">
       <label>Кого приглашаем</label>
@@ -309,6 +326,7 @@
     <div class="actions" style="margin-top:8px">
       <label><input type="checkbox" id="evGuests"> можно с гостями</label>
       <label><input type="checkbox" id="evInviteOnly"> только по приглашению</label>
+      <label><input type="checkbox" id="evHidden"> скрыть во вкладке «События»</label>
     </div>
     <div class="actions"><button class="btn" onclick="saveEvent()">Сохранить</button><button class="btn secondary" onclick="previewEvent()">Предпросмотр в боте</button><button class="btn secondary" onclick="newEvent()">Новое событие</button></div>
     <div id="evResult" class="muted"></div>
