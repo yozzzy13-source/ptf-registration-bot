@@ -64,16 +64,28 @@ export function calendarButtons(event, lang = 'ru') {
 // Подтверждение участия: календарь и сразу отмена. Без отмены человек, который
 // записался и передумал, остаётся в составе — кнопки у него нигде нет, только в
 // мини-приложении или в напоминании накануне, а это уже поздно.
-export function calendarKeyboard(event, lang = 'ru', signupId = '') {
+// signup — запись целиком (или только её id): по ней видно, есть ли уже гости.
+export function calendarKeyboard(event, lang = 'ru', signup = '') {
   const rows = [];
+  const signupId = typeof signup === 'object' && signup ? signup.signup_id : String(signup || '');
   const row = calendarButtons(event, lang);
   if (row) rows.push(row);
-  // Гости: добавить, убрать, посмотреть — одной кнопкой, дальше меню гостей.
-  if (signupId && event?.guests_allowed && isSignupOpen(event)) {
-    rows.push([{ text: ru(lang) ? '👥 Гости' : '👥 Guests', callback_data: `ev_gm:${signupId}` }]);
-  }
+  if (signupId) rows.push(...guestButtons(event, lang, signup));
   if (signupId) rows.push([{ text: ru(lang) ? '❌ Отменить участие' : '❌ Cancel', callback_data: `ev_cxl:${signupId}` }]);
   return rows.length ? { inline_keyboard: rows } : undefined;
+}
+
+// Кнопки гостей под подтверждением и в напоминаниях: «➕ Добавить гостя» —
+// сразу к вводу имени; «👥 Мои гости (N)» — список, убрать, счёт.
+export function guestButtons(event, lang = 'ru', signup = '') {
+  const L = ru(lang);
+  const signupId = typeof signup === 'object' && signup ? signup.signup_id : String(signup || '');
+  if (!signupId || !event?.guests_allowed || !isSignupOpen(event)) return [];
+  const count = typeof signup === 'object' && signup ? guestListOf(signup).length : 0;
+  const rows = [];
+  if (count < Math.max(1, event.max_guests || 1)) rows.push([{ text: L ? '➕ Добавить гостя' : '➕ Add a guest', callback_data: `ev_ga:${signupId}` }]);
+  if (count > 0) rows.push([{ text: L ? `👥 Мои гости (${count})` : `👥 My guests (${count})`, callback_data: `ev_gm:${signupId}` }]);
+  return rows;
 }
 
 // Способы оплаты в батах из вкладки «Payment Methods». Крипта сюда не попадает:
@@ -408,7 +420,7 @@ export async function joinPrecheck({ telegramId, lang = 'ru', eventId, group = '
   if (existing) {
     return { ok: false,
       message: L ? 'Ты уже записан на это событие.' : 'You are already signed up.',
-      markup: calendarKeyboard(event, lang, existing.signup_id), existing };
+      markup: calendarKeyboard(event, lang, existing), existing };
   }
   return { ok: true, event };
 }
@@ -450,7 +462,7 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guestN
 If a spot frees up, I will write to you first. You will have <b>${window} h</b> to decide, then the spot goes to the next person.
 Do not pay yet.`;
   } else if (status === SIGNUP_STATUS.confirmed) {
-    markup = calendarKeyboard(event, lang, signup.signup_id);
+    markup = calendarKeyboard(event, lang, signup);
     const g = names.length ? (L ? `\n👥 Гости: <b>${escapeHtml(names.join(', '))}</b>` : `\n👥 Guests: <b>${escapeHtml(names.join(', '))}</b>`) : '';
     const tail = shape.extra
       ? (L ? '\n\n💳 За гостей нужна оплата — счёт ниже. Место за ними держится до конца записи.'
@@ -517,7 +529,7 @@ export function invoiceKeyboard(event, signup, lang = 'ru', balance = 0) {
   if (balance >= due.amount && due.amount > 0) {
     rows.push([{ text: L ? `💰 Оплатить с депозита (${due.amount} ฿)` : `💰 Pay from deposit (${due.amount} ฿)`, callback_data: `ev_dep:${signup.signup_id}` }]);
   }
-  if (due.kind === 'guests') rows.push([{ text: L ? '👥 Гости' : '👥 Guests', callback_data: `ev_gm:${signup.signup_id}` }]);
+  if (due.kind === 'guests') rows.push([{ text: L ? `👥 Мои гости (${guestListOf(signup).length})` : `👥 My guests (${guestListOf(signup).length})`, callback_data: `ev_gm:${signup.signup_id}` }]);
   else rows.push([{ text: L ? '❌ Отменить участие' : '❌ Cancel', callback_data: `ev_cxl:${signup.signup_id}` }]);
   return { inline_keyboard: rows };
 }
@@ -551,7 +563,7 @@ export async function payFromDeposit({ signupId, telegramId, name, lang = 'ru', 
     await setSetting(sentKey(signup.signup_id, 'gpay'), '', 'Счёт за гостей оплачен').catch(() => {});
     if (adminChatId) await notifyOrganizer({ ...signup, ...updated }, event, adminChatId, `💰 Гости оплачены с депозита: ${escapeHtml(names)}`).catch(() => {});
     touchEventCards(signup.event_id);
-    return { ok: true, markup: calendarKeyboard(event, lang, signup.signup_id), message: L
+    return { ok: true, markup: calendarKeyboard(event, lang, signup), message: L
       ? `✅ Оплачено с депозита: <b>${due.amount} ฿</b>. Остаток: <b>${left} ฿</b>\nГости в списке участников: <b>${escapeHtml(names)}</b>.`
       : `✅ Paid from deposit: <b>${due.amount} ฿</b>. Remaining: <b>${left} ฿</b>\nYour guests are on the list: <b>${escapeHtml(names)}</b>.` };
   }
@@ -559,7 +571,7 @@ export async function payFromDeposit({ signupId, telegramId, name, lang = 'ru', 
     status: SIGNUP_STATUS.paid, paid_thb: due.amount, paid_from: 'депозит'
   });
   if (adminChatId) await notifyOrganizer({ ...signup, ...updated }, event, adminChatId).catch(() => {});
-  return { ok: true, markup: calendarKeyboard(event, lang, signup.signup_id), message: L
+  return { ok: true, markup: calendarKeyboard(event, lang, signup), message: L
     ? `✅ Оплачено с депозита: <b>${due.amount} ฿</b>. Остаток: <b>${left} ฿</b>\nТы в списке участников.`
     : `✅ Paid from deposit: <b>${due.amount} ฿</b>. Remaining: <b>${left} ฿</b>\nYou are on the list.` };
 }
@@ -996,7 +1008,7 @@ export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adm
     await sendMessage(chatId, L
       ? `✅ Место твоё — «${escapeHtml(event?.title_ru || '')}».\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}\n\n💳 За гостей нужна оплата — счёт ниже.`
       : `✅ The spot is yours — “${escapeHtml(event?.title_en || '')}”.\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}\n\n💳 Your guests need to be paid for — the invoice is below.`,
-      { reply_markup: calendarKeyboard(event, lang, signup.signup_id) }).catch(() => {});
+      { reply_markup: calendarKeyboard(event, lang, signup) }).catch(() => {});
     const balance = await getBalance(telegramId).catch(() => 0);
     return sendMessage(chatId, await invoiceText(event, merged, lang, balance), { reply_markup: invoiceKeyboard(event, merged, lang, balance) });
   }
@@ -1017,7 +1029,7 @@ export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adm
   return sendMessage(chatId, L
     ? `✅ Место твоё — «${escapeHtml(event?.title_ru || '')}».\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`
     : `✅ The spot is yours — “${escapeHtml(event?.title_en || '')}”.\n📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`,
-    { reply_markup: calendarKeyboard(event, lang, signup.signup_id) });
+    { reply_markup: calendarKeyboard(event, lang, signup) });
 }
 
 // Игрок отказался или вышел из очереди — держать место больше не нужно.
@@ -1166,7 +1178,7 @@ export async function reviewEventProof({ signupId, approve, adminChatId = '' }) 
     await sendMessage(signup.telegram_id, L
       ? `✅ Оплата за гостей подтверждена — «${escapeHtml(title)}».\n👥 В составе: <b>${escapeHtml(names)}</b>`
       : `✅ Payment for your guests confirmed — “${escapeHtml(title)}”.\n👥 On the list: <b>${escapeHtml(names)}</b>`,
-      { reply_markup: calendarKeyboard(event, lang, signup.signup_id) }).catch(() => {});
+      { reply_markup: calendarKeyboard(event, lang, signup) }).catch(() => {});
     if (adminChatId) await notifyOrganizer({ ...signup, ...updated }, event, adminChatId, '💰 Оплата за гостей подтверждена').catch(() => {});
     return { ok: true, message: `✅ Оплата за гостей зачтена: <b>${escapeHtml(signup.player_name || signup.telegram_id)}</b>, ${due.amount} ฿.` };
   }
@@ -1176,7 +1188,7 @@ export async function reviewEventProof({ signupId, approve, adminChatId = '' }) 
   });
   await sendMessage(signup.telegram_id, `${L?`✅ Оплата за «${escapeHtml(title)}» подтверждена. Ты в составе!`:`✅ Payment for “${escapeHtml(title)}” confirmed. You are on the list!`}
 📅 ${escapeHtml(fmtDay(event?.date, lang))} ${escapeHtml(event?.time || '')}`,
-    { reply_markup: calendarKeyboard(event, lang, signup.signup_id) }).catch(() => {});
+    { reply_markup: calendarKeyboard(event, lang, signup) }).catch(() => {});
   if (adminChatId) {
     await notifyOrganizer({ ...signup, ...updated, status: SIGNUP_STATUS.paid, paid_thb: amount },
       event, adminChatId, '💰 Оплата подтверждена').catch(() => {});
@@ -1295,6 +1307,48 @@ export async function deliverJoinResult(chatId, telegramId, r, lang = 'ru') {
       { reply_markup: invoiceKeyboard(r.event, r.signup, lang, balance) });
   }
   return null;
+}
+
+// Что показать на экране мини-приложения сразу после действия — до того, как
+// придёт сообщение в боте. Текст простой, без разметки.
+const plain = (v) => String(v ?? '').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+export function joinNotice(r, lang = 'ru') {
+  const L = ru(lang);
+  if (!r?.ok) return { kind: 'err', title: plain(r?.error || r?.message) || (L ? 'Не получилось' : 'Something went wrong') };
+  const title = eventTitle(r.event, lang);
+  const s = r.signup || {};
+  const due = dueOf(s);
+  const guests = guestListOf(s).map(g => g.name);
+  const g = guests.length ? (L ? `Гости: ${guests.join(', ')}.` : `Guests: ${guests.join(', ')}.`) : '';
+  if (s.status === SIGNUP_STATUS.waitlist) {
+    return { kind: 'info', icon: '⏳', title: L ? 'Вы в листе ожидания' : 'You are on the waitlist',
+      text: L ? `«${title}» — мест пока нет. Если место освободится, бот напишет вам первым. Деньги пока не переводите.`
+              : `“${title}” is full for now. If a place frees up, the bot will message you first. Do not pay yet.` };
+  }
+  if (due?.kind === 'main') {
+    return { kind: 'ok', icon: '💳', title: L ? 'Заявка принята' : 'Request received',
+      text: [L ? `«${title}»` : `“${title}”`, g,
+        L ? `Счёт на ${due.amount} ฿ отправлен в бот. После оплаты вы появитесь в списке участников.`
+          : `An invoice for ${due.amount} ฿ has been sent to the bot. Once paid, you will appear on the list.`].filter(Boolean).join('\n') };
+  }
+  return { kind: 'ok', title: L ? `Вы записаны на «${title}»` : `You are in for “${title}”`,
+    text: [g, due?.kind === 'guests'
+      ? (L ? `Счёт за гостей на ${due.amount} ฿ отправлен в бот. Место за ними держится до конца записи.`
+           : `The invoice for your guests (${due.amount} ฿) has been sent to the bot. Their places are held until sign-up closes.`)
+      : (L ? 'Подтверждение и кнопки календаря — в боте.' : 'The confirmation and calendar buttons are in the bot.')].filter(Boolean).join('\n') };
+}
+export function guestNotice(r, lang = 'ru', action = 'add') {
+  const L = ru(lang);
+  if (!r?.ok) return { kind: 'err', title: plain(r?.message || r?.error) || (L ? 'Не получилось' : 'Something went wrong') };
+  const text = plain(r.message);
+  const due = dueOf(r.signup || {});
+  const tail = r.needsInvoice && due ? (L ? `\nСчёт на ${due.amount} ฿ — в боте.` : `\nInvoice for ${due.amount} ฿ is in the bot.`) : '';
+  return { kind: 'ok', title: action === 'add' ? (L ? 'Гость добавлен' : 'Guest added') : (L ? 'Гость убран' : 'Guest removed'), text: text + tail };
+}
+export function cancelNotice(r, lang = 'ru') {
+  const L = ru(lang);
+  if (!r?.ok) return { kind: 'err', title: plain(r?.message || r?.error) || (L ? 'Не получилось' : 'Something went wrong') };
+  return { kind: 'ok', title: L ? 'Участие отменено' : 'Your spot is cancelled', text: plain(r.message).split('\n').slice(1).join('\n') || plain(r.message) };
 }
 
 // Текст, пришедший, пока ждём имя гостя. true — сообщение разобрано здесь.
@@ -1445,7 +1499,7 @@ export async function addGuests({ signupId, telegramId, names = [], lang = 'ru',
   if (adminChatId) await notifyOrganizer(merged, event, adminChatId, `➕ Добавил гостей: ${shown}`).catch(() => {});
   touchEventCards(event.event_id);
   return { ok: true, signup: merged, event, message, needsInvoice: Boolean(dueOf(merged)) && add > 0,
-    markup: dueOf(merged) && add > 0 ? undefined : calendarKeyboard(event, lang, signup.signup_id) };
+    markup: dueOf(merged) && add > 0 ? undefined : calendarKeyboard(event, lang, merged) };
 }
 
 // Что будет с деньгами, если убрать гостя, — до подтверждения.
@@ -1587,7 +1641,7 @@ export async function runEventReminders(now = Date.now()) {
 
 ${whenLine(event, lang)}${guestListOf(s).length ? `\n👥 ${L?"Твои гости:":"Your guests:"} <b>${escapeHtml(guestListOf(s).map(g => g.name).join(', '))}</b>` : ''}`, {
           reply_markup: { inline_keyboard: [
-            ...(event.guests_allowed && isSignupOpen(event, now) ? [[{ text: L?'👥 Гости':'👥 Guests', callback_data: `ev_gm:${s.signup_id}` }]] : []),
+            ...(isSignupOpen(event, now) ? guestButtons(event, lang, s) : []),
             [{ text: L?'❌ Отменить участие':'❌ Cancel attendance', callback_data: `ev_cxl:${s.signup_id}` }]
           ] }
         }).catch(() => {});
@@ -1733,7 +1787,7 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
     await sendMessage(telegramId, L
       ? `✅ Ты в составе на «${escapeHtml(event.title_ru)}».\n📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}${dep}`
       : `✅ You are in for “${escapeHtml(event.title_en)}”.\n📅 ${escapeHtml(fmtDay(event.date, lang))} ${escapeHtml(event.time)}${dep}`,
-      { reply_markup: calendarKeyboard(event, lang, signup.signup_id) }).catch(() => {});
+      { reply_markup: calendarKeyboard(event, lang, signup) }).catch(() => {});
   }
   if (adminChatId) await notifyOrganizer({ ...signup, status }, event, adminChatId, 'добавлен организатором').catch(() => {});
   touchEventCards(event.event_id);

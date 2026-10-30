@@ -1718,13 +1718,15 @@ app.post('/api/league/event-join', async (req, res) => {
       eventId: String(req.body.event_id || ''), guestNames, adminChatId, group });
     // Отказ с кнопкой («Подать заявку») уходит в бот: web_app-кнопку в мини-апп
     // не отдать, а в чате она откроет форму в один тап.
+    const { joinNotice } = await import('./eventflow.js');
     if (!r.ok) {
       if (r.markup) await sendMessage(v.user.id, r.message, { reply_markup: r.markup }).catch(() => {});
-      return res.json({ ok:false, error: r.error || r.message });
+      return res.json({ ok:false, error: String(r.error || r.message || '').replace(/<[^>]+>/g, ''), notice: joinNotice(r, lang) });
     }
-    // Счёт и подтверждение уходят в бот — там оплата и скриншоты.
-    await deliverJoinResult(v.user.id, v.user.id, r, lang).catch(() => {});
-    res.json({ ok:true, status: r.signup?.status || '', invoice: Boolean(r.needsInvoice) });
+    // Сначала ответ экрану, потом бот: счёт и подтверждение уходят в чат —
+    // там оплата и скриншоты. Ждать бота экрану незачем.
+    res.json({ ok:true, status: r.signup?.status || '', invoice: Boolean(r.needsInvoice), notice: joinNotice(r, lang) });
+    deliverJoinResult(v.user.id, v.user.id, r, lang).catch(() => {});
   } catch (e) {
     console.error('event join failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
@@ -1735,7 +1737,7 @@ app.post('/api/league/event-cancel', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const { cancelSignup } = await import('./eventflow.js');
+    const { cancelSignup, cancelNotice } = await import('./eventflow.js');
     const { getAdminChatId } = await import('./admin.js');
     const { sendMessage } = await import('./telegram.js');
     const lang = v.lang === 'ru' ? 'ru' : 'en';
@@ -1744,8 +1746,8 @@ app.post('/api/league/event-cancel', async (req, res) => {
     const r = await cancelSignup({ signupId: String(req.body.signup_id || ''),
       telegramId: v.user.id, name: applicant?.name || String(v.user.id),
       lang, keepGuests: false, adminChatId });
-    if (r?.message) await sendMessage(v.user.id, r.message).catch(() => {});
-    res.json({ ok: r?.ok !== false, error: r?.ok === false ? r.message : '' });
+    res.json({ ok: r?.ok !== false, error: r?.ok === false ? String(r.message || '').replace(/<[^>]+>/g, '') : '', notice: cancelNotice(r, lang) });
+    if (r?.message) sendMessage(v.user.id, r.message).catch(() => {});
   } catch (e) {
     console.error('event cancel failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
@@ -1770,17 +1772,19 @@ app.post('/api/league/event-guests', async (req, res) => {
         .map(x => String(x || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(x => x.length >= 2);
       if (!names.length) return res.json({ ok:false, error: lang === 'ru' ? 'Укажи имя гостя' : 'Enter the guest name' });
       const r = await evf.addGuests({ signupId, telegramId: v.user.id, names, lang, adminChatId });
-      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, '') });
-      await evf.deliverJoinResult(v.user.id, v.user.id, r, lang).catch(() => {});
-      return res.json({ ok:true, invoice: Boolean(r.needsInvoice) });
+      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, ''), notice: evf.guestNotice(r, lang, 'add') });
+      res.json({ ok:true, invoice: Boolean(r.needsInvoice), notice: evf.guestNotice(r, lang, 'add') });
+      evf.deliverJoinResult(v.user.id, v.user.id, r, lang).catch(() => {});
+      return;
     }
     if (action === 'remove') {
       const r = await evf.removeGuest({ signupId, idx: Number(req.body.index), count: req.body.count ?? null,
         telegramId: v.user.id, lang, adminChatId });
-      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, '') });
-      await sendMessage(v.user.id, r.message).catch(() => {});
-      if (r.needsInvoice) await evf.resendInvoice({ chatId: v.user.id, telegramId: v.user.id, lang, signupId }).catch(() => {});
-      return res.json({ ok:true });
+      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, ''), notice: evf.guestNotice(r, lang, 'remove') });
+      res.json({ ok:true, notice: evf.guestNotice(r, lang, 'remove') });
+      sendMessage(v.user.id, r.message).then(() => r.needsInvoice
+        ? evf.resendInvoice({ chatId: v.user.id, telegramId: v.user.id, lang, signupId }) : null).catch(() => {});
+      return;
     }
     if (action === 'plan') {
       // Что будет с деньгами — текст для подтверждения в мини-приложении.
