@@ -1703,8 +1703,7 @@ app.post('/api/league/event-join', async (req, res) => {
   try {
     const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
     if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
-    const { joinEvent, invoiceText, invoiceKeyboard } = await import('./eventflow.js');
-    const { getBalance } = await import('./events.js');
+    const { joinEvent, deliverJoinResult } = await import('./eventflow.js');
     const { getAdminChatId } = await import('./admin.js');
     const { sendMessage } = await import('./telegram.js');
     const lang = v.lang === 'ru' ? 'ru' : 'en';
@@ -1712,8 +1711,11 @@ app.post('/api/league/event-join', async (req, res) => {
     const name = applicant?.name || v.profile?.name || String(v.user.id);
     const adminChatId = await getAdminChatId().catch(() => '');
     const group = await playerGroup(v.user.id, applicant).catch(() => 'guest');
+    // Гости приходят списком имён: имя каждого гостя обязательно.
+    const guestNames = (Array.isArray(req.body.guest_names) ? req.body.guest_names : [])
+      .map(x => String(x || '').replace(/\s+/g, ' ').replace(/;/g, ',').trim().slice(0, 60)).filter(x => x.length >= 2);
     const r = await joinEvent({ telegramId: v.user.id, name, lang,
-      eventId: String(req.body.event_id || ''), adminChatId, group });
+      eventId: String(req.body.event_id || ''), guestNames, adminChatId, group });
     // Отказ с кнопкой («Подать заявку») уходит в бот: web_app-кнопку в мини-апп
     // не отдать, а в чате она откроет форму в один тап.
     if (!r.ok) {
@@ -1721,13 +1723,8 @@ app.post('/api/league/event-join', async (req, res) => {
       return res.json({ ok:false, error: r.error || r.message });
     }
     // Счёт и подтверждение уходят в бот — там оплата и скриншоты.
-    if (r.message) await sendMessage(v.user.id, r.message, r.markup ? { reply_markup: r.markup } : {}).catch(() => {});
-    else {
-      const balance = await getBalance(v.user.id).catch(() => 0);
-      await sendMessage(v.user.id, await invoiceText(r.event, r.signup, lang, balance),
-        { reply_markup: invoiceKeyboard(r.event, r.signup, lang, balance) }).catch(() => {});
-    }
-    res.json({ ok:true, status: r.signup?.status || '' });
+    await deliverJoinResult(v.user.id, v.user.id, r, lang).catch(() => {});
+    res.json({ ok:true, status: r.signup?.status || '', invoice: Boolean(r.needsInvoice) });
   } catch (e) {
     console.error('event join failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
@@ -1751,6 +1748,53 @@ app.post('/api/league/event-cancel', async (req, res) => {
     res.json({ ok: r?.ok !== false, error: r?.ok === false ? r.message : '' });
   } catch (e) {
     console.error('event cancel failed:', e.message);
+    res.status(500).json({ ok:false, error:e.message });
+  }
+});
+
+// Гости из мини-приложения: добавить (имена обязательны) или убрать одного.
+// Счёт и подтверждение уходят в бот — там оплата и скриншоты.
+app.post('/api/league/event-guests', async (req, res) => {
+  try {
+    const v = await leagueViewer(String(req.body.initData || ''), String(req.body.t || ''));
+    if (!v.ok) return res.status(v.code).json({ ok:false, error:v.error });
+    const evf = await import('./eventflow.js');
+    const { getAdminChatId } = await import('./admin.js');
+    const { sendMessage } = await import('./telegram.js');
+    const lang = v.lang === 'ru' ? 'ru' : 'en';
+    const adminChatId = await getAdminChatId().catch(() => '');
+    const signupId = String(req.body.signup_id || '');
+    const action = String(req.body.action || '');
+    if (action === 'add') {
+      const names = (Array.isArray(req.body.names) ? req.body.names : [])
+        .map(x => String(x || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(x => x.length >= 2);
+      if (!names.length) return res.json({ ok:false, error: lang === 'ru' ? 'Укажи имя гостя' : 'Enter the guest name' });
+      const r = await evf.addGuests({ signupId, telegramId: v.user.id, names, lang, adminChatId });
+      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, '') });
+      await evf.deliverJoinResult(v.user.id, v.user.id, r, lang).catch(() => {});
+      return res.json({ ok:true, invoice: Boolean(r.needsInvoice) });
+    }
+    if (action === 'remove') {
+      const r = await evf.removeGuest({ signupId, idx: Number(req.body.index), count: req.body.count ?? null,
+        telegramId: v.user.id, lang, adminChatId });
+      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, '') });
+      await sendMessage(v.user.id, r.message).catch(() => {});
+      if (r.needsInvoice) await evf.resendInvoice({ chatId: v.user.id, telegramId: v.user.id, lang, signupId }).catch(() => {});
+      return res.json({ ok:true });
+    }
+    if (action === 'plan') {
+      // Что будет с деньгами — текст для подтверждения в мини-приложении.
+      const { listSignups, findEvent } = await import('./events.js');
+      const s = (await listSignups()).find(x => x.signup_id === signupId && String(x.telegram_id) === String(v.user.id));
+      if (!s) return res.json({ ok:false, error: lang === 'ru' ? 'Запись не найдена' : 'Signup not found' });
+      const event = await findEvent(s.event_id);
+      const plan = event ? evf.guestRemovePlan(event, s, Number(req.body.index)) : null;
+      if (!plan) return res.json({ ok:false, error: lang === 'ru' ? 'Гость не найден' : 'Guest not found' });
+      return res.json({ ok:true, text: evf.guestRemoveText(event, plan, lang).replace(/<[^>]+>/g, '') });
+    }
+    res.status(400).json({ ok:false, error:'Неизвестное действие' });
+  } catch (e) {
+    console.error('event guests failed:', e.message);
     res.status(500).json({ ok:false, error:e.message });
   }
 });

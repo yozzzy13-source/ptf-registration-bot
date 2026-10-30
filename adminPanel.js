@@ -460,14 +460,14 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.query.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { listEvents, listSignups, eventHasEnded } = await import('./events.js');
+      const { listEvents, listSignups, eventHasEnded, seatsOf } = await import('./events.js');
       const events = await listEvents({ includeDrafts:true });
       const signups = await listSignups();
       res.json({ ok:true, events: events.map(e => ({
         ...e,past:eventHasEnded(e),
         signups: signups.filter(s => s.event_id === e.event_id && s.status !== 'cancelled').length,
         seats: signups.filter(s => s.event_id === e.event_id && s.status !== 'cancelled')
-          .reduce((n, s) => n + 1 + (s.guests || 0), 0)
+          .reduce((n, s) => n + seatsOf(s), 0)
       })) });
     } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
   });
@@ -487,7 +487,7 @@ export function registerAdminRoutes(app) {
     try {
       const auth = adminFromInitData(req.body.initData || '');
       if (!auth.ok) return res.status(403).json(auth);
-      const { createEvent, updateEvent, findEvent } = await import('./events.js');
+      const { createEvent, updateEvent, findEvent, isPaidByPrices } = await import('./events.js');
       const body = req.body.event || {};
       // Что было до правки — чтобы сказать записавшимся, если поменялись дата,
       // время, место или срок записи.
@@ -499,7 +499,10 @@ export function registerAdminRoutes(app) {
             date:body.date, time:body.time, end_time:body.end_time || '', place:body.place, place_url:body.place_url || '',
             price_thb:body.price_thb ?? '', guest_price_thb:body.guest_price_thb ?? '',
             capacity:body.capacity ?? '', signup_deadline:body.signup_deadline || '',
-            payment_required: body.payment_required ? 'TRUE' : 'FALSE',
+            // Платное или нет — по ценам: участие может быть 0, а гость платным.
+            payment_required: isPaidByPrices(Number(body.price_thb) || 0,
+              String(body.guest_price_thb ?? '').trim() === '' ? null : Number(body.guest_price_thb) || 0,
+              body.guests_allowed) ? 'TRUE' : 'FALSE',
             guests_allowed: body.guests_allowed ? 'TRUE' : 'FALSE',
             max_guests: body.max_guests ?? '', refund_hours: body.refund_hours ?? '',
             audience: body.audience || 'all',

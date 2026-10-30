@@ -36,7 +36,10 @@ export const REGISTRY_HEADERS = [
 ];
 export const SIGNUP_HEADERS = [
   'signup_id', 'event_id', 'telegram_id', 'player_name', 'guests', 'guest_names',
-  'status', 'amount_thb', 'paid_thb', 'paid_from', 'created_at', 'updated_at', 'note'
+  'status', 'amount_thb', 'paid_thb', 'paid_from', 'created_at', 'updated_at', 'note',
+  // Гости, добавленные после оплаты (или к бесплатному участию) и ещё не
+  // оплаченные: место за ними держится, в состав они переходят после оплаты.
+  'extra_guests', 'extra_guest_names', 'extra_amount_thb'
 ];
 export const TX_HEADERS = ['date', 'telegram_id', 'name', 'type', 'amount', 'balance', 'description'];
 export const BALANCE_HEADERS = ['telegram_id', 'name', 'balance_thb', 'updated_at'];
@@ -62,6 +65,34 @@ function yes(v) {
 }
 function num(v) { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }
 
+// Цена гостя: пусто — как у участника.
+export function guestPriceOf(event) {
+  if (!event) return 0;
+  return event.guest_price_thb === null || event.guest_price_thb === undefined ? (event.price_thb || 0) : (event.guest_price_thb || 0);
+}
+export function isPaidByPrices(price, guestPrice, guestsAllowed) {
+  const gp = guestPrice === null || guestPrice === undefined || guestPrice === '' ? price : Number(guestPrice);
+  return Number(price) > 0 || (Boolean(guestsAllowed) && Number(gp) > 0);
+}
+
+// Имена гостей хранятся одной строкой через «; ».
+export function splitNames(v) {
+  return String(v ?? '').split(';').map(x => x.trim()).filter(Boolean);
+}
+export function joinNames(list = []) {
+  return list.map(x => String(x || '').trim()).filter(Boolean).join('; ');
+}
+// Полный список гостей записи: сперва подтверждённые, потом ждущие оплаты.
+// Если имён меньше, чем гостей (старые записи), — «Гость N».
+export function guestListOf(signup = {}) {
+  const names = splitNames(signup.guest_names);
+  const extra = splitNames(signup.extra_guest_names);
+  const out = [];
+  for (let i = 0; i < (signup.guests || 0); i++) out.push({ name: names[i] || `Гость ${i + 1}`, pending: false });
+  for (let i = 0; i < (signup.extra_guests || 0); i++) out.push({ name: extra[i] || `Гость ${out.length + 1}`, pending: true });
+  return out;
+}
+
 export async function ensureEventSheets() {
   await ensureExtraSheet(EVENT_SHEETS.registry, REGISTRY_HEADERS);
   await ensureExtraSheet(EVENT_SHEETS.signups, SIGNUP_HEADERS);
@@ -83,7 +114,9 @@ function mapEvent(r) {
     guest_price_thb: String(r.guest_price_thb ?? '').trim() === '' ? null : num(r.guest_price_thb),
     capacity: num(r.capacity),
     signup_deadline: safe(r.signup_deadline),
-    payment_required: yes(r.payment_required),
+    // «Платное» больше не галочка: событие платное, если хоть одна цена больше
+    // нуля. Участие может быть бесплатным, а гость — платным.
+    payment_required: isPaidByPrices(num(r.price_thb), String(r.guest_price_thb ?? '').trim() === '' ? null : num(r.guest_price_thb), yes(r.guests_allowed)),
     guests_allowed: yes(r.guests_allowed),
     max_guests: num(r.max_guests) || (yes(r.guests_allowed) ? 1 : 0),
     refund_hours: String(r.refund_hours ?? '').trim() === '' ? CANCEL_LIMIT_HOURS : num(r.refund_hours),
@@ -124,7 +157,7 @@ export async function createEvent(data, createdBy = '') {
     date: safe(data.date), time: safe(data.time), end_time:safe(data.end_time), place: safe(data.place), place_url: safe(data.place_url),
     price_thb: data.price_thb ?? '', guest_price_thb: data.guest_price_thb ?? '',
     capacity: data.capacity ?? '', signup_deadline: safe(data.signup_deadline),
-    payment_required: data.payment_required ? 'TRUE' : 'FALSE',
+    payment_required: isPaidByPrices(num(data.price_thb), String(data.guest_price_thb ?? '').trim() === '' ? null : num(data.guest_price_thb), data.guests_allowed) ? 'TRUE' : 'FALSE',
     guests_allowed: data.guests_allowed ? 'TRUE' : 'FALSE',
     max_guests: data.max_guests ?? '',
     refund_hours: data.refund_hours ?? '',
@@ -172,6 +205,8 @@ function mapSignup(r) {
     amount_thb: num(r.amount_thb), paid_thb: num(r.paid_thb),
     paid_from: safe(r.paid_from),
     created_at: safe(r.created_at), updated_at: safe(r.updated_at), note: safe(r.note),
+    extra_guests: num(r.extra_guests), extra_guest_names: safe(r.extra_guest_names),
+    extra_amount_thb: num(r.extra_amount_thb),
     _rowNumber: r._rowNumber
   };
 }
@@ -195,19 +230,52 @@ export async function takenSeats(eventId) {
   const list = await listSignups(eventId);
   return list
     .filter(s => ACTIVE.includes(s.status))
-    .reduce((sum, s) => sum + 1 + (s.guests || 0), 0);
+    .reduce((sum, s) => sum + seatsOf(s), 0);
 }
 
-export function seatsOf(signup) { return 1 + (signup?.guests || 0); }
+// Место занимают сам игрок, его гости и гости, ждущие оплаты.
+export function seatsOf(signup) { return 1 + (signup?.guests || 0) + (signup?.extra_guests || 0); }
 
 // Стоимость участия: сам игрок плюс гости по своей цене (если она задана).
 export function priceFor(event, guests = 0) {
   if (!event?.payment_required) return 0;
-  const guestPrice = event.guest_price_thb === null ? event.price_thb : event.guest_price_thb;
-  return event.price_thb + guestPrice * (guests || 0);
+  return (event.price_thb || 0) + guestPriceOf(event) * (guests || 0);
 }
 
-export async function createSignup({ event, telegramId, name, guests = 0, guestNames = '', status, amount }) {
+// Как оформить запись с гостями. Если участие платное — один счёт на всех.
+// Если участие бесплатное, а гости платные — игрок в составе сразу, гости ждут
+// оплаты отдельным счётом. Если бесплатно всё — все в составе.
+export function signupShape(event, guestNames = []) {
+  const n = guestNames.length;
+  const own = priceFor(event, 0);
+  const total = priceFor(event, n);
+  if (own > 0) return { status: SIGNUP_STATUS.invoiced, amount: total, guests: n, guestNames: joinNames(guestNames), extra: null };
+  if (total > 0) return { status: SIGNUP_STATUS.confirmed, amount: 0, guests: 0, guestNames: '',
+    extra: { extra_guests: n, extra_guest_names: joinNames(guestNames), extra_amount_thb: total } };
+  return { status: SIGNUP_STATUS.confirmed, amount: 0, guests: n, guestNames: joinNames(guestNames), extra: null };
+}
+
+// Что сейчас ждёт оплаты по записи: основной счёт или доплата за гостей.
+export function dueOf(signup) {
+  if (!signup || signup.status === SIGNUP_STATUS.cancelled || signup.status === SIGNUP_STATUS.waitlist) return null;
+  if (signup.status === SIGNUP_STATUS.invoiced && (signup.amount_thb || 0) > 0) return { kind: 'main', amount: signup.amount_thb };
+  if ((signup.extra_amount_thb || 0) > 0 && (signup.extra_guests || 0) > 0) return { kind: 'guests', amount: signup.extra_amount_thb };
+  return null;
+}
+
+// Поля, которые переводят оплаченных «ждущих» гостей в состав.
+export function settleExtraPatch(signup) {
+  const amount = signup.extra_amount_thb || 0;
+  return {
+    guests: (signup.guests || 0) + (signup.extra_guests || 0),
+    guest_names: joinNames([...guestListOf(signup).map(g => g.name)]),
+    amount_thb: (signup.amount_thb || 0) + amount,
+    paid_thb: (signup.paid_thb || 0) + amount,
+    extra_guests: 0, extra_guest_names: '', extra_amount_thb: 0
+  };
+}
+
+export async function createSignup({ event, telegramId, name, guests = 0, guestNames = '', status, amount, extra = null }) {
   await ensureEventSheets();
   const row = {
     signup_id: 'sg_' + uid(8),
@@ -220,7 +288,10 @@ export async function createSignup({ event, telegramId, name, guests = 0, guestN
     amount_thb: amount || 0,
     paid_thb: 0,
     paid_from: '',
-    created_at: nowISO(), updated_at: nowISO(), note: ''
+    created_at: nowISO(), updated_at: nowISO(), note: '',
+    extra_guests: extra?.extra_guests || 0,
+    extra_guest_names: safe(extra?.extra_guest_names),
+    extra_amount_thb: extra?.extra_amount_thb || 0
   };
   await appendObject(EVENT_SHEETS.signups, row, { uniqueBy: 'signup_id' });
   return mapSignup(row);
@@ -388,8 +459,7 @@ export function refundDecision(event, signup, now = Date.now()) {
 export function refundForCancel(event, signup, keepGuests, now = Date.now()) {
   const base = refundDecision(event, signup, now);
   if (!keepGuests || !signup?.guests) return { ...base, keptGuests: 0 };
-  const guestPrice = event.guest_price_thb === null ? event.price_thb : event.guest_price_thb;
-  const guestsPart = guestPrice * signup.guests;
+  const guestsPart = guestPriceOf(event) * signup.guests;
   const own = Math.max(0, (signup.paid_thb || 0) - guestsPart);
   if (base.late) return { refund: 0, burned: signup.paid_thb || 0, late: true, keptGuests: signup.guests };
   return { refund: own, burned: 0, late: false, keptGuests: signup.guests };

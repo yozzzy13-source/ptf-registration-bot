@@ -631,21 +631,16 @@ export async function eventDeleteDo(chatId, eventId, refundMode) {
 }
 // Игрок нажал «Записаться» под карточкой.
 export async function eventJoin({ chatId, from, lang, eventId }) {
-  const { joinEvent, invoiceText, invoiceKeyboard } = await import('./eventflow.js');
-  const { getBalance } = await import('./events.js');
+  const { joinEvent } = await import('./eventflow.js');
   const applicant = await findApplicantByTelegramId(from.id).catch(() => null);
   const name = applicant?.name || [from.first_name, from.last_name].filter(Boolean).join(' ') || String(from.id);
   const adminChatId = await getAdminChatId().catch(() => '');
   const group = await playerGroup(from.id, applicant).catch(() => 'guest');
   const r = await joinEvent({ telegramId: from.id, name, lang, eventId, adminChatId, group });
   // Отказ тоже бывает с кнопкой — например «Подать заявку» для тех, кто вне лиги.
-  if (!r.ok) return sendMessage(chatId, r.error || r.message, r.markup ? { reply_markup: r.markup } : {});
-  // Кнопки «добавить в календарь» приходят вместе с подтверждением участия.
-  if (r.message) return sendMessage(chatId, r.message, r.markup ? { reply_markup: r.markup } : {});
-  const balance = await getBalance(from.id).catch(() => 0);
-  return sendMessage(chatId, await invoiceText(r.event, r.signup, lang, balance), {
-    reply_markup: invoiceKeyboard(r.event, r.signup, lang, balance)
-  });
+  // Подтверждение (с календарём) и, если нужно, счёт — одной общей функцией.
+  const { deliverJoinResult } = await import('./eventflow.js');
+  return deliverJoinResult(chatId, from.id, r, lang);
 }
 export async function eventPayFromDeposit({ chatId, from, lang, signupId }) {
   const { payFromDeposit } = await import('./eventflow.js');

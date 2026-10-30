@@ -1580,6 +1580,19 @@ function findConfirmedSlot(done, wanted) {
     if (act === 'waitlist') return sendOpenApp(chatId, lang, 'waitlist');
   }
 
+  // Имя гостя для записи на событие: ждём его после кнопки «с гостями» или
+  // «добавить гостя». Проверка дешёвая — ожидание лежит в памяти.
+  if (isPrivate && text && !text.startsWith('/')) {
+    const evf = await import('./eventflow.js');
+    if (evf.isAwaitingGuestName(from.id)) {
+      const applicant = await findApplicantByTelegramId(from.id).catch(() => null);
+      const name = applicant?.name || contactName(from);
+      const handled = await evf.handleGuestNameText({ chatId, telegramId: from.id, name, lang, text })
+        .catch(e => { console.error('guest name failed:', e.message); return false; });
+      if (handled) return null;
+    }
+  }
+
   const state = userState.get(String(chatId));
   if (state?.mode === 'selfie_upload') {
     if (!msg.photo?.length) return sendMessage(chatId, t(lang, 'selfie_prompt'));
@@ -2013,6 +2026,27 @@ export async function handleCallback(q) {
     });
   }
   if (data.startsWith('ev_join:')) return eventJoin({ chatId, from, lang, eventId: data.split(':')[1] });
+  // Гости: записаться с гостями, меню гостей, добавить, убрать, счёт ещё раз.
+  if (/^ev_(jg|jn|gm|ga|gn|gr|gry|inv):/.test(data)) {
+    const evf = await import('./eventflow.js');
+    const [cmd, id, a, b] = data.split(':');
+    const telegramId = from.id;
+    if (cmd !== 'ev_jn' && cmd !== 'ev_gn') evf.cancelGuestInput(telegramId);
+    if (cmd === 'ev_jg') return evf.startGuestJoin({ chatId, telegramId, lang, eventId: id });
+    if (cmd === 'ev_jn') return evf.chooseJoinGuests({ chatId, telegramId, lang, eventId: id, n: a });
+    if (cmd === 'ev_gm') return evf.guestMenu({ chatId, telegramId, lang, signupId: id });
+    if (cmd === 'ev_ga') return evf.startAddGuests({ chatId, telegramId, lang, signupId: id });
+    if (cmd === 'ev_gn') return evf.chooseAddGuests({ chatId, telegramId, lang, signupId: id, n: a });
+    if (cmd === 'ev_inv') return evf.resendInvoice({ chatId, telegramId, lang, signupId: id });
+    if (cmd === 'ev_gr') return evf.askRemoveGuest({ chatId, telegramId, lang, signupId: id, idx: a, count: b });
+    if (cmd === 'ev_gry') {
+      const r = await evf.removeGuest({ signupId: id, idx: a, count: b, telegramId, lang, adminChatId: await getAdminChatId().catch(() => '') });
+      if (!r.ok) return sendMessage(chatId, r.message);
+      await sendMessage(chatId, r.message);
+      if (r.needsInvoice) return evf.resendInvoice({ chatId, telegramId, lang, signupId: id });
+      return evf.guestMenu({ chatId, telegramId, lang, signupId: id });
+    }
+  }
   if (data.startsWith('ev_dep:')) return eventPayFromDeposit({ chatId, from, lang, signupId: data.split(':')[1] });
   if (data.startsWith('ev_cxl:')) return eventCancelAsk({ chatId, lang, signupId: data.split(':')[1] });
   if (data.startsWith('ev_cyes:')) return eventCancelDo({ chatId, from, lang, signupId: data.split(':')[1], keepGuests: true });
