@@ -11,7 +11,7 @@
 import { sendMessage, editMessageText } from './telegram.js';
 import { escapeHtml, safe } from './util.js';
 import { PUBLIC_URL } from './config.js';
-import { getSetting, setSetting, getPaymentMethods, playerGroup, findApplicantByTelegramId } from './sheets.js';
+import { getSetting, setSetting, getPaymentMethods, playerGroup, findApplicantByTelegramId, getPlayerLeagueInfo } from './sheets.js';
 import {
   findEvent, listEvents, listSignups, findSignup, createSignup, updateSignup,
   takenSeats, priceFor, seatsOf, refundForCancel, hoursUntil, eventStartMs, eventEndMs, eventHasEnded,
@@ -414,6 +414,16 @@ export async function joinPrecheck({ telegramId, lang = 'ru', eventId, group = '
   const denied = eventAccessDenial(event, who, lang);
   if (denied) return { ok: false, ...denied };
   if(!isSignupOpen(event)) return {ok:false,message:L?'Запись закрыта: событие уже началось или завершилось.':'Sign-up is closed: this event has started or ended.'};
+  // «Только активным» — это участники ТЕКУЩЕГО сезона: игрок должен стоять в
+  // таблице дивизиона этого сезона. Игрок прошлых сезонов тоже числится в лиге,
+  // и раньше он мог записаться через вкладку «События», не получив рассылки.
+  if (event.audience === 'active') {
+    const season = await currentSeasonCheck(telegramId);
+    if (season === null) return { ok: false, message: L ? 'Не получилось проверить участие в сезоне — попробуй ещё раз через минуту.' : 'Could not check your season status — please try again in a minute.' };
+    if (!season) return { ok: false, message: L
+      ? 'Это событие — для участников текущего сезона лиги. Если ты играешь в этом сезоне и видишь это сообщение, напиши организатору.'
+      : 'This event is for players of the current league season. If you play this season and see this message, please contact the organiser.' };
+  }
   const existing = await findSignup(eventId, telegramId);
   // Уже записан — не просто отказ: рядом та же кнопка отмены, иначе человек
   // жмёт «Записаться» второй раз именно потому, что не нашёл, где отписаться.
@@ -423,6 +433,15 @@ export async function joinPrecheck({ telegramId, lang = 'ru', eventId, group = '
       markup: calendarKeyboard(event, lang, existing), existing };
   }
   return { ok: true, event };
+}
+
+// Участник текущего сезона: стоит в таблице дивизиона последнего сезона
+// (или организатор). null — проверить не удалось (таблицы недоступны).
+export async function currentSeasonCheck(telegramId) {
+  try {
+    const info = await getPlayerLeagueInfo({ telegram_id: String(telegramId) });
+    return Boolean(info?.admin || info?.found);
+  } catch { return null; }
 }
 
 // guestNames — имена гостей (массив). Гостей приводит участник лиги и платит за
