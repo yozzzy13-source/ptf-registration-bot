@@ -2320,6 +2320,17 @@ export async function handleCallback(q) {
       const [, signupId, mode] = data.split(':');
       return eventRemoveDo(chatId, signupId, mode);
     }
+    // Организатор убирает гостя из записи (кнопки под карточкой записи в теме игрока).
+    if (data.startsWith('evgx:') || data.startsWith('evgxr:')) {
+      const evf = await import('./eventflow.js');
+      const { replyInPlayerTopic } = await import('./admin.js');
+      const [cmd, signupId, idx, count, money] = data.split(':');
+      const adminChatId = await getAdminChatId().catch(() => '');
+      const r = cmd === 'evgx'
+        ? await evf.askOrganizerRemoveGuest({ signupId, idx, count, adminChatId })
+        : await evf.organizerRemoveGuest({ signupId, idx, count, money: money === 'dep' ? 'dep' : 'none', adminChatId });
+      return replyInPlayerTopic(chatId, r.owner || '', r.message, r.markup ? { reply_markup: r.markup } : {});
+    }
     if (data.startsWith('ev_nudge:')) {
       const { remindUnregistered } = await import('./eventflow.js');
       return remindUnregistered(chatId, data.split(':')[1]);

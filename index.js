@@ -223,7 +223,7 @@ async function seoEvents(lang) {
   } catch (e) {}
   try {
     const { eventsForViewer } = await import('./eventflow.js');
-    for (const e of await eventsForViewer('', false, false).catch(() => [])) {
+    for (const e of await eventsForViewer('', '', false).catch(() => [])) {
       if (e.past) continue;
       const name = lang === 'ru' ? (e.title_ru || e.title_en) : (e.title_en || e.title_ru);
       out.push({ name, start: e.starts_at ? new Date(e.starts_at).toISOString() : '', place: e.place || '', path:'/events',
@@ -428,8 +428,20 @@ app.get('/apply', (req, res) => { noCache(res); res.sendFile(path.join(__dirname
 registerAdminRoutes(app);
 
 const seen = new Set();
+// Сообщения, которые бот сейчас обрабатывает. При деплое старая копия бота
+// получает SIGTERM: раньше она выключалась сразу и обрывала обработку — так
+// потерялся чек за гостя (Telegram уже получил «принято» и второй раз не шлёт).
+// Теперь копия сначала дорабатывает начатое, а новые сообщения в это время не
+// принимает: Telegram повторит их, и их возьмёт новая копия.
+const inflight = new Set();
+let shuttingDown = false;
 app.post('/webhook', async (req, res) => {
+  if (shuttingDown) return res.status(503).send('restarting');
   res.status(200).send('ok');
+  let done;
+  const job = new Promise(r => { done = r; });
+  inflight.add(job);
+  job.then(() => inflight.delete(job));
   try {
     const update = req.body;
     if (update.update_id !== undefined) {
@@ -450,7 +462,7 @@ app.post('/webhook', async (req, res) => {
     if (kind && spent > 1000) console.log(`медленно: ${kind} — ${spent} мс`);
   } catch (e) {
     console.error('webhook error', e);
-  }
+  } finally { done(); }
 });
 
 app.get('/api/bootstrap', async (req, res) => {
@@ -1684,11 +1696,14 @@ app.get('/api/league/events', async (req, res) => {
     const { getBalance } = await import('./events.js');
     const tg = v.user?.id || '';
     const applicant = tg ? await findApplicantByTelegramId(tg).catch(() => null) : null;
-    // События «только активным» видят участники текущего сезона (есть в таблице
-    // дивизиона этого сезона) и организатор, а не все, кто когда-либо играл.
-    const isActive = Boolean(v.division || v.isAdmin);
+    // Какие события видит человек, решают галочки события по категориям:
+    // участник сезона (есть в таблице дивизиона), игрок прошлых сезонов, лист
+    // ожидания, остальные. Не получилось проверить — показываем как участнику,
+    // если он нашёлся в дивизионе, иначе как «остальным».
+    const { viewerCategory } = await import('./eventflow.js');
+    const category = tg ? (await viewerCategory(tg) || (v.division ? 'season' : 'others')) : '';
     const [events, balance] = await Promise.all([
-      eventsForViewer(tg, isActive, !!v.isAdmin).catch(() => []),
+      eventsForViewer(tg, category, !!v.isAdmin).catch(() => []),
       tg ? getBalance(tg).catch(() => 0) : 0
     ]);
     res.json({ ok:true, events, balance, is_admin: !!v.isAdmin });
@@ -1829,6 +1844,17 @@ app.post('/api/league/event-roster', async (req, res) => {
       await askAddToEvent(chatId, String(req.body.event_id || ''), telegramId);
     }
     else if (action === 'remove') await askRemoveFromEvent(chatId, String(req.body.signup_id || ''));
+    else if (action === 'remove_guest') {
+      // Гостя убирает организатор: неоплаченного — сразу (игрок получит
+      // уведомление), за оплаченного бот спросит про деньги в теме игрока.
+      const evf = await import('./eventflow.js');
+      const { replyInPlayerTopic, getAdminChatId } = await import('./admin.js');
+      const adminChatId = await getAdminChatId().catch(() => '');
+      const r = await evf.askOrganizerRemoveGuest({ signupId: String(req.body.signup_id || ''), idx: Number(req.body.index), count: Number(req.body.count), adminChatId });
+      if (!r.ok) return res.json({ ok:false, error: String(r.message || '').replace(/<[^>]+>/g, '') });
+      await replyInPlayerTopic(adminChatId || chatId, r.owner || '', r.message, r.markup ? { reply_markup: r.markup } : {}).catch(() => {});
+      return res.json({ ok:true, asked: Boolean(r.ask), text: String(r.message || '').replace(/<[^>]+>/g, '') });
+    }
     else return res.status(400).json({ ok:false, error:'Неизвестное действие' });
     res.json({ ok:true });
   } catch (e) {
@@ -2789,11 +2815,15 @@ async function runDeadlineNudge() {
 
 // Деплой останавливает сервис сигналом SIGTERM. Успеваем записать прогресс
 // рассылки, чтобы после запуска она продолжилась с того же места, без повторов.
-let shuttingDown = false;
 process.on?.('SIGTERM', async () => {
   if (shuttingDown) return;
   shuttingDown = true;
-  const force = setTimeout(() => process.exit(0), 8000);
+  const force = setTimeout(() => process.exit(0), 9000);
+  // Сначала дорабатываем начатые сообщения (до 7 секунд), потом сохраняем рассылки.
+  if (inflight.size) {
+    console.log(`shutdown: дорабатываю сообщений — ${inflight.size}`);
+    await Promise.race([Promise.allSettled([...inflight]), new Promise(r => setTimeout(r, 7000))]);
+  }
   try { await flushBroadcasts(); } catch (e) { console.error('shutdown flush failed:', e.message); }
   clearTimeout(force);
   process.exit(0);

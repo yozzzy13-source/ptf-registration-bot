@@ -10,13 +10,15 @@
 //     редактируется, а не десяток новых.
 import { sendMessage, editMessageText } from './telegram.js';
 import { escapeHtml, safe } from './util.js';
-import { PUBLIC_URL } from './config.js';
-import { getSetting, setSetting, getPaymentMethods, playerGroup, findApplicantByTelegramId, getPlayerLeagueInfo } from './sheets.js';
+import { PUBLIC_URL, ADMIN_IDS } from './config.js';
+import { getSetting, setSetting, getPaymentMethods, playerGroup, findApplicantByTelegramId, getPlayerLeagueInfo,
+  getMasterPlayers, sameName, canonicalStatus } from './sheets.js';
 import {
   findEvent, listEvents, listSignups, findSignup, createSignup, updateSignup,
   takenSeats, priceFor, seatsOf, refundForCancel, hoursUntil, eventStartMs, eventEndMs, eventHasEnded,
   addTransaction, getBalance, publishEvent, updateEvent, deleteEventRow, addRefund,
   guestPriceOf, splitNames, joinNames, guestListOf, signupShape, dueOf, settleExtraPatch, refundDecision,
+  ownPriceOf, EVENT_CATEGORIES,
   SIGNUP_STATUS, CANCEL_LIMIT_HOURS
 } from './events.js';
 
@@ -145,7 +147,7 @@ export function icsForEvent(event, lang = 'ru') {
 // lead — карточка уходит в рассылку: сверху ставим заголовок «НОВОЕ СОБЫТИЕ»,
 // чтобы в ленте сообщений она сразу читалась как анонс. Название при этом идёт
 // отдельной строкой без мячика — два подряд выглядят неряшливо.
-export function eventCard(event, lang = 'ru', { taken = 0, lead = false } = {}) {
+export function eventCard(event, lang = 'ru', { taken = 0, lead = false, category = '' } = {}) {
   const L = ru(lang);
   const title = (L ? event.title_ru : event.title_en) || event.title_ru || event.title_en;
   const desc = (L ? event.description_ru : event.description_en) || '';
@@ -167,7 +169,12 @@ export function eventCard(event, lang = 'ru', { taken = 0, lead = false } = {}) 
     lines.push(L ? `👥 Свободно мест: <b>${left} из ${event.capacity}</b>`
                  : `👥 Spots available: <b>${left} of ${event.capacity}</b>`);
   }
-  if (event.payment_required) {
+  if (event.payment_required && category && category !== 'season') {
+    // Не участник сезона платит за себя по цене гостя.
+    const own = ownPriceOf(event, 'other');
+    lines.push(own ? (L ? `💳 Участие: <b>${own} ฿</b>` : `💳 Entry: <b>${own} ฿</b>`) : (L ? '💳 Участие бесплатное' : '💳 Free entry'));
+    if (event.guests_allowed) lines.push(own ? (L ? `➕ Гость: <b>${own} ฿</b>` : `➕ Guest: <b>${own} ฿</b>`) : (L ? '➕ Гость: <b>бесплатно</b>' : '➕ Guest: <b>free</b>'));
+  } else if (event.payment_required) {
     lines.push(event.price_thb
       ? (L ? `💳 Участие: <b>${event.price_thb} ฿</b>` : `💳 Entry: <b>${event.price_thb} ฿</b>`)
       : (L ? '💳 Участие для игроков лиги: <b>бесплатно</b>' : '💳 Entry for league players: <b>free</b>'));
@@ -208,17 +215,28 @@ export async function previewEventForAdmin(chatId, eventId) {
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
   const taken = await takenSeats(eventId);
   const { eventRecipients } = await import('./admin.js');
-  const recipients = await eventRecipients(event).catch(() => []);
-  const who = event.audience === 'personal'
-    ? `лично выбранным: ${recipients.length}`
-    : (event.audience === 'active' ? 'только активным игрокам' : 'всем в боте');
-  const div = event.audience_division ? `, дивизион ${event.audience_division}` : '';
-  const lock = event.invite_only ? '\n🔒 Только по приглашению: остальным событие не показывается.' : '';
-  await sendMessage(chatId, `<b>Так карточка уйдёт в рассылку</b> (${who}${div}) — получателей: <b>${recipients.length}</b>.${lock}`);
+  let recipients = [], failed = false;
+  try { recipients = await eventRecipients(event); } catch { failed = true; }
+  const fresh = event.status === 'published' ? await notYetReached(event, recipients) : recipients;
+  const lines = [`<b>Так карточка уйдёт в рассылку</b>`];
+  if (event.audience === 'personal') lines.push(`Лично выбранным: <b>${recipients.length}</b>`);
+  else {
+    const byCat = {};
+    for (const r of recipients) byCat[r.category] = (byCat[r.category] || 0) + 1;
+    lines.push(`Карточка: ${event.send_to.length ? event.send_to.map(c => `${CATEGORY_LABEL[c]} — <b>${byCat[c] || 0}</b>`).join(', ') : 'никому'}`);
+  }
+  lines.push(`Записаться могут: ${event.join_by.length ? event.join_by.map(c => CATEGORY_LABEL[c]).join(', ') : 'только приглашённые'}`);
+  if (event.payment_required && event.join_by.some(c => c !== 'season')) lines.push(`Не участники сезона платят за себя по цене гостя: <b>${guestPriceOf(event)} ฿</b>`);
+  if (event.audience_division) lines.push(`Дивизион: ${event.audience_division}`);
+  if (event.hidden) lines.push('🙈 Во вкладке «События» скрыто.');
+  if (event.invite_only) lines.push('🔒 Только по приглашению: остальным событие не показывается.');
+  if (failed) lines.push('⚠️ Не получилось прочитать составы — попробуй через минуту.');
+  else if (event.status === 'published') lines.push(`Уже разослано. Ещё не получили: <b>${fresh.length}</b>.`);
+  await sendMessage(chatId, lines.join('\n'));
   await sendMessage(chatId, eventCard(event, 'ru', { taken, lead: true }), {
     reply_markup: {
       inline_keyboard: [
-        [{ text: '📣 Подтвердить и разослать', callback_data: `ev_pub:${eventId}` }],
+        [{ text: event.status === 'published' ? `📣 Дослать тем, кто ещё не получил (${fresh.length})` : '📣 Подтвердить и разослать', callback_data: `ev_pub:${eventId}` }],
         ...(event.status === 'published' ? [[{ text: '🔔 Напомнить незаписавшимся', callback_data: `ev_nudge:${eventId}` }]] : []),
         [{ text: '✏️ Отредактировать', callback_data: `ev_edit:${eventId}` }],
         [{ text: '🗑 Удалить', callback_data: `ev_drop:${eventId}` }]
@@ -232,7 +250,11 @@ export async function previewEventForAdmin(chatId, eventId) {
 export async function broadcastEvent(chatId, eventId, contacts = []) {
   const event = await findEvent(eventId);
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
-  await publishEvent(eventId);
+  const again = event.status === 'published';
+  // Повторное нажатие рассылает только тем, кто карточку ещё не получал и не
+  // записан, — например, после того как в событие добавили новую категорию.
+  if (again) contacts = await notYetReached(event, contacts);
+  else await publishEvent(eventId);
   const taken = await takenSeats(eventId);
   const full = event.capacity > 0 && taken >= event.capacity;
   let ok = 0, fail = 0;
@@ -242,14 +264,65 @@ export async function broadcastEvent(chatId, eventId, contacts = []) {
   for (const c of contacts) {
     const lang = (c.language || 'en') === 'ru' ? 'ru' : 'en';
     try {
-      const res = await sendMessage(c.telegram_id, eventCard(event, lang, { taken, lead: true }), { reply_markup: signupKeyboard(event, lang, { full }) });
+      const res = await sendMessage(c.telegram_id, eventCard(event, lang, { taken, lead: true, category: c.category }), { reply_markup: signupKeyboard(event, lang, { full }) });
       const mid = res?.result?.message_id || res?.message_id;
-      if (mid) sent.push(`${c.telegram_id}:${mid}:${lang}`);
+      if (mid) sent.push(`${c.telegram_id}:${mid}:${lang}:${c.category || ''}`);
       ok++;
     } catch { fail++; }
   }
   await rememberCards(eventId, sent).catch(e => console.error('remember cards failed:', e.message));
-  return sendMessage(chatId, `📣 Событие опубликовано.\nОтправлено: <b>${ok}</b>${fail ? `\nОшибок: <b>${fail}</b>` : ''}`);
+  return sendMessage(chatId, `📣 ${again ? 'Дослано новым получателям' : 'Событие опубликовано'}.\nОтправлено: <b>${ok}</b>${fail ? `\nОшибок: <b>${fail}</b>` : ''}`);
+}
+
+// Кому карточка ещё не уходила и кто ещё не записан.
+async function notYetReached(event, contacts = []) {
+  const raw = await getSetting(CARDS_KEY(event.event_id)).catch(() => '');
+  const got = new Set(String(raw || '').split(',').filter(Boolean).map(x => x.split(':')[0]));
+  const signed = new Set((await listSignups(event.event_id).catch(() => [])).map(s => String(s.telegram_id)));
+  return contacts.filter(c => !got.has(String(c.telegram_id)) && !signed.has(String(c.telegram_id)));
+}
+
+// --- категории игроков ---------------------------------------------------------
+export const CATEGORY_LABEL = { season: 'участники сезона', past: 'игроки прошлых сезонов', waitlist: 'лист ожидания', others: 'остальные пользователи бота' };
+
+// Категория одного человека. null — проверить не удалось (таблицы недоступны):
+// тогда никого не пускаем наугад.
+export async function viewerCategory(telegramId) {
+  if (!telegramId) return 'others';
+  try {
+    if (ADMIN_IDS.map(String).includes(String(telegramId))) return 'season';
+    const info = await getPlayerLeagueInfo({ telegram_id: String(telegramId) });
+    if (info?.admin || info?.found) return 'season';
+    if (info?.member) {
+      // Есть в общем списке, но не нашёлся в таблицах сезона. Убеждаемся, что
+      // таблицы сезона вообще прочитались, иначе это не «прошлый сезон», а сбой.
+      const { seasonRoster } = await import('./division.js');
+      const roster = await seasonRoster();
+      if (!roster?.players?.length) return null;
+      return 'past';
+    }
+    const a = await findApplicantByTelegramId(telegramId);
+    return canonicalStatus(a?.status) === 'waitlist' ? 'waitlist' : 'others';
+  } catch { return null; }
+}
+
+// Категории для списка контактов разом (для рассылки): одно чтение составов.
+export async function categorizeContacts(contacts = []) {
+  const { seasonRoster } = await import('./division.js');
+  const roster = await seasonRoster();
+  if (!roster?.players?.length) throw new Error('Не получилось прочитать составы сезона');
+  const master = await getMasterPlayers();
+  const names = roster.players.map(p => p.name);
+  const admins = new Set(ADMIN_IDS.map(String));
+  return contacts.map(c => {
+    if (admins.has(String(c.telegram_id))) return { ...c, category: 'season' };
+    const name = String(c.name || '').trim();
+    const m = name ? master.find(p => sameName(p.player_name, name)) : null;
+    const nm = m?.player_name || name;
+    if (nm && names.some(n => sameName(n, nm))) return { ...c, category: 'season' };
+    if (m) return { ...c, category: 'past' };
+    return { ...c, category: canonicalStatus(c.status) === 'waitlist' ? 'waitlist' : 'others' };
+  });
 }
 
 // --- живая карточка --------------------------------------------------------
@@ -294,10 +367,10 @@ export async function refreshEventCards(eventId, { text = null, keyboard = undef
   let edited = 0, gone = 0;
   const keep = [];
   for (const part of String(raw).split(',').filter(Boolean)) {
-    const [cid, mid, lg] = part.split(':');
+    const [cid, mid, lg, cat] = part.split(':');
     if (!cid || !mid) continue;
     const lang = lg === 'ru' ? 'ru' : 'en';
-    const body = text ? (typeof text === 'function' ? text(lang) : text) : eventCard(event, lang, { taken, lead: true });
+    const body = text ? (typeof text === 'function' ? text(lang) : text) : eventCard(event, lang, { taken, lead: true, category: cat || '' });
     const markup = text ? keyboard : signupKeyboard(event, lang, { full });
     try {
       await editMessageText(cid, Number(mid), body, markup ? { reply_markup: markup } : { reply_markup: { inline_keyboard: [] } });
@@ -355,15 +428,18 @@ export async function notifyOrganizer(signup, event, adminChatId, extra = '') {
     extra
   ].filter(Boolean).join('\n');
 
+  // Под карточкой — кнопки «Убрать гостя», пока гости есть.
+  const kb = organizerGuestKeyboard(signup);
   const stored = await getSetting(noteKey(signup.signup_id)).catch(() => '');
   if (stored) {
     const [cid, mid] = String(stored).split(':');
-    try { await editMessageText(cid, Number(mid), text); return { edited: true }; } catch { /* сообщение могли удалить */ }
+    try { await editMessageText(cid, Number(mid), text, { reply_markup: kb || { inline_keyboard: [] } }); return { edited: true }; }
+    catch (e) { if (/not modified/i.test(e?.message || '')) return { edited: true }; /* сообщение могли удалить */ }
   }
   // Карточка записи — это разговор про конкретного игрока, поэтому она ложится
   // в его тему, а не в общую ленту админского чата.
-  const res = await topicNote(adminChatId, signup.telegram_id, text)
-    || await sendMessage(adminChatId, text);
+  const res = await topicNote(adminChatId, signup.telegram_id, text, kb ? { reply_markup: kb } : {})
+    || await sendMessage(adminChatId, text, kb ? { reply_markup: kb } : {});
   const mid = res?.result?.message_id || res?.message_id;
   const cid = res?.result?.chat?.id || res?.chat?.id || adminChatId;
   if (mid) await setSetting(noteKey(signup.signup_id), `${cid}:${mid}`, 'служебное: сообщение организатора по записи').catch(() => {});
@@ -410,19 +486,20 @@ export async function joinPrecheck({ telegramId, lang = 'ru', eventId, group = '
   if (event.invite_only && !isInvited(event, telegramId)) {
     return { ok: false, message: L ? 'Это событие только по приглашению.' : 'This event is by invitation only.' };
   }
-  const who = group || await playerGroup(telegramId).catch(() => 'guest');
-  const denied = eventAccessDenial(event, who, lang);
-  if (denied) return { ok: false, ...denied };
   if(!isSignupOpen(event)) return {ok:false,message:L?'Запись закрыта: событие уже началось или завершилось.':'Sign-up is closed: this event has started or ended.'};
-  // «Только активным» — это участники ТЕКУЩЕГО сезона: игрок должен стоять в
-  // таблице дивизиона этого сезона. Игрок прошлых сезонов тоже числится в лиге,
-  // и раньше он мог записаться через вкладку «События», не получив рассылки.
-  if (event.audience === 'active') {
-    const season = await currentSeasonCheck(telegramId);
-    if (season === null) return { ok: false, message: L ? 'Не получилось проверить участие в сезоне — попробуй ещё раз через минуту.' : 'Could not check your season status — please try again in a minute.' };
-    if (!season) return { ok: false, message: L
+  // Кто может записаться — по категориям события (галочки «Запись»). Участник
+  // сезона проверяется по таблицам дивизионов текущего сезона: игрок прошлых
+  // сезонов тоже числится в лиге, но это другая категория.
+  const category = await viewerCategory(telegramId);
+  if (category === null) return { ok: false, message: L ? 'Не получилось проверить участие в сезоне — попробуй ещё раз через минуту.' : 'Could not check your season status — please try again in a minute.' };
+  const allowed = event.join_by.includes(category) || (event.audience === 'personal' && isInvited(event, telegramId));
+  if (!allowed) {
+    if (category === 'others' && !event.join_by.length) return { ok: false, message: L ? 'Это событие только по приглашению.' : 'This event is by invitation only.' };
+    if (category === 'others') return { ok: false, ...eventAccessDenial(event, 'guest', lang) };
+    if (event.join_by.length === 1 && event.join_by[0] === 'season') return { ok: false, message: L
       ? 'Это событие — для участников текущего сезона лиги. Если ты играешь в этом сезоне и видишь это сообщение, напиши организатору.'
       : 'This event is for players of the current league season. If you play this season and see this message, please contact the organiser.' };
+    return { ok: false, message: L ? 'Запись на это событие для тебя закрыта. Если это ошибка — напиши организатору.' : 'Sign-up for this event is not open to you. If this is a mistake, please contact the organiser.' };
   }
   const existing = await findSignup(eventId, telegramId);
   // Уже записан — не просто отказ: рядом та же кнопка отмены, иначе человек
@@ -432,16 +509,14 @@ export async function joinPrecheck({ telegramId, lang = 'ru', eventId, group = '
       message: L ? 'Ты уже записан на это событие.' : 'You are already signed up.',
       markup: calendarKeyboard(event, lang, existing), existing };
   }
-  return { ok: true, event };
+  return { ok: true, event, category };
 }
 
 // Участник текущего сезона: стоит в таблице дивизиона последнего сезона
 // (или организатор). null — проверить не удалось (таблицы недоступны).
 export async function currentSeasonCheck(telegramId) {
-  try {
-    const info = await getPlayerLeagueInfo({ telegram_id: String(telegramId) });
-    return Boolean(info?.admin || info?.found);
-  } catch { return null; }
+  const c = await viewerCategory(telegramId);
+  return c === null ? null : c === 'season';
 }
 
 // guestNames — имена гостей (массив). Гостей приводит участник лиги и платит за
@@ -451,6 +526,7 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guestN
   const pre = await joinPrecheck({ telegramId, lang, eventId, group });
   if (!pre.ok) return pre;
   const event = pre.event;
+  const priceGroup = pre.category === 'season' ? 'season' : 'other';
   const names = event.guests_allowed
     ? (guestNames || []).map(x => String(x || '').trim()).filter(Boolean).slice(0, Math.max(1, event.max_guests || 1))
     : [];
@@ -458,13 +534,13 @@ export async function joinEvent({ telegramId, name, lang = 'ru', eventId, guestN
   const wantSeats = 1 + names.length;
   const taken = await takenSeats(eventId);
   const noRoom = event.capacity > 0 && taken + wantSeats > event.capacity;
-  const shape = signupShape(event, names);
+  const shape = signupShape(event, names, priceGroup);
 
   const status = noRoom ? SIGNUP_STATUS.waitlist : shape.status;
   const signup = noRoom
-    ? await createSignup({ event, telegramId, name, guests: names.length, guestNames: joinNames(names), status, amount: 0 })
+    ? await createSignup({ event, telegramId, name, guests: names.length, guestNames: joinNames(names), status, amount: 0, priceGroup })
     : await createSignup({ event, telegramId, name, guests: shape.guests, guestNames: shape.guestNames,
-        status, amount: shape.amount, extra: shape.extra });
+        status, amount: shape.amount, extra: shape.extra, priceGroup });
 
   let message = null, markup;
   if (noRoom) {
@@ -859,7 +935,7 @@ async function sendNudge(event, contacts) {
     const lang = (c.language || 'en') === 'ru' ? 'ru' : 'en';
     const head = lang === 'ru' ? '👀 <b>Ещё можно записаться</b>' : '👀 <b>You can still join</b>';
     try {
-      await sendMessage(c.telegram_id, `${head}\n\n${eventCard(event, lang, { taken })}`,
+      await sendMessage(c.telegram_id, `${head}\n\n${eventCard(event, lang, { taken, category: c.category })}`,
         { reply_markup: signupKeyboard(event, lang) });
       sent++;
     } catch { /* заблокировал бота — не наша забота */ }
@@ -1017,7 +1093,7 @@ export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adm
   const event = await findEvent(signup.event_id);
   if(!isSignupOpen(event))return sendMessage(chatId,L?'Запись на событие уже закрыта.':'Sign-up for this event is closed.');
   await setSetting(holdKey(signup.signup_id), '', 'Место занято').catch(() => {});
-  const shape = signupShape(event, guestListOf(signup).map(g => g.name));
+  const shape = signupShape(event, guestListOf(signup).map(g => g.name), signup.price_group);
   if (shape.extra) {
     // Участие бесплатное, гости платные: игрок в составе, гостям — счёт.
     const updated = await updateSignup(signup.signup_id, { status: SIGNUP_STATUS.confirmed, guests: 0, guest_names: '',
@@ -1031,7 +1107,7 @@ export async function takeOffer({ signupId, telegramId, lang = 'ru', chatId, adm
     const balance = await getBalance(telegramId).catch(() => 0);
     return sendMessage(chatId, await invoiceText(event, merged, lang, balance), { reply_markup: invoiceKeyboard(event, merged, lang, balance) });
   }
-  const amount = priceFor(event, signup.guests || 0);
+  const amount = priceFor(event, signup.guests || 0, signup.price_group);
   if (event?.payment_required && amount > 0) {
     const updated = await updateSignup(signup.signup_id, {
       status: SIGNUP_STATUS.invoiced, amount_thb: amount, note: 'принял место из листа ожидания'
@@ -1567,22 +1643,16 @@ export async function askRemoveGuest({ chatId, telegramId, lang = 'ru', signupId
   ] } });
 }
 
-export async function removeGuest({ signupId, idx, count = null, telegramId, lang = 'ru', adminChatId = '', now = Date.now() }) {
-  const L = ru(lang);
-  const own = await ownSignup(signupId, telegramId, lang);
-  if (own.error) return { ok: false, message: own.error };
-  const { signup, event } = own;
+// Убрать гостя из записи — общая часть для игрока и организатора.
+// money: 'rule' — по правилу отмены; 'dep' — вернуть на депозит; 'none' — без
+// возврата (организатор вернёт сам или удерживает).
+async function dropGuestCore({ signup, event, idx, plan, money = 'rule' }) {
   const list = guestListOf(signup);
-  if (count !== null && list.length !== Number(count)) return { ok: false, message: L ? 'Список гостей изменился — открой его заново.' : 'The guest list has changed — open it again.' };
-  if (eventHasEnded(event, now) || !isSignupOpen(event, now)) return { ok: false, message: L ? 'Запись закрыта — состав гостей уже не меняется.' : 'Sign-up is closed — guests can no longer be changed.' };
-  const plan = guestRemovePlan(event, signup, Number(idx), now);
-  if (!plan) return { ok: false, message: L ? 'Гость не найден.' : 'Guest not found.' };
   const confirmed = list.filter(g => !g.pending).map(g => g.name);
   const pending = list.filter(g => g.pending).map(g => g.name);
-  let patch, tail = '';
+  let patch, refunded = 0, withheld = 0, left = null;
   if (plan.guest.pending) {
-    const j = Number(idx) - confirmed.length;
-    pending.splice(j, 1);
+    pending.splice(Number(idx) - confirmed.length, 1);
     const amount = Math.max(0, (signup.extra_amount_thb || 0) - plan.amount);
     patch = { extra_guests: pending.length, extra_guest_names: joinNames(pending), extra_amount_thb: pending.length ? amount : 0 };
     if (!pending.length) await setSetting(sentKey(signup.signup_id, 'gpay'), '', 'Гостей к оплате нет').catch(() => {});
@@ -1593,25 +1663,104 @@ export async function removeGuest({ signupId, idx, count = null, telegramId, lan
     if (plan.kind === 'refund' || plan.kind === 'late') {
       patch.amount_thb = Math.max(0, (signup.amount_thb || 0) - plan.amount);
       patch.paid_thb = Math.max(0, (signup.paid_thb || 0) - plan.amount);
-    }
-    if (plan.kind === 'refund') {
-      const left = await addTransaction({ telegramId: signup.telegram_id, name: signup.player_name, type: 'возврат', amount: plan.amount,
-        description: `Гость убран: ${event.title_ru || event.event_id} (${plan.guest.name})` });
-      tail = L ? `\n↩️ Возвращено на депозит: <b>${plan.amount} ฿</b>. Остаток: <b>${left} ฿</b>` : `\n↩️ Returned to your deposit: <b>${plan.amount} ฿</b>. Balance: <b>${left} ฿</b>`;
-    }
-    if (plan.kind === 'late') {
-      patch.note = `гость ${plan.guest.name} убран поздно, удержано ${plan.amount} ฿`;
-      tail = L ? `\n💳 Оплата за гостя <b>${plan.amount} ฿</b> удержана — отмена позже срока.` : `\n💳 The <b>${plan.amount} ฿</b> for this guest is withheld — late cancellation.`;
+      const give = money === 'dep' || (money === 'rule' && plan.kind === 'refund');
+      if (give) {
+        left = await addTransaction({ telegramId: signup.telegram_id, name: signup.player_name, type: 'возврат', amount: plan.amount,
+          description: `Гость убран: ${event.title_ru || event.event_id} (${plan.guest.name})` });
+        refunded = plan.amount;
+      } else {
+        withheld = plan.amount;
+        patch.note = `гость ${plan.guest.name} убран, ${plan.amount} ฿ без возврата на депозит`;
+      }
     }
   }
   const updated = await updateSignup(signup.signup_id, patch);
-  const merged = { ...signup, ...updated };
-  const extra = `➖ Убрал гостя: ${escapeHtml(plan.guest.name)}` + (plan.kind === 'refund' ? ` — возврат ${plan.amount} ฿ на депозит` : plan.kind === 'late' ? ` — поздно, ${plan.amount} ฿ удержаны` : '');
-  if (adminChatId) await notifyOrganizer(merged, event, adminChatId, extra).catch(() => {});
+  return { merged: { ...signup, ...updated }, refunded, withheld, left };
+}
+
+export async function removeGuest({ signupId, idx, count = null, telegramId, lang = 'ru', adminChatId = '', now = Date.now() }) {
+  const L = ru(lang);
+  const own = await ownSignup(signupId, telegramId, lang);
+  if (own.error) return { ok: false, message: own.error };
+  const { signup, event } = own;
+  const list = guestListOf(signup);
+  if (count !== null && list.length !== Number(count)) return { ok: false, message: L ? 'Список гостей изменился — открой его заново.' : 'The guest list has changed — open it again.' };
+  if (eventHasEnded(event, now) || !isSignupOpen(event, now)) return { ok: false, message: L ? 'Запись закрыта — состав гостей уже не меняется.' : 'Sign-up is closed — guests can no longer be changed.' };
+  const plan = guestRemovePlan(event, signup, Number(idx), now);
+  if (!plan) return { ok: false, message: L ? 'Гость не найден.' : 'Guest not found.' };
+  const r = await dropGuestCore({ signup, event, idx, plan, money: 'rule' });
+  let tail = '';
+  if (r.refunded) tail = L ? `\n↩️ Возвращено на депозит: <b>${r.refunded} ฿</b>. Остаток: <b>${r.left} ฿</b>` : `\n↩️ Returned to your deposit: <b>${r.refunded} ฿</b>. Balance: <b>${r.left} ฿</b>`;
+  if (r.withheld) tail = L ? `\n💳 Оплата за гостя <b>${r.withheld} ฿</b> удержана — отмена позже срока.` : `\n💳 The <b>${r.withheld} ฿</b> for this guest is withheld — late cancellation.`;
+  const extra = `➖ Убрал гостя: ${escapeHtml(plan.guest.name)}` + (r.refunded ? ` — возврат ${r.refunded} ฿ на депозит` : r.withheld ? ` — поздно, ${r.withheld} ฿ удержаны` : '');
+  if (adminChatId) await notifyOrganizer(r.merged, event, adminChatId, extra).catch(() => {});
   await runWaitlistOffers(now, adminChatId).catch(() => {});
   touchEventCards(event.event_id);
   const message = (L ? `✅ Гость <b>${escapeHtml(plan.guest.name)}</b> убран.` : `✅ Guest <b>${escapeHtml(plan.guest.name)}</b> removed.`) + tail;
-  return { ok: true, message, signup: merged, event, needsInvoice: Boolean(dueOf(merged)) && (plan.kind === 'invoice' || plan.kind === 'pending') };
+  return { ok: true, message, signup: r.merged, event, needsInvoice: Boolean(dueOf(r.merged)) && (plan.kind === 'invoice' || plan.kind === 'pending') };
+}
+
+// --- гости: правка организатором -------------------------------------------
+// Кнопки «➖ Убрать гостя» под карточкой записи в теме игрока.
+export function organizerGuestKeyboard(signup) {
+  if (!signup || signup.status === SIGNUP_STATUS.cancelled) return null;
+  const list = guestListOf(signup);
+  if (!list.length) return null;
+  return { inline_keyboard: list.map((g, i) => [{ text: `➖ Убрать гостя: ${g.name}`.slice(0, 60), callback_data: `evgx:${signup.signup_id}:${i}:${list.length}` }]) };
+}
+
+async function findSignupById(signupId) {
+  const all = await listSignups().catch(() => []);
+  return all.find(s => s.signup_id === String(signupId)) || null;
+}
+
+// Первый шаг: если за гостя заплачено — спрашиваем про деньги; иначе убираем сразу.
+export async function askOrganizerRemoveGuest({ signupId, idx, count, adminChatId = '' }) {
+  const signup = await findSignupById(signupId);
+  if (!signup || signup.status === SIGNUP_STATUS.cancelled) return { ok: false, message: 'Запись не найдена.' };
+  if (guestListOf(signup).length !== Number(count)) return { ok: false, message: 'Список гостей изменился — открой карточку записи заново.' };
+  const event = await findEvent(signup.event_id);
+  const plan = event ? guestRemovePlan(event, signup, Number(idx)) : null;
+  if (!plan) return { ok: false, message: 'Гость не найден.' };
+  if (plan.kind === 'refund' || plan.kind === 'late') {
+    return { ok: true, ask: true, owner: signup.telegram_id,
+      message: `<b>➖ Убрать гостя ${escapeHtml(plan.guest.name)}</b>\nЗапись: <b>${escapeHtml(signup.player_name)}</b>\nЗа гостя оплачено: <b>${plan.amount} ฿</b>\n\nЧто делаем с деньгами?`,
+      markup: { inline_keyboard: [
+        [{ text: `💰 Вернуть на депозит (${plan.amount} ฿)`, callback_data: `evgxr:${signupId}:${idx}:${count}:dep` }],
+        [{ text: '🚫 Без возврата на депозит', callback_data: `evgxr:${signupId}:${idx}:${count}:none` }]
+      ] } };
+  }
+  return organizerRemoveGuest({ signupId, idx, count, money: 'none', adminChatId });
+}
+
+export async function organizerRemoveGuest({ signupId, idx, count, money = 'none', adminChatId = '', now = Date.now() }) {
+  const signup = await findSignupById(signupId);
+  if (!signup || signup.status === SIGNUP_STATUS.cancelled) return { ok: false, message: 'Запись не найдена.' };
+  if (guestListOf(signup).length !== Number(count)) return { ok: false, message: 'Список гостей изменился — открой карточку записи заново.' };
+  const event = await findEvent(signup.event_id);
+  if (!event) return { ok: false, message: 'Событие не найдено.' };
+  const plan = guestRemovePlan(event, signup, Number(idx), now);
+  if (!plan) return { ok: false, message: 'Гость не найден.' };
+  const r = await dropGuestCore({ signup, event, idx, plan, money });
+  // Игроку — всегда сообщение: организатор убрал гостя, и что с деньгами.
+  const lang = await recipientLang(signup.telegram_id), L = lang === 'ru';
+  const title = eventTitle(event, lang);
+  let tail = '';
+  if (r.refunded) tail = L ? `\n↩️ Возвращено на депозит: <b>${r.refunded} ฿</b>.` : `\n↩️ Returned to your deposit: <b>${r.refunded} ฿</b>.`;
+  await sendMessage(signup.telegram_id, (L
+    ? `ℹ️ Организатор убрал гостя <b>${escapeHtml(plan.guest.name)}</b> из твоей записи на «${escapeHtml(title)}».`
+    : `ℹ️ The organiser removed your guest <b>${escapeHtml(plan.guest.name)}</b> from your sign-up for “${escapeHtml(title)}”.`) + tail,
+    { reply_markup: calendarKeyboard(event, lang, r.merged) }).catch(() => {});
+  if (dueOf(r.merged) && (plan.kind === 'invoice' || plan.kind === 'pending')) {
+    const balance = await getBalance(signup.telegram_id).catch(() => 0);
+    await sendMessage(signup.telegram_id, await invoiceText(event, r.merged, lang, balance), { reply_markup: invoiceKeyboard(event, r.merged, lang, balance) }).catch(() => {});
+  }
+  const extra = `➖ Организатор убрал гостя: ${escapeHtml(plan.guest.name)}` + (r.refunded ? ` — ${r.refunded} ฿ на депозит` : r.withheld ? ` — ${r.withheld} ฿ без возврата на депозит` : '');
+  if (adminChatId) await notifyOrganizer(r.merged, event, adminChatId, extra).catch(() => {});
+  await runWaitlistOffers(now, adminChatId).catch(() => {});
+  touchEventCards(event.event_id);
+  return { ok: true, owner: signup.telegram_id,
+    message: `✅ Гость <b>${escapeHtml(plan.guest.name)}</b> убран из записи <b>${escapeHtml(signup.player_name)}</b>, игрок получил уведомление.` + (r.refunded ? ` На депозит: <b>${r.refunded} ฿</b>.` : '') };
 }
 
 // --- напоминания ------------------------------------------------------------
@@ -1764,7 +1913,9 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
   const existing = await findSignup(eventId, telegramId);
   if (existing) return { ok: false, message: `<b>${escapeHtml(name)}</b> уже в составе.` };
 
-  const amount = priceFor(event, 0);
+  const cat = await viewerCategory(telegramId);
+  const priceGroup = cat === 'season' || cat === null ? 'season' : 'other';
+  const amount = priceFor(event, 0, priceGroup);
   // mode === 'dep' — оплачиваем сразу с депозита игрока, если денег хватает.
   if (mode === 'dep' && event.payment_required && amount > 0) {
     const balance = await getBalance(telegramId).catch(() => 0);
@@ -1777,7 +1928,7 @@ export async function addToEvent({ eventId, telegramId, name, lang = 'ru', mode 
     : ((mode === 'paid' || mode === 'dep') ? SIGNUP_STATUS.paid : SIGNUP_STATUS.confirmed);
   const signup = await createSignup({
     event, telegramId, name, guests: 0, status,
-    amount: paying ? amount : 0
+    amount: paying ? amount : 0, priceGroup
   });
   if (mode === 'paid') {
     await updateSignup(signup.signup_id, { paid_thb: amount, paid_from: 'добавлен организатором' });
@@ -1862,11 +2013,11 @@ export async function removeFromEvent({ signupId, mode = 'rule', adminChatId = '
 //   manual  — вернёт переводом сам, бот только ведёт список долгов.
 // Заметка в тему игрока в админском чате. Импорт ленивый: admin.js сам тянет
 // eventflow.js, и обычный import замкнул бы их друг на друга.
-async function topicNote(adminChatId, telegramId, text) {
+async function topicNote(adminChatId, telegramId, text, opts = {}) {
   const { replyInPlayerTopic, getAdminChatId } = await import('./admin.js');
   const chat = adminChatId || await getAdminChatId().catch(() => '');
   if (!chat) return null;
-  return replyInPlayerTopic(chat, telegramId, text);
+  return replyInPlayerTopic(chat, telegramId, text, opts);
 }
 
 // Чей это игрок — нужно, чтобы ответ по снятию из состава лёг в его тему.
@@ -1977,12 +2128,14 @@ function queueOf(all, eventId, isAdmin) {
   }));
 }
 
-export async function eventsForViewer(telegramId = '', isActivePlayer = false, isAdmin = false) {
+// category — категория зрителя (viewerCategory); '' — гость сайта без входа.
+export async function eventsForViewer(telegramId = '', category = '', isAdmin = false) {
   const events = await listEvents();
   const mine = await listSignups();
   const out = [];
   for (const e of events) {
-    if (e.audience === 'active' && !isActivePlayer) continue;
+    // Видно тем, кто может записаться (галочка «Запись»), уже записанным,
+    // приглашённым и организатору. «Скрыть» убирает событие у всех остальных.
     // Пустой id — гость сайта: у него записей нет, даже если в листе есть
     // строка без Telegram ID (добавленная организатором вручную).
     const signup = telegramId && mine.find(s => s.event_id === e.event_id
@@ -1991,6 +2144,13 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false, i
     // Событие «только по приглашению» для остальных просто не существует.
     // Уже записавшегося не выкидываем, даже если его убрали из списка.
     if (e.invite_only && !signup && !isInvited(e, telegramId)) continue;
+    if (!isAdmin && !signup) {
+      if (e.hidden) continue;
+      const may = category
+        ? e.join_by.includes(category) || (e.audience === 'personal' && isInvited(e, telegramId))
+        : e.join_by.some(c => c !== 'season');
+      if (!may) continue;
+    }
     const taken = await takenSeats(e.event_id);
     out.push({
       ...e,
@@ -2003,6 +2163,8 @@ export async function eventsForViewer(telegramId = '', isActivePlayer = false, i
       my_guest_list: signup ? guestListOf(signup) : [],
       my_due: signup ? dueOf(signup) : null,
       guest_price: guestPriceOf(e),
+      my_category: category || '',
+      my_price: ownPriceOf(e, (signup ? signup.price_group : (category === 'season' || isAdmin ? 'season' : 'other')) === 'season' ? 'season' : 'other'),
       signup_open: isSignupOpen(e),
       guest_room: e.guests_allowed && isSignupOpen(e) ? guestRoom(e, signup || null, taken + (signup ? 0 : 1)) : 0,
       my_paid: signup?.paid_thb || 0,

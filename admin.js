@@ -498,10 +498,18 @@ export async function eventRecipients(event) {
     const byId = new Map(all.map(c => [String(c.telegram_id), c]));
     // Приглашённого может не быть в общей выборке (например, ещё не активен) —
     // тогда шлём по одному telegram_id, язык подставится по умолчанию.
-    return [...wanted].map(id => byId.get(id) || { telegram_id: id, language: 'ru' });
+    const list = [...wanted].map(id => byId.get(id) || { telegram_id: id, language: 'ru' });
+    // Категория нужна, чтобы в карточке стояла его цена.
+    const { categorizeContacts } = await import('./eventflow.js');
+    return categorizeContacts(list).catch(() => list);
   }
-  const segment = event.audience === 'active' ? 'active' : 'all';
-  let contacts = await getSegmentContacts(segment).catch(() => []);
+  // Получатели — по галочкам «Карточка» у категорий события: участники сезона,
+  // игроки прошлых сезонов, лист ожидания, остальные пользователи бота.
+  // Составы не прочитались — бросаем ошибку: разослать наугад хуже, чем подождать.
+  const { categorizeContacts } = await import('./eventflow.js');
+  const all = await getSegmentContacts('all');
+  const want = new Set(event.send_to || []);
+  let contacts = (await categorizeContacts(all)).filter(c => want.has(c.category));
   // Букву принимаем в любом виде: «A», «a», «Division A» — сравниваем по букве.
   const letter = (v) => String(v || '').replace(/^(division|дивизион)\s*/i, '').trim().toUpperCase();
   const div = letter(event.audience_division);
@@ -516,7 +524,10 @@ export async function eventPublish(chatId, eventId) {
   const { findEvent } = await import('./events.js');
   const event = await findEvent(eventId);
   if (!event) return sendMessage(chatId, 'Событие не найдено.');
-  return broadcastEvent(chatId, eventId, await eventRecipients(event));
+  let recipients;
+  try { recipients = await eventRecipients(event); }
+  catch (e) { return sendMessage(chatId, `⚠️ Не получилось прочитать составы сезона — рассылка не ушла. Попробуй через минуту.\n<code>${escapeHtml(e.message)}</code>`); }
+  return broadcastEvent(chatId, eventId, recipients);
 }
 // --- правка состава события -------------------------------------------------
 // Логика взята из тренерского бота: добавили игрока — запускается ветка оплаты,

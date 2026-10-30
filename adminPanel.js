@@ -502,10 +502,15 @@ export function registerAdminRoutes(app) {
             // Платное или нет — по ценам: участие может быть 0, а гость платным.
             payment_required: isPaidByPrices(Number(body.price_thb) || 0,
               String(body.guest_price_thb ?? '').trim() === '' ? null : Number(body.guest_price_thb) || 0,
-              body.guests_allowed) ? 'TRUE' : 'FALSE',
+              body.guests_allowed || (Array.isArray(body.join_by) && body.join_by.some(c => c !== 'season'))) ? 'TRUE' : 'FALSE',
+            // Галочки категорий. Пустой выбор пишем явно («none»), иначе событие
+            // откатилось бы к старому правилу «всем».
+            send_to: (Array.isArray(body.send_to) ? body.send_to : []).join(',') || 'none',
+            join_by: (Array.isArray(body.join_by) ? body.join_by : []).join(',') || 'none',
+            hidden: body.hidden ? 'TRUE' : 'FALSE',
             guests_allowed: body.guests_allowed ? 'TRUE' : 'FALSE',
             max_guests: body.max_guests ?? '', refund_hours: body.refund_hours ?? '',
-            audience: body.audience || 'all',
+            audience: body.audience === 'personal' ? 'personal' : 'cat',
             audience_division: String(body.audience_division || '').toUpperCase(),
             invite_only: body.invite_only ? 'TRUE' : 'FALSE',
             invited_ids: Array.isArray(body.invited_ids) ? body.invited_ids.join(',') : String(body.invited_ids || '')

@@ -32,14 +32,20 @@ export const REGISTRY_HEADERS = [
   // personal — поимённо тем, кто перечислен в invited_ids. Плюс необязательный
   // фильтр по дивизиону. invite_only прячет событие от всех, кроме приглашённых.
   'audience', 'audience_division', 'invite_only', 'invited_ids', 'remind_unregistered',
-  'created_at', 'published_at', 'created_by'
+  'created_at', 'published_at', 'created_by',
+  // Категории игроков (через запятую): кому уходит карточка и кто может
+  // записаться (и видит событие во вкладке). hidden — скрыть во вкладке у всех.
+  'send_to', 'join_by', 'hidden'
 ];
 export const SIGNUP_HEADERS = [
   'signup_id', 'event_id', 'telegram_id', 'player_name', 'guests', 'guest_names',
   'status', 'amount_thb', 'paid_thb', 'paid_from', 'created_at', 'updated_at', 'note',
   // Гости, добавленные после оплаты (или к бесплатному участию) и ещё не
   // оплаченные: место за ними держится, в состав они переходят после оплаты.
-  'extra_guests', 'extra_guest_names', 'extra_amount_thb'
+  'extra_guests', 'extra_guest_names', 'extra_amount_thb',
+  // По какой цене записан сам игрок: season — участник сезона (цена участника),
+  // other — остальные допущенные категории (цена гостя).
+  'price_group'
 ];
 export const TX_HEADERS = ['date', 'telegram_id', 'name', 'type', 'amount', 'balance', 'description'];
 export const BALANCE_HEADERS = ['telegram_id', 'name', 'balance_thb', 'updated_at'];
@@ -64,6 +70,34 @@ function yes(v) {
   return s === 'true' || s === 'yes' || s === 'да' || s === '1' || s === 'on';
 }
 function num(v) { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) ? n : 0; }
+
+// Категории игроков для событий:
+//   season  — участники текущего сезона (есть в таблице дивизиона сезона);
+//   past    — играли в прошлых сезонах, сейчас не играют;
+//   waitlist — лист ожидания;
+//   others  — все остальные пользователи бота.
+export const EVENT_CATEGORIES = ['season', 'past', 'waitlist', 'others'];
+function categoryList(v) {
+  return String(v ?? '').split(/[,;\s]+/).map(x => x.trim().toLowerCase()).filter(x => EVENT_CATEGORIES.includes(x));
+}
+// Старые события (без галочек) ведут себя как раньше: «только активным» —
+// участники сезона; «всем в боте» — карточка всем, запись игрокам лиги и листу
+// ожидания; «лично выбранным» — карточка приглашённым, запись по старому правилу.
+export function eventCategories(raw = {}) {
+  const audience = String(raw.audience || '').toLowerCase() || 'all';
+  const sendRaw = String(raw.send_to ?? '').trim(), joinRaw = String(raw.join_by ?? '').trim();
+  const legacySend = audience === 'active' ? ['season'] : audience === 'personal' ? [] : ['season', 'past', 'waitlist', 'others'];
+  const legacyJoin = audience === 'active' ? ['season'] : ['season', 'past', 'waitlist'];
+  return {
+    send_to: sendRaw ? categoryList(sendRaw) : legacySend,
+    join_by: joinRaw ? categoryList(joinRaw) : legacyJoin
+  };
+}
+// Сколько платит сам игрок: участник сезона — цена участника, остальные — цена гостя.
+export function ownPriceOf(event, group = 'season') {
+  if (!event?.payment_required) return 0;
+  return group === 'season' ? (event.price_thb || 0) : guestPriceOf(event);
+}
 
 // Цена гостя: пусто — как у участника.
 export function guestPriceOf(event) {
@@ -116,7 +150,8 @@ function mapEvent(r) {
     signup_deadline: safe(r.signup_deadline),
     // «Платное» больше не галочка: событие платное, если хоть одна цена больше
     // нуля. Участие может быть бесплатным, а гость — платным.
-    payment_required: isPaidByPrices(num(r.price_thb), String(r.guest_price_thb ?? '').trim() === '' ? null : num(r.guest_price_thb), yes(r.guests_allowed)),
+    payment_required: isPaidByPrices(num(r.price_thb), String(r.guest_price_thb ?? '').trim() === '' ? null : num(r.guest_price_thb),
+      yes(r.guests_allowed) || eventCategories(r).join_by.some(c => c !== 'season')),
     guests_allowed: yes(r.guests_allowed),
     max_guests: num(r.max_guests) || (yes(r.guests_allowed) ? 1 : 0),
     refund_hours: String(r.refund_hours ?? '').trim() === '' ? CANCEL_LIMIT_HOURS : num(r.refund_hours),
@@ -128,6 +163,8 @@ function mapEvent(r) {
     // Список приглашённых храним строкой через запятую — отдельный лист ради
     // десятка id заводить незачем.
     invited_ids: safe(r.invited_ids).split(/[,;\s]+/).map(x => x.trim()).filter(Boolean),
+    ...eventCategories(r),
+    hidden: yes(r.hidden),
     created_at: safe(r.created_at), published_at: safe(r.published_at),
     _rowNumber: r._rowNumber
   };
@@ -157,16 +194,22 @@ export async function createEvent(data, createdBy = '') {
     date: safe(data.date), time: safe(data.time), end_time:safe(data.end_time), place: safe(data.place), place_url: safe(data.place_url),
     price_thb: data.price_thb ?? '', guest_price_thb: data.guest_price_thb ?? '',
     capacity: data.capacity ?? '', signup_deadline: safe(data.signup_deadline),
-    payment_required: isPaidByPrices(num(data.price_thb), String(data.guest_price_thb ?? '').trim() === '' ? null : num(data.guest_price_thb), data.guests_allowed) ? 'TRUE' : 'FALSE',
+    payment_required: isPaidByPrices(num(data.price_thb), String(data.guest_price_thb ?? '').trim() === '' ? null : num(data.guest_price_thb),
+      data.guests_allowed || categoryList(Array.isArray(data.join_by) ? data.join_by.join(',') : data.join_by).some(c => c !== 'season')) ? 'TRUE' : 'FALSE',
     guests_allowed: data.guests_allowed ? 'TRUE' : 'FALSE',
     max_guests: data.max_guests ?? '',
     refund_hours: data.refund_hours ?? '',
-    audience: safe(data.audience) || 'all',
+    audience: safe(data.audience) === 'personal' ? 'personal' : (safe(data.audience) || 'cat'),
     audience_division: safe(data.audience_division).toUpperCase(),
     invite_only: data.invite_only ? 'TRUE' : 'FALSE',
     remind_unregistered: data.remind_unregistered === false ? 'FALSE' : 'TRUE',
     invited_ids: Array.isArray(data.invited_ids) ? data.invited_ids.join(',') : safe(data.invited_ids),
-    created_at: nowISO(), published_at: '', created_by: String(createdBy || '')
+    created_at: nowISO(), published_at: '', created_by: String(createdBy || ''),
+    // Не передали вовсе — по старому полю «Кому»; передали пустой выбор —
+    // пишем «none», чтобы не откатиться к старому правилу «всем».
+    send_to: data.send_to === undefined ? (eventCategories({ audience: data.audience }).send_to.join(',') || 'none') : (categoryList(Array.isArray(data.send_to) ? data.send_to.join(',') : data.send_to).join(',') || 'none'),
+    join_by: data.join_by === undefined ? (eventCategories({ audience: data.audience }).join_by.join(',') || 'none') : (categoryList(Array.isArray(data.join_by) ? data.join_by.join(',') : data.join_by).join(',') || 'none'),
+    hidden: data.hidden ? 'TRUE' : 'FALSE'
   };
   await appendObject(EVENT_SHEETS.registry, row, { uniqueBy: 'event_id' });
   return mapEvent(row);
@@ -207,6 +250,7 @@ function mapSignup(r) {
     created_at: safe(r.created_at), updated_at: safe(r.updated_at), note: safe(r.note),
     extra_guests: num(r.extra_guests), extra_guest_names: safe(r.extra_guest_names),
     extra_amount_thb: num(r.extra_amount_thb),
+    price_group: safe(r.price_group) || 'season',
     _rowNumber: r._rowNumber
   };
 }
@@ -237,18 +281,18 @@ export async function takenSeats(eventId) {
 export function seatsOf(signup) { return 1 + (signup?.guests || 0) + (signup?.extra_guests || 0); }
 
 // Стоимость участия: сам игрок плюс гости по своей цене (если она задана).
-export function priceFor(event, guests = 0) {
+export function priceFor(event, guests = 0, group = 'season') {
   if (!event?.payment_required) return 0;
-  return (event.price_thb || 0) + guestPriceOf(event) * (guests || 0);
+  return ownPriceOf(event, group) + guestPriceOf(event) * (guests || 0);
 }
 
 // Как оформить запись с гостями. Если участие платное — один счёт на всех.
 // Если участие бесплатное, а гости платные — игрок в составе сразу, гости ждут
 // оплаты отдельным счётом. Если бесплатно всё — все в составе.
-export function signupShape(event, guestNames = []) {
+export function signupShape(event, guestNames = [], group = 'season') {
   const n = guestNames.length;
-  const own = priceFor(event, 0);
-  const total = priceFor(event, n);
+  const own = priceFor(event, 0, group);
+  const total = priceFor(event, n, group);
   if (own > 0) return { status: SIGNUP_STATUS.invoiced, amount: total, guests: n, guestNames: joinNames(guestNames), extra: null };
   if (total > 0) return { status: SIGNUP_STATUS.confirmed, amount: 0, guests: 0, guestNames: '',
     extra: { extra_guests: n, extra_guest_names: joinNames(guestNames), extra_amount_thb: total } };
@@ -275,7 +319,7 @@ export function settleExtraPatch(signup) {
   };
 }
 
-export async function createSignup({ event, telegramId, name, guests = 0, guestNames = '', status, amount, extra = null }) {
+export async function createSignup({ event, telegramId, name, guests = 0, guestNames = '', status, amount, extra = null, priceGroup = 'season' }) {
   await ensureEventSheets();
   const row = {
     signup_id: 'sg_' + uid(8),
@@ -291,7 +335,8 @@ export async function createSignup({ event, telegramId, name, guests = 0, guestN
     created_at: nowISO(), updated_at: nowISO(), note: '',
     extra_guests: extra?.extra_guests || 0,
     extra_guest_names: safe(extra?.extra_guest_names),
-    extra_amount_thb: extra?.extra_amount_thb || 0
+    extra_amount_thb: extra?.extra_amount_thb || 0,
+    price_group: priceGroup === 'season' ? 'season' : 'other'
   };
   await appendObject(EVENT_SHEETS.signups, row, { uniqueBy: 'signup_id' });
   return mapSignup(row);
