@@ -615,7 +615,36 @@ check(!(await flow.cancelSignup({signupId:'past-signup',telegramId:'1',lang:'en'
   check(await flow.currentSeasonCheck('5')===false&&await flow.currentSeasonCheck('3')===true,'Season check uses the current division tables');
   const cur=await flow.joinEvent({telegramId:'3',name:'Carol Three',lang:'ru',eventId:'gact',group:'active'});
   check(cur.ok&&cur.signup.status==='confirmed','Current-season player joins for free');
-  check(!(await flow.eventsForViewer('5',false,false)).some(e=>e.event_id==='gact'),'Past-season player does not see the event in the Events tab');}
+  check(!(await flow.eventsForViewer('5','past',false)).some(e=>e.event_id==='gact'),'Past-season player does not see the event in the Events tab');}
+ // Категории: галочки «Карточка»/«Запись»; не участники сезона платят цену гостя.
+ {const reg=tables.get('crm|Event_Registry');
+  reg.push(row({...base,event_id:'gmix',title_ru:'Микс',title_en:'Mix',price_thb:'0',guest_price_thb:'550',max_guests:'1',audience:'cat',send_to:'season,past',join_by:'season,past'}));
+  reg.push(row({...base,event_id:'ghid',title_ru:'Скрыто',title_en:'Hidden',audience:'cat',send_to:'none',join_by:'season',hidden:'TRUE'}));
+  const mix=await ev.findEvent('gmix');
+  check(mix.send_to.join()==='season,past'&&mix.join_by.join()==='season,past'&&mix.payment_required,'Category checkboxes are read from the event row');
+  check((await ev.findEvent('ghid')).send_to.length===0,'Explicit empty card list stays empty');
+  check(ev.eventCategories({audience:'all'}).send_to.length===4&&ev.eventCategories({audience:'active'}).join_by.join()==='season','Old events keep their previous audience rules');
+  const cats=await flow.categorizeContacts([{telegram_id:'3',name:'Carol Three',status:'active'},{telegram_id:'5',name:'No Division',status:'inactive'},{telegram_id:'2',name:'Bob Two',status:'waitlist'},{telegram_id:'6',name:'Out Sider',status:'active'},{telegram_id:'77',name:'Nobody',status:'waitlist'}]);
+  check(cats.map(c=>c.category).join()==='season,past,season,others,waitlist','Contacts split into season / past / waitlist / others by division tables');
+  check(await flow.viewerCategory('5')==='past'&&await flow.viewerCategory('6')==='others'&&await flow.viewerCategory('3')==='season','Single viewer category matches');
+  check(flow.eventCard(mix,'ru',{category:'past'}).includes('Участие: <b>550 ฿</b>')&&flow.eventCard(mix,'ru',{category:'season'}).includes('бесплатно'),'Card shows the price of the recipient category');
+  const pj2=await flow.joinEvent({telegramId:'5',name:'No Division',lang:'ru',eventId:'gmix'});
+  check(pj2.ok&&pj2.signup.status==='invoiced'&&pj2.signup.amount_thb===550&&pj2.signup.price_group==='other','Past-season player joins at the guest price');
+  check(!(await flow.joinEvent({telegramId:'6',name:'Out Sider',lang:'ru',eventId:'gmix'})).ok,'Category without the sign-up checkbox cannot join');
+  const seen6=await flow.eventsForViewer('6','others',false), seen5=await flow.eventsForViewer('5','past',false);
+  check(!seen6.some(e=>e.event_id==='gmix')&&seen5.some(e=>e.event_id==='gmix'&&e.my_price===550),'Events tab shows the event only to allowed categories, with their price');
+  check(!seen5.some(e=>e.event_id==='ghid')&&(await flow.eventsForViewer('3','season',true)).some(e=>e.event_id==='ghid'),'Hidden event is visible only to the organiser');}
+ // Организатор убирает неоплаченного гостя: игрок получает уведомление.
+ {const dj2=await flow.joinEvent({telegramId:'4',name:'Dan Four',lang:'en',eventId:'gst',guestNames:['Self As Guest'],group:'active'});
+  check(dj2.ok&&dj2.signup.extra_guests===1,'Player booked themself as a guest');
+  const kb=flow.organizerGuestKeyboard(dj2.signup);
+  check(kb.inline_keyboard[0][0].callback_data===`evgx:${dj2.signup.signup_id}:0:1`,'Organizer card has a remove-guest button');
+  messages.length=0;
+  const ask=await flow.askOrganizerRemoveGuest({signupId:dj2.signup.signup_id,idx:0,count:1});
+  const after=(await ev.listSignups('gst')).find(x=>x.signup_id===dj2.signup.signup_id);
+  check(ask.ok&&!ask.ask&&after.extra_guests===0&&after.extra_amount_thb===0&&after.status==='confirmed','Unpaid guest is removed by the organiser at once, the player stays');
+  check(messages.some(m=>m.method==='sendMessage'&&String(m.args[0])==='4'&&/(removed your guest|убрал гостя)/.test(String(m.args[1]))),'Player is notified when the organiser removes a guest');
+  check(!(await flow.askOrganizerRemoveGuest({signupId:dj2.signup.signup_id,idx:0,count:1})).ok,'Stale remove-guest button is rejected');}
 }
 
 const links=await load('links.js');
