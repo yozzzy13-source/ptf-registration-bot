@@ -1852,9 +1852,10 @@ function avSend(dataUrl,direct){
     .then(function(r){return r.json()}).then(function(j){
       avBusy=false;
       if(!j.ok)throw new Error(j.error||'Error');
-      avSay(direct?(L?'✅ Аватарка опубликована. На витрине обновится в течение нескольких минут.':'✅ Avatar published. It shows up on the site within a few minutes.'):X.avAccepted);
+      var okMsg=direct?(L?'✅ Аватарка опубликована. На витрине обновится в течение нескольких минут.':'✅ Avatar published. It shows up on the site within a few minutes.'):X.avAccepted;
+      avSay(okMsg);PTFNotice.say(okMsg);
       loadAvatar();
-    }).catch(function(e){avBusy=false;avSay('⛔ '+e.message,true)});
+    }).catch(function(e){avBusy=false;avSay('⛔ '+e.message,true);PTFNotice.err(e.message)});
 }
 
 // Полноэкранный просмотр аватарки: в шапке она обрезана, а посмотреть целиком
@@ -2009,13 +2010,13 @@ function toggleWallet(){ walletOpen=!walletOpen;renderWallet();
   if(walletOpen)$('walletPanel').scrollIntoView({behavior:'smooth',block:'nearest'}) }
 function topup(amount){
   var min=(wallet&&wallet.min)||1000;
-  if(!amount||amount<min){toast(X.wMin.replace('{n}',min));return}
+  if(!amount||amount<min){PTFNotice.err(X.wMin.replace('{n}',min));return}
   toast(X.evSending);
   fetch('/api/league/wallet-topup',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(Object.assign({initData:initData,amount:amount},linkToken?{t:linkToken}:{}))})
     .then(function(r){return r.json()}).then(function(j){
-      toast(j&&j.ok?X.wSent:((j&&j.error)||'…'));
-    }).catch(function(){toast('…')});
+      if(j&&j.ok)PTFNotice.ok(X.wSent,(L?'Сумма: ':'Amount: ')+amount+' ฿');else evSay(j);
+    }).catch(function(){evSay(null)});
 }
 function topupOwn(){
   var el=$('wOwn');
@@ -3374,8 +3375,8 @@ function eventCard(e,compact){
   var mine=!!e.my_status&&e.my_status!=='cancelled';
   var btn='';
   if(!e.past){
-    if(!mine&&e.open_now&&!(e.capacity&&e.seats_left<=0))btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>'+evGuestJoinForm(e);
-    else if(mine)btn=evGuestsBlock(e)+'<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
+    if(!mine&&e.open_now&&!(e.capacity&&e.seats_left<=0))btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\',this)">'+esc(X.evSignUp)+'</button>'+evGuestJoinForm(e);
+    else if(mine)btn=evGuestsBlock(e)+'<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\',this)">'+esc(X.evCancel)+'</button>';
   }
   var badges=evStatusBadge(e);
   if(compact){
@@ -3432,7 +3433,7 @@ function evGuestJoinForm(e){
   return '<button class="evbtn ghost" onclick="evGuestForm(\''+q(e.event_id)+'\')">'+esc(X.evWithGuests)+'</button>'
     +'<div class="evg hidden" id="evGF_'+id+'" data-max="'+Number(e.guest_room)+'"><h5>'+esc(X.evGuestsTitle)+'</h5><div class="gin"></div>'
     +(e.guest_room>1?'<button class="evbtn ghost more" onclick="evGuestMore(\''+q(e.event_id)+'\')">'+esc(X.evMoreGuest)+'</button>':'')
-    +'<button class="evbtn go" onclick="evJoinGuests(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>'
+    +'<button class="evbtn go" onclick="evJoinGuests(\''+q(e.event_id)+'\',this)">'+esc(X.evSignUp)+'</button>'
     +evPriceHint(e)+'</div>';
 }
 // Мои гости: список, убрать, добавить ещё.
@@ -3448,7 +3449,7 @@ function evGuestsBlock(e){
       +(e.signup_open?'<span class="rm" onclick="evGuestRemove(\''+q(sid)+'\','+i+','+list.length+')">✕</span>':'')+'</div>';
   }).join('');
   var add=canAdd?'<div class="row"><input id="evGA_'+esc(sid)+'" placeholder="'+esc(X.evGuestName)+'" maxlength="60" autocomplete="off">'
-    +'<button class="evbtn go" onclick="evGuestAdd(\''+q(sid)+'\')">'+esc(X.evAddBtn)+'</button></div>'+evPriceHint(e):'';
+    +'<button class="evbtn go" onclick="evGuestAdd(\''+q(sid)+'\',this)">'+esc(X.evAddBtn)+'</button></div>'+evPriceHint(e):'';
   var note=e.my_due&&e.my_due.kind==='guests'?'<div class="hint2">'+esc(X.evGuestBill)+'</div>'
     :(waiting&&e.signup_open?'<div class="hint2">'+esc(X.evGuestWait)+'</div>':'');
   return '<div class="evg"><h5>'+esc(X.evGuestsTitle)+'</h5>'+rows+add+note+'</div>';
@@ -3469,36 +3470,40 @@ function evGuestMore(id){
   box.appendChild(i);i.focus();
   if(box.children.length>=max){var m=b.querySelector('.more');if(m)m.style.display='none'}
 }
-function evJoinGuests(id){
+function evJoinGuests(id,btn){
   var b=document.getElementById('evGF_'+id);if(!b)return;
   var names=[].map.call(b.querySelectorAll('.gin input'),function(x){return String(x.value||'').trim()}).filter(function(x){return x});
-  if(!names.length||names.some(function(n){return n.length<2}))return toast(X.evNeedNames);
-  toast(X.evSending);
+  if(!names.length||names.some(function(n){return n.length<2}))return PTFNotice.err(X.evNeedNames);
+  PTFNotice.busy(btn,true);
   evPost('/api/league/event-join',{event_id:id,guest_names:names},function(j){
-    toast(j&&j.ok?X.evJoined:(j&&j.error)||'…');
+    PTFNotice.busy(btn,false);evSay(j,X.evJoined);
   });
 }
-function evGuestAdd(sid){
+function evGuestAdd(sid,btn){
   var el=document.getElementById('evGA_'+sid);
   var n=String(el&&el.value||'').trim();
-  if(n.length<2)return toast(X.evNeedNames);
-  toast(X.evSending);
+  if(n.length<2)return PTFNotice.err(X.evNeedNames);
+  PTFNotice.busy(btn,true);
   evPost('/api/league/event-guests',{action:'add',signup_id:sid,names:[n]},function(j){
-    toast(j&&j.ok?X.evDone:(j&&j.error)||'…');
+    PTFNotice.busy(btn,false);evSay(j,X.evDone);
   });
+}
+// Ответ на действие — окном на экране, а не мелкой строкой: сервер присылает
+// готовый текст (notice), иначе берём запасной.
+function evSay(j,okText){
+  if(j&&j.notice)return PTFNotice.show(j.notice);
+  if(j&&j.ok)return PTFNotice.ok(okText);
+  return PTFNotice.err(j&&j.error&&j.error!=='network'?j.error:(L?'Нет связи с сервером. Попробуйте ещё раз.':'No connection to the server. Please try again.'));
 }
 // Сначала спрашиваем у сервера, что будет с деньгами, — и только потом убираем.
 function evGuestRemove(sid,i,c){
   fetch('/api/league/event-guests',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(Object.assign({initData:initData},linkToken?{t:linkToken}:{},{action:'plan',signup_id:sid,index:i}))})
     .then(function(r){return r.json()}).then(function(j){
-      if(!j||!j.ok)return toast((j&&j.error)||'…');
+      if(!j||!j.ok)return evSay(j);
       if(!confirm(j.text))return;
-      toast(X.evSending);
-      evPost('/api/league/event-guests',{action:'remove',signup_id:sid,index:i,count:c},function(r){
-        toast(r&&r.ok?X.evDone:(r&&r.error)||'…');
-      });
-    }).catch(function(){toast('…')});
+      evPost('/api/league/event-guests',{action:'remove',signup_id:sid,index:i,count:c},function(r){evSay(r,X.evDone)});
+    }).catch(function(){evSay(null)});
 }
 function evPost(url,body,done){
   fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},
@@ -3508,25 +3513,23 @@ function evPost(url,body,done){
       if(done)done(j);
     }).catch(function(){ if(done)done({ok:false,error:'network'}) });
 }
-function evJoin(id){
+function evJoin(id,btn){
   if(webGuest)return openLogin();
   if(needsProfile)return openProfile();
-  toast(X.evSending);
-  evPost('/api/league/event-join',{event_id:id},function(j){
-    toast(j&&j.ok?X.evJoined:(j&&j.error)||'…');
-  });
+  PTFNotice.busy(btn,true);
+  evPost('/api/league/event-join',{event_id:id},function(j){PTFNotice.busy(btn,false);evSay(j,X.evJoined)});
 }
-function evCancel(sid){
+function evCancel(sid,btn){
   if(!confirm(X.evCancelAsk))return;
-  toast(X.evSending);
-  evPost('/api/league/event-cancel',{signup_id:sid},function(){});
+  PTFNotice.busy(btn,true);
+  evPost('/api/league/event-cancel',{signup_id:sid},function(j){PTFNotice.busy(btn,false);evSay(j,X.evDone)});
 }
 function evDrop(sid){
   toast(X.evSending);
   // Дальше бот спрашивает про возврат — но уже в теме игрока, а не в личке,
   // поэтому говорим, куда смотреть.
   evPost('/api/league/event-roster',{action:'remove',signup_id:sid},function(j){
-    toast(j&&j.ok?X.evToTopic:((j&&j.error)||'…'));
+    if(j&&j.ok)PTFNotice.info(X.evToTopic);else evSay(j);
   });
 }
 function evAddInput(el,eventId){
@@ -3550,7 +3553,7 @@ function evAddPick(eventId,name){
   var inp=document.getElementById('evAdd_'+eventId); if(inp)inp.value='';
   toast(X.evSending);
   evPost('/api/league/event-roster',{action:'add',event_id:eventId,player_name:name},function(j){
-    toast(j&&j.ok?X.evToTopic:((j&&j.error)||'…'));
+    if(j&&j.ok)PTFNotice.info(X.evToTopic);else evSay(j);
   });
 }
 var toastTimer=null;

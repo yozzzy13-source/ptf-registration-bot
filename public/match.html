@@ -483,7 +483,7 @@ function unplayedBlock(){
 // Тап по имени: переходим в создание заявки с уже выбранным соперником.
 function challengeByName(name){
   var hit=opponents.filter(function(o){return String(o.name||'').toLowerCase()===String(name).toLowerCase()})[0];
-  if(!hit){ if(tg&&tg.showAlert)tg.showAlert(X.noTelegram+' '+name); else alert(X.noTelegram+' '+name); return }
+  if(!hit){ PTFNotice.err(X.noTelegram+' '+name); return }
   newMode='direct';selOpp=String(hit.telegram_id);ownAlternative=false;opponentDay='';showTab('new');
 }
 function renderOpen(){
@@ -552,15 +552,15 @@ function confirmTake(id,btn){
   var tm=document.querySelector('#pkTimes .chip.on');
   var c=document.querySelector('#pkCourts .chip.on');
   var res=$('pkRes');res.className='res';
-  if(!d){res.className='res err';res.textContent=X.needDate;return}
+  if(!d){res.className='res err';res.textContent=X.needDate;PTFNotice.err(X.needDate);return}
   btn.disabled=true;btn.textContent='…';
   fetch('/api/match/take',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,challenge_id:id,date:d.dataset.d,time:tm?tm.dataset.t:'',court:c?c.dataset.c:''
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     closePicker();load(true);showTab('mine');
-    if(tg&&tg.showAlert)tg.showAlert(X.sent);
-  }).catch(function(e){btn.disabled=false;btn.textContent=X.accept;res.className='res err';res.textContent='⛔ '+e.message});
+    PTFNotice.say(X.sent);
+  }).catch(function(e){btn.disabled=false;btn.textContent=X.accept;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 
 // Входящие предложения, где ход за мной. Показываем их первыми в «Вызовах» —
@@ -740,7 +740,7 @@ function submitAssign(btn,force){
   if(edit)body.challenge_id=edit;
   else{
     var a=manualPerson($('aFrom').value),b=manualPerson($('aOpp').value);
-    if(!a.telegram_id||!b.telegram_id){res.className='res err';res.textContent=L?'Выберите двух игроков из списка.':'Pick two players from the list.';return}
+    if(!a.telegram_id||!b.telegram_id){res.className='res err';res.textContent=L?'Выберите двух игроков из списка.':'Pick two players from the list.';PTFNotice.err(L?'Выберите двух игроков из списка.':'Pick two players from the list.');return}
     body.from_telegram_id=a.telegram_id;body.to_telegram_id=b.telegram_id;body.stage=$('aStage')?$('aStage').value:'';
   }
   assignBusy=true;btn.disabled=true;res.textContent=X.sending;
@@ -753,7 +753,7 @@ function submitAssign(btn,force){
       :(L?'✅ Матч назначен. Сообщений игрокам: ':'✅ Match scheduled. Messages sent: ')+(j.notified||0)
         +(j.stage?' · '+poStage(j.stage)+(j.playoff?(L?', время записано в сетку плей-офф':', time written to the playoff bracket'):''):'');
     poSay(note);assignForm='';adminLoaded=false;load(true);
-  }).catch(function(e){assignBusy=false;btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  }).catch(function(e){assignBusy=false;btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 function cancelAssignedMatch(id,btn){
   poAsk(L?'Отменить матч? Оба игрока получат сообщение.':'Cancel the match? Both players will get a message.',function(){
@@ -790,7 +790,7 @@ function poAct(body,btn,okText,after){
 }
 function poSavedNote(j){return (L?'✅ Время сохранено':'✅ Saved')+(j&&j.assigned_note?'\n'+j.assigned_note:'')}
 function poReplacedNote(j){return (L?'✅ Заменено, игроки получат сообщение':'✅ Replaced, players notified')+(j&&j.assigned_note&&['created','moved'].indexOf(j.assigned)>=0?'\n'+j.assigned_note:'')}
-function poSay(t){if(tg&&tg.showAlert)tg.showAlert(t);else alert(t)}
+function poSay(t){PTFNotice.say(t)}
 function poAsk(t,go){if(tg&&tg.showConfirm)tg.showConfirm(t,function(ok){if(ok)go()});else if(confirm(t))go()}
 var PO_STAGE={QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final'};
 function poStage(st){return ({QF:L?'Четвертьфинал':'Quarterfinal',SF:L?'Полуфинал':'Semifinal','3rd':L?'За 3-е место':'3rd place',Final:L?'Финал':'Final',Promotion:L?'Стыковой матч':'Promotion playoff'})[st]||st}
@@ -964,13 +964,13 @@ function submitAnnouncePoster(btn){
   var res=$('annRes');res.className='res';
   var p1=announcePlayerByName($('annP1')&&$('annP1').value);
   var p2=announcePlayerByName($('annP2')&&$('annP2').value);
-  if(!p1||!p2||p1.telegram_id===p2.telegram_id){res.className='res err';res.textContent=X.annNeedPlayers;return}
+  if(!p1||!p2||p1.telegram_id===p2.telegram_id){res.className='res err';res.textContent=X.annNeedPlayers;PTFNotice.err(X.annNeedPlayers);return}
   btn.disabled=true;res.textContent=X.annSending;
   fetch('/api/match/announce-poster',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,player1_id:p1.telegram_id,player2_id:p2.telegram_id,
     division:($('annDivision')&&$('annDivision').value||'').trim(),comment:($('annComment')&&$('annComment').value||'').trim()
-  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=X.annSent})
-  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  })}).then(function(r){return r.json()}).then(function(j){btn.disabled=false;if(!j.ok)throw new Error(j.error||'Error');res.className='res ok';res.textContent=X.annSent;PTFNotice.say(X.annSent)})
+  .catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 
 function renderMine(){
@@ -1022,8 +1022,8 @@ function confirmCourtApp(id,btn){
   var go=function(){btn.disabled=true;btn.textContent='…';
     fetch('/api/match/court-confirm',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
-      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.message||j.error||'Error');load(true)})
-      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.message||j.error||'Error');load(true);PTFNotice.ok(L?'Корт подтверждён':'Court confirmed',L?'Соперник получит уведомление.':'Your opponent will be notified.')})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message;PTFNotice.err(e.message)})};
   if(tg&&tg.showConfirm)tg.showConfirm(X.courtAsk,function(ok){if(ok)go()});else if(confirm(X.courtAsk))go();
 }
 function matchContactUrl(s,opp){return s.contact&&s.contact.url || (opp.username?'https://t.me/'+String(opp.username).replace(/^@/,''):'tg://user?id='+encodeURIComponent(String(s.from_telegram_id)===String(me&&me.id)?s.to_telegram_id:s.from_telegram_id))}
@@ -1129,6 +1129,7 @@ function nudgeOpponent(id,btn){
     body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
     .then(function(r){return r.json()}).then(function(j){
       btn.textContent=j.ok?X.nudgeSent:'⛔ '+(j.error||'');
+      if(j.ok)PTFNotice.ok(X.nudgeSent);else PTFNotice.err(j.error||'Error');
       if(!j.ok)setTimeout(function(){btn.disabled=false;btn.textContent=old},4000);
     })
     .catch(function(e){btn.disabled=false;btn.textContent=old;alert('⛔ '+e.message)});
@@ -1155,13 +1156,13 @@ function submitRetime(id,btn){
     .then(function(r){return r.json()}).then(function(j){
       btn.disabled=false;
       if(!j.ok)throw new Error(j.error||'Error');
-      res.className='res ok';res.textContent=X.retimeSent;
+      res.className='res ok';res.textContent=X.retimeSent;PTFNotice.say(X.retimeSent);
       retimeId='';load(true);
-    }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+    }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 // Отмена согласованного матча — финальная: соперник получает уведомление, окно закрывается.
 function cancelRequest(id,btn){
-  var go=function(){btn.disabled=true;btn.textContent='…';fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');adminLoaded=false;load(true)}).catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+  var go=function(){btn.disabled=true;btn.textContent='…';fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');adminLoaded=false;load(true);PTFNotice.ok(L?'Отменено':'Cancelled',L?'Соперник получит уведомление.':'Your opponent will be notified.')}).catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message;PTFNotice.err(e.message)})};
   if(tg&&tg.showConfirm)tg.showConfirm(X.cancelRequestAsk,function(ok){if(ok)go()});else if(confirm(X.cancelRequestAsk))go();
 }
 
@@ -1169,8 +1170,8 @@ function cancelMatch(id,btn){
   var go=function(){btn.disabled=true;btn.textContent='…';
     fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
-      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
-      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true);PTFNotice.ok(L?'Отменено':'Cancelled')})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message;PTFNotice.err(e.message)})};
   if(tg&&tg.showConfirm)tg.showConfirm(X.cancelMatchAsk,function(ok){if(ok)go()});else if(confirm(X.cancelMatchAsk))go();
 }
 
@@ -1212,9 +1213,9 @@ function submitCounter(btn){
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=X.sent;
+    res.className='res ok';res.textContent=X.sent;PTFNotice.say(X.sent);
     counterSlotId='';selDates=[];load(true);showTab('mine');
-  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 function setSelect(id,val,max){
   var o='<option value=""></option>';
@@ -1415,9 +1416,9 @@ function disputePendingResult(id,btn){
     initData:initData,t:linkToken,challenge_id:id
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
-    if(tg&&tg.showAlert)tg.showAlert(X.disagreeDone);
+    PTFNotice.say(X.disagreeDone);
     resultSlotId='';resultMode='';load(true);
-  }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+  }).catch(function(e){btn.disabled=false;btn.textContent=old;PTFNotice.say('⛔ '+e.message)});
 }
 function resendResultConfirmation(id,btn){
   btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
@@ -1426,17 +1427,17 @@ function resendResultConfirmation(id,btn){
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
     btn.disabled=false;btn.textContent=old;
-    if(tg&&tg.showAlert)tg.showAlert(X.confirmationResent);else alert(X.confirmationResent);
-  }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+    PTFNotice.say(X.confirmationResent);
+  }).catch(function(e){btn.disabled=false;btn.textContent=old;PTFNotice.say('⛔ '+e.message)});
 }function confirmPendingResult(id,btn){
   btn.disabled=true;var old=btn.textContent;btn.textContent=X.sending;
   fetch('/api/match/result/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,challenge_id:id
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
-    if(tg&&tg.showAlert)tg.showAlert(j.waiting?X.resultHalf:(j.review?X.resultReview:X.resultConfirmed));
+    PTFNotice.say(j.waiting?X.resultHalf:(j.review?X.resultReview:X.resultConfirmed));
     adminLoaded=false;resultSlotId='';load(true);
-  }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+  }).catch(function(e){btn.disabled=false;btn.textContent=old;PTFNotice.say('⛔ '+e.message)});
 }
 function deleteAdminMatch(id,btn){
   var go=function(){
@@ -1445,8 +1446,8 @@ function deleteAdminMatch(id,btn){
       initData:initData,t:linkToken,challenge_id:id
     })}).then(function(r){return r.json()}).then(function(j){
       if(!j.ok)throw new Error(j.error||'Error');
-      adminLoaded=false;resultSlotId='';load(true);
-    }).catch(function(e){btn.disabled=false;btn.textContent=old;if(tg&&tg.showAlert)tg.showAlert('⛔ '+e.message);else alert('⛔ '+e.message)});
+      adminLoaded=false;resultSlotId='';load(true);PTFNotice.ok(L?'Матч удалён':'Match deleted');
+    }).catch(function(e){btn.disabled=false;btn.textContent=old;PTFNotice.say('⛔ '+e.message)});
   };
   if(tg&&tg.showConfirm)tg.showConfirm(X.deleteMatchAsk,function(ok){if(ok)go()});else if(confirm(X.deleteMatchAsk))go();
 }
@@ -1469,9 +1470,9 @@ function submitUnfinished(id,btn){
     initData:initData,t:linkToken,challenge_id:id,photo:resPhoto,note:($('uNote').value||'').trim()
   })}).then(function(r){return r.json()}).then(function(j){
     if(!j.ok)throw new Error(j.error||'Error');
-    box.className='res ok';box.textContent=(j.organizer_notified?X.unfinishedSaved:X.unfinishedNoNotify)+(j.warning?' ⚠️ '+j.warning:'');
+    box.className='res ok';box.textContent=(j.organizer_notified?X.unfinishedSaved:X.unfinishedNoNotify)+(j.warning?' ⚠️ '+j.warning:'');PTFNotice.say((j.organizer_notified?X.unfinishedSaved:X.unfinishedNoNotify)+(j.warning?' ⚠️ '+j.warning:''));
     resPhoto='';setTimeout(function(){resultSlotId='';resultMode='';load(true)},1300);
-  }).catch(function(e){btn.disabled=false;box.className='res err';box.textContent='⛔ '+e.message});
+  }).catch(function(e){btn.disabled=false;box.className='res err';box.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 function resultKindPicker(prefix){
   return '<label>'+esc(X.resultType)+'</label><div class="seg resultKind"><div class="s on" data-k="played" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.playedType)+'</div><div class="s" data-k="retired" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.retiredType)+'</div>'+(isAdmin?'<div class="s" data-k="technical" onclick="pickResultKind(this,\''+prefix+'\')">'+esc(X.technicalType)+'</div>':'')+'</div>';
@@ -1572,7 +1573,7 @@ function resultPopup(ok,j,err){
 }
 function submitResult(id,btn){
   var res=$('rRes');res.className='res';var sets=collectSets('r');
-  if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
+  if(!selWinner){res.className='res err';res.textContent=X.needWinner;PTFNotice.err(X.needWinner);return}
   btn.disabled=true;res.textContent=X.sending;
   // Если Google сейчас занят, сервер ждёт и повторяет сам (до минуты) — счёт
   // не потеряется. Человеку важно видеть, что процесс идёт, а не завис.
@@ -1675,7 +1676,7 @@ function renderManualWinner(){
 }
 function submitManual(btn){
   var res=$('mResBox');res.className='res';var sets=collectSets('m');
-  if(!selWinner){res.className='res err';res.textContent=X.needWinner;return}
+  if(!selWinner){res.className='res err';res.textContent=X.needWinner;PTFNotice.err(X.needWinner);return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,from_telegram_id:$('mFrom')?(manualPerson($('mFrom').value).telegram_id||''):'',to_telegram_id:manualPerson($('mOpp').value).telegram_id||'',date:$('mDate').value,
@@ -1723,15 +1724,15 @@ function toggleBookCourt(n){syncBookInputs();var i=bookCourts.indexOf(n);if(i>=0
 function submitBooking(btn){
   syncBookInputs();
   var res=$('bkRes');res.className='res';
-  if(!bookCourts.length){res.className='res err';res.textContent=X.needCourts;return}
+  if(!bookCourts.length){res.className='res err';res.textContent=X.needCourts;PTFNotice.err(X.needCourts);return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/court/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,date:bookDate,time:bookTime,duration_min:Number(bookDur),courts:bookCourts
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=X.bookOk;bookCourts=[];
-  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+    res.className='res ok';res.textContent=X.bookOk;PTFNotice.say(X.bookOk);bookCourts=[];
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 function renderNew(){
   if (!canMatch) { $('viewNew').innerHTML='<div class="empty">'+esc(X.subNone)+'</div>'; return; }
@@ -1798,7 +1799,7 @@ function pickOpp(id){keepNewForm();selOpp=id;ownAlternative=false;opponentDay=""
 function openLink(u){if(/^https:\/\/t\.me\//.test(u)&&tg&&tg.openTelegramLink)tg.openTelegramLink(u);else if(/^tg:\/\//.test(u))location.href=u;else if(tg&&tg.openLink)tg.openLink(u);else window.open(u,'_blank')}
 
 function bookingHelper(id,btn){
- btn.disabled=true;fetch('/api/match/booking',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw Error(j.error);if(tg&&tg.showAlert)tg.showAlert(L?'Сообщение для брони отправлено вам в чат бота.':'The booking message is in your bot chat.');}).catch(function(e){if(tg&&tg.showAlert)tg.showAlert(e.message)}).finally(function(){btn.disabled=false});
+ btn.disabled=true;fetch('/api/match/booking',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw Error(j.error);PTFNotice.say(L?'Сообщение для брони отправлено вам в чат бота.':'The booking message is in your bot chat.');}).catch(function(e){PTFNotice.err(e.message)}).finally(function(){btn.disabled=false});
 }
 function renderOpponentWindows(){
  var opp=opponents.find(function(o){return String(o.telegram_id)===String(selOpp)}),today=isoDate(new Date());
@@ -1821,9 +1822,9 @@ function pickOpponentDay(day){opponentDay=day;renderOpponentWindows()}
 function submitSlot(btn){
   var res=$('mRes');res.className='res';
   keepNewForm();var from=selFrom,to=selTo,dur=matchDuration;
-  if(!selDates.length){res.className='res err';res.textContent=X.needDate;return}
-  if(hm2min(to)-hm2min(from)<dur){res.className='res err';res.textContent=X.needRange;return}
-  if(newMode==='direct'&&!selOpp){res.className='res err';res.textContent=X.needOpp;return}
+  if(!selDates.length){res.className='res err';res.textContent=X.needDate;PTFNotice.err(X.needDate);return}
+  if(hm2min(to)-hm2min(from)<dur){res.className='res err';res.textContent=X.needRange;PTFNotice.err(X.needRange);return}
+  if(newMode==='direct'&&!selOpp){res.className='res err';res.textContent=X.needOpp;PTFNotice.err(X.needOpp);return}
   btn.disabled=true;res.textContent=X.sending;
   fetch('/api/match/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     initData:initData,t:linkToken,match_type:newMode,dates:selDates,time_from:from,time_to:to,
@@ -1831,15 +1832,15 @@ function submitSlot(btn){
   })}).then(function(r){return r.json()}).then(function(j){
     btn.disabled=false;
     if(!j.ok)throw new Error(j.error||'Error');
-    res.className='res ok';res.textContent=newMode==='direct'?X.okDirect:X.okOpen;
+    res.className='res ok';res.textContent=newMode==='direct'?X.okDirect:X.okOpen;PTFNotice.say(newMode==='direct'?X.okDirect:X.okOpen);
     selOpp='';selDates=[];selCourts=[];selFrom='17:00';selTo='21:00';selComment='';load(true);
-  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message});
+  }).catch(function(e){btn.disabled=false;res.className='res err';res.textContent='⛔ '+e.message;PTFNotice.err('⛔ '+e.message)});
 }
 function cancelSlot(id,btn){
   var go=function(){btn.disabled=true;btn.textContent='…';
     fetch('/api/match/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:initData,t:linkToken,challenge_id:id})})
-      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true)})
-      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message})};
+      .then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'Error');load(true);PTFNotice.ok(L?'Отменено':'Cancelled')})
+      .catch(function(e){btn.disabled=false;btn.textContent='⛔ '+e.message;PTFNotice.err(e.message)})};
   if(tg&&tg.showConfirm)tg.showConfirm(X.cancelAsk,function(ok){if(ok)go()});else if(confirm(X.cancelAsk))go();
 }
 

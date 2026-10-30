@@ -130,3 +130,77 @@
     mount:mount
   };
 })(window,document);
+
+// Окно с результатом действия. Любое действие в интерфейсе (запись, отмена,
+// счёт, заявка) сначала отвечает здесь, на экране, и только потом — сообщением
+// в боте. Закрывается только кнопкой: человек должен успеть прочитать.
+//
+//   PTFNotice.ok('Вы записаны', 'Счёт на 550 ฿ — в боте');
+//   PTFNotice.err('Мест нет');
+//   PTFNotice.say('⛔ текст') — сам решит по значку, ошибка это или нет;
+//   PTFNotice.busy(btn, true) / PTFNotice.busy(btn, false) — «Секунду…» на кнопке.
+(function(w,d){
+  var CSS='.ptfn{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:18px;'
+    +'background:rgba(0,0,0,.66);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:ptfnIn .16s ease-out}'
+    +'.ptfn .bx{width:100%;max-width:380px;background:#17171A;color:#EFEBE4;border:1px solid rgba(255,255,255,.1);border-radius:20px;'
+    +'padding:22px 18px 16px;text-align:center;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:inherit}'
+    +'.ptfn .ic{font-size:42px;line-height:1;margin-bottom:10px}'
+    +'.ptfn .tt{font-size:17px;font-weight:800;line-height:1.3;margin:0 0 6px}'
+    +'.ptfn .tx{font-size:14px;line-height:1.5;color:#B9B1A5;white-space:pre-line;margin:0}'
+    +'.ptfn .ok{margin-top:16px;width:100%;padding:12px;border:0;border-radius:13px;font-size:15px;font-weight:800;cursor:pointer;'
+    +'background:linear-gradient(180deg,#8FC79A,#5FA56C);color:#0E1A10}'
+    +'.ptfn .ok:focus{outline:none}'
+    +'.ptfn.err .ok{background:#2A2A2E;color:#EFEBE4;border:1px solid rgba(255,255,255,.12)}'
+    +'.ptfn.err .tt{color:#F08A7E}'
+    +'html[data-theme="light"] .ptfn .bx{background:#FFFFFF;color:#16211A;border-color:#DDE5DB}'
+    +'html[data-theme="light"] .ptfn .tx{color:#4C5A50}'
+    +'html[data-theme="light"] .ptfn.err .ok{background:#EBF0EA;color:#16211A;border-color:#DDE5DB}'
+    +'html[data-theme="light"] .ptfn.err .tt{color:#B23B2E}'
+    +'@keyframes ptfnIn{from{opacity:0}to{opacity:1}}';
+  var ready=false;
+  function css(){if(ready)return;ready=true;var s=d.createElement('style');s.textContent=CSS;d.head.appendChild(s)}
+  function ru(){try{return (w.PTFPrefs&&w.PTFPrefs.lang())==='ru'}catch(e){return false}}
+  function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  // Убираем значок в начале — он и так будет крупно сверху.
+  function strip(t){return String(t==null?'':t).replace(/^\s*(⛔|⚠️|✅|❌)\s*/,'')}
+  function haptic(kind){try{var tg=w.Telegram&&w.Telegram.WebApp;tg&&tg.HapticFeedback&&tg.HapticFeedback.notificationOccurred(kind==='err'?'error':'success')}catch(e){}}
+  function show(o){
+    o=o||{};css();
+    var old=d.getElementById('ptfNotice');if(old)old.remove();
+    var kind=o.kind==='err'?'err':(o.kind==='info'?'info':'ok');
+    var icon=o.icon||(kind==='err'?'⚠️':(kind==='info'?'ℹ️':'✅'));
+    var title=o.title!=null?strip(o.title):(kind==='err'?(ru()?'Не получилось':'Something went wrong'):(ru()?'Готово':'Done'));
+    var el=d.createElement('div');el.className='ptfn '+kind;el.id='ptfNotice';
+    el.setAttribute('role','dialog');el.setAttribute('aria-modal','true');
+    el.innerHTML='<div class="bx"><div class="ic">'+esc(icon)+'</div><div class="tt">'+esc(title)+'</div>'
+      +(o.text?'<p class="tx">'+esc(strip(o.text))+'</p>':'')
+      +'<button type="button" class="ok">'+esc(o.button||(ru()?'Понятно':'OK'))+'</button></div>';
+    el.querySelector('.ok').onclick=function(){el.remove();if(typeof o.onClose==='function')o.onClose()};
+    d.body.appendChild(el);haptic(kind);
+    try{el.querySelector('.ok').focus()}catch(e){}
+    return el;
+  }
+  function busy(btn,on,label){
+    if(!btn)return;
+    if(on){if(btn.dataset.ptfOld==null)btn.dataset.ptfOld=btn.innerHTML;btn.disabled=true;btn.innerHTML=esc(label||(ru()?'Секунду…':'One moment…'))}
+    else{btn.disabled=false;if(btn.dataset.ptfOld!=null){btn.innerHTML=btn.dataset.ptfOld;delete btn.dataset.ptfOld}}
+  }
+  w.PTFNotice={
+    show:show,busy:busy,
+    ok:function(title,text,o){return show(Object.assign({kind:'ok',title:title,text:text},o||{}))},
+    // Короткая причина — заголовком; длинная — под общим «Не получилось».
+    err:function(text,title,o){
+      var t=strip(text);
+      if(title==null&&t.length>48)return show(Object.assign({kind:'err',text:t},o||{}));
+      return show(Object.assign({kind:'err',title:title==null?t:title,text:title==null?null:t},o||{}));
+    },
+    info:function(title,text,o){return show(Object.assign({kind:'info',title:title,text:text},o||{}))},
+    // Текст с ⛔/⚠️ в начале — ошибка; иначе успех. Первая строка — заголовок.
+    say:function(t,o){
+      var s=String(t==null?'':t),bad=/^\s*(⛔|⚠️|❌)/.test(s);
+      var lines=strip(s).split('\n'),head=lines.shift();
+      if(head.length>48)return show(Object.assign({kind:bad?'err':'ok',text:strip(s)},o||{}));
+      return show(Object.assign({kind:bad?'err':'ok',title:head,text:lines.join('\n').trim()},o||{}));
+    }
+  };
+})(window,document);

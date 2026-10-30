@@ -421,7 +421,7 @@ async function commit() {
     // Refresh scores, transfer availability and deadline after a write.
     try {const fresh=await api('bootstrap');D=fresh;}catch {}
     view='success';
-  } catch(e) {notice=e.message;step=3;review=null;}
+  } catch(e) {notice=e.message;step=3;review=null;window.PTFNotice?.err(e.message);}
   finally {busy=false;render();window.scrollTo(0,0);}
 }
 async function confirmFromHome(n) {
@@ -437,7 +437,8 @@ async function confirmFromHome(n) {
     updateTeam(saved.team);draft(n).saved=draft(n).version;
     const fresh=await api('bootstrap');D=fresh;D.teams=D.teams||[];drafts.delete(n);
     homeStatus=tr('Команда подтверждена и добавлена в рейтинг.','Team confirmed and added to the standings.');
-  } catch(e) {notice=e.message;}
+    window.PTFNotice?.ok(tr('Команда подтверждена','Team confirmed'),tr('Она добавлена в рейтинг Fantasy.','It has been added to the Fantasy standings.'));
+  } catch(e) {notice=e.message;window.PTFNotice?.err(e.message);}
   finally {busy=false;render();window.scrollTo(0,0);}
 }
 async function back() {
@@ -496,7 +497,9 @@ async function handle(action,el={dataset:{}}) {
     const issue=selectionError(key);if(issue){notice=issueText(issue);return render();}
     if(!window.confirm(tr('Подтвердить замену на ','Confirm transfer to ')+player(key).name+'?'))return;
     busy=true;render();
-    try {await api('transfer',{team_slot:slot,player_out_key:transferOut,player_in_key:key});D=await api('bootstrap');drafts.delete(slot);transferOut='';}
+    try {await api('transfer',{team_slot:slot,player_out_key:transferOut,player_in_key:key});D=await api('bootstrap');drafts.delete(slot);transferOut='';
+      window.PTFNotice?.ok(tr('Замена сделана','Transfer done'),player(key).name);}
+    catch(e) {window.PTFNotice?.err(e.message);throw e;}
     finally {busy=false;render();}
   }
 }

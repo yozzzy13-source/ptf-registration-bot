@@ -252,7 +252,7 @@ function plainError(raw) {
   const pre = /<pre>([\s\S]*?)<\/pre>/i.exec(text);
   return (pre ? pre[1] : text.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 200);
 }
-function flash(text, isError) { S.msg = isError ? '' : text; S.err = isError ? text : ''; render(); setTimeout(() => { S.msg = ''; S.err = ''; render(); }, 4200); }
+function flash(text, isError) { S.msg = isError ? '' : text; S.err = isError ? text : ''; render(); if (isError && window.PTFNotice) PTFNotice.err(text); setTimeout(() => { S.msg = ''; S.err = ''; render(); }, 4200); }
 async function run(fn, done) {
   if (S.busy) return;
   S.busy = true; render();
