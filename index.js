@@ -1684,7 +1684,9 @@ app.get('/api/league/events', async (req, res) => {
     const { getBalance } = await import('./events.js');
     const tg = v.user?.id || '';
     const applicant = tg ? await findApplicantByTelegramId(tg).catch(() => null) : null;
-    const isActive = Boolean(v.isLeagueMember);
+    // События «только активным» видят участники текущего сезона (есть в таблице
+    // дивизиона этого сезона) и организатор, а не все, кто когда-либо играл.
+    const isActive = Boolean(v.division || v.isAdmin);
     const [events, balance] = await Promise.all([
       eventsForViewer(tg, isActive, !!v.isAdmin).catch(() => []),
       tg ? getBalance(tg).catch(() => 0) : 0
