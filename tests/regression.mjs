@@ -607,6 +607,15 @@ check(!(await flow.cancelSignup({signupId:'past-signup',telegramId:'1',lang:'en'
  check(n1.kind==='ok'&&/Вы записаны/.test(n1.title)&&/1000 ฿/.test(n1.text)&&/Anna Smith/.test(n1.text),'Mini app notice: signed up, guests and guest invoice');
  check(flow.joinNotice({ok:false,message:'<b>Мест нет</b>'},'ru').kind==='err'&&flow.joinNotice({ok:false,message:'<b>Мест нет</b>'},'ru').title==='Мест нет','Mini app notice shows the refusal reason as plain text');
  check(flow.joinNotice(pj,'ru').icon==='💳'&&/500 ฿/.test(flow.joinNotice(pj,'ru').text),'Mini app notice for a paid entry points to the invoice');
+ // «Только активным» = участники текущего сезона. Игрок прошлых сезонов
+ // (есть в общем списке, но нет в таблицах дивизионов) не записывается.
+ {const reg=tables.get('crm|Event_Registry');reg.push(row({...base,event_id:'gact',title_ru:'Церемония',title_en:'Ceremony',price_thb:'0',guest_price_thb:'550',max_guests:'2',audience:'active'}));
+  const past=await flow.joinEvent({telegramId:'5',name:'No Division',lang:'ru',eventId:'gact',group:'active'});
+  check(!past.ok&&/текущего сезона/.test(past.message),'Past-season player cannot join a current-season-only event');
+  check(await flow.currentSeasonCheck('5')===false&&await flow.currentSeasonCheck('3')===true,'Season check uses the current division tables');
+  const cur=await flow.joinEvent({telegramId:'3',name:'Carol Three',lang:'ru',eventId:'gact',group:'active'});
+  check(cur.ok&&cur.signup.status==='confirmed','Current-season player joins for free');
+  check(!(await flow.eventsForViewer('5',false,false)).some(e=>e.event_id==='gact'),'Past-season player does not see the event in the Events tab');}
 }
 
 const links=await load('links.js');
