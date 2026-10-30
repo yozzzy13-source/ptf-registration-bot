@@ -245,10 +245,23 @@ font-weight:700;color:var(--mute);cursor:pointer;user-select:none}
 .evp{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line4)}
 .evp:last-child{border-bottom:0}
 .evp.wait{opacity:.62}
-.evp .nm{font-weight:700;font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.evp .nm{font-weight:700;font-size:12.5px;color:var(--text);overflow-wrap:anywhere;white-space:normal}
 .evp .sub{font-weight:600;color:var(--mute)}
 .evp .st{margin-left:auto;font-size:10.5px;color:var(--mute);white-space:nowrap}
 .evp .rm{cursor:pointer;color:var(--lose);font-weight:800;padding:0 2px}
+/* Гости: форма записи с гостями и блок «твои гости» в карточке события. */
+.evbtn.ghost{background:transparent;color:var(--text);border-color:var(--line);box-shadow:none}
+.evg{margin-top:10px;padding:10px 11px;border:1px solid var(--line);border-radius:12px;background:var(--surf2)}
+.evg h5{margin:0 0 6px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);font-weight:800}
+.evg .gl{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12.5px;font-weight:700;border-bottom:1px solid var(--line4)}
+.evg .gl:last-child{border-bottom:0}
+.evg .gl .pd{color:var(--amber);font-size:10.5px;font-weight:700;white-space:nowrap}
+.evg .gl .rm{margin-left:auto;cursor:pointer;color:var(--lose);font-weight:800;padding:0 4px}
+.evg input{width:100%;margin-top:6px;padding:9px 10px;border-radius:10px;border:1px solid var(--line);
+  background:var(--surf);color:var(--text);font-size:12.5px}
+.evg .row{display:flex;gap:8px;align-items:flex-end}
+.evg .row .evbtn{width:auto;white-space:nowrap;margin-top:6px}
+.evg .hint2{font-size:11px;color:var(--mute);margin-top:6px}
 .evadd{position:relative;margin-top:8px}
 .evadd input{width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--line);
   background:var(--surf2);color:var(--text);font-size:12.5px}
@@ -1159,6 +1172,11 @@ ru:{title:'Лига',sub:'Таблицы, матчи, игроки и годов
   evClosed:'Запись закрыта',evSending:'Секунду…',evJoined:'Готово — счёт и детали в боте',
   evToTopic:'Вопрос ушёл в тему игрока в админ-группе',
   evCancelAsk:'Отменить участие? Деньги вернутся по правилу отмены.',evGuestsN:'гостей',evUntil:'Запись до',
+  evWithGuests:'Записаться с гостями',evGuestName:'Имя и фамилия гостя',evMoreGuest:'+ ещё гость',
+  evGuestsTitle:'Твои гости',evAddBtn:'Добавить',evGuestPending:'ждёт оплаты',evFreeMember:'бесплатно для игроков лиги',
+  evFree:'бесплатно',evGuestsOk:'можно с гостями',evNeedNames:'Укажи имя и фамилию каждого гостя',evPerGuest:'за гостя',
+  evDone:'Готово — подробности в боте',evGuestBill:'Счёт за гостей — в боте. Место держится до конца записи.',
+  evGuestWait:'Гостей можно добавить, когда твоё место подтвердится.',
   wBalance:'Депозит',wEmpty:'Операций пока нет',wTopup:'Пополнить',wOwn:'Своя сумма',wGo:'Пополнить',
   wSent:'Счёт на пополнение отправлен в бот',wMin:'Минимум {n} ฿',
   wNote:'После перевода пришли скриншот в бот — организатор подтвердит, и деньги появятся здесь.',
@@ -1218,6 +1236,11 @@ en:{title:'League',sub:'Standings, matches, players and the yearly race.',
   evClosed:'Sign-up closed',evSending:'One moment…',evJoined:'Done — invoice and details are in the bot',
   evToTopic:'Sent to the player’s topic in the admin group',
   evCancelAsk:'Cancel your spot? Refund follows the cancellation rule.',evGuestsN:'guests',evUntil:'Sign-up until',
+  evWithGuests:'Sign up with guests',evGuestName:'Guest first and last name',evMoreGuest:'+ one more guest',
+  evGuestsTitle:'Your guests',evAddBtn:'Add',evGuestPending:'awaiting payment',evFreeMember:'free for league players',
+  evFree:'free',evGuestsOk:'guests welcome',evNeedNames:'Enter the first and last name of every guest',evPerGuest:'per guest',
+  evDone:'Done — details are in the bot',evGuestBill:'The guests invoice is in the bot. Places are held until sign-up closes.',
+  evGuestWait:'You can add guests once your own place is confirmed.',
   wBalance:'Deposit',wEmpty:'No operations yet',wTopup:'Top up',wOwn:'Custom amount',wGo:'Top up',
   wSent:'Top-up invoice sent to the bot',wMin:'Minimum {n} ฿',
   wNote:'After the transfer send the screenshot to the bot — once confirmed the money appears here.',
@@ -3326,7 +3349,7 @@ function evStatusOf(e){
 }
 function eventCard(e,compact){
   if(e.ends_at&&Date.now()>=e.ends_at)e.past=true;
-  if(e.starts_at&&Date.now()>=e.starts_at)e.open_now=false;
+  if(e.starts_at&&Date.now()>=e.starts_at){e.open_now=false;e.signup_open=false;}
   var title=L?(e.title_ru||e.title_en):(e.title_en||e.title_ru);
   var desc=L?(e.description_ru||e.description_en):(e.description_en||e.description_ru);
   var dm=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(e.date||''));
@@ -3338,9 +3361,9 @@ function eventCard(e,compact){
   if(e.place)meta.push('<span>📍 '+(e.place_url
     ? '<a class="lnk" href="'+esc(e.place_url)+'" onclick="event.preventDefault();openLink(\''+q(e.place_url)+'\')">'+esc(e.place)+'</a>'
     : esc(e.place))+'</span>');
-  if(e.payment_required&&e.price_thb)meta.push('<span>💳 '+esc(e.price_thb)+' ฿'
-    +(e.guests_allowed?' · '+esc(X.evGuest)+' '+esc((e.guest_price_thb===null||e.guest_price_thb==='')?e.price_thb:e.guest_price_thb)+' ฿':'')+'</span>');
-  else if(!e.past)meta.push('<span>🎟 '+esc(L?'Бесплатно':'Free')+'</span>');
+  if(e.payment_required)meta.push('<span>💳 '+(Number(e.price_thb)?esc(e.price_thb)+' ฿':esc(X.evFreeMember))
+    +(e.guests_allowed?' · '+esc(X.evGuest)+' '+(Number(e.guest_price)?esc(e.guest_price)+' ฿':esc(X.evFree)):'')+'</span>');
+  else if(!e.past)meta.push('<span>🎟 '+esc(L?'Бесплатно':'Free')+(e.guests_allowed?' · '+esc(X.evGuestsOk):'')+'</span>');
   if(e.signup_deadline&&!e.past)meta.push('<span>⏳ '+esc(X.evUntil)+' '+esc(dayLabel(e.signup_deadline))+'</span>');
   if(e.invite_only)meta.push('<span>🔒 '+esc(X.evInviteOnly)+'</span>');
   var cap='';
@@ -3351,8 +3374,8 @@ function eventCard(e,compact){
   var mine=!!e.my_status&&e.my_status!=='cancelled';
   var btn='';
   if(!e.past){
-    if(!mine&&e.open_now&&!(e.capacity&&e.seats_left<=0))btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>';
-    else if(mine)btn='<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
+    if(!mine&&e.open_now&&!(e.capacity&&e.seats_left<=0))btn='<button class="evbtn go" onclick="evJoin(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>'+evGuestJoinForm(e);
+    else if(mine)btn=evGuestsBlock(e)+'<button class="evbtn off" onclick="evCancel(\''+q(e.my_signup_id)+'\')">'+esc(X.evCancel)+'</button>';
   }
   var badges=evStatusBadge(e);
   if(compact){
@@ -3382,7 +3405,7 @@ function evPeople(e){
   var list=e.participants||[];
   var body=list.length?'<div class="evwho">'+list.map(function(p){
     return '<div class="evp'+(p.waitlist?' wait':'')+'">'
-      +'<span class="nm">'+esc(p.name)+(p.guests?' <span class="sub">+'+p.guests+'</span>':'')+'</span>'
+      +'<span class="nm">'+esc(p.name)+evGuestNames(p)+'</span>'
       +'<span class="st">'+esc(evWhoStatus(p))+'</span>'
       +(evAdmin&&p.signup_id?'<span class="rm" onclick="evDrop(\''+q(p.signup_id)+'\')">✕</span>':'')
       +'</div>';
@@ -3390,6 +3413,92 @@ function evPeople(e){
   var add=evAdmin?'<div class="evadd"><input id="evAdd_'+esc(e.event_id)+'" placeholder="'+esc(X.evAdd)+'" oninput="evAddInput(this,\''+q(e.event_id)+'\')" autocomplete="off"><div class="sug hidden" id="evSug_'+esc(e.event_id)+'"></div></div>':'';
   return '<details class="spo evspo"><summary>'+esc(X.evWho)+' · '+list.length+'</summary>'
     +'<div class="in">'+body+add+'</div></details>';
+}
+// Гости в составе — в той же строке: «Иван + Пётр, Анна». ⏳ — гость ещё не
+// оплачен (это видит только организатор).
+function evGuestNames(p){
+  var g=p.guest_list||[];
+  if(g.length)return ' <span class="sub">+ '+g.map(function(x){return esc(x.name)+(x.pending?' ⏳':'')}).join(', ')+'</span>';
+  return p.guests?' <span class="sub">+'+p.guests+'</span>':'';
+}
+function evPriceHint(e){
+  var gp=e.payment_required?Number(e.guest_price)||0:0;
+  return gp?'<div class="hint2">'+esc(gp+' ฿ '+X.evPerGuest)+'</div>':'';
+}
+// «Записаться с гостями»: форма с именами прямо в карточке.
+function evGuestJoinForm(e){
+  if(!e.guests_allowed||!(e.guest_room>0))return '';
+  var id=esc(e.event_id);
+  return '<button class="evbtn ghost" onclick="evGuestForm(\''+q(e.event_id)+'\')">'+esc(X.evWithGuests)+'</button>'
+    +'<div class="evg hidden" id="evGF_'+id+'" data-max="'+Number(e.guest_room)+'"><h5>'+esc(X.evGuestsTitle)+'</h5><div class="gin"></div>'
+    +(e.guest_room>1?'<button class="evbtn ghost more" onclick="evGuestMore(\''+q(e.event_id)+'\')">'+esc(X.evMoreGuest)+'</button>':'')
+    +'<button class="evbtn go" onclick="evJoinGuests(\''+q(e.event_id)+'\')">'+esc(X.evSignUp)+'</button>'
+    +evPriceHint(e)+'</div>';
+}
+// Мои гости: список, убрать, добавить ещё.
+function evGuestsBlock(e){
+  if(!e.guests_allowed)return '';
+  var list=e.my_guest_list||[],sid=e.my_signup_id;
+  var waiting=e.my_status==='waitlist'||e.my_status==='pending';
+  var canAdd=e.signup_open&&!waiting&&e.guest_room>0;
+  if(!list.length&&!canAdd&&!(waiting&&e.signup_open))return '';
+  var rows=list.map(function(g,i){
+    return '<div class="gl"><span>'+esc(g.name)+'</span>'
+      +(g.pending?'<span class="pd">⏳ '+esc(X.evGuestPending)+'</span>':'')
+      +(e.signup_open?'<span class="rm" onclick="evGuestRemove(\''+q(sid)+'\','+i+','+list.length+')">✕</span>':'')+'</div>';
+  }).join('');
+  var add=canAdd?'<div class="row"><input id="evGA_'+esc(sid)+'" placeholder="'+esc(X.evGuestName)+'" maxlength="60" autocomplete="off">'
+    +'<button class="evbtn go" onclick="evGuestAdd(\''+q(sid)+'\')">'+esc(X.evAddBtn)+'</button></div>'+evPriceHint(e):'';
+  var note=e.my_due&&e.my_due.kind==='guests'?'<div class="hint2">'+esc(X.evGuestBill)+'</div>'
+    :(waiting&&e.signup_open?'<div class="hint2">'+esc(X.evGuestWait)+'</div>':'');
+  return '<div class="evg"><h5>'+esc(X.evGuestsTitle)+'</h5>'+rows+add+note+'</div>';
+}
+function evGuestForm(id){
+  if(webGuest)return openLogin();
+  if(needsProfile)return openProfile();
+  var b=document.getElementById('evGF_'+id);if(!b)return;
+  b.classList.toggle('hidden');
+  if(!b.querySelector('.gin').children.length)evGuestMore(id);
+}
+function evGuestMore(id){
+  var b=document.getElementById('evGF_'+id);if(!b)return;
+  var box=b.querySelector('.gin'),max=Number(b.getAttribute('data-max'))||1;
+  if(box.children.length>=max)return;
+  var i=document.createElement('input');i.maxLength=60;i.autocomplete='off';
+  i.placeholder=X.evGuestName+(max>1?' '+(box.children.length+1):'');
+  box.appendChild(i);i.focus();
+  if(box.children.length>=max){var m=b.querySelector('.more');if(m)m.style.display='none'}
+}
+function evJoinGuests(id){
+  var b=document.getElementById('evGF_'+id);if(!b)return;
+  var names=[].map.call(b.querySelectorAll('.gin input'),function(x){return String(x.value||'').trim()}).filter(function(x){return x});
+  if(!names.length||names.some(function(n){return n.length<2}))return toast(X.evNeedNames);
+  toast(X.evSending);
+  evPost('/api/league/event-join',{event_id:id,guest_names:names},function(j){
+    toast(j&&j.ok?X.evJoined:(j&&j.error)||'…');
+  });
+}
+function evGuestAdd(sid){
+  var el=document.getElementById('evGA_'+sid);
+  var n=String(el&&el.value||'').trim();
+  if(n.length<2)return toast(X.evNeedNames);
+  toast(X.evSending);
+  evPost('/api/league/event-guests',{action:'add',signup_id:sid,names:[n]},function(j){
+    toast(j&&j.ok?X.evDone:(j&&j.error)||'…');
+  });
+}
+// Сначала спрашиваем у сервера, что будет с деньгами, — и только потом убираем.
+function evGuestRemove(sid,i,c){
+  fetch('/api/league/event-guests',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({initData:initData},linkToken?{t:linkToken}:{},{action:'plan',signup_id:sid,index:i}))})
+    .then(function(r){return r.json()}).then(function(j){
+      if(!j||!j.ok)return toast((j&&j.error)||'…');
+      if(!confirm(j.text))return;
+      toast(X.evSending);
+      evPost('/api/league/event-guests',{action:'remove',signup_id:sid,index:i,count:c},function(r){
+        toast(r&&r.ok?X.evDone:(r&&r.error)||'…');
+      });
+    }).catch(function(){toast('…')});
 }
 function evPost(url,body,done){
   fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},

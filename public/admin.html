@@ -285,8 +285,8 @@
       <div><label>Дата</label><select id="evDate"></select></div>
       <div><label>Время</label><select id="evTime"></select></div><div><label>Окончание (необязательно)</label><input id="evEndTime" type="time"></div>
       <div><label>Запись до</label><select id="evDeadline"></select></div>
-      <div><label>Цена, ฿</label><input id="evPrice" type="number" placeholder="500"/></div>
-      <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = та же"/></div>
+      <div><label>Цена для участника, ฿</label><input id="evPrice" type="number" placeholder="0 = бесплатно"/></div>
+      <div><label>Цена за гостя, ฿</label><input id="evGuestPrice" type="number" placeholder="пусто = как у участника"/></div>
       <div><label>Вместимость</label><input id="evCapacity" type="number" placeholder="16"/></div>
       <div><label>Максимум гостей</label><input id="evMaxGuests" type="number" placeholder="1"/></div>
       <div><label>Возврат, часов до</label><input id="evRefund" type="number" placeholder="12"/></div>
@@ -303,11 +303,11 @@
       <div id="evInvited" class="rcp" style="margin-top:6px"></div>
       <div class="muted" id="evInvitedCount">Никого не выбрано</div>
     </div>
+    <div class="muted" style="margin-top:6px">Оплата включается сама, если хоть одна цена больше нуля. Участник лиги может идти бесплатно, а за каждого гостя — доплачивать. Имя гостя обязательно.</div>
     <label>Описание RU</label><textarea id="evDescRu" placeholder="Что за событие, что взять с собой"></textarea>
     <label>Описание EN</label><textarea id="evDescEn"></textarea>
     <div class="actions" style="margin-top:8px">
-      <label><input type="checkbox" id="evPaid" checked> нужна оплата</label>
-      <label><input type="checkbox" id="evGuests"> можно с собой</label>
+      <label><input type="checkbox" id="evGuests"> можно с гостями</label>
       <label><input type="checkbox" id="evInviteOnly"> только по приглашению</label>
     </div>
     <div class="actions"><button class="btn" onclick="saveEvent()">Сохранить</button><button class="btn secondary" onclick="previewEvent()">Предпросмотр в боте</button><button class="btn secondary" onclick="newEvent()">Новое событие</button></div>

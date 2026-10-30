@@ -243,7 +243,7 @@ function evForm(){return{
   place:$('evPlace').value.trim(),place_url:$('evPlaceUrl').value.trim(),
   price_thb:$('evPrice').value||'',guest_price_thb:$('evGuestPrice').value||'',
   capacity:$('evCapacity').value||'',signup_deadline:$('evDeadline').value.trim(),
-  payment_required:$('evPaid').checked,guests_allowed:$('evGuests').checked,
+  guests_allowed:$('evGuests').checked,
   max_guests:$('evMaxGuests').value||'',refund_hours:$('evRefund').value||'',
   audience:$('evAudience').value,
   audience_division:$('evDivision').value,
@@ -284,7 +284,7 @@ function editEvent(id){
   $('evPrice').value=e.price_thb||'';$('evGuestPrice').value=e.guest_price_thb==null?'':e.guest_price_thb;
   $('evCapacity').value=e.capacity||'';evSetSelect('evDeadline',e.signup_deadline||'');
   $('evMaxGuests').value=e.max_guests||'';$('evRefund').value=e.refund_hours||'';
-  $('evPaid').checked=!!e.payment_required;$('evGuests').checked=!!e.guests_allowed;
+  $('evGuests').checked=!!e.guests_allowed;
   $('evAudience').value=e.audience||'all';
   $('evDivision').value=e.audience_division||'';
   $('evInviteOnly').checked=!!e.invite_only;
