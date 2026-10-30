@@ -597,6 +597,16 @@ check(!(await flow.cancelSignup({signupId:'past-signup',telegramId:'1',lang:'en'
  const fr=(await ev.listSignups('gfree')).find(x=>x.telegram_id==='10');
  check(!flow.isAwaitingGuestName('10')&&fr.status==='confirmed'&&fr.guests===1&&fr.guest_names==='Ivan Petrov','Free event with a named guest confirms both at once');
  check(messages.some(m=>m.method==='sendMessage'&&/Ivan Petrov/.test(String(m.args[1]))),'Confirmation names the guest');
+ // Кнопки под подтверждением: «Добавить гостя» сразу, «Мои гости (N)» — когда гости есть.
+ const kb0=flow.calendarKeyboard(gst,'ru',{signup_id:'x1',guests:0}).inline_keyboard.flat();
+ check(kb0.some(b=>b.text==='➕ Добавить гостя'&&b.callback_data==='ev_ga:x1')&&!kb0.some(b=>/Мои гости/.test(b.text)),'Confirmation offers a clear Add a guest button');
+ const kb2=flow.calendarKeyboard(gst,'ru',{signup_id:'x2',guests:2,guest_names:'A B; C D'}).inline_keyboard.flat();
+ check(kb2.some(b=>b.text==='👥 Мои гости (2)')&&!kb2.some(b=>b.callback_data==='ev_ga:x2'),'Guest list button shows the count; no add button at the limit');
+ // Экран мини-приложения получает готовый текст ответа сразу.
+ const n1=flow.joinNotice(j,'ru');
+ check(n1.kind==='ok'&&/Вы записаны/.test(n1.title)&&/1000 ฿/.test(n1.text)&&/Anna Smith/.test(n1.text),'Mini app notice: signed up, guests and guest invoice');
+ check(flow.joinNotice({ok:false,message:'<b>Мест нет</b>'},'ru').kind==='err'&&flow.joinNotice({ok:false,message:'<b>Мест нет</b>'},'ru').title==='Мест нет','Mini app notice shows the refusal reason as plain text');
+ check(flow.joinNotice(pj,'ru').icon==='💳'&&/500 ฿/.test(flow.joinNotice(pj,'ru').text),'Mini app notice for a paid entry points to the invoice');
 }
 
 const links=await load('links.js');
