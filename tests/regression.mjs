@@ -517,6 +517,23 @@ const eight=await results.getUnplayedOpponents('A','A Player 1','2','');check(ei
  tables.set('w2|Match_Log',tmpl);await results.refreshAfterResult();
  const left=await results.getUnplayedOpponents('W','Wendy Three','2','2');
  check(left.known&&left.names.includes('Wendy Four'),'8-slot template: late pair (match 19) still counts as unplayed for a smaller group');}
+// Отказ (RET), когда снялся тот, кто вёл по счёту: таблица дивизиона считает
+// победителя по сетам, поэтому такой матч пишется техническим результатом.
+{const tn=await load('tennis.js');const sc=tn.cellToScore('4:3');
+ check(results.setLeader(sc)==='p1','Set leader from a partial set');
+ check(results.retiredAgainstScore({result_kind:'retired',result_winner:'B',from_telegram_id:'A'},sc,false),'Leader retired: score points the wrong way, written as technical');
+ check(!results.retiredAgainstScore({result_kind:'retired',result_winner:'A',from_telegram_id:'A'},sc,false),'Trailing player retired: the score stays a normal result');
+ check(results.retiredAgainstScore({result_kind:'retired',result_winner:'B',from_telegram_id:'A'},tn.reverseScore(sc),true)&&!results.retiredAgainstScore({result_kind:'retired',result_winner:'A',from_telegram_id:'A'},tn.reverseScore(sc),true),'Reversed division row keeps the right winner side');}
+// Разовая починка формулы Winner ID: только стандартные ячейки, с проверкой.
+{const rf=await load('retfix.js');
+ const head=['Match #','P1 ID','Player 1','P2 ID','Player 2','F','G','H','I','J','K','L','M','N','O','P','Q','R','Completed?','Tech Result','P1 Sets Won','P2 Sets Won','W','X','Winner ID','Z','AA','AB','AC','AD','AE','P1 TechLoss','P2 TechLoss'];
+ const rowOf=(n,a,b,extra={})=>{const r=Array(33).fill('');r[0]=n;r[1]=1;r[2]=a;r[3]=2;r[4]=b;r[24]=rf.oldWinnerFormula(n+1);Object.entries(extra).forEach(([k,v])=>r[k]=v);return r};
+ put('ret-test','Match_Log',[head,rowOf(1,'Ilia Izotov','Nikita Tati',{5:4,6:3,18:'Yes',31:1}),rowOf(2,'A','B',{24:'=MANUAL()'})]);
+ const fx=await rf.fixSheetFormulas('ret-test');const lg=tables.get('ret-test|Match_Log');
+ check(fx.ok&&fx.changed===1&&lg[1][24]===rf.newWinnerFormula(2)&&lg[2][24]==='=MANUAL()','Winner formula rewritten only where it is the standard one');
+ const rr=await rf.fixRetRow('ret-test','Ilia Izotov','Nikita Tati','P2');
+ check(rr.ok&&lg[1][18]==='Yes'&&lg[1][19]==='P2'&&lg[1][31]==='','RET row: played, Tech Result = P2, technical loss cleared');
+ put('ret-bad','Match_Log',[['x']]);check(!(await rf.fixSheetFormulas('ret-bad')).ok,'Unexpected column layout is left untouched');}
 const ev=await load('events.js'),flow=await load('eventflow.js');
 const event={event_id:'past',status:'published',date:'14.09.2099',time:'10:00',signup_deadline:'30.09.2099'};
 const start=Date.parse('2099-09-14T03:00:00Z');

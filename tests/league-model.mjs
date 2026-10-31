@@ -43,6 +43,13 @@ check(log.matches[2].season === '2', 'Пустая подпись сезона �
 check(log.matches.find(m => m.no === '4').kind === 'technical' && log.matches.find(m => m.no === '4').winner === 'p1', 'Техпобеда W/L распознаётся');
 check(log.matches.find(m => m.no === '5').kind === 'double' && !log.matches.find(m => m.no === '5').winner, 'Двойное техническое — победителя нет');
 check(log.matches.find(m => m.no === '6').kind === 'retired' && log.matches.find(m => m.no === '6').winner === 'p1', 'Отказ (RET) — победитель по Winner ID');
+// Снялся тот, кто вёл по счёту: Winner ID (по сетам) указывает на него, но
+// победитель — соперник. Решают «кто снялся», затем очки за матч.
+{const leader = row({ no: 9, date: serial('2026-10-29'), comp: 'Season 2', p1: 'Nik Tati', id1: 57, p2: 'Ilia Iz', id2: 26, sets: [[3, 4]], mark: 'RET', win: 26, pts: [3, 1] });
+ const byQuit = [...leader]; byQuit[41] = 'P2'; byQuit[39] = ''; byQuit[40] = '';
+ const h2 = [...header]; h2[41] = 'Retired Player';
+ check(lm.normalizeLog([h2, leader]).matches[0].winner === 'p1', 'RET: снявшийся вёл по счёту — победитель по очкам за матч, не по сетам');
+ check(lm.normalizeLog([h2, byQuit]).matches[0].winner === 'p1', 'RET: колонка «Retired Player» решает, кто победил');}
 check(log.matches.find(m => m.no === '8').season === '2' && log.matches.find(m => m.no === '8').competition === 'Semifinal S2', 'Плей-офф: сезон из «Semifinal S2», подпись стадии сохраняется');
 check(lm.scoreText(log.matches[2].sets) === '6:1 / 4:6 / TB 10:8' && lm.scoreText(log.matches[2].sets, { flip: true }) === '1:6 / 6:4 / TB 8:10', 'Счёт глазами каждого игрока, супертай-брейк как в сетке дивизиона');
 check(lm.scoreText(log.matches[1].sets, { flip: true }) === '4:6 / 6:7 (3:7)', 'Тай-брейк сета переворачивается вместе со счётом');

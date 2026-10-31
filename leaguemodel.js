@@ -81,7 +81,9 @@ export function logColumns(header = []) {
     p2id: at(['p2 id', 'p2_id'], 6), p2div: at(['p2 division', 'p2 div', 'p2_division'], 7),
     p1: at(['p1 name', 'player 1', 'p1_name'], 8), p2: at(['p2 name', 'player 2', 'p2_name'], 9),
     score: 10, done: at(['completed?', 'completed'], 23), winner: at(['winner id', 'winner_id'], 24),
-    mark: 27, pts1: 39, pts2: 40
+    mark: 27, pts1: 39, pts2: 40,
+    // Кто снялся (P1/P2) — для отказа (RET): победитель тогда тот, кто НЕ снялся.
+    retired: at(['retired player', 'retired_player', 'retired'], 41)
   };
 }
 
@@ -129,9 +131,22 @@ export function normalizeLog(values = []) {
       winner = mark === 'W/L' ? 'p1' : mark === 'L/W' ? 'p2' : '';
     } else {
       if (mark === 'RET') kind = 'retired';
+      // Отказ: счёт на момент снятия может быть в пользу того, кто снялся
+      // (вёл и травмировался). Поэтому сначала смотрим, кто снялся, потом —
+      // очки за матч (победителю 3), и только потом Winner ID и счёт: формула
+      // Winner ID в журнале считает по сетам и отдала бы победу снявшемуся.
+      if (kind === 'retired') {
+        const quit = up(r[c.retired]);
+        if (quit === 'P1') winner = 'p2';
+        else if (quit === 'P2') winner = 'p1';
+        if (!winner) {
+          const x = numOrNull(r[c.pts1]), y = numOrNull(r[c.pts2]);
+          if (x !== null && y !== null && x !== y) winner = x > y ? 'p1' : 'p2';
+        }
+      }
       const w = idOf(r[c.winner]);
-      if (w && p1id && w === p1id) winner = 'p1';
-      else if (w && p2id && w === p2id) winner = 'p2';
+      if (!winner && w && p1id && w === p1id) winner = 'p1';
+      else if (!winner && w && p2id && w === p2id) winner = 'p2';
       if (!winner && sets.length) {
         let a = 0, b = 0;
         for (const s of sets) { if (s.a > s.b) a++; else if (s.b > s.a) b++; }

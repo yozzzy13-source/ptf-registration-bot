@@ -351,7 +351,7 @@ export function tablePlan(bracket, standings = []) {
 }
 // Регион таблицы → разделитель формул («;» там, где десятичная запятая).
 const sepCache = new Map();
-async function formulaSep(spreadsheetId) {
+export async function formulaSep(spreadsheetId) {
   if (sepCache.has(spreadsheetId)) return sepCache.get(spreadsheetId);
   let sep = ',';
   try {

@@ -2931,6 +2931,13 @@ app.listen(PORT, () => withPriority('low', async () => {
       const r = await po.checkTableBrackets('', { fix: true });
       return po.tableCheckText(r, { fixed: true });
     }).catch(e => console.error('once playoff tables:', e.message));
+    // RET, когда снялся ведущий по счёту: формула Winner ID во всех таблицах
+    // дивизионов сезона смотрит на «Tech Result» (P1/P2); матч Илья Изотов —
+    // Никита Тати переписан по новому правилу. Резервные копии таблиц сделаны.
+    await runOnce('once_ret_winner_formula', async () => {
+      const { fixRetWinnerFormulas } = await import('./retfix.js');
+      return fixRetWinnerFormulas();
+    }).catch(e => console.error('once ret formula:', e.message));
     // Предварительная сетка плей-офф открыта всем (за 2 недели до дедлайна) —
     // объявление всем игрокам сезона; игрокам C и W — про четвертьфиналы.
     await runOnce('once_playoff_preview_notice', async () => {

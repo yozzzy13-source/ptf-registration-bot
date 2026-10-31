@@ -112,13 +112,44 @@ function resultPoints(slot = {}, reversed = false) {
   const b = slot.result_points_to === '' || slot.result_points_to == null ? '' : coerceNumber(slot.result_points_to);
   return reversed ? [b, a] : [a, b];
 }
+// На какой стороне строки победитель: счёт в слоте всегда «от from», поэтому
+// без разворота p1 — это from_telegram_id.
+function winnerSide(slot = {}, reversed = false) {
+  const w = String(slot.result_winner || '');
+  if (!w) return '';
+  const fromWon = w === String(slot.from_telegram_id);
+  return reversed ? (fromWon ? 'p2' : 'p1') : (fromWon ? 'p1' : 'p2');
+}
+// Кто ведёт по сетам в записанном счёте (неполный сет считается по геймам).
+export function setLeader(parsed) {
+  const v = scoreValues(parsed).map(x => (x === '' || x == null ? null : Number(x)));
+  let a = 0, b = 0;
+  for (let i = 0; i < 3; i++) {
+    const x = v[i * 4], y = v[i * 4 + 1];
+    if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x > y) a++; else if (y > x) b++;
+  }
+  return a > b ? 'p1' : b > a ? 'p2' : '';
+}
+// Отказ, при котором счёт «врёт»: снялся тот, кто вёл (или по сетам ровно).
+// Такой матч пишется как сыгранный (сеты и геймы идут в разницу), а победитель
+// задаётся колонкой «Tech Result» (P1/P2) — формула Winner ID смотрит туда.
+export function retiredAgainstScore(slot = {}, parsed, reversed = false) {
+  if (resultKind(slot) !== 'retired') return false;
+  const w = winnerSide(slot, reversed);
+  return Boolean(w) && setLeader(parsed) !== w;
+}
 function centralWrites(row, slot, parsed) {
   const kind = resultKind(slot), completed = kind === 'technical' ? '' : 'Yes';
+  const w = winnerSide(slot);
   return [
     { range: `${LEAGUE_RESULTS_SHEETS.log}!K${row}:V${row}`, values: [scoreValues(parsed).map(coerceNumber)] },
     { range: `${LEAGUE_RESULTS_SHEETS.log}!W${row}:X${row}`, values: [[detectSet3Mode(parsed), completed]] },
     { range: `${LEAGUE_RESULTS_SHEETS.log}!AB${row}`, values: [[resultMarker(slot)]] },
-    { range: `${LEAGUE_RESULTS_SHEETS.log}!AN${row}:AO${row}`, values: [resultPoints(slot)] }
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!AN${row}:AO${row}`, values: [resultPoints(slot)] },
+    // Кто снялся (RET): P1/P2. По нему журнал и сайт отдают победу сопернику,
+    // даже если снявшийся вёл по счёту.
+    { range: `${LEAGUE_RESULTS_SHEETS.log}!AP${row}`, values: [[kind === 'retired' && w ? (w === 'p1' ? 'P2' : 'P1') : '']] }
   ];
 }
 async function matchLogHeaders(spreadsheetId) {
@@ -529,6 +560,10 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
   if (!info) return { status: 'row_not_found', division: d1, season };
   const p = info.reversed ? reverseScore(parsed) : parsed;
   const kind = resultKind(slot), points = resultPoints(slot, info.reversed), marker = resultMarker(slot, info.reversed);
+  // Снялся тот, кто вёл по счёту: матч остаётся сыгранным (сеты и геймы идут),
+  // а победителя задаёт «Tech Result» — иначе формула по сетам отдала бы победу
+  // снявшемуся.
+  const retiredFlip = retiredAgainstScore(slot, p, info.reversed);
   const writes = [
     { range: `Match_Log!F${info.row}:Q${info.row}`, values: [scoreValues(p).map(coerceNumber)] },
     { range: `Match_Log!R${info.row}:S${info.row}`, values: [[detectSet3Mode(p), kind === 'technical' ? '' : 'Yes']] }
@@ -573,6 +608,11 @@ async function writeDivisionRow(p1, p2, parsed, known = null, slot = {}, journal
     // Сыгранный счёт вместо прежнего W/O — старую неявку из строки убираем,
     // иначе таблица засчитала бы матч дважды.
     for (const c of [namedWrite(headers, info.row, ['p1_techloss'], ''), namedWrite(headers, info.row, ['p2_techloss'], '')]) if (c) extra.push(c);
+    // Сторона победителя при отказе ведущего; в остальных сыгранных матчах —
+    // пусто (там победителя решают сеты).
+    const w = winnerSide(slot, info.reversed);
+    const tr = namedWrite(headers, info.row, ['tech_result'], retiredFlip && w ? w.toUpperCase() : '');
+    if (tr) extra.push(tr);
   }
   // Снимок для карточки результата: место в дивизионе, форма и очки Fantasy
   // «до» этого матча. Снимаем строго перед записью — после неё это состояние

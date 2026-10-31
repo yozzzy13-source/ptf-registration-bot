@@ -539,7 +539,10 @@ export async function getDivisionTable(letter, season = '', group = '') {
     }
     if (!yes(r.completed)) continue;
 
-    const winner = num(r.winner_id);
+    // «Tech Result» = P1/P2 у сыгранного матча — победитель задан явно (отказ
+    // игрока, который вёл по счёту). Не ждём, пока это учтёт формула таблицы.
+    const forced = txt(r.tech_result).toUpperCase();
+    const winner = forced === 'P1' ? p1 : forced === 'P2' ? p2 : num(r.winner_id);
     const s1 = num(r.p1_sets_won), s2 = num(r.p2_sets_won);
     const g1 = num(r.p1_games_won), g2 = num(r.p2_games_won);
 
